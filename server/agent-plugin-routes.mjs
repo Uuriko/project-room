@@ -669,21 +669,63 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // anything; it returns the required shape instead. requestId is optional
   // and echoed back, matching the access-request convention, so a client that
   // retries an uncertain rotation can correlate the receipt.
-  const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
+    const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-rotate:${remoteAddress}`, 20);
-    const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
-    const data = await body(req);
-    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
-    if (!shape || data.confirm !== true) {
-      reject(422, "confirm_required",
-        "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
+    // ownerAuth first (R316-1, restores the base ordering): a caller the
+    // owner check rejects sees that error before any body parsing or shape
+    // guidance, exactly like the neighbouring routes. The receipt consult
+    // below runs only after that check has failed.
+    let auth = null;
+    let authError = null;
+    try {
+      auth = ownerAuth(req);
+    } catch (error) {
+      authError = error;
     }
-    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
-      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    if (authError === null) {
+      if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
+      const data = await body(req);
+      const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+      if (!shape || data.confirm !== true) {
+        reject(422, "confirm_required",
+          "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
+      }
+      if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+        reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+      }
+      // R306: requestId feeds the rotation receipt, so a retry after a lost
+      // response can re-rotate from the pre-rotation secret inside the TTL.
+      const result = store.identities.rotate(identityId, bearer(req), data.requestId ?? null);
+      return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
     }
-    const result = store.identities.rotate(identityId, bearer(req));
-    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
+    // R306: ownerAuth rejected the caller, which for the lost-response retry
+    // is expected: the presented secret is the one the earlier rotation
+    // retired, so ownerAuth cannot accept it. The receipt keyed to requestId
+    // authorizes one re-rotation from that secret inside the TTL. The consult
+    // stays inside the confirm + exact-shape contract (landing lane, 13518):
+    // a request without confirm:true, with fields outside the shape, with a
+    // malformed requestId, or with a body the parser rejects rethrows the
+    // original auth error instead, so nothing the contract rejects can ever
+    // rotate and no body guidance leaks past the auth error. The consult can
+    // only succeed for the identity whose pre-rotation secret matches, so
+    // the cross-identity rule still holds.
+    let consultData = null;
+    try {
+      const data = await body(req);
+      const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+      const requestIdOk = data && (data.requestId === undefined || (typeof data.requestId === "string" && data.requestId.length > 0));
+      const secret = bearer(req) ?? "";
+      if (shape && data.confirm === true && requestIdOk && data.requestId !== undefined && secret.startsWith("pri_")) {
+        consultData = data;
+      }
+    } catch {
+      // A body the parser rejects can never satisfy the contract.
+    }
+    if (consultData) {
+      const retried = store.identities.rotateFromReceiptIfMatched(identityId, bearer(req), consultData.requestId);
+      if (retried) return json(res, 200, { ...retried, requestId: consultData.requestId });
+    }
+    throw authError;
   });
 
   // Revocation is the end of the line for this credential: unlike rotation it
@@ -840,7 +882,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // pinned namespaced response. The listener block rides only when the
     // heartbeat asked for the lease.
     const presentedHost = auth.scopedKey ? { ...host, hostId: data.hostId } : host;
-    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, more: more === true, next, pushConfigured, reachability,
+    // R327-1 (r6): the heartbeat carries the pause state so a machine whose
+    // room the owner paused learns it before it asks anything in the room.
+    const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
+    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
       ...(listener ? { listener } : {}) });
   });
 
@@ -865,7 +910,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null,
-        fencingToken: data.fencingToken ?? null });
+        fencingToken: data.fencingToken ?? null, door: "rest" });
     }));
   });
 
@@ -954,6 +999,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         reject(422, "invalid_wake_poll", "waitMs must be 0..55000 milliseconds");
       waitMs = parsed;
     }
+    // R327-1 (r6): the poll carries the pause state so a paused bot learns
+    // why its room wakes are being held, and learns at once when the pause
+    // lands or lifts (releasePauseWaiters wakes the held poll).
+    const pausedField = identityId => { const rooms = store.agentHeartbeats.pausedRoomsOf(identityId); return rooms.length ? { paused: rooms } : {}; };
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
       Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
@@ -981,7 +1030,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
+        // #3265: the poll door carries the heartbeat door's truncation
+        // flag — a full page says whether more signals are waiting.
         return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+          more: immediate.more === true, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -1002,6 +1054,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+        more: fresh.more === true, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();

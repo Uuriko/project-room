@@ -1,5 +1,6 @@
 import { accountSessionError, sameAccountSession } from "./account-client.js";
 export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits, solveIdentityMintProof, submitIdentityMint } from "./account-client.js";
+import { applyEvent } from "./events.js";
 import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
@@ -34,6 +35,40 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
 // Room events that only append: they never change a message already held, so
 // a live refresh for them can read `?messages=recent` and keep older history.
 const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+// Delta sync: message mutations whose stream event carries everything the
+// shared reducer needs to advance the held snapshot locally — no refetch.
+// Any other event type, and any covered event whose preconditions fail,
+// keeps the refresh() read path below (see tryDelta).
+const DELTA_EVENT_TYPES = new Set(["message.posted", "message.edited", "message.deleted", "message.redacted"]);
+// The server's activity audit tail (store.snapshot): the last 100 events,
+// filtered to decisions and work-bearing events. Mirrored so a locally
+// advanced snapshot carries the same Record tail a fresh read would serve.
+const ACTIVITY_TAIL_TYPES = /^(work\.|work_claim\.|verification\.|owner_decision\.)/;
+const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVITY_TAIL_TYPES.test(event?.type ?? "") || event?.data?.workItemId !== undefined;
+// Mirror of the server's read-time redaction for the one message a delta
+// touched (server/redact-read.mjs): edit-history bodies never ride a served
+// record, and earlier log entries for the message show only its current
+// body (null once deleted or redacted). Entries are replaced, not mutated.
+function deltaReadModel(state, tail, event) {
+  const data = event?.data ?? {};
+  const messageId = event?.type === "message.posted" ? (typeof data.messageId === "string" ? data.messageId : event.id) : data.messageId;
+  if (typeof messageId !== "string" || !Array.isArray(state.messages)) return;
+  const record = state.messages.find(message => message.id === messageId);
+  if (record && Array.isArray(record.editHistory)) {
+    record.editHistory = record.editHistory.map(entry => {
+      if (!entry || typeof entry !== "object" || !Object.hasOwn(entry, "body")) return entry;
+      const { body, ...rest } = entry;
+      return rest;
+    });
+  }
+  const current = !record || record.deletedAt || record.body == null ? null : record.body;
+  for (let i = 0; i < tail.length; i++) {
+    const logged = tail[i];
+    if (!logged || !["message.posted", "message.edited"].includes(logged.type) || !logged.data || !Object.hasOwn(logged.data, "body")) continue;
+    const loggedId = typeof logged.data.messageId === "string" ? logged.data.messageId : logged.type === "message.posted" ? logged.id : null;
+    if (loggedId === messageId && logged.data.body !== current) tail[i] = { ...logged, data: { ...logged.data, body: current } };
+  }
+}
 // Join held history with a `?messages=recent` window. The window must start on
 // a held message with exactly `omitted` messages before it; anything else
 // returns null and the caller reads the full snapshot.
@@ -51,6 +86,13 @@ function mergeRecentMessages(held, read) {
 // reads the newest window first and fills the rest in the background; `partial`
 // marks held history that is only that window.
 const FILL_DELAY_MS = 250;
+// Session liveness under delta sync: a covered event applies locally with no
+// read, so the snapshot read's second job — noticing a dead room credential
+// (401/403) — needs its own cadence while connected. The probe in
+// probeSession() re-reads on this interval whenever no snapshot read has just
+// done it. Worst case, a credential that dies just after a successful read is
+// detected one interval plus one probe round trip later.
+const LIVENESS_INTERVAL_MS = 10000;
 function firstWindow(read) {
   const window = read?.messagesWindow;
   if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(read?.state?.messages)) return null;
@@ -60,7 +102,9 @@ function firstWindow(read) {
 // Single source for the connected status line; app.js matches this exact text.
 const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+    if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
+    this.auditView = auditView;
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange });
     this.session = null;
     this.sequence = 0;
@@ -68,6 +112,19 @@ export class RoomClient {
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
     this.lastTypingSent = 0;
+    // Delta sync: the last snapshot handed to the app (any completeness),
+    // the raw event tail it carried, and the apply/fallback counters.
+    this.live = null;
+    this.rawTail = [];
+    this.windowOmitted = null;
+    this.backfilling = false;
+    this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
+    // Liveness: when the last snapshot-path read proved the credential, and
+    // the pending probe timer (see scheduleLiveness). The interval is an
+    // instance field so tests can shorten it.
+    this.lastReadAt = 0;
+    this.livenessTimer = null;
+    this.livenessInterval = LIVENESS_INTERVAL_MS;
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -80,13 +137,14 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
+          ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
@@ -221,6 +279,10 @@ export class RoomClient {
   // sequence, so older history is corrected by those events' own reads.
   refresh(receipt = null, { revalidate = false, fill = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
+    // Delta sync: a covered message event that continues the held snapshot
+    // exactly is applied locally; tryDelta declines (and counts) anything
+    // else, and the read path below handles it as before.
+    if (receipt && this.tryDelta(receipt)) return Promise.resolve();
     // Only sequenced room events can prove a snapshot already contains a change.
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
     const sequence = receipt?.event?.roomId === this.session?.roomId && Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
@@ -252,11 +314,18 @@ export class RoomClient {
           // With nothing held, read the newest window first (the background fill brings the rest).
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true });
+          const auditView = this.auditView;
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
+          this.lastReadAt = Date.now();
+          // A mode change during this read must not display a partial Record.
+          if (auditView !== this.auditView) { flight.revisit = true; continue; }
+          if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
+            throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
+          if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
           else if (!holding || holding.partial) {
@@ -271,6 +340,8 @@ export class RoomClient {
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
               partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
+            this.live = { generation, session, snapshot };
+            this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
@@ -288,16 +359,29 @@ export class RoomClient {
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
   }
+  setAuditView(view) {
+    if (!["full", "activity"].includes(view)) throw new RangeError(uiText("record.invalidView"));
+    if (this.auditView === view) return this.flight?.promise ?? Promise.resolve();
+    this.auditView = view;
+    return this.session ? this.refresh(null, { revalidate: true }) : Promise.resolve();
+  }
   // Background full read after a windowed first read (or a failed read). It never
   // changes the status line: the page is already usable. A failure retries quietly
   // with backoff; only an ended session (401/403) is surfaced.
   scheduleFill(delay = FILL_DELAY_MS) {
-    if (this.fillTimer) return;
+    if (this.fillTimer || this.backfilling) return;
     const generation = this.generation, session = this.session;
     this.fillTimer = setTimeout(() => {
       this.fillTimer = null;
-      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull) return;
-      this.refresh(null, { fill: true }).then(() => { this.fillDelay = 1000; }, error => {
+      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull || this.backfilling) return;
+      this.backfilling = true;
+      (async () => {
+        try {
+          // Paged history first; the legacy full read is the fallback
+          // whenever paging cannot prove a contiguous merge (backfill()).
+          if (!await this.backfill()) await this.refresh(null, { fill: true });
+        } finally { if (generation === this.generation) this.backfilling = false; }
+      })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
         if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
         const next = this.fillDelay || 1000;
@@ -306,10 +390,156 @@ export class RoomClient {
       });
     }, delay);
   }
+  // Session liveness while connected (see LIVENESS_INTERVAL_MS): covered
+  // stream events apply locally, so a room credential can die without any
+  // read ever noticing — the room would stay open on it indefinitely. This
+  // loop revalidates the credential on the interval whenever no snapshot
+  // read has just done it; it runs only while a stream is held, because
+  // manual-refresh mode has no live deltas to protect and reads on demand.
+  scheduleLiveness(delay = this.livenessInterval) {
+    if (this.livenessTimer) return;
+    const generation = this.generation, session = this.session;
+    this.livenessTimer = setTimeout(() => {
+      this.livenessTimer = null;
+      if (generation !== this.generation || this.session !== session || !this.stream) return;
+      const sinceRead = Date.now() - this.lastReadAt;
+      if (sinceRead < this.livenessInterval) { this.scheduleLiveness(this.livenessInterval - sinceRead); return; }
+      this.probeSession().then(() => this.scheduleLiveness(), () => this.scheduleLiveness());
+    }, delay);
+  }
+  // One liveness probe: a work-view read on the snapshot path. It carries
+  // the path's authentication and the viewer binding ownsResponse() checks
+  // on every snapshot, at a fraction of a message window's bytes; the
+  // payload itself is discarded — only the binding verdict is used. An
+  // authentication verdict (401/403, or a changed account-session binding)
+  // ends access through handleFailure, exactly as a failed refresh read
+  // does. Any other failure is inconclusive — the credential may be fine
+  // and the network down — so access stands and the next interval retries.
+  async probeSession() {
+    const generation = this.generation, session = this.session;
+    if (!session) return;
+    if (session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
+    try {
+      const read = await this.request(this.path("?view=work"));
+      if (generation !== this.generation || this.session !== session) return;
+      if (!this.ownsResponse(read, session)) { this.endAccess(); return; }
+      this.lastReadAt = Date.now();
+    } catch (error) {
+      if (generation !== this.generation || this.session !== session) return;
+      if ([401, 403].includes(error.status) || (session.authMode === "account" && error.code === "session_binding_changed")) this.handleFailure(error);
+    }
+  }
+  // Paged history backfill over /conversation: walk the cursor chain from
+  // the newest page down to the floor and merge the older segment in front
+  // of the held recent window. The merge is accepted only when the segment
+  // is exactly the window's `omitted` count, id-disjoint from the window,
+  // and anchored by a head page identical to the window — cursor chains
+  // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
+  // instead of splicing two heads. The records are the server's history
+  // read model, the same surface the recent window serves (edit-history
+  // bodies ride neither). Returns false — the legacy full read takes over —
+  // whenever contiguity cannot be proved; auth failures throw, like
+  // refresh()'s reads.
+  async backfill() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    const held0 = this.heldMessages();
+    if (!held0?.partial || !anchored()) return false;
+    const expected = this.windowOmitted;
+    if (!Number.isSafeInteger(expected) || expected <= 0) return false;
+    const windowIds = () => held0.messages.map(message => message.id);
+    let seen = new Set(windowIds());
+    let older = [], cursor = null, resets = 0, headPage = true;
+    for (let page = 0; page < 1000 && older.length < expected; page++) {
+      let result;
+      try { result = await this.conversation({ limit: 100, cursor }); }
+      catch (error) {
+        // A server without the history endpoint (or a garbled page) is a
+        // paging failure, not a fill failure: the legacy read takes over.
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") throw error;
+        return false;
+      }
+      if (generation !== this.generation || this.session !== session) return false;
+      if (result.mode === "reset") { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; headPage = true; continue; }
+      if (headPage) {
+        // The chain's first page is the anchor: it must overlap the held
+        // window (else this chain's head is not our window's head at all),
+        // and nothing is collected or marked seen from it — anything on it
+        // that is not in the window arrived after the window was read, so
+        // it is newer than the window, never part of the older segment.
+        if (!result.messages.some(message => seen.has(message.id))) { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; continue; }
+      } else {
+        for (const message of result.messages) if (!seen.has(message.id)) { seen.add(message.id); older.push(message); }
+      }
+      headPage = false;
+      if (result.nextCursor == null) break;
+      cursor = result.nextCursor;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live) return false;
+    if (!heldNow.partial) return true; // a full read completed history meanwhile
+    if (older.length !== expected || this.windowOmitted !== expected) return false;
+    const state = { ...live.snapshot.state, messages: [...older, ...heldNow.messages] };
+    const snapshot = { ...live.snapshot, state };
+    this.held = { ...heldNow, messages: state.messages.slice(), partial: false, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
   // History held from this session's last snapshot, for windowed refreshes.
   heldMessages() {
     const held = this.held;
     return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
+  }
+  // Delta sync: advance the held snapshot with one stream/command receipt
+  // instead of re-reading the room. Only a covered message mutation that
+  // continues the held history exactly — next sequence, complete non-partial
+  // history, no read already in flight, same audit view — is applied, through
+  // the shared reducer, so derived state (thread roots, pins, receipt
+  // withdrawals) matches the server by construction. Anything else returns
+  // false and the caller falls back to refresh()'s reads; every decline of a
+  // covered type is counted in deltaStats for diagnosis.
+  tryDelta(receipt) {
+    const event = receipt?.event;
+    if (!event || !DELTA_EVENT_TYPES.has(event.type)) return false;
+    const decline = reason => { this.deltaStats.fallback++; const reasons = this.deltaStats.reasons; reasons[reason] = (reasons[reason] ?? 0) + 1; return false; };
+    if (this.flight) return decline("flight");
+    const held = this.heldMessages();
+    if (!held || held.partial || held.owesFull || held.fullSequence !== this.sequence) return decline("held");
+    const live = this.live;
+    if (!live || live.generation !== this.generation || live.session !== this.session || live.snapshot.sequence !== this.sequence) return decline("live");
+    if ((live.snapshot.auditView ?? "full") !== this.auditView) return decline("view");
+    if (!Number.isSafeInteger(receipt.sequence) || receipt.sequence !== this.sequence + 1 || event.roomId !== this.session?.roomId) return decline("gap");
+    let state;
+    try { state = applyEvent(live.snapshot.state, event); } catch { return decline("reducer"); }
+    // The stored projection keeps no replay bookkeeping; match its shape so
+    // the next delta (or the app's own reads) sees the served form.
+    state.seenEvents = {}; state.seenIdempotencyKeys = {};
+    // The event tail: the last 100 raw events, from our own copy of the
+    // stream event (a snapshot's log never carries the stream-only mention
+    // chips), presented with the same activity filter a fresh read applies.
+    const { mentions, ...logged } = event;
+    const tail = [...this.rawTail, logged].slice(-100);
+    deltaReadModel(state, tail, event);
+    this.rawTail = tail;
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    const snapshot = { ...live.snapshot, sequence: receipt.sequence, state };
+    // R28-1 mirror: a read-derived snapshot carries the server's
+    // catchUpCursor — the stored cursor extended past the viewer's own
+    // unbroken run of events (store.catchUpCursor). A delta carries no
+    // fresh cursor fields, so extend the boundary locally under exactly
+    // the server's rule: the event is the viewer's own and the boundary
+    // already reached the held head, i.e. the run continues unbroken.
+    // Any other event, or a boundary behind the head, leaves it as the
+    // last read reported it — never past someone else's event.
+    if (Number.isSafeInteger(live.snapshot.catchUpCursor) && live.snapshot.catchUpCursor === this.sequence
+      && event.actorId === this.session?.member?.id) snapshot.catchUpCursor = receipt.sequence;
+    this.sequence = receipt.sequence;
+    this.held = { ...held, messages: Array.isArray(state.messages) ? state.messages.slice() : null, fullSequence: receipt.sequence };
+    this.live = { generation: this.generation, session: this.session, snapshot };
+    this.deltaStats.applied++;
+    this.onSnapshot(snapshot, this.session);
+    return true;
   }
   async send(command) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
@@ -700,6 +930,7 @@ export class RoomClient {
   connect() {
     clearTimeout(this.streamRetry); this.streamRetry = null;
     clearTimeout(this.refreshRetry); this.refreshRetry = null;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
@@ -712,6 +943,7 @@ export class RoomClient {
     const resumeAfter = heldNow && !heldNow.partial ? heldNow.fullSequence : this.sequence;
     const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
+    this.scheduleLiveness();
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
     const markRecovered = () => {
       if (!ownsStream() || !this.refreshInterrupted) return;
@@ -794,6 +1026,7 @@ export class RoomClient {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
   }

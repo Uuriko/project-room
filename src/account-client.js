@@ -202,6 +202,31 @@ export class AccountClient {
     if (value.nextCursor !== null && (value.nextCursor <= (after ?? "") || value.nextCursor < previous)) throw new Error("Room continuation could not be confirmed");
     return value;
   }
+  // #3342 Owner Cockpit slice 1: the cross-room Decisions + Exceptions
+  // document. Session-identity checked exactly like rooms(): a document
+  // that does not echo this session's binding is never rendered.
+  async ownerOverview({ window = "7d", after = null } = {}) {
+    const session = this.currentSession("loading the owner overview", { authenticated: true }), generation = this.generation;
+    let value;
+    const query = new URLSearchParams({ window });
+    if (after !== null) query.set("after", after);
+    try { value = await this.request("/api/owner/overview?" + query.toString(), { session }); }
+    catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+    if (!this.owns(generation, session)) return null;
+    const v = value?.viewer;
+    if (value?.contractVersion !== 1 || v?.accountId !== session.account.id || v.authEpoch !== session.account.authEpoch
+      || v.sessionRevision !== session.sessionRevision || v.sessionBinding !== session.sessionBinding) {
+      this.invalidate(generation, session); throw accountSessionError("Account changed");
+    }
+    if (!Array.isArray(value.decisions?.items) || !Array.isArray(value.exceptions?.items) || !Array.isArray(value.roomErrors)) {
+      throw new Error("Owner overview could not be confirmed");
+    }
+    return value;
+  }
   async logout() {
     const session = this.currentSession("signing out");
     const generation = ++this.generation;

@@ -125,7 +125,8 @@ export function unpublishPublic(db, { kind, id, byAccount, now }) {
 }
 
 export function isUnpublished(db, kind, target) {
-  if (!db || typeof target !== "string" || !target) return false;
+  // Fail closed: a check that cannot be performed must hide the content, never serve it.
+  if (!db || typeof target !== "string" || !target) return true;
   try {
     return Boolean(db.prepare("SELECT 1 FROM public_unpublish WHERE kind=? AND target=?").get(kind, target));
   } catch {

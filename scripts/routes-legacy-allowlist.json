@@ -831,6 +831,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/owner/overview"
+    },
+    {
+      "method": "GET",
       "path": "/api/project-offers"
     },
     {
@@ -3119,6 +3123,14 @@
     },
     {
       "method": "GET",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/robots.txt"
     },
     {
@@ -4350,6 +4362,10 @@
     {
       "method": "GET",
       "path": "/api/opportunities.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/owner/overview"
     },
     {
       "method": "GET",
@@ -6730,6 +6746,14 @@
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/og.png"
     },
     {
       "method": "GET",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom, readUncertainJoin, writeUncertainJoin, clearUncertainJoin } from "../src/share-links.js";
+import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, failureTextWithHint, reuseVisibleRoom, readUncertainJoin, writeUncertainJoin, clearUncertainJoin } from "../src/share-links.js";
 
 test("human join share URLs keep the app path so www /room is not dropped", () => {
   const token = "T".repeat(43);
@@ -81,6 +81,18 @@ test("general request failures hide raw transport and parser text but keep servi
   assert.equal(requestFailureMessage(new Error("Membership is inactive.")), "Membership is inactive.");
 });
 
+test("failureTextWithHint joins message and hint with exactly one period (#3597)", () => {
+  // Service messages already end with a period: the join must not double it.
+  assert.equal(
+    failureTextWithHint(new Error("Something went wrong on our side. Try again in a moment."), "Draft kept. Send again to retry."),
+    "Something went wrong on our side. Try again in a moment. Draft kept. Send again to retry.");
+  // The interrupted base has no trailing period: the join supplies it.
+  assert.equal(
+    failureTextWithHint(new TypeError("Failed to fetch"), "Your entries were kept; try again."),
+    "The connection was interrupted and the result could not be confirmed. Your entries were kept; try again.");
+  assert.doesNotMatch(failureTextWithHint(new Error("Membership is inactive."), "Sign in again."), /\.\./);
+});
+
 test("invitation management recovery distinguishes listing, creation and cancellation", () => {
   const error = new TypeError("Failed to fetch");
   assert.match(invitationManagementFailureMessage(error, "list"), /Close and reopen/);
@@ -134,7 +146,7 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     await node("#share-link-form").handlers.submit({ preventDefault() {} });
     assert.equal(createAttempts, 2);
     assert.deepEqual(requests[1], requests[0], "retry preserves token, request ID, expiry, scope and membership revision");
-    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.equal(node("#share-link-status").textContent, "Guest link ready — the link shown above is the one to share.");
     assert.match(node("#share-management-status").textContent, /reload invitation links/);
     assert.equal(node("#share-link-result").hidden, false);
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
@@ -242,7 +254,7 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
     const minted = node("#share-link-form").handlers.submit({ preventDefault() {} });
     await Promise.resolve();
     assert.equal(node("#share-link-create").disabled, false, "Create is usable while clipboard is still pending");
-    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.equal(node("#share-link-status").textContent, "Guest link ready — the link shown above is the one to share.");
     assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     finishClipboard();
