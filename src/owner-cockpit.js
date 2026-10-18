@@ -13,6 +13,7 @@ const KIND_LABEL = {
   decision: "Decision",
   dispute: "Dispute",
   claim_lease: "Claim lease",
+  board_review: "Board review",
   spend: "Spend",
 };
 
@@ -28,6 +29,24 @@ export function formatAge(ageMs) {
   return `waiting ${days}d ${hours % 24}h`;
 }
 
+// The action controls for one queue item, as a pure value so the
+// rendering contract is testable without a DOM (the claimVerifyBody
+// precedent). A POST action is a decide only when it carries a body —
+// the #662 pointer actions (the spend item's "adjust") name an
+// endpoint and the payload to send in their hint instead. Rendering
+// one of those as a Deny button POSTed an empty body to the
+// spend-allowance endpoint (#3891); the in-room needs-attention card
+// falls through to the hint for the same shape, and so does this.
+export function cockpitActionsHtml(item) {
+  return (item.actions ?? []).map(action => {
+    if (action.method === "POST") {
+      if (!action.body) return action.hint ? `<span class="attention-hint">${esc(action.hint)}</span>` : "";
+      return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
+    }
+    return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
+  }).join(" ");
+}
+
 export function createOwnerCockpit({ accountClient, section, decide }) {
   const summary = section.querySelector("#cockpit-summary");
   const decisionsBox = section.querySelector("#cockpit-decisions");
@@ -38,12 +57,7 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
   function renderItem(item) {
     const label = KIND_LABEL[item.kind] ?? item.kind;
     const age = formatAge(item.ageMs);
-    const actions = (item.actions ?? []).map(action => {
-      if (action.method === "POST") {
-        return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
-      }
-      return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
-    }).join(" ");
+    const actions = cockpitActionsHtml(item);
     return `<article class="cockpit-item" data-kind="${esc(item.kind)}">
       <header><strong>${esc(label)}</strong> <span>${esc(item.title)}</span></header>
       <p class="form-hint">${esc(item.roomName ?? item.roomId)}${age ? ` · ${esc(age)}` : ""}</p>

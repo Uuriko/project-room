@@ -61,6 +61,7 @@ const CONSEQUENCE = Object.freeze({
   claim_lease: "When the lease expires the work returns to the board",
   verification: "Settlement stays locked in escrow and the worker stays unpaid until this is verified",
   decision: "Settlement stays locked in escrow and the worker stays unpaid until you decide",
+  board_review: "Delivered work stays unverified and the claim stays open until it is reviewed",
   spend: "At zero headroom, new session starts are refused",
 });
 
@@ -169,6 +170,10 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     }
     const workItems = state.workItems ?? {};
     const budgetsByWorkItem = sessionBudgetsByWorkItem(store, roomId);
+    const claimsById = new Map();
+    if (typeof store.workClaims?.list === "function") {
+      for (const claim of store.workClaims.list(roomId)) if (claim?.id) claimsById.set(claim.id, claim);
+    }
     for (const item of items) {
       if (item.kind === "jev_escalation") continue; // shadow diagnostics are not decisions (spec §4.1)
       decisions.push(enrichDecision(item, base, decisionFacts(item, {
@@ -251,7 +256,7 @@ function enrichDecision(item, base, facts, nowMs) {
   });
 }
 
-function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
+function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem, claimsById }) {
   if (item.kind === "access_request") {
     const request = requestsById.get(item.id);
     const createdAtMs = request ? ms(request.createdAt) : null;
@@ -276,6 +281,19 @@ function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
   }
   if (item.kind === "spend") {
     return { createdAtMs: null, consequenceAtMs: null, consequence: CONSEQUENCE.spend };
+  }
+  if (item.kind === "board_review") {
+    // #3890: board-native claims are not in workItems (the fallthrough
+    // below read a map the claim id is never in, so every board review
+    // carried null facts: no age, no consequence, sorted as brand new).
+    // The facts live on the claim itself — waiting since the delivery
+    // landed, which is when the review became the pending act. No
+    // deadline attaches to a review, so no consequence time (and the
+    // item is never "overdue" by §4.2's rule); the age now drives the
+    // oldest-first tiebreak and the header's oldestAgeMs honestly.
+    const claim = claimsById?.get(item.id) ?? null;
+    return { createdAtMs: claim ? (ms(claim.delivery?.deliveredAt) ?? ms(claim.updatedAt)) : null,
+      consequenceAtMs: null, consequence: CONSEQUENCE.board_review };
   }
   return { createdAtMs: workItem ? ms(workItem.createdAt) : null, consequenceAtMs: null, consequence: null };
 }
