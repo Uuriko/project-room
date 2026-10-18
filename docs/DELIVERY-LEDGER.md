@@ -47,3 +47,29 @@ evidence and a source revision, not just a checkbox.
 
 New research is not a reason to abandon this sequence. Independent measurement and
 source reconciliation can proceed without waiting for every architectural stage.
+
+## Automation research additions (2026-10-18)
+
+See [automation design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md). These extend
+existing work; no automation has been activated by writing this plan.
+
+| ID | Scope / status | Dependencies | Acceptance evidence required |
+|---|---|---|---|
+| AU1 | Existing automation inventory and baseline — planned | G1, M2 | Caller/test inventory, task episode denominators, current manual effort and exceptions |
+| AU2 | Readiness, evidence freshness and review packets — planned | A3, A4, A6, AU1 | Revision-aware due work, stale-check invalidation, independently verified packets and reduced human effort |
+| AU3 | Commitment reconciliation — planned | G1, P2 | Source-linked commitments, explicit disposition, false-positive/omission evaluation; no automatic abandonment |
+| AU4 | Recovery and contract checks — planned | R3, R4, P1, AU1 | Crash/effect reconciliation and executable discovery journey qualification |
+| AU5 | Regression and research experiment pipelines — experiment | P3, M1, AU1 | Reviewed oracles, source provenance, bounded budgets and useful finding yield |
+| AU6 | Resource/knowledge maintenance and quiet briefs — experiment | R1, P4, AU1 | Scoped invalidation, deletion/revocation parity, quality-adjusted cost and notification usefulness |
+
+## Adaptive system additions (2026-10-18)
+
+The [master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) sequences all work above
+into six integration packages without replacing the original seven stages.
+
+| ID | Scope / status | Dependencies | Acceptance evidence required |
+|---|---|---|---|
+| AD1 | Versioned observations and experiment registry — planned | A3, M2, AU1 | Task/cohort/policy provenance, denominators, retention and immutable candidates |
+| AD2 | Offline and shadow adaptation harness — planned | AD1, P1, P3 | Baseline/held-out comparisons, budget stops, false-improvement rejection, independent verifier and reproducibility |
+| AD3 | Bounded adaptive execution policies — experiment | AD2, A4, R3, R4 | Quality-matched improvement, drift detection, stability under load, scoped authorization and rollback |
+| AD4 | Adaptive memory and context — experiment | AD2, P4, R1 | Relevance/freshness improvements at fixed budget, contradiction correction and source deletion/revocation propagation |

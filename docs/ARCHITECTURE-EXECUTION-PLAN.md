@@ -245,3 +245,7 @@ research-derived additions. The [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCO
 extends qualification beyond speed to correctness, recovery, context, human effort,
 cost, maintainability, accessibility and portability. Existing exit criteria remain
 required; new research does not supersede unfinished architecture work.
+
+The [adaptive master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) sequences the
+overhaul, automation and bounded improvement loop into concrete integration
+packages. It preserves all seven exit criteria above.

@@ -101,3 +101,11 @@ quality make future speed gains cheaper and more useful.
 Current next step remains canonical entity contexts and independent aggregates.
 Add baseline instrumentation to existing journey probes while doing that work.
 The scorecard changes acceptance criteria; it does not create a competing rewrite.
+
+## Automation-specific outcomes
+
+The [automation research](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md) adds operational
+definitions for commitment retention, blocked time, evidence freshness, first-pass
+acceptance, decision burden, coverage, unattended success, exception burden,
+notification usefulness, knowledge reuse, recurrence, predictability and improvement
+yield. Use the relevant subset per workflow and include supervision/repair costs.

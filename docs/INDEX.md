@@ -93,3 +93,7 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 - [Startup research and productivity strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md)
 - [Delivery ledger](DELIVERY-LEDGER.md)
 - [Quality and productivity scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md)
+
+- [Automation research and execution design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md)
+
+- [Adaptive Project Room master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md)
