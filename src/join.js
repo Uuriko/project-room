@@ -11,7 +11,7 @@
 
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
-import { AccountClient } from "./client.js";
+import { AccountClient } from "./account-client.js";
 import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
 
