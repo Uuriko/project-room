@@ -252,22 +252,28 @@ export function bountyBalanceHtml(model) {
 }
 
 function reviewHtml(item) {
+  // H-3: verdicts start UNSET. A pre-set Pass made one click attest every
+  // criterion sight unseen; the select now opens on an unchosen option, the
+  // block is headed as the attestation it is, and the accept button stays
+  // disabled until every criterion carries an explicit verdict (the install
+  // layer's change listener maintains that; buildAcceptAttestation refuses
+  // an unset criterion as the backstop).
   const criteria = item.rubricCriteria.map(c =>
     `<li><span>${escapeHtml(c.description || c.criterionId)}</span>` +
     `<select data-verdict-for="${escapeHtml(item.bountyId)}:${escapeHtml(c.criterionId)}" aria-label="Verdict for ${escapeHtml(c.description || c.criterionId)}">` +
-    `<option value="pass">Pass</option><option value="fail">Fail</option></select></li>`).join("");
+    `<option value="" selected>Choose…</option><option value="pass">Pass</option><option value="fail">Fail</option></select></li>`).join("");
   const evidence = item.evidence
     ? `<p class="bounty-delivery"><strong>Delivery:</strong> ${escapeHtml(item.evidence.summary || "(no summary)")}` +
       (item.evidence.evidenceUrl ? ` <a href="${escapeHtml(item.evidence.evidenceUrl)}" target="_blank" rel="noopener">Evidence</a>` : "") + `</p>`
     : `<p class="bounty-delivery"><strong>Delivery:</strong> (no evidence recorded)</p>`;
   return `<div class="bounty-review">${evidence}` +
-    (criteria ? `<ul class="bounty-rubric">${criteria}</ul>` : "") +
+    (criteria ? `<p class="form-hint"><strong>Your attestation.</strong> Accepting records your verdict on every criterion below — choose each one; nothing is decided for you.</p><ul class="bounty-rubric">${criteria}</ul>` : "") +
     // The truth at the moment of commitment (HUNT-HUMAN H-1): accepting
     // releases nothing — it opens the challenge window (24h under 1 credit,
     // else 72h; server/bounty-escrow.mjs challenge-window constants), and
     // the worker is paid when it closes unless a dispute opens.
     `<p class="form-hint">Accepting does not pay the worker now. It starts a ${item.amount < 1 ? "24-hour" : "72-hour"} challenge window, and the worker is paid when it closes, unless a dispute opens.</p>` +
-    `<div class="bounty-actions"><button class="button primary" type="button" data-bounty-action="accept" data-bounty-id="${escapeHtml(item.bountyId)}">Accept work</button></div>` +
+    `<div class="bounty-actions"><button class="button primary" type="button" data-bounty-action="accept" data-bounty-id="${escapeHtml(item.bountyId)}"${criteria ? " disabled" : ""}>Accept work</button></div>` +
     `<label class="field">Reason to reject <input type="text" data-reject-reason="${escapeHtml(item.bountyId)}" maxlength="500"></label>` +
     `<div class="bounty-actions"><button class="button secondary" type="button" data-bounty-action="reject" data-bounty-id="${escapeHtml(item.bountyId)}">Reject &amp; refund me</button></div></div>`;
 }
@@ -345,14 +351,19 @@ export function buildPostPayload({ title, criteria, amount, deadlineLocal } = {}
 }
 
 // Accept body: the escrow requires a citation per pinned rubric criterion
-// (slice 6). verdicts maps criterionId -> "pass"|"fail"; anything missing
-// defaults to "pass" (the select's initial value).
+// (slice 6). verdicts maps criterionId -> "pass"|"fail". H-3: there is NO
+// default verdict — an attestation is the reviewer's own act, so a
+// criterion with no explicit "pass"/"fail" refuses the build with a human
+// message instead of silently attesting a pass nobody chose.
 export function buildAcceptAttestation(bounty, verdicts = {}, nowIso = new Date().toISOString()) {
   const criteria = Array.isArray(bounty?.rubricCriteria) ? bounty.rubricCriteria : [];
-  const citations = criteria.map(c => ({
-    criterionId: c.criterionId,
-    verdict: verdicts[c.criterionId] === "fail" ? "fail" : "pass",
-  }));
+  const citations = criteria.map(c => {
+    const verdict = verdicts[c.criterionId];
+    if (verdict !== "pass" && verdict !== "fail") {
+      throw new Error(`Choose a verdict for every criterion before accepting — “${c.description || c.criterionId}” is still unchosen. Your attestation records a verdict on each one.`);
+    }
+    return { criterionId: c.criterionId, verdict };
+  });
   return { verifierAttestation: { citations, at: nowIso } };
 }
 
@@ -478,9 +489,18 @@ export function installBountyBoard({ client, getSession }) {
       host.querySelectorAll(`[data-verdict-for^="${CSS.escape(bountyId)}:"]`).forEach(select => {
         verdicts[select.dataset.verdictFor.slice(bountyId.length + 1)] = select.value;
       });
+      // Refuse inline, before the wire: an unset criterion is the
+      // reviewer's unfinished act, not a server round-trip (H-3).
+      let attestation;
+      try {
+        attestation = buildAcceptAttestation(item, verdicts);
+      } catch (error) {
+        setStatus(error.message, true);
+        return;
+      }
       const done = await runAction(
         () => client.request(client.path(`/bounties/${encodeURIComponent(bountyId)}/accept`),
-          { method: "POST", data: { ...buildAcceptAttestation(item, verdicts), idempotencyKey: newIdempotencyKey() } }),
+          { method: "POST", data: { ...attestation, idempotencyKey: newIdempotencyKey() } }),
         null);
       if (done) {
         // runAction already reloaded: lastModel carries the accept's
@@ -510,6 +530,20 @@ export function installBountyBoard({ client, getSession }) {
 
   host.addEventListener("submit", event => { if (event.target?.id === "bounty-post-form") void onSubmit(event); });
   host.addEventListener("click", event => { void onClick(event); });
+  // H-3: verdict selects render unchosen and the accept button disabled;
+  // enable it only while every criterion on that bounty carries an
+  // explicit verdict, and disable it again if one is reset to unchosen.
+  host.addEventListener("change", event => {
+    const select = event.target?.closest?.("[data-verdict-for]");
+    if (!select || typeof select.dataset?.verdictFor !== "string") return;
+    const key = select.dataset.verdictFor;
+    const item = lastModel?.items.find(row => key.startsWith(`${row.bountyId}:`));
+    if (!item || item.rubricCriteria.length === 0) return;
+    const selects = host.querySelectorAll(`[data-verdict-for^="${CSS.escape(item.bountyId)}:"]`);
+    const allChosen = selects.length > 0 && [...selects].every(s => s.value === "pass" || s.value === "fail");
+    const button = host.querySelector(`[data-bounty-action="accept"][data-bounty-id="${CSS.escape(item.bountyId)}"]`);
+    if (button) button.disabled = !allChosen;
+  });
 
   return {
     sync() { if (panel.open) return load(); },
