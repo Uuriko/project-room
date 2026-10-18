@@ -55,6 +55,8 @@ function seedReadTables(db) {
   CREATE TABLE IF NOT EXISTS room_public_settings (
     room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS public_unpublish (kind TEXT, target TEXT);
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS public_rooms (slug TEXT PRIMARY KEY, title TEXT);
   CREATE TABLE IF NOT EXISTS public_receipts (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL,
@@ -175,6 +177,9 @@ test("a work receipt with no lot linkage gains neither key and no link", () => {
 test("the lot receipt's own page and JSON are undisturbed", () => {
   const { escrow, db, store } = makeEscrow();
   const { lotId } = linkedWorkReceipt(escrow, db, store);
+  // The lot serves under the owner's recorded public-receipts opt-in
+  // (#3594), mirrored here as syncRoomPublication writes it.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(ROOM);
 
   const lot = publicReceiptById(store, lotId);
   assert.ok(lot, "the payout lot must resolve");

@@ -58,7 +58,11 @@ function makeEscrow() {
   db.exec(`CREATE TABLE room_directory_settings (room_id TEXT PRIMARY KEY, discoverable INTEGER NOT NULL DEFAULT 0, public_receipts INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE room_public_settings (room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE public_unpublish (kind TEXT, target TEXT);
-    CREATE TABLE public_rooms (slug TEXT PRIMARY KEY, title TEXT);`);
+    CREATE TABLE public_rooms (slug TEXT PRIMARY KEY, title TEXT);
+    CREATE TABLE room_public_receipts_setting (room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);`);
+  // Lot receipts serve only under the owner's recorded public-receipts
+  // opt-in (#3594); this fixture's room has opted in.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(ROOM);
   return { escrow, db, store };
 }
 
