@@ -4,6 +4,25 @@ import Darwin
 /// Converts explicit native selections into an app-owned configuration. No
 /// credentials are copied, no process is started, and no imported file is edited.
 public enum LocalRoomHostSetup {
+    /// Find installed tools without launching a shell or walking the disk. Finder
+    /// launches often have a minimal PATH, so include common installation roots.
+    public static func installedExecutable(_ name: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        searchPath: String = ProcessInfo.processInfo.environment["PATH"] ?? "") -> String? {
+        guard ["node", "codex"].contains(name) else { return nil }
+        let directories = [home.appendingPathComponent(".local/bin").path,
+            "/opt/homebrew/bin", "/usr/local/bin"] + searchPath.split(separator: ":").map(String.init)
+        var candidates = directories.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0).appendingPathComponent(name).path }
+        if name == "codex" {
+            candidates.append("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
+        }
+        let fm = FileManager.default
+        return candidates.first { path in
+            var directory: ObjCBool = false
+            return fm.fileExists(atPath: path, isDirectory: &directory) && !directory.boolValue && fm.isExecutableFile(atPath: path)
+        }
+    }
+
     public struct Selection {
         public let node, script, codex, workspace, profile, connection: URL
         public let allowWrites: Bool

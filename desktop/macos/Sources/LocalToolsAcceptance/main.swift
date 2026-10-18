@@ -136,6 +136,17 @@ final class LocalToolsTests {
         func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
         let controls = descendants(content).compactMap { $0 as? NSButton }
         let enable = controls.first { $0.title == "Enable local tools" }!
+        let advanced = controls.first { $0.title == "Advanced" }!
+        let manual = controls.filter { ["Copy agent connection", "Import existing host configuration…"].contains($0.title) }
+        expectEqual(manual.count, 2)
+        expectEqual(manual.allSatisfy { $0.isHiddenOrHasHiddenAncestor }, true)
+        advanced.performClick(nil)
+        expectEqual(manual.allSatisfy { !$0.isHiddenOrHasHiddenAncestor }, true)
+        content.layoutSubtreeIfNeeded()
+        for view in manual { expectEqual(content.bounds.contains(content.convert(view.bounds, from: view)), true) }
+        advanced.performClick(nil)
+        expectEqual(manual.allSatisfy { $0.isHiddenOrHasHiddenAncestor }, true)
+
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             panel.window.appearance = NSAppearance(named: appearance)
             panel.window.orderFrontRegardless()
@@ -147,7 +158,7 @@ final class LocalToolsTests {
                 let labels = descendants(content).compactMap { $0 as? NSTextField }
                 let expected = LocalToolReadiness.summary(tools.status()["capabilities"] as! [[String: Any]])
                 expectEqual(labels.contains { $0.stringValue.hasPrefix(expected) }, true)
-                for view in labels + controls {
+                for view in (labels + controls).filter({ !$0.isHiddenOrHasHiddenAncestor }) {
                     let frame = content.convert(view.bounds, from: view)
                     expectEqual(content.bounds.insetBy(dx: -1, dy: -1).contains(frame), true)
                 }

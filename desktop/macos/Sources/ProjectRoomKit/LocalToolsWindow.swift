@@ -14,6 +14,7 @@ import CoreGraphics
     private let state = NSTextField(wrappingLabelWithString: "")
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let toggle = NSButton(title: "Enable local tools", target: nil, action: nil)
+    private let advancedControls = NSStackView()
     private var timer: Timer?
     private var hostIssue: String?
     private var setupWindow: LocalRoomHostSetupWindow?
@@ -34,16 +35,19 @@ import CoreGraphics
         toggle.target = self; toggle.action = #selector(changeEnabled); toggle.bezelStyle = .rounded
         let setup = NSButton(title: "macOS permissions…", target:self, action:#selector(openPermissions)); setup.bezelStyle = .rounded
         let copy = NSButton(title:"Copy agent connection", target:self, action:#selector(copyConnection)); copy.bezelStyle = .rounded
-        let controls = NSStackView(views:[toggle,setup,copy]); controls.orientation = .horizontal; controls.spacing = 8
+        let controls = NSStackView(views:[toggle,setup]); controls.orientation = .horizontal; controls.spacing = 8
         for view in [title,explanation,state,permissions,controls,scope] { stack.addArrangedSubview(view) }
         hostConnect.target = self; hostConnect.action = #selector(setupHost); hostConnect.bezelStyle = .rounded
         hostToggle.target = self; hostToggle.action = #selector(toggleHost); hostToggle.bezelStyle = .rounded
         macConnect.target = self; macConnect.action = #selector(connectMacTools); macConnect.bezelStyle = .rounded
         let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle]); hostControls.spacing = 8
-        let hostNote = NSTextField(wrappingLabelWithString: "Keep Project Room open while your agent works."); hostNote.textColor = .secondaryLabelColor
         let importHost = NSButton(title: "Import existing host configuration…", target: self, action: #selector(connectHost)); importHost.bezelStyle = .rounded
-        for view in [hostState, hostControls, hostNote, importHost] { stack.addArrangedSubview(view) }
-        for label in [explanation, state, permissions, scope, hostState, hostNote] {
+        let advanced = NSButton(checkboxWithTitle: "Advanced", target: self, action: #selector(toggleAdvanced(_:)))
+        advancedControls.orientation = .vertical; advancedControls.alignment = .leading; advancedControls.spacing = 8
+        advancedControls.addArrangedSubview(copy); advancedControls.addArrangedSubview(importHost)
+        advancedControls.isHidden = true
+        for view in [hostState, hostControls, advanced, advancedControls] { stack.addArrangedSubview(view) }
+        for label in [explanation, state, permissions, scope, hostState] {
             label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         window.contentView!.addSubview(stack)
@@ -56,6 +60,9 @@ import CoreGraphics
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     public func stop() { setupWindow?.stop(); timer?.invalidate(); host.stopAndWait(); connection.stop() }
+    @objc private func toggleAdvanced(_ sender: NSButton) {
+        advancedControls.isHidden = sender.state != .on
+    }
     @objc private func changeEnabled() {
         let enabled = service.status()["enabled"] as? Bool == true
         service.setEnabled(!enabled)

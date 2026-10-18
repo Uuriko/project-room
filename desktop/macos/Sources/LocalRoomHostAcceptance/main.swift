@@ -56,6 +56,14 @@ let root = fm.temporaryDirectory.appendingPathComponent("room-native-host-\(UUID
 try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
 defer { try? fm.removeItem(at: root) }
 let executable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
+let discoveryHome = root.appendingPathComponent("discovery-home")
+let discoveryBin = discoveryHome.appendingPathComponent(".local/bin")
+try fm.createDirectory(at: discoveryBin, withIntermediateDirectories: true)
+let discoveredNode = discoveryBin.appendingPathComponent("node")
+try fm.createSymbolicLink(at: discoveredNode, withDestinationURL: URL(fileURLWithPath: executable))
+check(LocalRoomHostSetup.installedExecutable("node", home: discoveryHome, searchPath: "") == discoveredNode.path, "Finder launch discovers user-local executable symlink without PATH")
+check(LocalRoomHostSetup.installedExecutable("../node", home: discoveryHome, searchPath: "") == nil, "discovery accepts only supported tool names")
+
 func fixture(_ name: String) throws -> (LocalRoomHost, URL) {
     let dir = root.appendingPathComponent(name), connection = dir.appendingPathComponent("connection")
     try fm.createDirectory(at: connection, withIntermediateDirectories:true, attributes:[.posixPermissions:0o700])

@@ -49,8 +49,8 @@ import AppKit
             if index != 1 { advancedRows.append(row); row.isHidden = true }
         }
         let fm = FileManager.default
-        fields[3].stringValue = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first(where: fm.isExecutableFile(atPath:)) ?? ""
-        fields[5].stringValue = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"].first(where: fm.isExecutableFile(atPath:)) ?? ""
+        fields[3].stringValue = LocalRoomHostSetup.installedExecutable("node") ?? ""
+        fields[5].stringValue = LocalRoomHostSetup.installedExecutable("codex") ?? ""
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("room-runtime/scripts/run-codex-room.mjs"), fm.isReadableFile(atPath: bundled.path) { fields[4].stringValue = bundled.path }
         fields[2].stringValue = managed.appendingPathComponent("Provider Profile").path
         loginButton.target = self; loginButton.action = #selector(signIn); loginButton.bezelStyle = .rounded
