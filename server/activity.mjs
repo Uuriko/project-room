@@ -1,10 +1,10 @@
 // Personal attention surfaces: activity feed, read horizons, saved messages,
-// thread mutes. Write-time fan-out for mention/reply/thread_reply/reaction
+// thread mutes. Write-time fan-out for mention/reply/thread_reply
 // events (per-recipient rows, like mention_states), plus read/unread state per
 // item. This is the explicit-triage companion to the cursor-derived
 // notifications feed (server/notifications.mjs): notifications derive from the
 // event tail, activity rows are fanned out at write time and carry their own
-// read state, reactions, and thread replies.
+// read state and thread replies.
 //
 // Tables:
 //   activity_events  one row per (recipient, triggering message, actor)
@@ -20,7 +20,7 @@
 //
 // The store (server/store.mjs) owns persistence and calls recordActivityEvents
 // inside the command transaction, next to trackMentions: an activity row is
-// never recorded without its triggering message/reaction. Fan-out never
+// never recorded without its triggering message. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
@@ -30,7 +30,9 @@ import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const ACTIVITY_TYPES = Object.freeze(["mention", "reply", "thread_reply", "reaction"]);
+// 'reaction' stays in the table CHECK for rows written before reactions were
+// removed (2026-10); reads skip them.
+export const ACTIVITY_TYPES = Object.freeze(["mention", "reply", "thread_reply"]);
 export const isActivityType = value => ACTIVITY_TYPES.includes(value);
 
 export const activitySchema = `
@@ -221,32 +223,6 @@ function applyActivityFanOut(store, roomId, state, senderId, command, incoming, 
     }
     return;
   }
-  if (command.type === T.MESSAGE_REACTION_SET) {
-    const data = command.data ?? {};
-    const message = messages.find(m => m.id === data.messageId);
-    if (!message) return;
-    if (data.active === true) {
-      if (message.authorId === senderId) return; // no self-events
-      const result = db.prepare(
-        `INSERT OR IGNORE INTO activity_events
-         (room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
-         VALUES(?,?,?,?,?,?,?,?,NULL)`)
-        .run(roomId, "reaction", senderId, actorName, message.id, "", message.authorId, now);
-      if (result.changes > 0) applied.inserted.push(result.lastInsertRowid);
-    } else if (data.active === false) {
-      // Toggle-off retracts the still-unread event. Capture the row first
-      // so a later failure in this call can restore it verbatim.
-      const retracted = db.prepare(
-        `SELECT * FROM activity_events
-         WHERE room_id=? AND type='reaction' AND message_id=? AND actor_id=? AND user_id=? AND read_at IS NULL`)
-        .all(roomId, message.id, senderId, message.authorId);
-      const result = db.prepare(
-        `DELETE FROM activity_events
-         WHERE room_id=? AND type='reaction' AND message_id=? AND actor_id=? AND user_id=? AND read_at IS NULL`)
-        .run(roomId, message.id, senderId, message.authorId);
-      if (result.changes > 0) applied.retracted.push(...retracted);
-    }
-  }
 }
 
 // #3261: durably journal a fan-out failure with everything a replay needs.
@@ -358,7 +334,7 @@ export function listActivity(store, token, roomId, params = {}, expectedSessionB
     let hasMore = false;
     let scanned = 0;
     while (items.length <= count && scanned < 2000) {
-      const clauses = ["room_id=?", "user_id=?"];
+      const clauses = ["room_id=?", "user_id=?", "type<>'reaction'"];
       const args = [roomId, member.id];
       if (type) { clauses.push("type=?"); args.push(type); }
       if (cursor !== null) { clauses.push("id<?"); args.push(cursor); }
@@ -388,7 +364,7 @@ export function activityUnreadCount(store, token, roomId, expectedSessionBinding
     const floor = store.historyFloor(roomId, member.id);
     const rows = store.db.prepare(
       `SELECT * FROM activity_events
-       WHERE room_id=? AND user_id=? AND read_at IS NULL`).all(roomId, member.id);
+       WHERE room_id=? AND user_id=? AND read_at IS NULL AND type<>'reaction'`).all(roomId, member.id);
     const byType = Object.fromEntries(ACTIVITY_TYPES.map(t => [t, 0]));
     for (const row of rows) {
       const view = eventView(store, roomId, row, member.id, floor);

@@ -112,7 +112,10 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
         messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
       .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
-        id => store.room(roomId).state.messages.find(message => message.id === id)?.body) })
+        // The recovery source must itself verify: a hot-path room() read
+        // trusts the content-addressed body key (WRITE-PATH-WINS win 3)
+        // and would hand the tampered bytes straight back.
+        id => store.room(roomId, { verifyBodyHashes: true }).state.messages.find(message => message.id === id)?.body) })
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     // Without a certified table the projection holds only the tail. Page the
     // archived messages from the table after it, with the certified path's

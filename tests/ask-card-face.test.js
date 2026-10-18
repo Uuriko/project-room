@@ -41,3 +41,14 @@ test('a one-person room asks Room only for messages addressed to no one else', (
   assert.equal(ctx('and then?', 'answer'), true, 'a follow-up on the assistant answer still asks Room');
   assert.equal(ctx('agreed', 'theirs'), false, 'a reply to another agent is addressed to that agent');
 });
+
+test('R366-1: a queued ask on a paused assistant says it is paused, not offline', () => {
+  const run = { id: 'r', status: 'queued', createdAt: 1_000 };
+  const face = askFaceStatus(run, 1_000 + NOT_PICKED_UP_MS, { availability: 'paused' });
+  assert.equal(face.key, 'host_paused');
+  assert.match(face.text, /paused/i);
+  assert.doesNotMatch(face.text, /offline/);
+  assert.equal(askFaceStatus(run, 1_000, { availability: 'paused' }).key, 'host_paused', 'no 10 s wait to say so');
+  assert.equal(askFaceStatus({ ...run, status: 'working' }, 1_000, { availability: 'paused' }).key, 'working', 'only queued asks change');
+  assert.equal(askFaceStatus(run, 1_000 + NOT_PICKED_UP_MS, { availability: 'awaiting_host' }).key, 'not_picked_up');
+});
