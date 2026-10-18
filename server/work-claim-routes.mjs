@@ -714,7 +714,7 @@ function memoizeList(registry) {
   });
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null, recordEvidenceRead = null }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
@@ -999,7 +999,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
     // settlement state as the board page.
-    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
+    const item = withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller));
+    // #3616 (R-11): the single-claim read is a verdict/evidence surface
+    // (reviews, verification, delivery evidence) — log the read at the
+    // room audit surface. List/board reads are not logged.
+    if (typeof recordEvidenceRead === "function") recordEvidenceRead("board-claim", workClaimId ?? null);
+    return json(res, 200, item);
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);

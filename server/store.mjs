@@ -720,7 +720,8 @@ const shapes = {
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
   // --- PRIV-2: owner-only history setting and the export audit record. ---
   [T.ROOM_HISTORY_VISIBILITY_SET]: "historyVisibility",
-  [T.ROOM_EXPORTED]: "format",
+  [T.ROOM_EXPORTED]: "format schema rowCount requester",
+  [T.EVIDENCE_READ]: "surface subjectId",
   // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
   [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
   [T.ROOM_JOIN_LINK_SET]: "enabled",
@@ -820,7 +821,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "rowCount"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);

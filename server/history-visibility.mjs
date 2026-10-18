@@ -146,7 +146,17 @@ export function requireExportOwner(store, roomId, memberId, fail) {
   if (memberId !== store.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can export the room");
 }
 
-export function recordRoomExport(store, token, roomId, format, expectedSessionBinding = null) {
+export function recordRoomExport(store, token, roomId, format, expectedSessionBinding = null, audit = null) {
   if (isRoomArchived(store.room(roomId).state)) return null;
-  return store.command(token, roomId, { id: randomUUID(), type: T.ROOM_EXPORTED, data: { format } }, expectedSessionBinding);
+  return store.command(token, roomId, { id: randomUUID(), type: T.ROOM_EXPORTED, data: { format, ...(audit ?? {}) } }, expectedSessionBinding);
+}
+
+// #3616 (R-11): member-side evidence reads are logged at the same audit
+// surface as the export record above — the room event log. The record
+// names the surface and the subject read, never the evidence content.
+// An archived room records nothing new, so its reads leave no event
+// (the same rule the export record follows).
+export function recordEvidenceRead(store, token, roomId, { surface, subjectId = null } = {}, expectedSessionBinding = null) {
+  if (isRoomArchived(store.room(roomId).state)) return null;
+  return store.command(token, roomId, { id: randomUUID(), type: T.EVIDENCE_READ, data: { surface, subjectId } }, expectedSessionBinding);
 }

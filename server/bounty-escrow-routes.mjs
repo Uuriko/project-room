@@ -141,7 +141,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null, recordEvidenceRead = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -192,6 +192,9 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (escrowRoute === "reviews" && req.method === "GET") {
     const bountyId = url.searchParams.get("bountyId");
     const packets = runPure(reject, () => escrow.getReviewPackets(roomId, { bountyId }));
+    // #3616 (R-11): arbiter inspection of verdict evidence — log the read
+    // at the room audit surface.
+    if (typeof recordEvidenceRead === "function") recordEvidenceRead("bounty-review-packets", bountyId ?? null);
     return json(res, 200, { roomId, packets });
   }
   // Slice 10: the sybil-flag arbiter review queue. Read-only (rooms:read);
@@ -226,6 +229,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   // packets. Read-only (rooms:read); packets are immutable once created.
   if (escrowRoute === "reputation-reviews" && req.method === "GET") {
     const packets = runPure(reject, () => escrow.getReputationPackets(roomId));
+    // #3616 (R-11): arbiter inspection of verdict evidence — log the read.
+    if (typeof recordEvidenceRead === "function") recordEvidenceRead("bounty-reputation-packets", null);
     return json(res, 200, { roomId, packets });
   }
   if (escrowRoute === "create" && req.method === "POST") {
