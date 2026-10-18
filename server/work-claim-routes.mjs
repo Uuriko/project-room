@@ -42,6 +42,7 @@ import {
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+import { reviewerLoadOf, reviewerOfferFor } from "./reviewer-load.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
@@ -203,10 +204,15 @@ function mayReviewWorkClaims(access) {
     && (mayWriteWorkClaims(access) || (access.member.permissions ?? []).includes("verify")));
 }
 
-const reviewersOf = (store, roomId) => {
-  const authority = store.roomAuthority(roomId);
-  return Object.values(authority.members).filter(member => mayReviewWorkClaims({ ownerId: authority.ownerId, member })).map(member => member.id);
-};
+// The member ids eligible to review in a room, from a room authority
+// snapshot (#3755: shared with the reviewer-load derivation so the depth
+// surface and the review gate name the same set). Eligibility itself is
+// unchanged: mayReviewWorkClaims above remains the one rule.
+export function eligibleReviewerIds(authority) {
+  return Object.values(authority?.members ?? {}).filter(member => mayReviewWorkClaims({ ownerId: authority?.ownerId, member })).map(member => member.id);
+}
+
+const reviewersOf = (store, roomId) => eligibleReviewerIds(store.roomAuthority(roomId));
 
 function mayManageAnyClaim(access) {
   const member = access.member;
@@ -342,7 +348,7 @@ function pageReady(items, limit, cursor) {
 // Shared stored-state projection. No registry/store access or lifecycle effects:
 // ordinary GET calls this after housekeeping; derived reads call it directly.
 // Pages are live, not a snapshot fenced by the legacy room event sequence.
-export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
+export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now(), reviewContext = null) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
@@ -360,7 +366,11 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     // #3661: every claim read carries the derived pull settlement state on
     // its pull record (verified / asserted / pending; link-less claims
     // keep pullRequest null, which reads as "none").
+    // #3755: every board page also carries the room's per-reviewer
+    // pending-review depth, derived over the whole board (not just this
+    // page) when the caller supplies the room's reviewer context.
     const stamped = stampClaimPage({ ...metadata, ...page,
+      ...(reviewContext ? { reviewerLoad: reviewerLoadOf(items, reviewContext.members ?? {}, reviewContext.eligibleReviewers ?? []) } : {}),
       claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
@@ -837,7 +847,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+      url?.searchParams, nowMs, { members: access.authority?.members ?? {}, eligibleReviewers: reviewersOf(store, roomId) }), swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -1279,6 +1289,20 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       ? runPure(reject, () => bindReviewerRequestOutcome(item, acked, caller, data.requestId, data.readingAck)) : acked;
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
+    // #3755 ask 2: submitting a claim for review (the finish → delivered
+    // transition) offers the less-loaded eligible reviewers instead of
+    // silently defaulting to the room's usual reviewer. The offer rides
+    // the response only: it assigns nobody, wakes nobody, and does not
+    // narrow who may review — eligibility and every refusal above are
+    // untouched. Derived after the commit so the new delivery counts in
+    // the depths shown; a derivation failure never breaks the transition.
+    if (data.state === "delivered" && item.state !== "delivered" && result.state === "delivered") {
+      let offer = null;
+      try {
+        offer = reviewerOfferFor(result, registry.list(roomId), access.authority?.members ?? {}, reviewersOf(store, roomId));
+      } catch { offer = null; }
+      if (offer) return json(res, 200, { ...result, reviewOffer: offer });
+    }
     return json(res, 200, result);
   }
   if (workClaimRoute === "review" && req.method === "POST") {

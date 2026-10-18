@@ -14,7 +14,9 @@ import { sessionWatermark } from "./read-cursor.mjs";
 // the last gap where a polling agent had to re-read a whole room or board
 // to answer "what is mine and what is broken": the CI rollup and reviews
 // already live on the claim record (recordCi / recordReview), so these
-// sections compose that state instead of recomputing it.
+// sections compose that state instead of recomputing it. reviewerLoad
+// (#3755) rides beside them: per-reviewer pending-review depth for the
+// room, derived from the same claim records (server/reviewer-load.mjs).
 //
 // since is a sequence number (applied per room) or the previous cursor
 // { rooms: { roomId: seq }, land: { roomId: updatedAt } }. Land-queue
@@ -27,7 +29,8 @@ import { sessionWatermark } from "./read-cursor.mjs";
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
-import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { eligibleReviewerIds, mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { reviewerLoadOf } from "./reviewer-load.mjs";
 import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
@@ -591,6 +594,27 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
+// Per-reviewer pending-review depth for one room (#3755 ask 1): how many
+// reviews are waiting on each eligible reviewer, derived at read time
+// from the board's review state (server/reviewer-load.mjs) — no persisted
+// counters. Standing state like the other work sections: it never moves
+// the cursor. Shown only while something is actually waiting; the rows
+// include eligible reviewers at depth 0, because the less-loaded
+// reviewers are the point of the surface.
+export function reviewLoadOf(store, roomId, authority, claims = null) {
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
+  const reviewers = reviewerLoadOf(list, authority?.members ?? {}, eligibleReviewerIds(authority));
+  const totalPendingReviews = reviewers.reduce((sum, row) => sum + row.pendingReviews, 0);
+  if (!totalPendingReviews) return null;
+  return {
+    roomId,
+    totalPendingReviews,
+    reviewers,
+    next: `GET /api/rooms/${encodeURIComponent(roomId)}/work-claims`
+  };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -632,6 +656,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myWork = [];
   const myClaims = [];
   const actionsNeeded = [];
+  const reviewerLoad = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -655,6 +680,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
     if (needed) actionsNeeded.push(needed);
+    const load = reviewLoadOf(store, link.roomId, authority, claims);
+    if (load) reviewerLoad.push(load);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -717,5 +744,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), ...(reviewerLoad.length ? { reviewerLoad } : {}), cursor, hasMore, untrusted: true };
 }

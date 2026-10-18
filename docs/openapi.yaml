@@ -5150,7 +5150,13 @@ paths:
             With `queue=ready`, only unheld claims whose dependencies are done:
             `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
             With `state`, only claims in that state. With `view=summary`,
-            each claim is the compact projection.
+            each claim is the compact projection. Every page also carries
+            `reviewerLoad` (#3755): per-reviewer pending-review depth for
+            the whole room, derived at read time — one row per eligible
+            reviewer (`{ memberId, pendingReviews, claimIds }`, deepest
+            first, zero-depth reviewers included), where a claim counts
+            for its named reviewers when it names any and for every
+            eligible reviewer otherwise.
           content:
             application/json:
               schema:
@@ -5698,7 +5704,13 @@ paths:
         reviews, comments, change requests and note-only records cannot
         qualify. Rejection is 403 work_review_rejected. This manual gate
         does not bind artifact bytes or change automatic PR/land/deploy
-        settlement. API keys need `rooms:write`.
+        settlement. API keys need `rooms:write`. A successful transition
+        into `delivered` (submitting the claim for review) also carries
+        `reviewOffer` (#3755): the claim's eligible reviewers ranked
+        least-loaded first by pending-review depth, with
+        `suggestedReviewer` naming the least loaded. The offer is
+        presentation only — it assigns nobody and does not change who
+        may review.
         Alternatively send only appendPullRequest, expectedClaimedAt and
         expectedHistoryLength from a fresh item read. The history count is
         history.length + (historyOmitted ?? 0), including entries no longer
@@ -10449,7 +10461,7 @@ paths:
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
+        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, reviewerLoad?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. reviewerLoad lists, per room with reviews waiting, the per-reviewer pending-review depth derived at read time (#3755: totalPendingReviews and one row per eligible reviewer with pendingReviews and claimIds, deepest first, zero-depth reviewers included); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
