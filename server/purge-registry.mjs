@@ -1081,6 +1081,27 @@ const ROWS = [
     }
   },
   {
+    "table": "messages_backfill_state",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "projection_shape_upgrades",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "owner_delegate_grants",
     "key": "room_id",
     "action": "delete",
