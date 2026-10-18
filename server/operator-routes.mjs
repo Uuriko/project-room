@@ -6,6 +6,7 @@ import { configuredOperatorTokenHash, presentedOperatorToken, operatorTokenMatch
 import { createOperatorPurge } from "./operator-purge.mjs";
 import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
+import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
 
 const POST = "POST";
 const GET = "GET";
@@ -13,6 +14,8 @@ const ROUTES = Object.freeze({
   "/api/operator/purge/plan": POST,
   "/api/operator/purge/find": POST,
   "/api/operator/purge/execute": POST,
+  "/api/operator/projection/plan": POST,
+  "/api/operator/projection/execute": POST,
   "/api/operator/actions": GET,
   "/api/operator/status": GET,
   "/api/operator/drift": GET
@@ -42,6 +45,14 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     }
     if (path === "/api/operator/purge/execute") {
       json(res, 200, purge.execute(await body(req), requestId));
+      return true;
+    }
+    if (path === "/api/operator/projection/plan") {
+      json(res, 200, planProjectionRepair(store, await body(req), requestId));
+      return true;
+    }
+    if (path === "/api/operator/projection/execute") {
+      json(res, 200, executeProjectionRepair(store, await body(req), requestId));
       return true;
     }
     if (path === "/api/operator/actions") {
