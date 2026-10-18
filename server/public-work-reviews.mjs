@@ -26,6 +26,11 @@ export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS public_work_review_versions (
+  receipt_id TEXT NOT NULL, room_id TEXT NOT NULL, revision INTEGER NOT NULL,
+  action TEXT NOT NULL, actor_id TEXT NOT NULL, at TEXT NOT NULL, state_json TEXT NOT NULL,
+  PRIMARY KEY(receipt_id, revision)
+);
 CREATE TABLE IF NOT EXISTS public_work_review_requests (
   room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
   input_json TEXT NOT NULL, outcome_json TEXT NOT NULL,
@@ -104,7 +109,7 @@ export class PublicWorkReviews {
   }
   needsPass(scope) { return scope.offer.approvalPolicy.mode !== 'human' || scope.policy.requireIndependentReview || scope.work?.independentVerificationRequired; }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
-  view(scope) {
+  view(scope, { history = false } = {}) {
     const review = this.current(scope), permissions = this.permissions(scope, scope.actorId);
     const settlement = this.settlementService().viewForOffer(scope.receipt.taskId);
     const followUp = this.store.publicWorkSuccessors?.link(scope.receipt.receiptId);
@@ -112,7 +117,7 @@ export class PublicWorkReviews {
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), ...(history ? { history: this.historyEntries(scope) } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -122,11 +127,29 @@ export class PublicWorkReviews {
         acceptReady: permissions.decide && ready && !terminal,
         reason: terminal ? 'Review decision is final.' : !permissions.decide ? 'A designated reviewer must decide.' : !ready ? 'A current independent PASS is required.' : 'Ready for an explicit decision.' } };
   }
+  // W3 review-history versioning: every mutation appends an immutable
+  // version row (see mutate), so the full verdict/revision history reads
+  // back in revision order. Entries mirror the current view's redaction:
+  // reviewer identity and reasons are visible at this (member-side)
+  // door, the verification fingerprint never leaves the evidence record.
+  // Pre-versioning reviews have no rows and read as an empty history —
+  // their overwritten verdicts are gone, not fabricated.
+  historyEntries(scope) {
+    if (!this.hasTable('public_work_review_versions')) return [];
+    return this.db.prepare('SELECT revision, action, actor_id, at, state_json FROM public_work_review_versions WHERE receipt_id=? AND room_id=? ORDER BY revision ASC')
+      .all(scope.receipt.receiptId, scope.roomId).map(row => {
+        const state = JSON.parse(row.state_json);
+        let verification = null;
+        if (state.verification) { const { fingerprint: ignored, ...rest } = state.verification; void ignored; verification = rest; }
+        return { revision: row.revision, action: row.action, actorId: row.actor_id, at: row.at,
+          state: state.state, verification, decision: state.decision ?? null };
+      });
+  }
   inspect(roomId, actorId, receiptId) {
     return this.store.readTransaction(() => {
       const scope = this.scope(roomId, actorId, receiptId), authority = this.permissions(scope, actorId);
       if (scope.state.room.ownerId !== actorId && !authority.decide && !authority.verify) fail(403, 'review_forbidden', 'Only the owner or designated reviewer may inspect');
-      return this.view(scope);
+      return this.view(scope, { history: true });
     });
   }
   results(roomId, actorId, { limit = 20, after = '' } = {}) {
@@ -254,7 +277,19 @@ export class PublicWorkReviews {
       const settlement = action === 'decide' && ['accepted', 'rejected'].includes(input.decision)
         ? this.settlementService().settleOnVerdict(roomId, scope.receipt.taskId, { decision: input.decision, reason: input.reason }) : null;
       if (action === 'decide' && input.decision === 'accepted') this.stampPublicReceiptVerified(receiptId, current);
-      const outcome = this.view(scope);
+      // W3: the public_work_reviews row is the current-verdict pointer;
+      // this append-only row is the history it used to destroy. Written
+      // after settlement and the verified stamp, inside the same
+      // transaction, so a failed settlement records no version either.
+      // Journal replays return above and never reach this insert, keeping
+      // version rows 1:1 with revisions. A plain INSERT (no OR IGNORE): a
+      // revision collision would mean revision reuse, which must fail
+      // loudly rather than silently drop a verdict.
+      if (this.hasTable('public_work_review_versions')) {
+        this.db.prepare('INSERT INTO public_work_review_versions VALUES (?,?,?,?,?,?,?)')
+          .run(receiptId, roomId, current.revision, action, actorId, at, JSON.stringify(current));
+      }
+      const outcome = this.view(scope, { history: true });
       if (settlement) outcome.settlement = settlement;
       this.db.prepare('INSERT INTO public_work_review_requests VALUES (?,?,?,?,?)').run(roomId, actorId, input.requestId, encoded, JSON.stringify(outcome));
       return outcome;
