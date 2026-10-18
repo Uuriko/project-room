@@ -5,7 +5,7 @@
 :root {
   color-scheme: dark;
   /* tokens:begin DARK */
-  --bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--control-min-target-coarse:2.75rem;--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   /* tokens:end DARK */
   /* Component aliases kept for existing rules. */
   --room-paper: var(--panel-raised);
@@ -852,6 +852,15 @@ button:disabled { cursor: wait; opacity: .6; }
 .icon-button:hover { color: var(--text); background: rgb(255 255 255 / 6%); }
 @media (pointer: coarse) { .icon-button { min-width: 44px; min-height: 44px; width: 44px; height: 44px; } }
 @media (pointer: coarse) { .button, .topbar-button, .people-actions .button, .search-row .button { min-height: 44px; } }
+/* Front-door batch B-8 (#3744): the coarse-pointer floor is ONE token
+   (--control-min-target-coarse, src/design-tokens.js), applied to the
+   tappable elements the token rule did not already reach: plain links,
+   text buttons, disclosure summaries, and footer legal links. */
+@media (pointer: coarse) {
+  .text-button, summary { min-height: var(--control-min-target-coarse); }
+  .site-footer a, .signin-entry-routes a, #signin-methods a.button { display: inline-flex; align-items: center; min-height: var(--control-min-target-coarse); }
+  .site-footer a { padding-inline: .3rem; }
+}
 /* QA2-A11Y (D-fo-3): form controls under 16px trigger iOS auto-zoom on focus.
    Coarse pointers get the 16px floor and the 44px touch target. Specific
    checkbox/radio sizes win by specificity where they are intentional. */

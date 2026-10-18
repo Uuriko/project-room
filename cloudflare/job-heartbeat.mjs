@@ -73,11 +73,18 @@ export function summaryFailure(result) {
 
 const DETAIL_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 const DETAIL_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+const DETAIL_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 // A job may attach a sanitized failure detail (stable codes and classes
 // only, e.g. the integrity job's failing sub-check — #3334). Every field
-// must be a short token, so no id, body or secret can ride this channel
-// onto the public health surface.
+// must be a short token, so no body or secret can ride this channel onto
+// the public health surface. The integrity job may attach the failing
+// ROOM (recordId) for its room-record steps to the stored failure detail
+// — operators read it from the job detail and the token-gated operator
+// status — but jobHealthView deliberately does not project it: the
+// public health view must not carry block evidence for a room
+// (integrity-block-health), not even its id. The shape check below still
+// bars everything that is not id-shaped.
 export function sanitizeFailureDetail(detail) {
   if (!detail || typeof detail !== "object") return null;
   const out = {};
@@ -85,6 +92,7 @@ export function sanitizeFailureDetail(detail) {
   for (const key of ["subcheck", "errorClass", "recordClass"]) {
     if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
   }
+  if (typeof detail.recordId === "string" && DETAIL_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
   return Object.keys(out).length ? out : null;
 }
 

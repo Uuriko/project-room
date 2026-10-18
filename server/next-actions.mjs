@@ -274,7 +274,7 @@ export class NextActions {
       throw new ServiceError(error.status ?? 401, error.code ?? "unauthorized", error.message ?? "Authentication required");
     }
   }
-  _snapshot(roomId, memberId) {
+  _snapshot(roomId, memberId, boardList = null) {
     const bounties = [];
     try {
       for (const b of this.store.bountyEscrow.listBounties(roomId) ?? []) {
@@ -299,7 +299,10 @@ export class NextActions {
     } catch { /* newcomers unavailable */ }
     const workClaims = [];
     try {
-      for (const item of this.store.workClaims.list(roomId) ?? []) {
+      // boardList: a caller's per-request memoized board list (PERF-10X
+      // L4) — when supplied, the snapshot shares the board the caller
+      // already decoded instead of listing (and decoding) it again.
+      for (const item of (boardList ? boardList(roomId) : this.store.workClaims.list(roomId)) ?? []) {
         if (item?.owner !== memberId || item?.state !== "claimed") continue;
         const leaseMs = typeof item.leaseExpiresAt === "string" ? Date.parse(item.leaseExpiresAt) : NaN;
         workClaims.push({ id: item.id, title: item.title, state: item.state, leaseExpiresAtMs: Number.isFinite(leaseMs) ? leaseMs : null });
@@ -321,14 +324,14 @@ export class NextActions {
       .all(roomId, memberId);
     return rows.map(r => ({ ...r, active: r.expiresAtMs === null || r.expiresAtMs > nowMs }));
   }
-  list(token, roomId, { limit = 10, kinds = null, binding = null } = {}) {
+  list(token, roomId, { limit = 10, kinds = null, binding = null, boardList = null } = {}) {
     return this.store.readTransaction(() => {
       const auth = this._auth(token, roomId, binding);
       if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new ServiceError(422, "invalid_input", "limit must be 1..50");
       const kindFilter = kinds === null ? null : String(kinds).split(",").map(k => k.trim()).filter(Boolean);
       const now = this.store.now();
       const { dismissals, suppressions } = this._privateRows(roomId, auth.member.id);
-      const built = buildNextActions({ agent: { id: auth.member.id }, snapshots: this._snapshot(roomId, auth.member.id), dismissals, suppressions, now, roomId });
+      const built = buildNextActions({ agent: { id: auth.member.id }, snapshots: this._snapshot(roomId, auth.member.id, boardList), dismissals, suppressions, now, roomId });
       const items = kindFilter === null ? built.items : built.items.filter(i => kindFilter.includes(i.kind));
       return { ...built, items: Object.freeze(items.slice(0, limit)), roomId, viewerId: auth.member.id };
     });
