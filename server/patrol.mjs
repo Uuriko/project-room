@@ -11,11 +11,34 @@
 // invariants at the event that introduces a divergence.
 //
 // Phase 1 is READ-ONLY / WOULD-FREEZE. The patrol writes only its own tables
-// (patrol_cursor, patrol_claims, patrol_messages, patrol_findings). It never
-// mutates room state, never blocks or alters a write, and never throws into a
-// caller: a room whose log it cannot process costs that room one error count
-// and cannot stall another room's checks (no shared cursor). Freeze rights
-// are a later decision, taken on this phase's measured false-positive rate.
+// (patrol_cursor, patrol_claims, patrol_messages, patrol_findings,
+// patrol_blocks). It never mutates room state, never blocks or alters a
+// write, and never throws into a caller: a room whose log it cannot process
+// is parked (below) and cannot stall another room's checks (no shared
+// cursor). Freeze rights are a later decision, taken on this phase's
+// measured false-positive rate.
+//
+// Parking (the #3847 poison-item rule, applied to the throw path): a room
+// whose stored state makes patrolRoom throw deterministically — an
+// unloadable projection the agreement leg cannot JSON.parse, a stored
+// event body the idempotency look-back's json_extract rejects, a claim
+// registry row the agreement leg cannot read — used to re-throw on every
+// tick forever: patrolRoom commits in one transaction, so the cursor never
+// advanced, and the tick result carried errors/scanError every time, so
+// the job heartbeat graded every tick a failure and the patrol job NEVER
+// recorded a success in production (915 consecutive failures, lastSuccess
+// null, room build-together-32f67587). The tick now records the room in
+// patrol_blocks (room id, cursor sequence/event id, head, error class and
+// a truncated one-line error — the patrol's own bookkeeping, never a room
+// mutation), surfaces a FRESH park once as a named failure, and skips the
+// room while its head is unchanged. Standing parks ride every later tick
+// as the numeric `parked` count in the result (the job summary), so the
+// job succeeds, healthy rooms keep being patrolled, and the parked set
+// stays visible until repaired. A parked room whose head moves earns one
+// retry (its state changed — the log may have been repaired or replaced);
+// a room that then patrols cleanly is unparked, and importEvents clears
+// the block with the replaced log. This mirrors the head_gap park below
+// (blocked/blocked_head on the cursor) and messages_backfill_blocks.
 //
 // Checks (each is the per-event form of a batch check, no invented rules):
 // - sequence: the log is contiguous and reaches the room head. A gap is
@@ -123,6 +146,15 @@ CREATE TABLE IF NOT EXISTS patrol_findings (
   detail TEXT,
   at TEXT NOT NULL,
   UNIQUE (room_id, invariant, kind, subject_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS patrol_blocks (
+  room_id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  event_id TEXT,
+  head_seq INTEGER NOT NULL DEFAULT 0,
+  error_class TEXT NOT NULL,
+  error TEXT NOT NULL,
+  blocked_at INTEGER NOT NULL DEFAULT 0
 );`;
 
 export function ensurePatrolSchema(store) {
@@ -153,13 +185,79 @@ export function patrolPending(store) {
     } catch { return true; }
   }
   try {
+    // A room parked in patrol_blocks at its current head is not pending
+    // either: it is retried only once its head moves (or its log is
+    // replaced, which clears the block). Stores written before patrol_blocks
+    // existed simply have no such rows to join.
+    const parkedClause = tableExists(db, "patrol_blocks")
+      ? "AND NOT EXISTS (SELECT 1 FROM patrol_blocks b WHERE b.room_id = r.id AND b.head_seq = r.sequence)"
+      : "";
     const row = db.prepare(`SELECT 1 AS hit FROM rooms r
       LEFT JOIN patrol_cursor c ON c.room_id = r.id
       WHERE r.sequence > COALESCE(c.sequence, 0)
         AND (COALESCE(c.blocked, 0) = 0 OR r.sequence != c.blocked_head)
+        ${parkedClause}
       LIMIT 1`).get();
     return Boolean(row?.hit);
   } catch { return true; }
+}
+
+// The durable parked set: rooms whose stored state the patrol cannot
+// process, named with the cursor position, the head they were parked at,
+// and the error class — the operator's repair list. Internal read model
+// (like patrolFindings); room ids and error text stay off the public
+// health surface, which carries only the numeric parked count.
+export function patrolBlocks(store) {
+  if (!store?.db?.prepare || !tableExists(store.db, "patrol_blocks")) return [];
+  return store.db.prepare("SELECT room_id, sequence, event_id, head_seq, error_class, error, blocked_at FROM patrol_blocks ORDER BY room_id")
+    .all().map(row => ({
+      roomId: row.room_id, sequence: row.sequence, eventId: row.event_id, headSeq: row.head_seq,
+      errorClass: row.error_class, error: row.error, blockedAt: row.blocked_at
+    }));
+}
+
+const ERROR_CLASS_TOKEN = /^[a-z][a-z0-9_]{0,63}$/i;
+// The patrol_error failureDetail token for a thrown error: its stable
+// class name (SyntaxError, TypeError, a SQLite error name), never its
+// message — messages can carry stored text and stay in patrol_blocks only.
+function errorClassOf(error) {
+  const name = typeof error?.name === "string" ? error.name : "";
+  return ERROR_CLASS_TOKEN.test(name) ? name : "unknown";
+}
+function errorTextOf(error) {
+  return String(error?.message ?? error).replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+// Record (or refresh) a room's park after patrolRoom threw. Returns the
+// recorded block plus `fresh`: true when the park is new or changed — the
+// caller surfaces a fresh park once, loudly, instead of re-failing every
+// tick on the same stored state.
+function parkRoom(store, room, error) {
+  const db = store.db;
+  const cursor = db.prepare("SELECT sequence, event_id FROM patrol_cursor WHERE room_id=?").get(room.id);
+  const block = {
+    sequence: cursor?.sequence ?? 0,
+    eventId: cursor?.event_id || null,
+    headSeq: room.sequence,
+    errorClass: errorClassOf(error),
+    error: errorTextOf(error)
+  };
+  const existing = db.prepare("SELECT sequence, event_id, head_seq, error_class, error FROM patrol_blocks WHERE room_id=?").get(room.id);
+  const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId
+    || existing.head_seq !== block.headSeq || existing.error_class !== block.errorClass || existing.error !== block.error;
+  store.transaction(() => {
+    db.prepare(`INSERT INTO patrol_blocks (room_id, sequence, event_id, head_seq, error_class, error, blocked_at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
+        head_seq=excluded.head_seq, error_class=excluded.error_class, error=excluded.error,
+        blocked_at=excluded.blocked_at`)
+      .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now());
+  });
+  return { fresh, block: { roomId: room.id, ...block } };
+}
+
+function clearPark(store, roomId) {
+  store.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
 }
 
 export function patrolFindings(store, { roomId = null, limit = 100 } = {}) {
@@ -171,12 +269,13 @@ export function patrolFindings(store, { roomId = null, limit = 100 } = {}) {
 }
 
 export function patrolStatus(store) {
-  if (!store?.db?.prepare || !tableExists(store.db, "patrol_cursor")) return { rooms: [], findings: 0 };
+  if (!store?.db?.prepare || !tableExists(store.db, "patrol_cursor")) return { rooms: [], findings: 0, parked: [] };
   const rooms = store.db.prepare(`SELECT c.room_id AS roomId, c.sequence, c.blocked,
       (SELECT COUNT(*) FROM patrol_findings f WHERE f.room_id = c.room_id) AS findings
     FROM patrol_cursor c ORDER BY c.room_id`).all();
   const total = store.db.prepare("SELECT COUNT(*) AS n FROM patrol_findings").get().n;
-  return { rooms, findings: total };
+  const parked = patrolBlocks(store).map(({ roomId, sequence, headSeq, errorClass }) => ({ roomId, sequence, headSeq, errorClass }));
+  return { rooms, findings: total, parked };
 }
 
 export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH, roomId = null } = {}) {
@@ -186,35 +285,59 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
   const rooms = roomId
     ? store.db.prepare("SELECT id, sequence FROM rooms WHERE id=?").all(roomId)
     : store.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
+  // Parks for rooms that no longer exist described a deleted room's state;
+  // they do not carry (the refreshStaleBlocks rule in the backfill).
+  if (!roomId) {
+    store.db.prepare("DELETE FROM patrol_blocks WHERE room_id NOT IN (SELECT id FROM rooms)").run();
+  }
+  const blocks = new Map(patrolBlocks(store).map(block => [block.roomId, block]));
   let checked = 0;
   let patrolled = 0;
   let errors = 0;
-  let firstErrorRoom = null;
+  let firstErrorClass = null;
   let budgetExceeded = 0;
   const fresh = [];
   for (const room of rooms) {
     if (Date.now() > deadline) { budgetExceeded = 1; break; }
     const cursor = store.db.prepare("SELECT sequence, blocked, blocked_head FROM patrol_cursor WHERE room_id=?").get(room.id);
     const caughtUp = (cursor?.sequence ?? 0) >= room.sequence && !roomId;
-    const parked = cursor?.blocked === 1 && cursor.blocked_head === room.sequence;
-    if (caughtUp || parked) continue;
+    const headGapParked = cursor?.blocked === 1 && cursor.blocked_head === room.sequence;
+    // A throw-parked room is skipped while its head is unchanged: its
+    // stored state guarantees the same throw, and re-trying it every tick
+    // is the wedge this table exists to end. A moved head (or an explicit
+    // single-room recheck) earns one retry.
+    const throwParked = !roomId && blocks.has(room.id) && blocks.get(room.id).headSeq === room.sequence;
+    if (caughtUp || headGapParked || throwParked) continue;
     patrolled += 1;
     try {
       const outcome = patrolRoom(store, room, { deadline, limit, forced: Boolean(roomId) });
       checked += outcome.checked;
       fresh.push(...outcome.fresh);
       if (outcome.budgetExceeded) budgetExceeded = 1;
+      if (blocks.has(room.id)) { clearPark(store, room.id); blocks.delete(room.id); }
     } catch (error) {
-      // One room's unprocessable log is that room's error, never a reason to
-      // stall the others. The cursor was not advanced (patrolRoom writes in
-      // one transaction), so the next tick retries from the same sequence.
-      errors += 1;
-      firstErrorRoom ??= room.id;
+      // One room's unprocessable stored state is that room's park, never a
+      // reason to stall the others. The cursor was not advanced (patrolRoom
+      // writes in one transaction), so without parking the next tick would
+      // retry from the same sequence and throw again — forever. Park it:
+      // a fresh park is this tick's named failure; a standing park is
+      // carried by the `parked` count below and does not re-fail the job.
+      let parkFresh = true;
+      try {
+        const parked = parkRoom(store, room, error);
+        parkFresh = parked.fresh;
+        blocks.set(room.id, parked.block);
+      } catch { /* parking failed: surface the throw as before */ }
+      if (parkFresh) {
+        errors += 1;
+        firstErrorClass ??= errorClassOf(error);
+      }
       console.error(`[patrol] room ${room.id} failed: ${error?.message ?? error}`);
     }
   }
   const findings = store.db.prepare("SELECT COUNT(*) AS n FROM patrol_findings").get().n;
   const result = { checked, rooms: patrolled, fresh: fresh.length, findings };
+  if (blocks.size) result.parked = blocks.size;
   if (budgetExceeded) result.budgetExceeded = 1;
   if (fresh.length) {
     const first = fresh[0];
@@ -233,8 +356,12 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
   if (errors) {
     result.errors = errors;
     if (!fresh.length) {
-      result.scanError = `patrol could not process room ${firstErrorRoom}`;
-      result.failureDetail = { code: "patrol_error", subcheck: "patrol", errorClass: "unknown", recordClass: "room" };
+      // Same #3334 rule: the public surface gets the count's context — a
+      // room could not be processed, and the error's class — never the
+      // room id. The room, its cursor and the error text are in
+      // patrol_blocks (patrolBlocks), the patrol's own bookkeeping.
+      result.scanError = `patrol could not process a room (${firstErrorClass ?? "unknown"})`;
+      result.failureDetail = { code: "patrol_error", subcheck: "patrol", errorClass: firstErrorClass ?? "unknown", recordClass: "room" };
     }
   }
   return result;
