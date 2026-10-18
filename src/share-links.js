@@ -668,6 +668,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
+      if (afterSignIn && account.authenticated && version === joinVersion) {
+        // #3796: reaching the name step by signing in (or creating an
+        // account) inside this dialog used to be a silent state change —
+        // nothing announced that another step was required, and focus
+        // was dropped to <body> when the account form re-rendered. Name
+        // the step and its completion action, and land focus on the
+        // name field. A status applyAccountDefaults already set (the
+        // email-verification hint) is kept.
+        if (!$("#join-link-status").textContent) joinStatus("You're signed in. One more step: confirm the name to show in this room, then choose “Join room”.");
+        $("#join-link-name").focus();
+      }
       if (version !== joinVersion) return;
       // #3796: arriving here via account creation used to re-render the
       // dialog into this name form with no word about what happened or
@@ -880,6 +891,23 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   });
   $("#join-link-close").addEventListener("click", () => { if (!joining && canLeaveAccountSignin()) joinDialog.close(); });
   joinDialog.addEventListener("cancel", event => { if (joining || !canLeaveAccountSignin()) event.preventDefault(); });
+  joinDialog.addEventListener("keydown", event => {
+    // #3796: keep Tab inside the join dialog — the app's modal dialogs
+    // cycle focus (the account-settings deletion dialog), while this
+    // one let Tab walk through <body> into the page behind, stranding
+    // keyboard users mid-join. Cycle among the dialog's enabled
+    // controls outside any hidden subtree; when focus sits outside
+    // them entirely (dropped to <body> by a re-render), pull it back
+    // in at the matching end.
+    if (event.key !== "Tab" || !joinDialog.open) return;
+    const controls = [...joinDialog.querySelectorAll("button, input, a[href], summary, [tabindex]")]
+      .filter(el => !el.disabled && el.getAttribute?.("aria-disabled") !== "true" && !el.closest?.("[hidden]"));
+    if (!controls.length) return;
+    const first = controls[0], last = controls[controls.length - 1];
+    const outside = !joinDialog.contains(document.activeElement);
+    if (event.shiftKey && (outside || document.activeElement === first)) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (outside || document.activeElement === last)) { event.preventDefault(); first.focus(); }
+  });
   joinDialog.addEventListener("close", () => {
     onAccountSignin(null);
     // R70-1: the dialog settled (joined, dismissed or superseded); drop the
