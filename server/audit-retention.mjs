@@ -13,6 +13,16 @@ const SEVERITY_KEEP_DAYS = Object.freeze({
   normal: 180,    // 6 months: routine room/inbox events
   low: 30,        // 30 days: reads, searches, heartbeats
 });
+// #3614 (accountability R-3): decision-bearing events — the events
+// underlying verdicts, receipts, and settlements — carry the explicit
+// decision-records retention class declared in RETENTION_POLICY
+// (server/account-deletion.mjs): at least four years, under legal hold.
+// Four calendar years span 1461 days when a leap day intervenes, so the
+// floor is 1461 and a decision event can never classify below four full
+// years, whatever its severity class says. Decision events are kept in
+// place (not archived, not purged) until their floored keep period
+// passes: they are the live proof receipts and verdicts are read from.
+const DECISION_RECORD_FLOOR_DAYS = 1461; // 4 years, counting a leap day
 const ARCHIVE_AFTER_DAYS = 90; // events older than this (but kept) move to archive
 class RetentionError extends Error { constructor(code, message) { super(message); this.name = "RetentionError"; this.code = code; } }
 const fail = (code, message) => { throw new RetentionError(code, message); };
@@ -24,7 +34,7 @@ const eventOf = (value, index) => {
   check(typeof value.at === "string" && !Number.isNaN(new Date(value.at).getTime()), `event ${index} needs a parseable at timestamp`);
   const severity = value.severity ?? "normal";
   check(Object.hasOwn(SEVERITY_KEEP_DAYS, severity), `event ${index} has unknown severity "${severity}"`);
-  return { id: value.id, at: value.at, severity };
+  return { id: value.id, at: value.at, severity, decision: value.decision === true };
 };
 // Decide retention for each event. now is injectable for tests.
 export function retentionDecisions(events, { now, dryRun } = {}) {
@@ -33,15 +43,21 @@ export function retentionDecisions(events, { now, dryRun } = {}) {
   check(!Number.isNaN(at), "now must be a parseable timestamp");
   const decisions = [], totals = { keep: 0, archive: 0, purge: 0 };
   for (let index = 0; index < events.length; index++) {
-    const { id, at: eventAt, severity } = eventOf(events[index], index);
+    const { id, at: eventAt, severity, decision } = eventOf(events[index], index);
     const ageDays = Math.max(0, (at - new Date(eventAt).getTime()) / 86400000);
-    const keepDays = SEVERITY_KEEP_DAYS[severity];
-    const action = ageDays > keepDays ? "purge" : ageDays > ARCHIVE_AFTER_DAYS ? "archive" : "keep";
+    // A decision-bearing event's keep period is its severity period
+    // floored at the decision-records class: the class reconciles the
+    // severity table so routine (normal/low) decision events cannot age
+    // out at 180/30 days, far under the four-year floor.
+    const keepDays = decision
+      ? Math.max(SEVERITY_KEEP_DAYS[severity], DECISION_RECORD_FLOOR_DAYS)
+      : SEVERITY_KEEP_DAYS[severity];
+    const action = ageDays > keepDays ? "purge" : decision ? "keep" : ageDays > ARCHIVE_AFTER_DAYS ? "archive" : "keep";
     totals[action] += 1;
-    decisions.push(Object.freeze({ id, severity, ageDays: Math.round(ageDays * 10) / 10,
+    decisions.push(Object.freeze({ id, severity, decision, keepDays, ageDays: Math.round(ageDays * 10) / 10,
       action, dryRun: dryRun === true }));
   }
   return Object.freeze({ dryRun: dryRun === true, totals: Object.freeze({ ...totals }),
     decisions: Object.freeze(decisions) });
 }
-export { RetentionError, SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS };
+export { RetentionError, SEVERITY_KEEP_DAYS, DECISION_RECORD_FLOOR_DAYS, ARCHIVE_AFTER_DAYS };
