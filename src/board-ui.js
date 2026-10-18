@@ -84,6 +84,58 @@ function memberName(members, id) {
   return name;
 }
 
+// #659: the per-card state chip. The label is the claim's recorded state —
+// this map only names states the ledger itself records, so an unknown state
+// renders no chip rather than an invented one. A "Verified" chip appears
+// only when the claim carries a verification fact (item.verification, the
+// same record the claim record disclosure renders); done alone is
+// "Completed", never "Verified".
+const CLAIM_CHIP_KEYS = Object.freeze({
+  unclaimed: "board.chip.unclaimed",
+  claimed: "board.chip.claimed",
+  in_progress: "board.chip.in_progress",
+  blocked: "board.chip.blocked",
+  delivered: "board.chip.delivered",
+  done: "board.chip.done",
+  closed: "board.chip.closed"
+});
+
+export function claimStateChipHtml(item) {
+  const key = CLAIM_CHIP_KEYS[item?.state];
+  if (!key) return "";
+  const verified = item?.verification
+    ? `<span class="claim-chip claim-chip-verified">${escapeHtml(uiText("board.chip.verified"))}</span>`
+    : "";
+  return `<p class="claim-chips"><span class="claim-chip claim-chip-${escapeHtml(item.state)}">${escapeHtml(uiText(key))}</span>${verified}</p>`;
+}
+
+// #659: per-member lanes — the same claims placeClaims puts in state
+// columns, grouped by recorded owner instead. Pure projection: every item
+// lands in exactly one lane (its owner's, or the unclaimed lane when it has
+// no owner), lanes are ordered by member display name with the unclaimed
+// lane last, and cards keep the board's title order inside a lane. Members
+// with no claims get no lane — a lane is the member's ledger, not the roster.
+export function placeClaimsByMember(items, members = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const lanes = new Map();
+  for (const item of list) {
+    const ownerId = typeof item?.owner === "string" && item.owner ? item.owner : null;
+    if (!lanes.has(ownerId)) lanes.set(ownerId, []);
+    lanes.get(ownerId).push(item);
+  }
+  const named = [...lanes.entries()]
+    .filter(([ownerId]) => ownerId !== null)
+    .map(([ownerId, rows]) => ({ ownerId, name: memberName(members, ownerId) || ownerId, items: rows }))
+    .sort((a, b) => a.name.localeCompare(b.name) || String(a.ownerId).localeCompare(String(b.ownerId)));
+  for (const lane of named) lane.items.sort((a, b) => String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
+  const unclaimed = lanes.get(null);
+  if (unclaimed?.length) {
+    unclaimed.sort((a, b) => String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
+    named.push({ ownerId: null, name: uiText("board.lane.unclaimed"), items: unclaimed });
+  }
+  return named;
+}
+
 // Board search and "mine only" filter. Pure: the filter bar narrows the loaded
 // claims client-side, and the two controls compose by AND — each control can
 // only narrow the other, never widen it.
@@ -205,6 +257,32 @@ export function paintClaimChat(state, list) {
     const after = stamps.find(entry => entry.at > (group.event.at ?? ""));
     list.insertBefore(line, after?.node ?? null);
   }
+}
+
+// #659: the inline receipt card for the chat timeline. A receipt_card
+// message is a typed message part whose fields were recorded from the claim
+// at close time by server/receipt-cards.mjs (title, closedBy, deliveryMode,
+// evidence, and the receiptId `rc_<claimId>` the room receipts surface
+// resolves). This renders exactly those recorded fields — the same record,
+// not a second formatting of the ledger — and returns "" for any other
+// message, so callers can ask unconditionally. An unrecorded deliveryMode
+// renders no mode line rather than an invented one.
+export function receiptCardMessageHtml(message) {
+  if (!message || message.kind !== "receipt_card") return "";
+  const title = typeof message.title === "string" && message.title ? message.title : String(message.claimId ?? "");
+  const receiptId = typeof message.receiptId === "string" && message.receiptId
+    ? message.receiptId
+    : (message.claimId ? `rc_${message.claimId}` : "");
+  const mode = ["result", "merged", "production"].includes(message.deliveryMode) ? message.deliveryMode : "";
+  const closedBy = typeof message.closedBy === "string" ? message.closedBy : "";
+  const evidence = typeof message.evidence === "string" ? message.evidence : "";
+  const pull = safePrUrl(message.pullRequestUrl);
+  const number = pull ? pullNumber(pull) : "";
+  const facts = [
+    mode ? uiText("board.receipt.closedAs", { mode }) : "",
+    closedBy ? uiText("board.receipt.closedBy", { name: escapeHtml(closedBy) }) : ""
+  ].filter(Boolean).join(" · ");
+  return `<div class="receipt receipt-card-message" data-receipt-card="${escapeHtml(String(message.claimId ?? ""))}"><p class="receipt-label">${escapeHtml(uiText("board.receipt.label"))}${receiptId ? ` · <code>${escapeHtml(receiptId)}</code>` : ""}</p><p class="receipt-card-title">${escapeHtml(title)}</p>${facts ? `<p>${facts}</p>` : ""}${evidence ? `<p>${escapeHtml(evidence)}</p>` : ""}${pull ? `<p><a href="${escapeHtml(pull)}">PR ${number ? `#${escapeHtml(number)}` : "link"}</a></p>` : ""}</div>`;
 }
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -664,7 +742,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${claimStateChipHtml(item)}${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -726,7 +804,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null, grouping = "state" } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -750,12 +828,25 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // it stays one grandfathered i18n literal instead of growing the ratchet.
   const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
+  // #659 member lanes: a grouping of the same placed population the state
+  // columns show — the toggle changes grouping only, never which cards the
+  // board carries. Lanes fall back to the columns when no lane has a card.
+  const population = Object.values(placed).flat().filter(item => visibleIds.has(item.id));
+  const laneSections = grouping === "member"
+    ? placeClaimsByMember(population, members).map(lane => {
+      const laneId = `board-lane-${escapeHtml(lane.ownerId ?? "unclaimed")}`;
+      const heading = uiText("board.lane.heading", { name: escapeHtml(lane.name), count: lane.items.length });
+      return `<section aria-labelledby="${laneId}"><h3 id="${laneId}">${heading}</h3>${lane.items.map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("")}</section>`;
+    }).join("")
+    : "";
+  const lanesHtml = laneSections ? `<div class="board-columns board-lanes">${laneSections}</div>` : "";
+  const groupToggle = `<div class="board-group" role="group" aria-label="${escapeHtml(uiText("board.group.aria"))}"><button type="button" class="button ${grouping === "member" ? "ghost" : "secondary"}" data-board-group="state" data-focus-key="board-group-state" aria-pressed="${grouping !== "member"}">${escapeHtml(uiText("board.group.state"))}</button><button type="button" class="button ${grouping === "member" ? "secondary" : "ghost"}" data-board-group="member" data-focus-key="board-group-member" aria-pressed="${grouping === "member"}">${escapeHtml(uiText("board.group.member"))}</button></div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
   // the empty copy) on a failed load with nothing to show.
   const emptyCopy = `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   const board = all.length
-    ? [bar, hint, filterEmptyCopy(filter, visible.length) || columnsHtml].join("")
+    ? [bar, hint, filterEmptyCopy(filter, visible.length) || (grouping === "member" ? lanesHtml || columnsHtml : columnsHtml)].join("")
     : loading ? boardSkeletonHtml()
     : loadError ? ""
     : [bar, hint, emptyCopy].join("");
@@ -763,7 +854,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${groupToggle}${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {
@@ -831,6 +922,9 @@ export function installWorkBoard({ client, getState, getSession }) {
   // Board search and "mine only" filter. Client-side narrowing of the loaded
   // claims; cleared on room/member context change.
   let filter = { q: "", mine: false };
+  // #659: board grouping (state columns vs per-member lanes). View-only,
+  // in-memory like the filter; cleared with the room/member context below.
+  let grouping = "state";
   let pendingCaret = null;
 
   function paint() {
@@ -847,7 +941,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy, grouping
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
@@ -907,7 +1001,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; grouping = "state"; pendingCaret = null; paint();
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -1021,6 +1115,16 @@ export function installWorkBoard({ client, getState, getSession }) {
       pendingCaret = null;
       stick = { key: "board-filter-q", id: null, status: "" };
       paint();
+      return;
+    }
+    const group = event.target.closest("[data-board-group]");
+    if (group && root.contains(group)) {
+      const next = group.dataset.boardGroup === "member" ? "member" : "state";
+      if (next !== grouping) {
+        grouping = next;
+        stick = { key: `board-group-${next}`, id: null, status: "" };
+        paint();
+      }
       return;
     }
     const jump = event.target.closest("[data-needs-me-open]");
@@ -1252,6 +1356,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; grouping = "state"; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
   };
 }

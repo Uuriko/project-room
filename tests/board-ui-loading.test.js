@@ -120,7 +120,7 @@ async function completionFixture(t) {
   const button = strict({
     dataset: { claimId: "notes", claimAction: "done", focusKey: "done:notes" },
     closest(selector) {
-      assert.ok(["[data-board-retry]", "[data-board-filter-clear]", "[data-needs-me-open]", "[data-claim-action]"].includes(selector));
+      assert.ok(["[data-board-retry]", "[data-board-filter-clear]", "[data-board-group]", "[data-needs-me-open]", "[data-claim-action]"].includes(selector));
       return selector === "[data-claim-action]" ? button : null;
     },
     setAttribute(name, value) { assert.equal(name, "aria-busy"); assert.equal(value, "true"); },
