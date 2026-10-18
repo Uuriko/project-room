@@ -24,7 +24,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, verifyWatermarkTables, verifyWatermarkRoomSequences, verifyRestoredConservation, conservationFailureMessage, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -235,14 +235,12 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
       if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
       const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
       if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
-      // Exports written with per-table watermark counts (newer exporters)
-      // verify every table, not just the event log; older exports skip this.
-      if (watermark.tables && typeof watermark.tables === "object") {
-        for (const [table, expected] of Object.entries(watermark.tables)) {
-          const actual = db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
-          if (actual !== expected) throw new Error(`Export watermark does not match the restored table ${table}: expected ${expected} rows, got ${actual}`);
-        }
-      }
+      // HUNT-RESTORE R-1/R-5: the watermark's per-table counts and per-room
+      // sequences, verified against the restored store (shared with the
+      // file replay in server/room-export.mjs); exports written before
+      // the exporter carried them skip the corresponding check.
+      verifyWatermarkTables(db, watermark);
+      verifyWatermarkRoomSequences(db, watermark);
       // #3325: the digest pin is verified inside the transaction, after
       // the load — the load's per-cell refusals are the more specific
       // errors and fire first; a well-formed tamper (the #3325 probe) is
@@ -259,7 +257,13 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
+      // HUNT-RESTORE R-2: conservation of the restored money, verified
+      // inside the transaction like every other check here: strict refuses
+      // (and the replay rolls back), report names it on the result. A
+      // store carrying no bounty tables has nothing to verify (null).
+      const conservation = verifyRestoredConservation(store);
+      if (conservation && !conservation.ok && audit !== "report") throw new Error(conservationFailureMessage(conservation));
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, conservation, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -514,22 +518,19 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
       const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
       if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
-      if (watermark.tables && typeof watermark.tables === "object") {
-        for (const [table, expected] of Object.entries(watermark.tables)) {
-          const actual = db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
-          if (actual !== expected) throw new Error(`Export watermark does not match the restored table ${table}: expected ${expected} rows, got ${actual}`);
-        }
-      }
+      // HUNT-RESTORE R-1/R-5: the watermark's per-table counts and per-room
+      // sequences, verified against the restored store (shared with the
+      // other restore paths in server/room-export.mjs); exports written
+      // before the exporter carried them skip the corresponding check.
+      verifyWatermarkTables(db, watermark);
+      verifyWatermarkRoomSequences(db, watermark);
       // Landed-count reconciliation, for every table the stream carried:
       // the trailer pins what the exporter emitted and
       // contentVerificationLevel above proves the parsed stream matches
-      // it; this proves the target actually holds those rows. (The
-      // watermark was designed to carry these counts as watermark.tables,
-      // but the exporter never writes that field, so the check above is
-      // dead for every backup the current exporter produces. The stream
-      // counts are the same expectation derived from data the trailer
-      // already pins, and they also cover backups with v1 or absent
-      // trailers, where the session's own parse counts are the record.)
+      // it; this proves the target actually holds those rows. It also
+      // covers backups with v1 or absent trailers and legacy watermarks
+      // without per-table counts, where the session's own parse counts
+      // are the record.
       for (const [table, streamed] of counts) {
         const expected = streamed - (unlandedEmpty.get(table) ?? 0);
         const actual = db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
@@ -549,9 +550,15 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
+      // HUNT-RESTORE R-2: conservation of the restored money: strict
+      // refuses (the catch below aborts and wipes the replay), report
+      // names it on the result. A store carrying no bounty tables has
+      // nothing to verify (null).
+      const conservation = verifyRestoredConservation(store);
+      if (conservation && !conservation.ok && audit !== "report") throw new Error(conservationFailureMessage(conservation));
       settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, conservation, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
     } catch (error) {
       abort();
       throw error;
@@ -666,7 +673,7 @@ export async function operatorRestoreResponse(request, token, store) {
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|conservation|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
   }
@@ -675,6 +682,7 @@ export async function operatorRestoreResponse(request, token, store) {
     verified: result.verified,
     audit: result.audit,
     contentVerification: result.contentVerification,
+    conservation: result.conservation,
     events: result.events,
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -780,6 +788,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       verified: result.verified,
       audit: result.audit,
       contentVerification: result.contentVerification,
+      conservation: result.conservation,
       events: result.events,
       tables: result.tables,
       backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -797,7 +806,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     const message = error?.message ?? String(error);
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message))
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|conservation|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }

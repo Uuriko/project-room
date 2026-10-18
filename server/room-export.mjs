@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { BountyEscrow } from "./bounty-escrow.mjs";
 import { Buffer } from "node:buffer";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -148,11 +149,29 @@ function* exportTableRows(db, table, columns, pageRows) {
 export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
-  yield JSON.stringify({ kind: "watermark", version: 1, sanitizePolicy: BACKUP_SANITIZE_POLICY, backedUpAt: Date.now(), rooms, events }) + "\n";
+  const order = exportTableOrder(db);
+  // Per-table row counts, taken with the rest of the watermark before the
+  // dump: every restore path verifies the restored store against them
+  // (verifyWatermarkTables), so a truncated export — a prefix of a backup
+  // is a valid backup of less — refuses instead of verifying
+  // (HUNT-RESTORE F1). Only tables a restore can load are counted: the
+  // trailer-digest skip set (Cloudflare-internal tables, the tables replay
+  // skips, the claim writer permit) is the target's own business and never
+  // lands, so expecting it would refuse every restore. Zero-count tables
+  // are omitted; an absent entry expects no rows.
+  const tables = {};
+  for (const table of order) {
+    if (contentDigestSkipped(table)) continue;
+    const count = db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
+    if (count > 0) tables[table] = count;
+  }
+  const watermark = { kind: "watermark", version: 1, sanitizePolicy: BACKUP_SANITIZE_POLICY, backedUpAt: Date.now(), rooms, events };
+  if (Object.keys(tables).length) watermark.tables = tables;
+  yield JSON.stringify(watermark) + "\n";
   // #3325: pin every loadable table's content in the trailer, accumulated
   // over the sanitized rows exactly as they are yielded below.
   const digests = createTableDigests();
-  for (const table of exportTableOrder(db)) {
+  for (const table of order) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
     for (const row of exportTableRows(db, table, columns, pageRows)) {
@@ -283,6 +302,86 @@ export function contentVerificationLevel(trailer, computed) {
     if (!Object.hasOwn(trailer.tables, table))
       throw new Error(`Export holds rows for table ${table} that its trailer does not pin`);
   return "full";
+}
+
+// HUNT-RESTORE R-1/R-5: the watermark's own expectations, checked against
+// the restored store by every restore path. The exporter writes per-table
+// row counts (watermark.tables) and per-room sequences (watermark.rooms);
+// until it did, the replay-side checks were dead code and a truncated
+// export verified as the whole backup. Legacy exports (no tables field,
+// or room entries without a sequence) skip the corresponding check —
+// their honesty signal is contentVerification, which names the weaker
+// level instead of claiming this one. Every mismatch is named in one
+// error, so the operator sees the full shortfall, not the first table.
+export function verifyWatermarkTables(db, watermark) {
+  if (!watermark?.tables || typeof watermark.tables !== "object") return;
+  const mismatches = [];
+  for (const [table, expected] of Object.entries(watermark.tables)) {
+    if (!Number.isSafeInteger(expected) || expected < 0)
+      throw new Error("Export watermark is malformed: per-table counts must be non-negative integers");
+    const present = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    const actual = present ? db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n : 0;
+    if (actual !== expected) mismatches.push(`${table}: expected ${expected} rows, got ${actual}`);
+  }
+  if (mismatches.length)
+    throw new Error(`Export watermark does not match the restored tables — ${mismatches.join("; ")}. The backup is truncated or the store was tampered with; re-take the backup.`);
+}
+
+export function verifyWatermarkRoomSequences(db, watermark) {
+  if (!Array.isArray(watermark?.rooms)) return;
+  const mismatches = [];
+  for (const room of watermark.rooms) {
+    if (!room || typeof room.id !== "string" || !Number.isSafeInteger(room.sequence)) continue;
+    const restored = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(room.id);
+    if (!restored) mismatches.push(`${room.id}: expected sequence ${room.sequence}, but the room is absent`);
+    else if (restored.sequence !== room.sequence) mismatches.push(`${room.id}: expected sequence ${room.sequence}, got ${restored.sequence}`);
+  }
+  if (mismatches.length)
+    throw new Error(`Export watermark does not match the restored room sequences — ${mismatches.join("; ")}. The backup is truncated or the store was tampered with; re-take the backup.`);
+}
+
+// HUNT-RESTORE R-2: no restore path used to run the money conservation
+// audit, so a backup of a mutilated store — journal legs deleted,
+// balances negative — restored "verified" and only a manual audit
+// noticed. Every restore path now verifies conservation per room before
+// declaring success; the caller decides strict (throw) vs report (name
+// it on the result), mirroring the recovery audit's two modes. Returns
+// null when the restored store carries no bounty tables (nothing to
+// verify); an empty-but-present escrow schema verifies clean.
+export function verifyRestoredConservation(store) {
+  const db = store?.db;
+  if (!db) return null;
+  const hasTable = name => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+  if (!hasTable("bounty_journal") || !hasTable("bounty_records")) return null;
+  const roomIds = db.prepare("SELECT id FROM rooms ORDER BY id").all().map(row => row.id);
+  // Presence-only verification: BountyEscrow._ensure() must not migrate
+  // a store that was just restored, so the escrow runs over a passthrough
+  // store double with the read-only flag set — the same construction
+  // scripts/bounty-conservation-check.mjs uses. verifyConservation wraps
+  // itself in readTransaction and issues only SELECTs.
+  const previous = db.readOnlyTransaction;
+  db.readOnlyTransaction = true;
+  try {
+    const escrow = new BountyEscrow(
+      { db, transaction: fn => fn(), readTransaction: fn => fn(), now: () => Date.now() },
+      { now: () => Date.now() });
+    const violations = [];
+    for (const roomId of roomIds) {
+      const result = escrow.verifyConservation(roomId);
+      for (const violation of result.violations) violations.push({ roomId, violation });
+    }
+    return { ok: violations.length === 0, violations };
+  } finally {
+    if (previous === undefined) delete db.readOnlyTransaction;
+    else db.readOnlyTransaction = previous;
+  }
+}
+
+export function conservationFailureMessage(conservation) {
+  const list = conservation.violations.slice(0, 10)
+    .map(({ roomId, violation }) => `${roomId}: ${violation}`).join("; ");
+  const more = conservation.violations.length > 10 ? `; …and ${conservation.violations.length - 10} more` : "";
+  return `Restored store failed conservation verification (${conservation.violations.length} violation(s)): ${list}${more}`;
 }
 
 // Shape gate shared by both NDJSON parsers (here and restore-ndjson.mjs).
@@ -441,6 +540,7 @@ export function createSanitizedCellTracker(db, { legacySanitize = false } = {}) 
 function parseExport(ndjson) {
   if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
   const byTable = new Map();
+  const skippedTables = {};
   let watermark = null;
   let trailer = null;
   for (const line of ndjson.split("\n")) {
@@ -459,13 +559,21 @@ function parseExport(ndjson) {
       trailer = record;
       continue;
     }
-    if (typeof record?.table !== "string" || !record.row || typeof record.row !== "object" || Array.isArray(record.row)) throw new Error("Export line is not a table row");
+    if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row)) throw new Error("Export line is not a table row");
+    // HUNT-RESTORE R-4: Cloudflare-internal tables are the target's own
+    // business, exactly as restore-ndjson.mjs's parser treats them: skip
+    // and count them instead of refusing the whole backup over a table
+    // the DO paths treat as noise.
+    if (record.table.startsWith("_cf_")) {
+      skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
+      continue;
+    }
     const rows = byTable.get(record.table) ?? [];
     rows.push(record.row);
     byTable.set(record.table, rows);
   }
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events)) throw new Error("Export is missing its watermark");
-  return { watermark, byTable, trailer };
+  return { watermark, byTable, trailer, skippedTables };
 }
 
 function insertOrder(names) {
@@ -511,7 +619,7 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!filename) throw new Error("Missing replay paths");
-  const { watermark, byTable, trailer } = parseExport(ndjson);
+  const { watermark, byTable, trailer, skippedTables: parseSkipped } = parseExport(ndjson);
   // Fail fast on a torn export, before any store is created: a mid-stream
   // write the watermark could not see must never verify. #3325: the
   // trailer's per-table content digests are computed over the complete
@@ -529,7 +637,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     // placeholder; legacy streams get the legacy resolutions.
     const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
     const existing = new Set(tableNames(store.db));
-    const skipped = {};
+    const skipped = { ...parseSkipped };
     for (const table of REPLAY_SKIPPED_TABLES) {
       if (existing.has(table) || !byTable.has(table)) continue;
       skipped[table] = byTable.get(table).length;
@@ -570,6 +678,12 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     if (store.db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new Error("Restored store failed quick_check");
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
+    // HUNT-RESTORE R-1/R-5: the watermark's per-table counts and per-room
+    // sequences are expectations about THIS store, checked like the event
+    // count: a truncated export (which has no trailer to catch it) refuses
+    // here instead of verifying as the whole backup.
+    verifyWatermarkTables(store.db, watermark);
+    verifyWatermarkRoomSequences(store.db, watermark);
     // #3325: the digest pin is verified after the load, not before it —
     // the load's own per-cell refusals (a non-BLOB object cell, a BLOB
     // whose bytes fail their stored sha256) are the more specific errors
@@ -577,6 +691,12 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     // (the #3325 probe) loads cleanly and is refused here, before the
     // audits and before verified is ever returned.
     const contentVerification = contentVerificationLevel(trailer, computedDigests);
+    // HUNT-RESTORE R-2: conservation of the restored money, verified like
+    // the recovery audit below: strict refuses with the violations named,
+    // report lands the data and names them on the result instead. A store
+    // carrying no bounty tables has nothing to verify (null).
+    const conservation = verifyRestoredConservation(store);
+    if (conservation && !conservation.ok && audit === "strict") throw new Error(conservationFailureMessage(conservation));
     let recovery = null, invitations = {}, auditResult = { ok: true };
     try {
       recovery = auditRecovery(store);
@@ -586,6 +706,6 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
     }
     chmodSync(filename, 0o600);
-    return { verified: true, events, trailer: trailerState, contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report() };
+    return { verified: true, events, trailer: trailerState, contentVerification, backedUpAt: watermark.backedUpAt ?? null, conservation, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report() };
   } finally { store.close(); }
 }
