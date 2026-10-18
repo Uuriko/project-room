@@ -98,7 +98,7 @@ test("archiveRoomMessages dry-run report carries timestamps and projection sizes
   const f = fixture(t);
   for (let i = 0; i < 10; i++) f.send(`report body ${i}`, `r-${i}`);
   f.certify();
-  const before = f.store.room("commons").state.messages.length;
+  const beforeCount = f.store.room("commons").state.messages.length;
   const plan = f.store.archiveMessages("commons", { keepNewest: 4 });
   assert.equal(plan.ok, true);
   assert.equal(plan.dryRun, true);
@@ -110,7 +110,7 @@ test("archiveRoomMessages dry-run report carries timestamps and projection sizes
   assert.ok(plan.resultingProjectionBytes < plan.projectionBytesBefore);
   assert.ok(Math.abs(plan.projectionBytesBefore - plan.resultingProjectionBytes - plan.freedBytes) < 512,
     "resulting size tracks the freed bytes (plus the small archive marker)");
-  assert.equal(f.store.room("commons").state.messages.length, before, "dry run changes nothing");
+  assert.equal(f.store.room("commons").state.messages.length, beforeCount, "dry run changes nothing");
   const done = f.store.archiveMessages("commons", { keepNewest: 4, dryRun: false });
   assert.equal(done.archived, plan.archived);
   const afterBytes = projectionBytes(f.store);
@@ -262,7 +262,7 @@ describe("operator messages archive route", { concurrency: false }, () => {
 
   test("dry run is the default: the route reports what would move and moves nothing", async t => {
     const { store, call } = await serve(t);
-    const before = store.room("commons").state.messages.length;
+    const beforeCount = store.room("commons").state.messages.length;
     const res = await call({ data: { roomId: "commons", keepNewest: 4 } });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.dryRun, true);
@@ -272,7 +272,7 @@ describe("operator messages archive route", { concurrency: false }, () => {
     assert.equal(typeof res.body.plan.oldestAt, "string");
     assert.equal(typeof res.body.plan.newestAt, "string");
     assert.ok(res.body.plan.resultingProjectionBytes < res.body.plan.projectionBytesBefore);
-    assert.equal(store.room("commons").state.messages.length, before, "nothing moved");
+    assert.equal(store.room("commons").state.messages.length, beforeCount, "nothing moved");
     const actions = store.db.prepare("SELECT action, result FROM operator_actions ORDER BY at DESC").all();
     assert.ok(actions.some(row => row.action === "messages_archive" && row.result === "dry_run"), "the dry run is audited");
   });
@@ -289,13 +289,13 @@ describe("operator messages archive route", { concurrency: false }, () => {
 
   test("live:true performs the archival, and only because it was explicit", async t => {
     const { store, call } = await serve(t);
-    const before = store.room("commons").state.messages.length;
+    const beforeCount = store.room("commons").state.messages.length;
     const res = await call({ data: { roomId: "commons", keepNewest: 4, live: true } });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.live, true);
     assert.equal(res.body.dryRun, false);
     assert.ok(res.body.archived > 0);
-    assert.equal(store.room("commons").state.messages.length, before - res.body.archived);
+    assert.equal(store.room("commons").state.messages.length, beforeCount - res.body.archived);
     assert.equal(store.room("commons").state.messagesArchive.count, res.body.archived);
   });
 });
