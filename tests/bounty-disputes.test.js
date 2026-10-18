@@ -7,7 +7,9 @@ import { createDisputes, DisputeError } from "../server/bounty-disputes.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof DisputeError && error.code === code);
 const ECON = { bountyId: "b1", bountyAmount: 1000, raisedBy: "alice", reason: "work not delivered" };
-const BOND = 50; // max($1, 5% of 1000)
+const BOND = 50; // the machine floor, max($1, 5% of 1000): these tests drive the
+// machine directly. Production bonds are exactly 25%, enforced by
+// BountyEscrow.disputeBounty (#3307).
 
 // Drives a dispute to decided.
 function toDecided(disputes, id = "d1", outcome = "upheld", codes = ["receipt-incomplete"]) {
