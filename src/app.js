@@ -5531,7 +5531,13 @@ function syncPublicReceipts() {
   const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
   control.hidden = !show;
   if (!show) return;
-  box.checked = state.room.publicReceipts?.enabled === true;
+  // While a change is in flight the box holds the value the owner just
+  // chose. Re-deriving `checked` from room state here snaps it back to the
+  // pre-change value until the server echo lands, so the control looks
+  // dead at the exact moment of interaction — a keyboard user pressing
+  // Space sees it toggle off again instantly (#3968). The landed state
+  // re-syncs when the flight ends and on every state render.
+  if (!publicReceiptsBusy) box.checked = state.room.publicReceipts?.enabled === true;
   box.disabled = publicReceiptsBusy;
 }
 $("#public-receipts-toggle")?.addEventListener("change", async () => {
