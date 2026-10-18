@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { manifestDrift } from "../scripts/candidate-manifest.mjs";
@@ -78,24 +78,36 @@ test("drift refuses malformed manifests without reading sections", () => {
   assert.ok(manifestDrift({}, { contractVersion: 2, runtime: {}, storeSchemaVersion: 1, assets: {}, deployment: {}, packages: {} }).includes("contractVersion"));
 });
 
-test("frozen deployment manifest pins the recovery helper and production workflow bytes", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../scripts/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
+test("generated deployment manifest pins the recovery helper and production workflow bytes", async () => {
+  const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
   const root = new URL("..", import.meta.url).pathname;
+  const manifest = buildCandidateManifest(root);
   const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
   const actual = pinFiles(root, files);
   for (const file of files) assert.equal(manifest.deployment[file], actual[file], file);
 });
 
-test("committed candidate manifest has zero drift from the tree", async () => {
-  // Bug sweep lane 14 F3 (#3902): before this test, only the two deployment
-  // files above tied the committed manifest to the tree; the other 150+
-  // pins drifted undetectably (17 stale at the time of the fix, including
-  // deployment:cloudflare/room.mjs). Rebuild from the real tree and require
-  // an exact match across every section. Repair drift with:
-  //   node scripts/candidate-manifest.mjs --write
+test("candidate manifest generation is deterministic: same tree, same bytes", async () => {
+  // CH-1: the manifest is generated at CI/freeze time, never committed — the
+  // committed copy's only consumer was the old drift test, and every pin
+  // change made it a merge-up serialization point. What must hold instead is
+  // determinism: building twice from the same tree yields byte-identical
+  // output, so a manifest generated anywhere (CI artifact, freeze checkout)
+  // pins exactly the same candidate. Bug sweep lane 14 F3 (#3902) coverage is
+  // preserved differently: the generated manifest is built from the real tree
+  // here, so stale or missing pins fail as build errors, not silent drift.
   const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
   const root = new URL("..", import.meta.url).pathname;
-  const committed = JSON.parse(readFileSync(join(root, "scripts/CANDIDATE-MANIFEST.json"), "utf8"));
-  const drift = manifestDrift(buildCandidateManifest(root), committed);
-  assert.deepEqual(drift, [], `candidate manifest drift (run: node scripts/candidate-manifest.mjs --write): ${drift.join(", ")}`);
+  const first = buildCandidateManifest(root);
+  const second = buildCandidateManifest(root);
+  assert.deepEqual(manifestDrift(first, second), []);
+  assert.equal(JSON.stringify(first, null, 2) + "\n", JSON.stringify(second, null, 2) + "\n");
+});
+
+test("no committed candidate manifest: the file is generated, not versioned", () => {
+  // Guards the CH-1 invariant directly. If this fails because a freeze run
+  // wrote the file locally, delete it — do not commit it. (.gitignore also
+  // covers the path; this test catches a force-add.)
+  assert.equal(existsSync(new URL("../scripts/CANDIDATE-MANIFEST.json", import.meta.url)), false,
+    "scripts/CANDIDATE-MANIFEST.json must not be committed; generate it with node scripts/candidate-manifest.mjs --write");
 });

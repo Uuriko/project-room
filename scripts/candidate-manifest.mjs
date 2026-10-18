@@ -1,6 +1,15 @@
-// Frozen candidate manifest: pin runtime, assets, schema and package hashes so
-// tests and deployment preparation refer to the same bytes. Deterministic: the
-// same tree always produces the same manifest, so drift is a byte comparison.
+// Candidate manifest: pin runtime, assets, schema and package hashes so tests
+// and deployment preparation refer to the same bytes. Deterministic: the same
+// tree always produces the same manifest. The manifest is GENERATED, never
+// committed (CH-1): CI validates generation determinism on every run (see
+// tests/candidate-manifest.test.js), and freeze/deploy preparation runs this
+// script with --write (or reads its stdout) in the operator's checkout. A
+// test.yml job that also uploads the generated manifest as a run artifact is
+// the recorded follow-up (it needs a workflow-scope token to land). Committing the
+// output made every pinned-asset change a merge-up conflict on one JSON file;
+// generation removes that serialization point while keeping the pin itself —
+// "the candidate" is defined by the tree, and the manifest is derivable from
+// it in under a second.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
