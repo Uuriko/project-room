@@ -451,12 +451,12 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   // Lot receipts have no public_receipts row for an opt-out to delete, so
   // the RECORDED receipts setting is mirrored into
   // room_public_receipts_setting for the lot read, which serves a lot
-  // only on a recorded on (#3594): "never recorded" (no mirror row)
-  // must stay distinguishable from "recorded true", even though both
-  // it and "recorded false" now hide the lot. The setter bumps the recorded revision on every
-  // record, so an unchanged revision needs no write; a null previous
-  // (bootstrap, import, backfill) is an authoritative state and always
-  // re-mirrors.
+  // only on a recorded on (#3594): never recorded (no mirror row) must
+  // stay distinguishable from a recorded-on row, even though both it
+  // and a recorded-off row now hide the lot. The setter bumps the
+  // recorded revision on every record, so an unchanged revision needs
+  // no write; a null previous (bootstrap, import, backfill) is an
+  // authoritative state and always re-mirrors.
   const recorded = state.room.publicReceipts;
   const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
   const recordedWas = previous?.room?.publicReceipts ?? null;
