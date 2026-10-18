@@ -3,9 +3,9 @@
 Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md); current [work lifecycle build and qualification](WORK-LIFECYCLE-BUILD-PLAN.md) and [canonical work cutover](WORK-CUTOVER-PLAN.md). The latest scope rule applies to every retained item too: previous discussion or implementation is not sufficient justification; retain only supported benefits over simpler alternatives.
 
 2026-10-18. This is the revised active planning scope following the request to cut,
-combine and shrink the total backlog. It changes scope, not implementation status.
-The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) remains the evidence index,
-not a promise to build 773 things. No issues/PRs were closed and no runtime was changed.
+combine and shrink the total backlog. The execution evidence below records actual
+progress; the six outcomes remain acceptance criteria. The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
+remains the evidence index, not a promise to build 773 things.
 
 The product test: two people and an authorized agent turn a conversation into an
 accepted result, change direction, survive a disconnect, and return without
