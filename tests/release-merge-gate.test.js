@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT, REQUIRED, protectionPlan, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge } from '../scripts/release-merge-gate.mjs';
+import { CONTEXT, REQUIRED, protectionPlan, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
 const candidate = { repo: 'Uuriko/project-room', pr: 4102, head: 'a'.repeat(40), base: 'b'.repeat(40) };
 const grant = { kind: 'room.release-merge.v1', ...candidate, purpose: 'deploy-fix', directiveMessageId: 'owner-directive', problemKeys: ['release:landing'], workClaimId: 'source-work' };
 const protection = { enforceAdmins: true, strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
@@ -120,4 +120,21 @@ test('administrator enforcement and complete claim pagination fail closed', () =
   assert.throws(() => claimsFromPages([{ claims: [], hasMore: true }]), /Incomplete/);
   assert.throws(() => claimsFromPages([{ claims: [] }]), /Incomplete/);
   assert.deepEqual(claimsFromPages([{ claims: [{ id: 'claim' }], hasMore: false }]), [{ id: 'claim' }]);
+});
+
+
+test('open authorization scan follows bounded pages and catches status or check-run successes', () => {
+  const pr = (number, nodes, hasNextPage = false) => ({ number, headRefOid: String(number).padStart(40, 'a'), commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes, pageInfo: { hasNextPage } } } } }] } });
+  const pages = new Map([
+    [null, { nodes: [pr(1, [{ context: CONTEXT, state: 'FAILURE' }])], pageInfo: { hasNextPage: true, endCursor: 'next' } }],
+    ['next', { nodes: [pr(2, [{ context: CONTEXT, state: 'SUCCESS' }]), pr(3, [{ name: CONTEXT, conclusion: 'SUCCESS' }])], pageInfo: { hasNextPage: false } }],
+  ]);
+  const reads = [];
+  assert.deepEqual(openAuthorizations(cursor => { reads.push(cursor); return pages.get(cursor); }).map(x => x.number), [2, 3]);
+  assert.deepEqual(reads, [null, 'next']);
+  assert.throws(() => openAuthorizations(() => ({ nodes: [pr(1, [], true)], pageInfo: { hasNextPage: false } })), /Incomplete/);
+  assert.throws(() => openAuthorizations(() => ({ nodes: [], pageInfo: { hasNextPage: true, endCursor: 'same' } })), /did not advance/);
+  assert.throws(() => openAuthorizations(() => undefined), /Incomplete/);
+  assert.throws(() => openAuthorizations(() => { throw new Error('504'); }), /504/);
+  assert.throws(() => openAuthorizations(() => ({ nodes: [{ number: 1, headRefOid: 'a'.repeat(40), commits: { nodes: [] } }], pageInfo: { hasNextPage: false } })), /Incomplete/);
 });

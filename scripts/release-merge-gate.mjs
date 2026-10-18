@@ -86,6 +86,39 @@ export async function guardedMerge(candidate, io) {
     if (authorized) await io.status({ state: 'failure', context: CONTEXT, description: 'Landing authorization consumed or revoked; obtain a fresh Room lease' });
   }
 }
+// Keep each GraphQL response bounded: a repository-wide rollup expansion can
+// time out before the gate starts. Every outer page and inner context list must
+// be complete; an API error or truncated list never becomes permission.
+export function openAuthorizations(readPage) {
+  const approved = [], seen = new Set();
+  let after = null;
+  do {
+    const page = readPage(after);
+    if (!page || !Array.isArray(page.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean') fail('Incomplete open PR page');
+    for (const pr of page.nodes) {
+      const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup;
+      if (!pr.headRefOid || !Number.isSafeInteger(pr.number) || !Array.isArray(pr.commits?.nodes) || pr.commits.nodes.length !== 1) fail('Incomplete open PR head');
+      if (rollup === null) continue;
+      const contexts = rollup?.contexts;
+      if (!Array.isArray(contexts?.nodes) || contexts.pageInfo?.hasNextPage !== false) fail('Incomplete open PR check contexts');
+      if (contexts.nodes.some(check => (check.name ?? check.context) === CONTEXT && ['success', 'SUCCESS'].includes(check.conclusion ?? check.state))) approved.push({ number: pr.number, headRefOid: pr.headRefOid });
+    }
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+    if (!after || seen.has(after)) fail('Open PR pagination did not advance');
+    seen.add(after);
+  } while (true);
+  return approved;
+}
+const OPEN_PR_QUERY = `query($after:String) { repository(owner:"Uuriko",name:"project-room") {
+  pullRequests(first:20,after:$after,states:OPEN) { pageInfo { hasNextPage endCursor }
+    nodes { number headRefOid commits(last:1) { nodes { commit { statusCheckRollup {
+      contexts(first:100) { pageInfo { hasNextPage } nodes {
+        ... on StatusContext { context state } ... on CheckRun { name conclusion }
+      } }
+    } } } } }
+  }
+} }`;
 const gh = (args, input) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', input: input === undefined ? undefined : JSON.stringify(input), stdio: ['pipe', 'pipe', 'pipe'] }) || 'null');
 async function main() {
   const [action, ...args] = process.argv.slice(2);
@@ -146,7 +179,7 @@ async function main() {
     const claims = claimsFromPages(pages);
     const fullProtection = gh(['api', `repos/${repo}/branches/main/protection`]);
     return { identity: access.memberId, slot, pause,
-      openAuthorizations: gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '1000', '--json', 'number,headRefOid,statusCheckRollup']).filter(pr => pr.statusCheckRollup.some(check => (check.name ?? check.context) === CONTEXT && ['success', 'SUCCESS'].includes(check.conclusion ?? check.state))),
+      openAuthorizations: openAuthorizations(after => gh(['api', 'graphql', '--input', '-'], { query: OPEN_PR_QUERY, variables: { after } }).data?.repository?.pullRequests),
       claims,
       pr: gh(['pr', 'view', String(candidate.pr), '--repo', repo, '--json', 'state,isDraft,headRefOid,baseRefName,mergeable,statusCheckRollup']),
       main: gh(['api', `repos/${repo}/commits/main`]).sha,
