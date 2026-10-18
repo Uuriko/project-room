@@ -1238,7 +1238,16 @@ export function installWorkBoard({ client, getState, getSession }) {
       const record = card.querySelector(`details[data-claim-record="${CSS.escape(id)}"]`);
       if (record) record.open = true;
       card.scrollIntoView({ block: "center" });
-      (card.querySelector("h4 a") ?? card.querySelector("h4"))?.focus({ preventScroll: true });
+      // #3967: land focus on the record itself — its summary, the
+      // record's heading, with the record's content next in Tab order —
+      // not on the card's title link. A keyboard user who followed the
+      // link (or a deep link) arrives IN the record they opened; before
+      // this, focus stayed on the title link while the record opened
+      // elsewhere in the card, and the only reachable "record" was the
+      // main view's return control behind the still-open board dialog.
+      const target = record?.querySelector("summary") ?? card.querySelector("h4 a") ?? card.querySelector("h4");
+      if (record) record.scrollIntoView({ block: "center" });
+      target?.focus({ preventScroll: true });
       return true;
     },
     async whenReady() {
