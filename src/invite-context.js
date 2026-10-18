@@ -16,7 +16,7 @@ import { normalizeShareInviteCode } from "./share-invite-code.js";
 export const PENDING_INVITE_KEY = "pr-pending-invite";
 
 const INVITE_FRAGMENT_PATTERN = /^#invite\/[A-Za-z0-9_-]{43}$/;
-const INVITE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+export const INVITE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 // Agent-invite codes (RM- + Crockford base32, minted by the "invite agents"
 // UI and redeemed by src/join.js). The SPA's invitation dialog only speaks

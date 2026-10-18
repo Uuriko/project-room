@@ -13,7 +13,8 @@ import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
 import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
-import { readAccessRequest } from "./invite-context.js";
+import { readAccessRequest, INVITE_SECRET_PATTERN } from "./invite-context.js";
+import { normalizeShareInviteCode } from "./share-invite-code.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
@@ -42,6 +43,22 @@ export function parseInviteCodeInput(value) {
   const linkMatch = /\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})(?:[/?#\s]|$)/.exec(text);
   const candidate = (linkMatch?.[1] ?? text).toUpperCase();
   return JOIN_CODE_PATTERN.test(candidate) ? candidate : null;
+}
+
+// A pasted HUMAN share link (https://<host>/?...#join/<token>) is "the whole
+// invite link" the entry form offers to accept, but it is not an RM- agent
+// invite: the app owns that join flow. Hand the fragment back to the app on
+// the same door instead of rejecting the very shape the copy names (room
+// event 14347). Accepts the bare fragment and a purpose focus; the token
+// shape matches invite-context's #join/ contract (43-char secret or a legacy
+// share code). Returns the same-door href, or null when this is not one.
+export function shareJoinHref(value, locationLike) {
+  const match = /#join\/([^/?#\s]+)(\/(?:work|message)\/[^/?#\s]+)?/.exec(String(value ?? "").trim());
+  if (!match) return null;
+  if (!INVITE_SECRET_PATTERN.test(match[1]) && !normalizeShareInviteCode(match[1])) return null;
+  const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
+  const door = String(locationLike?.pathname ?? "").startsWith("/room/") ? "/room" : "";
+  return `${origin}${door}/${match[0]}`;
 }
 
 // A ?code= value is a claimed code too (same rule as the path segment):
@@ -333,7 +350,10 @@ function renderEnter() {
     form.addEventListener("submit", event => {
       event.preventDefault();
       const statusEl = $("join-enter-status");
-      const code = parseInviteCodeInput($("join-enter-code")?.value);
+      const entered = $("join-enter-code")?.value;
+      const shareHref = shareJoinHref(entered, globalThis.location);
+      if (shareHref) { globalThis.location.assign(shareHref); return; }
+      const code = parseInviteCodeInput(entered);
       if (!code) {
         if (statusEl) { statusEl.textContent = "That doesn't look like an invite code. Codes look like RM-XXXXXX — or paste the whole invite link."; statusEl.classList.add("visible"); }
         $("join-enter-code")?.focus();
