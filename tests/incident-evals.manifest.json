@@ -1,1 +1,466 @@
-{"base":"main @ 470d546a03411c38cb86c6752ed9737fd9409a21","catalogue":"tests/fleet-incident-evals.test.js","counts":{"active":26,"classes":6,"pending":7},"fixtures":[{"class":"COMP","id":"E1","incidents":["#3627","#3747"],"sources":["server/work-claim-routes.mjs","server/store.mjs (PILOT_LIMITS)"],"status":"active","title":"pilot-cap composition: verify of a delivered+approved claim is a resolution, never growth"},{"class":"COMP","id":"E2","incidents":["#3716"],"sources":["scripts/runtime-package.mjs","server/routes/front-door.mjs","src/front-door.js"],"status":"active","title":"runtime-package allowlist keeps the front-door registrations an auto-merge dropped"},{"class":"COMP","id":"E3","incidents":["#3642","#3776"],"sources":["server/receipts-page.mjs"],"status":"active","title":"receipts page renders both the tier label and the verdict block (duplicate-declaration composition)"},{"class":"COMP","environmentNote":"The i18n half loads the base tree via git archive. On the 2026-10-18 VM write-fault window that call fails (exit 128, reproduced), the harness degrades by design to the committed-baseline ratchet, and the fixture cannot pass locally; the MCP half was verified green standalone at the base head (diffSnapshots = []). Hosted CI (full clone, healthy git) runs the fixture as designed.","id":"E4","incidents":["#3782","#3746"],"sources":["scripts/i18n-harness.mjs","scripts/mcp-catalog-snapshot.mjs"],"status":"active","title":"baselines match the composed tree: i18n baseline + MCP catalog snapshot"},{"class":"GUARDIAN","id":"E5","incidents":["#3946"],"sources":["cloudflare/job-heartbeat.mjs (applyOutcomes)"],"status":"active","title":"a failing job tick writes its own lastSummary; lastSuccessAt does not advance"},{"class":"TIME","id":"E6","incidents":["#3945"],"sources":["server/agent-connections.mjs (ownerIdsAt, verifyHistory)"],"status":"active","title":"ownership resolves at the operation's own sequence; transferred-room history verifies"},{"class":"TIME","id":"E7","incidents":["#3987","production integrity failure 2026-10-11 → 2026-10-18"],"sources":["server/agent-connections.mjs","server/account-deletion.mjs"],"status":"active","title":"connection history verifies after the sponsor transfers ownership and deletes their account"},{"class":"TIME","id":"E8","incidents":["#3987"],"sources":["server/agent-connections.mjs"],"status":"active","title":"a binding repointed to a different live account is still refused"},{"class":"TIME","id":"E9","incidents":["claim-pr-sync lease cases","#3711","CN-10 lease-expiry family"],"sources":["server/claim-pr-sync.mjs","server/work-claim-sqlite.mjs"],"status":"active","title":"a valid lapsed lease releases; a poisoned lease row is left untouched and named"},{"class":"GUARDIAN","id":"E10","incidents":["#3988","production patrol: 1,402 consecutive failed ticks, lastSuccessAt null"],"sources":["server/patrol.mjs","server/store.mjs (patrolTick, patrol_blocks)"],"status":"active","title":"patrol parks a corrupt-projection room by name; the tick succeeds; the park is durable"},{"class":"GUARDIAN","id":"E11","incidents":["#3464","#3465","production claim-prs wedge from 2026-10-13, 380+ failed ticks"],"sources":["server/claim-pr-sync.mjs (syncClaimPullRequests)"],"status":"active","title":"one malformed claim row is skipped and named; the sweep still polls the good claim"},{"class":"GUARDIAN","id":"E12","incidents":["#3334"],"sources":["server/jobs.mjs (classifyIntegrityError)"],"status":"active","title":"integrity failures carry typed names: subcheck, code, error class, record class"},{"class":"GUARDIAN","id":"E13","incidents":["#3847","#3855"],"sources":["server/messages-store.mjs (runMessagesBackfill)","server/store.mjs (backfillMessages)"],"status":"active","title":"an un-replayable room parks by name in the messages backfill; healthy rooms still backfill"},{"class":"GUARDIAN","id":"E14","incidents":["CN-7 guardian census §2 (room-backup isolation)"],"sources":["cloudflare/room-backup.mjs (writeDailyBackup)","server/room-export.mjs"],"status":"active","title":"a torn backup export is refused before any put; verified bytes are stored exactly once"},{"class":"GUARDIAN","id":"E15","incidents":["CN-7 launch-gate finding: integrity + patrol failed 6+ days with no alert"],"sources":["cloudflare/job-heartbeat.mjs (jobHealthView)"],"status":"active","title":"the health view grades a never-succeeded job stale, never ok"},{"class":"GUARDIAN","id":"E16","incidents":["#3895","CN-7 §4"],"sources":["server/jobs.mjs (storeGrowthBreach)"],"status":"active","title":"the store-growth breach check names the gauge that crossed"},{"class":"GUARDIAN","id":"E17","incidents":["2026-10-10 claim-prs rate-limit incident","2026-10-17 recurrence"],"sources":["cloudflare/job-heartbeat.mjs (applyOutcomes, jobHealthView, jobHealthResponse)"],"status":"active","title":"a rate-limited claim-prs tick reads degraded (github_rate_limited), HTTP 200, never ok"},{"class":"MONEY","id":"E18","incidents":["#3307","FS-13 drill: a max(1,5%) probe bond refused 422 on the live rail"],"sources":["server/bounty-escrow.mjs (DISPUTE_BOND_RATIO, disputeBounty)"],"status":"active","title":"the dispute bond is exactly 25% — under and over are refused, exact opens"},{"class":"MONEY","id":"E19","incidents":["#3726 (Option A, decided 2026-10-16)"],"sources":["server/bounty-escrow.mjs (disputeBounty)"],"status":"active","title":"a dispute on submitted work is refused before any challenger bond locks"},{"class":"MONEY","id":"E20","incidents":["#3275 (journal seam)","CN-7 §2 per-bounty isolation"],"sources":["server/bounty-epoch-keeper.mjs (progressEscrowEpochs)","server/bounty-escrow.mjs"],"status":"active","title":"one poisoned bounty fails alone — the epoch progresses and conservation holds"},{"class":"MONEY","id":"E21","incidents":["#3693","#3844"],"sources":["server/bounty-epoch-keeper.mjs","server/bounty-escrow.mjs"],"status":"active","title":"the keeper progresses an accepted award to paid with no human invoking closeEpoch"},{"class":"CONSENT","id":"E22","incidents":["#3594 (mechanism half)"],"sources":["server/public-read-model.mjs","server/receipts-live.mjs (publicReceiptById)"],"status":"active","title":"a recorded public-receipts OFF hides even a settled bounty lot"},{"class":"PROOF","id":"E23","incidents":["RQ-15 U1 refutation (public receipts are unsigned)","GREAT-DEBATE money veto V3"],"sources":["server/receipt-verify.mjs (verifyPublicReceipt, NEVER_CHECKED)"],"status":"active","title":"receipt verification states in its own scope that no signature is checked"},{"class":"PROOF","id":"E24","incidents":["patrol controls, proof-expiry registry standing proof 4"],"sources":["server/patrol.mjs","server/store.mjs (patrolTick, patrolFindings)"],"status":"active","title":"the patrol catches a truncated log at the event that introduces it (head_gap)"},{"class":"GUARDIAN","id":"E25","incidents":["#3988","CN-7 item F3 post-deploy check"],"sources":["cloudflare/job-heartbeat.mjs (runCronJobs, applyOutcomes)","server/jobs.mjs (patrol job)"],"status":"active","title":"once parked, the patrol job records success — lastSuccess advances from null"},{"class":"GUARDIAN","id":"E26","incidents":["#3847","#3855"],"sources":["server/store.mjs (runDeferredIntegrityBatch)","server/messages-store.mjs"],"status":"active","title":"the deferred integrity batch names the parked room per record and advances past messages_backfill"},{"class":"CONSENT","form":"skipped test in the catalogue file","id":"P1","incidents":["#3594 decision (2026-10-16): settled lots require the owner's recorded opt-in"],"sources":["server/public-read-model.mjs"],"status":"pending","title":"a settled lot is NOT served until the room records a public-receipts opt-in","trigger":"The #3594 opt-in fix lands on main (chartered to FINISH-BACKLOG, Wave B priority). Unskip."},{"class":"TIME","form":"skipped test in the catalogue file","id":"P2","incidents":["RQ-12 ruling A2+B1 (2026-10-18)","MUT-04: QA200 issues #2035/#2051"],"sources":["server/work-claims.mjs (renewWork)"],"status":"pending","title":"a claim renew omitting leaseHours reuses the claim's current window duration","trigger":"The RQ-12 implementation lands on main (chartered to FINISH-BACKLOG). Probe on main today: a 72h claim renewed without leaseHours extends 24h (the room default) — the pending assertion is aimed at exactly that delta. Unskip."},{"class":"GUARDIAN","form":"manifest-only (the grading behaviour does not exist on main)","id":"P3","incidents":["CN-7 item F1: keeper reports ok with {due: 2, overdue: 2, paid: 0} — overdue bounties surface nowhere"],"sources":["server/jobs.mjs (escrow-epochs)","server/bounty-epoch-keeper.mjs"],"status":"pending","title":"escrow-epochs grades DEGRADED while bounties sit overdue past their windows","trigger":"GUARDIAN-FIX F1 lands its degraded-grading channel. Author the fixture against the landed summary/health shape."},{"class":"GUARDIAN","form":"manifest-only (PR open, not on main)","id":"P4","incidents":["PR #4084 (failure-naming summaries)"],"sources":["cloudflare/job-heartbeat.mjs"],"status":"pending","title":"job failure summaries name the failing record on every job, not only integrity/patrol","trigger":"PR #4084 lands. Author against its landed summary shape."},{"class":"MONEY","form":"manifest-only (PR open, not on main)","id":"P5","incidents":["PR #3995 (sponsor cap, Jill's fork rulings)"],"sources":["server/bounty-escrow.mjs"],"status":"pending","title":"sponsor cap: worst-case draw = award + claim bond; settlement frees headroom; cap replacement floored at outstanding","trigger":"PR #3995 lands (it is in the 2026-10-17 deploy order). Author against the landed cap API."},{"class":"MONEY","form":"manifest-only (PR open, not on main)","id":"P6","incidents":["PR #4023 (AUDIT-50X C-08 step)"],"sources":["server/bounty-escrow.mjs (closeEpoch)"],"status":"pending","title":"closeEpoch settles only bounties whose window has closed (due-filter)","trigger":"PR #4023 lands. Author against the landed filter."},{"class":"PROOF","form":"manifest-only (PR open, not on main)","id":"P7","incidents":["PR #4082","RQ-3 consolidation: #3640 owns the wake-poll sentence fix"],"sources":["server/agent-discovery.mjs"],"status":"pending","title":"the wake-poll instruction served to agents matches the implemented poll semantics","trigger":"PR #4082 lands. Author against the landed sentence."}],"gate":{"command":"node --test tests/fleet-incident-evals.test.js","consumer":"Deploy packet proof set: packet assembly runs the gate command at the candidate head and records the result in the packet's verification section. Also standing proof #5 in the proof-expiry registry (staleness trigger: any change to this file or the manifest). The repo's ordinary test CI runs the file on every PR.","killCriterion":"Fixtures no gate consumes after 2 waves — stop authoring new ones (data programme W7).","single":"node --test --test-name-pattern \"<id>\" tests/fleet-incident-evals.test.js"},"programme":"Data programme item W7 (incidents-as-evals), 2026-10-18","schema":"project-room-incident-evals/1"}
+{
+  "base": "main @ 470d546a03411c38cb86c6752ed9737fd9409a21",
+  "catalogue": "tests/fleet-incident-evals.test.js",
+  "counts": {
+    "active": 26,
+    "classes": 6,
+    "pending": 7
+  },
+  "fixtures": [
+    {
+      "class": "COMP",
+      "id": "E1",
+      "incidents": [
+        "#3627",
+        "#3747"
+      ],
+      "sources": [
+        "server/work-claim-routes.mjs",
+        "server/store.mjs (PILOT_LIMITS)"
+      ],
+      "status": "active",
+      "title": "pilot-cap composition: verify of a delivered+approved claim is a resolution, never growth"
+    },
+    {
+      "class": "COMP",
+      "id": "E2",
+      "incidents": [
+        "#3716"
+      ],
+      "sources": [
+        "scripts/runtime-package.mjs",
+        "server/routes/front-door.mjs",
+        "src/front-door.js"
+      ],
+      "status": "active",
+      "title": "runtime-package allowlist keeps the front-door registrations an auto-merge dropped"
+    },
+    {
+      "class": "COMP",
+      "id": "E3",
+      "incidents": [
+        "#3642",
+        "#3776"
+      ],
+      "sources": [
+        "server/receipts-page.mjs"
+      ],
+      "status": "active",
+      "title": "receipts page renders both the tier label and the verdict block (duplicate-declaration composition)"
+    },
+    {
+      "class": "COMP",
+      "environmentNote": "The i18n half loads the base tree via git archive. On the 2026-10-18 VM write-fault window that call fails (exit 128, reproduced), the harness degrades by design to the committed-baseline ratchet, and the fixture cannot pass locally; the MCP half was verified green standalone at the base head (diffSnapshots = []). Hosted CI (full clone, healthy git) runs the fixture as designed.",
+      "id": "E4",
+      "incidents": [
+        "#3782",
+        "#3746"
+      ],
+      "sources": [
+        "scripts/i18n-harness.mjs",
+        "scripts/mcp-catalog-snapshot.mjs"
+      ],
+      "status": "active",
+      "title": "baselines match the composed tree: i18n baseline + MCP catalog snapshot"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E5",
+      "incidents": [
+        "#3946"
+      ],
+      "sources": [
+        "cloudflare/job-heartbeat.mjs (applyOutcomes)"
+      ],
+      "status": "active",
+      "title": "a failing job tick writes its own lastSummary; lastSuccessAt does not advance"
+    },
+    {
+      "class": "TIME",
+      "id": "E6",
+      "incidents": [
+        "#3945"
+      ],
+      "sources": [
+        "server/agent-connections.mjs (ownerIdsAt, verifyHistory)"
+      ],
+      "status": "active",
+      "title": "ownership resolves at the operation's own sequence; transferred-room history verifies"
+    },
+    {
+      "class": "TIME",
+      "id": "E7",
+      "incidents": [
+        "#3987",
+        "production integrity failure 2026-10-11 → 2026-10-18"
+      ],
+      "sources": [
+        "server/agent-connections.mjs",
+        "server/account-deletion.mjs"
+      ],
+      "status": "active",
+      "title": "connection history verifies after the sponsor transfers ownership and deletes their account"
+    },
+    {
+      "class": "TIME",
+      "id": "E8",
+      "incidents": [
+        "#3987"
+      ],
+      "sources": [
+        "server/agent-connections.mjs"
+      ],
+      "status": "active",
+      "title": "a binding repointed to a different live account is still refused"
+    },
+    {
+      "class": "TIME",
+      "id": "E9",
+      "incidents": [
+        "claim-pr-sync lease cases",
+        "#3711",
+        "CN-10 lease-expiry family"
+      ],
+      "sources": [
+        "server/claim-pr-sync.mjs",
+        "server/work-claim-sqlite.mjs"
+      ],
+      "status": "active",
+      "title": "a valid lapsed lease releases; a poisoned lease row is left untouched and named"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E10",
+      "incidents": [
+        "#3988",
+        "production patrol: 1,402 consecutive failed ticks, lastSuccessAt null"
+      ],
+      "sources": [
+        "server/patrol.mjs",
+        "server/store.mjs (patrolTick, patrol_blocks)"
+      ],
+      "status": "active",
+      "title": "patrol parks a corrupt-projection room by name; the tick succeeds; the park is durable"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E11",
+      "incidents": [
+        "#3464",
+        "#3465",
+        "production claim-prs wedge from 2026-10-13, 380+ failed ticks"
+      ],
+      "sources": [
+        "server/claim-pr-sync.mjs (syncClaimPullRequests)"
+      ],
+      "status": "active",
+      "title": "one malformed claim row is skipped and named; the sweep still polls the good claim"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E12",
+      "incidents": [
+        "#3334"
+      ],
+      "sources": [
+        "server/jobs.mjs (classifyIntegrityError)"
+      ],
+      "status": "active",
+      "title": "integrity failures carry typed names: subcheck, code, error class, record class"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E13",
+      "incidents": [
+        "#3847",
+        "#3855"
+      ],
+      "sources": [
+        "server/messages-store.mjs (runMessagesBackfill)",
+        "server/store.mjs (backfillMessages)"
+      ],
+      "status": "active",
+      "title": "an un-replayable room parks by name in the messages backfill; healthy rooms still backfill"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E14",
+      "incidents": [
+        "CN-7 guardian census §2 (room-backup isolation)"
+      ],
+      "sources": [
+        "cloudflare/room-backup.mjs (writeDailyBackup)",
+        "server/room-export.mjs"
+      ],
+      "status": "active",
+      "title": "a torn backup export is refused before any put; verified bytes are stored exactly once"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E15",
+      "incidents": [
+        "CN-7 launch-gate finding: integrity + patrol failed 6+ days with no alert"
+      ],
+      "sources": [
+        "cloudflare/job-heartbeat.mjs (jobHealthView)"
+      ],
+      "status": "active",
+      "title": "the health view grades a never-succeeded job stale, never ok"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E16",
+      "incidents": [
+        "#3895",
+        "CN-7 §4"
+      ],
+      "sources": [
+        "server/jobs.mjs (storeGrowthBreach)"
+      ],
+      "status": "active",
+      "title": "the store-growth breach check names the gauge that crossed"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E17",
+      "incidents": [
+        "2026-10-10 claim-prs rate-limit incident",
+        "2026-10-17 recurrence"
+      ],
+      "sources": [
+        "cloudflare/job-heartbeat.mjs (applyOutcomes, jobHealthView, jobHealthResponse)"
+      ],
+      "status": "active",
+      "title": "a rate-limited claim-prs tick reads degraded (github_rate_limited), HTTP 200, never ok"
+    },
+    {
+      "class": "MONEY",
+      "id": "E18",
+      "incidents": [
+        "#3307",
+        "FS-13 drill: a max(1,5%) probe bond refused 422 on the live rail"
+      ],
+      "sources": [
+        "server/bounty-escrow.mjs (DISPUTE_BOND_RATIO, disputeBounty)"
+      ],
+      "status": "active",
+      "title": "the dispute bond is exactly 25% — under and over are refused, exact opens"
+    },
+    {
+      "class": "MONEY",
+      "id": "E19",
+      "incidents": [
+        "#3726 (Option A, decided 2026-10-16)"
+      ],
+      "sources": [
+        "server/bounty-escrow.mjs (disputeBounty)"
+      ],
+      "status": "active",
+      "title": "a dispute on submitted work is refused before any challenger bond locks"
+    },
+    {
+      "class": "MONEY",
+      "id": "E20",
+      "incidents": [
+        "#3275 (journal seam)",
+        "CN-7 §2 per-bounty isolation"
+      ],
+      "sources": [
+        "server/bounty-epoch-keeper.mjs (progressEscrowEpochs)",
+        "server/bounty-escrow.mjs"
+      ],
+      "status": "active",
+      "title": "one poisoned bounty fails alone — the epoch progresses and conservation holds"
+    },
+    {
+      "class": "MONEY",
+      "id": "E21",
+      "incidents": [
+        "#3693",
+        "#3844"
+      ],
+      "sources": [
+        "server/bounty-epoch-keeper.mjs",
+        "server/bounty-escrow.mjs"
+      ],
+      "status": "active",
+      "title": "the keeper progresses an accepted award to paid with no human invoking closeEpoch"
+    },
+    {
+      "class": "CONSENT",
+      "id": "E22",
+      "incidents": [
+        "#3594 (mechanism half)"
+      ],
+      "sources": [
+        "server/public-read-model.mjs",
+        "server/receipts-live.mjs (publicReceiptById)"
+      ],
+      "status": "active",
+      "title": "a recorded public-receipts OFF hides even a settled bounty lot"
+    },
+    {
+      "class": "PROOF",
+      "id": "E23",
+      "incidents": [
+        "RQ-15 U1 refutation (public receipts are unsigned)",
+        "GREAT-DEBATE money veto V3"
+      ],
+      "sources": [
+        "server/receipt-verify.mjs (verifyPublicReceipt, NEVER_CHECKED)"
+      ],
+      "status": "active",
+      "title": "receipt verification states in its own scope that no signature is checked"
+    },
+    {
+      "class": "PROOF",
+      "id": "E24",
+      "incidents": [
+        "patrol controls, proof-expiry registry standing proof 4"
+      ],
+      "sources": [
+        "server/patrol.mjs",
+        "server/store.mjs (patrolTick, patrolFindings)"
+      ],
+      "status": "active",
+      "title": "the patrol catches a truncated log at the event that introduces it (head_gap)"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E25",
+      "incidents": [
+        "#3988",
+        "CN-7 item F3 post-deploy check"
+      ],
+      "sources": [
+        "cloudflare/job-heartbeat.mjs (runCronJobs, applyOutcomes)",
+        "server/jobs.mjs (patrol job)"
+      ],
+      "status": "active",
+      "title": "once parked, the patrol job records success — lastSuccess advances from null"
+    },
+    {
+      "class": "GUARDIAN",
+      "id": "E26",
+      "incidents": [
+        "#3847",
+        "#3855"
+      ],
+      "sources": [
+        "server/store.mjs (runDeferredIntegrityBatch)",
+        "server/messages-store.mjs"
+      ],
+      "status": "active",
+      "title": "the deferred integrity batch names the parked room per record and advances past messages_backfill"
+    },
+    {
+      "class": "CONSENT",
+      "form": "skipped test in the catalogue file",
+      "id": "P1",
+      "incidents": [
+        "#3594 decision (2026-10-16): settled lots require the owner's recorded opt-in"
+      ],
+      "sources": [
+        "server/public-read-model.mjs"
+      ],
+      "status": "pending",
+      "title": "a settled lot is NOT served until the room records a public-receipts opt-in",
+      "trigger": "The #3594 opt-in fix lands on main (chartered to FINISH-BACKLOG, Wave B priority). Unskip."
+    },
+    {
+      "class": "TIME",
+      "form": "skipped test in the catalogue file",
+      "id": "P2",
+      "incidents": [
+        "RQ-12 ruling A2+B1 (2026-10-18)",
+        "MUT-04: QA200 issues #2035/#2051"
+      ],
+      "sources": [
+        "server/work-claims.mjs (renewWork)"
+      ],
+      "status": "pending",
+      "title": "a claim renew omitting leaseHours reuses the claim's current window duration",
+      "trigger": "The RQ-12 implementation lands on main (chartered to FINISH-BACKLOG). Probe on main today: a 72h claim renewed without leaseHours extends 24h (the room default) — the pending assertion is aimed at exactly that delta. Unskip."
+    },
+    {
+      "class": "GUARDIAN",
+      "form": "manifest-only (the grading behaviour does not exist on main)",
+      "id": "P3",
+      "incidents": [
+        "CN-7 item F1: keeper reports ok with {due: 2, overdue: 2, paid: 0} — overdue bounties surface nowhere"
+      ],
+      "sources": [
+        "server/jobs.mjs (escrow-epochs)",
+        "server/bounty-epoch-keeper.mjs"
+      ],
+      "status": "pending",
+      "title": "escrow-epochs grades DEGRADED while bounties sit overdue past their windows",
+      "trigger": "GUARDIAN-FIX F1 lands its degraded-grading channel. Author the fixture against the landed summary/health shape."
+    },
+    {
+      "class": "GUARDIAN",
+      "form": "manifest-only (PR open, not on main)",
+      "id": "P4",
+      "incidents": [
+        "PR #4084 (failure-naming summaries)"
+      ],
+      "sources": [
+        "cloudflare/job-heartbeat.mjs"
+      ],
+      "status": "pending",
+      "title": "job failure summaries name the failing record on every job, not only integrity/patrol",
+      "trigger": "PR #4084 lands. Author against its landed summary shape."
+    },
+    {
+      "class": "MONEY",
+      "form": "manifest-only (PR open, not on main)",
+      "id": "P5",
+      "incidents": [
+        "PR #3995 (sponsor cap, Jill's fork rulings)"
+      ],
+      "sources": [
+        "server/bounty-escrow.mjs"
+      ],
+      "status": "pending",
+      "title": "sponsor cap: worst-case draw = award + claim bond; settlement frees headroom; cap replacement floored at outstanding",
+      "trigger": "PR #3995 lands (it is in the 2026-10-17 deploy order). Author against the landed cap API."
+    },
+    {
+      "class": "MONEY",
+      "form": "manifest-only (PR open, not on main)",
+      "id": "P6",
+      "incidents": [
+        "PR #4023 (AUDIT-50X C-08 step)"
+      ],
+      "sources": [
+        "server/bounty-escrow.mjs (closeEpoch)"
+      ],
+      "status": "pending",
+      "title": "closeEpoch settles only bounties whose window has closed (due-filter)",
+      "trigger": "PR #4023 lands. Author against the landed filter."
+    },
+    {
+      "class": "PROOF",
+      "form": "manifest-only (PR open, not on main)",
+      "id": "P7",
+      "incidents": [
+        "PR #4082",
+        "RQ-3 consolidation: #3640 owns the wake-poll sentence fix"
+      ],
+      "sources": [
+        "server/agent-discovery.mjs"
+      ],
+      "status": "pending",
+      "title": "the wake-poll instruction served to agents matches the implemented poll semantics",
+      "trigger": "PR #4082 lands. Author against the landed sentence."
+    }
+  ],
+  "gate": {
+    "command": "node --test tests/fleet-incident-evals.test.js",
+    "consumer": "Deploy packet proof set: packet assembly runs the gate command at the candidate head and records the result in the packet's verification section. Also standing proof #5 in the proof-expiry registry (staleness trigger: any change to this file or the manifest). The repo's ordinary test CI runs the file on every PR.",
+    "killCriterion": "Fixtures no gate consumes after 2 waves — stop authoring new ones (data programme W7).",
+    "single": "node --test --test-name-pattern \"<id>\" tests/fleet-incident-evals.test.js"
+  },
+  "programme": "Data programme item W7 (incidents-as-evals), 2026-10-18",
+  "schema": "project-room-incident-evals/1"
+}
