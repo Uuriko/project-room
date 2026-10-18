@@ -2,6 +2,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import { agentConnectionFromEnvironment } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal } from "../client/request-runner.mjs";
@@ -11,9 +12,10 @@ import { runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
 export async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--help") {
     console.log(`Usage:
-  ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs --list
+  ROOM_AGENT_CONFIG="/path/private-connection" node scripts/run-codex-room.mjs --list
   node scripts/run-codex-room.mjs --check /absolute/runtime.json
-  ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
+  ROOM_AGENT_CONFIG="/path/private-connection" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
+  ROOM_AGENT_CONFIG="/path/private-connection" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
 
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
 Authenticate the dedicated Codex home explicitly using Codex login with CODEX_HOME set to that directory and cli_auth_credentials_store="file". No operator credentials or sessions are imported.
@@ -27,7 +29,7 @@ Normal invocation executes one already-created public Room assistant run assigne
     console.log(JSON.stringify(runs.filter(run => run.coordinatorMemberId === connection.memberId).map(run => ({ runId: run.id, status: run.status, sourceMessageId: run.sourceMessageId }))));
     return;
   }
-  const check = argv[0] === "--check";
+  const check = argv[0] === "--check", watch = argv[0] === "--watch";
   const [runId, journal, configPath] = check ? [null, null, argv[1]] : argv;
   if (argv.length !== (check ? 2 : 3) || !isAbsolute(configPath ?? "") || !check && (!runId || !isAbsolute(journal ?? "")))
     throw new Error("Invalid arguments; use --help");
@@ -50,10 +52,35 @@ Normal invocation executes one already-created public Room assistant run assigne
     if (check) {
       console.log(JSON.stringify(qualified));
     } else {
-      const result = await runCodexSharedAssistant({ connection, db, rpc, cwd: settings.cwd, policy: settings.policy,
-        runId, signal: controller.signal, timeoutMs: settings.turnTimeoutMs,
-        emit: event => console.log(JSON.stringify(event)) });
-      console.log(JSON.stringify({ status: result.result.status, runId, resultMessageId: result.result.resultMessageId ?? null }));
+      const execute = async id => {
+        const result = await runCodexSharedAssistant({ connection, db, rpc, cwd: settings.cwd, policy: settings.policy,
+          runId: id, signal: controller.signal, timeoutMs: settings.turnTimeoutMs,
+          emit: event => console.log(JSON.stringify(event)) });
+        console.log(JSON.stringify({ status: result.result.status, runId: id, resultMessageId: result.result.resultMessageId ?? null }));
+      };
+      if (!watch) await execute(runId);
+      else {
+        const client = new RoomAgentClient(connection), failed = new Set();
+        console.log(JSON.stringify({ status: "listening", roomId: connection.roomId }));
+        while (!controller.signal.aborted) {
+          let runs;
+          try { ({ runs } = await client.assistant(undefined, { signal: controller.signal })); }
+          catch (error) { if (controller.signal.aborted) break; throw error; }
+          for (const run of runs.filter(run => run.coordinatorMemberId === connection.memberId
+            && ["queued", "resume_requested"].includes(run.status) && !failed.has(run.id)).reverse()) {
+            if (controller.signal.aborted) break;
+            try { await execute(run.id); }
+            catch (error) {
+              if (controller.signal.aborted) break;
+              // An uncertain attempt needs its journal reconciled, not a fresh model run.
+              failed.add(run.id);
+              console.error(JSON.stringify({ status: "needs_attention", runId: run.id, message: error.message }));
+            }
+          }
+          try { await delay(1000, undefined, { signal: controller.signal }); }
+          catch (error) { if (!controller.signal.aborted) throw error; }
+        }
+      }
     }
   } finally { await rpc?.close(); db?.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
 }

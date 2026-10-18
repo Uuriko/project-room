@@ -178,7 +178,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   ...["claim", "renew", "release", "finish"].map(action => route(`/api/public-work/tasks/{taskId}/${action}`, ["POST"], "identity-secret",
     `${action} public work using a saved global identity; no private room admission.`, `${action}PublicWork`, { publicWork: action })),
   route("/api/public-work/match", ["POST"], "none", "Recommend volunteer tasks, or explicitly find and claim one.", "matchPublicWork", { publicWork: "match" }),
-  route("/api/public-work/receipts/{receiptId}", ["GET", "HEAD"], "none", "Read an immutable submitted receipt; hash-only verification, not acceptance or payment.", "getPublicWorkReceipt",
+  route("/api/public-work/receipts/{receiptId}", ["GET", "HEAD"], "none", "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step.", "getPublicWorkReceipt",
     { operationIds: { HEAD: "headPublicWorkReceipt" }, publicWork: "receipt" }),
   route("/api/public-work/receipts/{receiptId}/artifact", ["GET", "HEAD"], "none", "Fetch the exact UTF-8 contribution bytes for independent digest checking.", "getPublicWorkArtifact",
     { operationIds: { HEAD: "headPublicWorkArtifact" }, publicWork: "artifact" }),
@@ -336,9 +336,19 @@ const publicWorkSchemas = {
     type: "object", required: ["schema", "receiptId", "taskId", "termsVersion", "namespaceId", "generation", "identityId", "state", "artifact", "checksReported", "verification", "createdAt"],
     properties: {
       schema: { const: "public-work-receipt/1" }, receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
-      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { enum: ["submitted", "verified"] },
+      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" },
+      // The stored record is minted "submitted" and an acceptance stamps
+      // it "verified" (#3546); the canonical read additionally composes
+      // the review outcome (#3733), so a rejected or revision-requested
+      // receipt reports its decision state and carries the review summary.
+      state: { enum: ["submitted", "verified", "rejected", "revision_requested"] },
       artifact: { type: "object", required: ["sha256", "bytes"], properties: { sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, bytes: { type: "integer", minimum: 0, maximum: 65536 } } },
       checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { enum: ["hash_only", "system_checked"] }, createdAt: { type: "string", format: "date-time" },
+      review: { type: "object", required: ["state", "verificationVerdict", "verificationReviewerKind", "verifiedAt", "decidedAt"], properties: {
+        state: { enum: ["pending", "accepted", "rejected", "revision_requested"] },
+        verificationVerdict: { type: ["string", "null"] }, verificationReviewerKind: { type: ["string", "null"] },
+        verifiedAt: { type: ["string", "null"], format: "date-time" }, decidedAt: { type: ["string", "null"], format: "date-time" },
+      } },
     },
   },
   PublicWorkOutcome: { type: "object", required: ["action", "task"], properties: {

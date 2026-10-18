@@ -5,9 +5,14 @@
 // BODY_AT_REST_MIN_CHARS is replaced by `bodyRef` (its sha256) and the text
 // is kept once in projection_bodies, keyed by content. Rows are immutable,
 // so a write that is later rolled back or skipped can never change what an
-// existing bodyRef means. A trigger on rooms deletes every body the stored
-// projection no longer references, in the same statement, so deleted,
-// redacted and purged text does not outlive the projection that held it.
+// existing bodyRef means. The serializer itself deletes every body the
+// new stored projection no longer references, in the same transaction,
+// so deleted, redacted and purged text does not outlive the projection
+// that held it. (WRITE-PATH-WINS win 4: this used to be an AFTER UPDATE
+// trigger running json_each over the whole projection on every rooms
+// write; the serializer already walks the messages and knows the
+// referenced set, so the release is a set difference over the sha index
+// instead of a second full-projection parse in SQL.)
 //
 // Rollout: hydration is always on. Slimming is on only when the store was
 // opened with bodiesAtRest (ROOM_BODIES_AT_REST=1). Turning it off makes the
@@ -29,17 +34,22 @@ CREATE TABLE IF NOT EXISTS projection_bodies (
   body TEXT NOT NULL,
   PRIMARY KEY(room_id, sha)
 );
-CREATE TRIGGER IF NOT EXISTS projection_bodies_release AFTER UPDATE OF projection ON rooms
-WHEN EXISTS (SELECT 1 FROM projection_bodies WHERE room_id=NEW.id)
-BEGIN
-  DELETE FROM projection_bodies WHERE room_id=NEW.id AND sha NOT IN (
-    SELECT json_extract(m.value, '$.bodyRef') FROM json_each(NEW.projection, '$.messages') AS m
-    WHERE json_type(m.value, '$.bodyRef') = 'text');
-END;
 CREATE TRIGGER IF NOT EXISTS projection_bodies_room_gone AFTER DELETE ON rooms
 BEGIN
   DELETE FROM projection_bodies WHERE room_id=OLD.id;
 END;`;
+
+// WRITE-PATH-WINS win 4: rooms this process has seen holding body rows.
+// The serializer only pays the release scan for those rooms; hydration
+// (which reads the stored refs) and the serializer's own inserts set the
+// mark, and every projection write path loads the room first, so a room
+// with rows is always marked before its next write in this process.
+const bodyRoomMarks = new WeakMap();
+function markedRooms(db) {
+  let rooms = bodyRoomMarks.get(db);
+  if (!rooms) { rooms = new Set(); bodyRoomMarks.set(db, rooms); }
+  return rooms;
+}
 
 // Swap one key for another in place, so key order (and so any byte-level
 // comparison of the stored row) is unchanged by a round trip.
@@ -72,7 +82,8 @@ function prepared(db) {
     hit = {
       known: db.prepare("SELECT sha FROM projection_bodies WHERE room_id=?"),
       insert: db.prepare("INSERT OR IGNORE INTO projection_bodies(room_id, sha, body) VALUES(?,?,?)"),
-      read: db.prepare("SELECT sha, body FROM projection_bodies WHERE room_id=?")
+      read: db.prepare("SELECT sha, body FROM projection_bodies WHERE room_id=?"),
+      release: db.prepare("DELETE FROM projection_bodies WHERE room_id=? AND sha=?")
     };
     statements.set(db, hit);
   }
@@ -112,6 +123,22 @@ function restoreEnvelope(message) {
   return out;
 }
 
+// Delete every body row the projection about to be stored no longer
+// references (win 4, replacing the json_each trigger). `referenced` is the
+// set of bodyRef shas in the new stored text. Callers run this in the same
+// transaction as the rooms write, so a rolled-back write rolls the
+// release back too — exactly the trigger's atomicity.
+function releaseUnreferencedBodies(db, roomId, referenced) {
+  const { known, release } = prepared(db);
+  let remaining = 0;
+  for (const row of known.all(roomId)) {
+    if (referenced.has(row.sha)) { remaining += 1; continue; }
+    release.run(roomId, row.sha);
+  }
+  if (remaining || referenced.size) markedRooms(db).add(roomId);
+  else markedRooms(db).delete(roomId);
+}
+
 // The only way a room projection is turned into the text stored in
 // rooms.projection. With enabled=false the output is JSON.stringify(state),
 // byte for byte, apart from rehydrating any bodyRef a raw-read state carries.
@@ -119,9 +146,25 @@ export function storedProjection(db, roomId, state, { enabled = false } = {}) {
   const messages = Array.isArray(state?.messages) ? state.messages : null;
   if (!messages) return JSON.stringify(state);
   const carriesRefs = messages.some(message => message && typeof message.bodyRef === "string" || hasMarker(message));
-  if (!enabled && !carriesRefs) return JSON.stringify(state);
-  if (!enabled) return JSON.stringify(hydrateProjection(db, roomId, structuredClone(state)).state);
-  if (!messages.some(message => slimmable(message) || nullEnvelope(message))) return JSON.stringify(state);
+  if (!enabled && !carriesRefs) {
+    // Full bodies are about to be stored, so any body rows the room still
+    // holds are unreferenced by definition. Only rooms this process has
+    // seen holding rows pay the scan (a write always follows a load,
+    // which marks the room in hydrateProjection).
+    if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, new Set());
+    return JSON.stringify(state);
+  }
+  if (!enabled) {
+    const text = JSON.stringify(hydrateProjection(db, roomId, structuredClone(state)).state);
+    releaseUnreferencedBodies(db, roomId, new Set());
+    return text;
+  }
+  if (!messages.some(message => slimmable(message) || nullEnvelope(message))) {
+    const referenced = new Set();
+    for (const message of messages) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);
+    if (referenced.size || markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, referenced);
+    return JSON.stringify(state);
+  }
   const { known, insert } = prepared(db);
   const present = new Set(known.all(roomId).map(row => row.sha));
   const memo = memoFor(db, roomId), seen = new Map();
@@ -135,16 +178,41 @@ export function storedProjection(db, roomId, state, { enabled = false } = {}) {
     return renameKey(message, "body", "bodyRef", sha);
   });
   hashMemo.get(db).set(roomId, seen);
+  const referenced = new Set();
+  for (const message of slim) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);
+  // The `present` set above is the pre-write index (plus this write's
+  // inserts, all of which are referenced), so the release diff needs no
+  // second scan of the table.
+  const { release } = prepared(db);
+  let remaining = 0;
+  for (const sha of present) {
+    if (referenced.has(sha)) { remaining += 1; continue; }
+    release.run(roomId, sha);
+  }
+  if (remaining || referenced.size) markedRooms(db).add(roomId);
+  else markedRooms(db).delete(roomId);
   return JSON.stringify({ ...state, messages: slim });
 }
 
 // Put bodies back into a state parsed from rooms.projection. Mutates and
 // returns the state. `missing` lists messages whose body row is gone, which
 // only an out-of-band write could cause; the caller rebuilds from the log.
-export function hydrateProjection(db, roomId, state) {
+//
+// WRITE-PATH-WINS win 3: hydration used to re-hash every restored body
+// against its bodyRef on every load — a full sha256 pass over the room's
+// text per read, to catch a body row whose bytes were changed out of
+// band. The row is content-addressed (its sha is the primary key, computed
+// from the body at insert time and never updated), so the hot read path
+// now trusts the key, as it already trusts every other stored byte it
+// parses. Callers whose job is verification (the messages-parity /
+// integrity path) pass verifyBodyHashes to keep the per-body check, and
+// a row whose bytes no longer hash to its key is reported missing there,
+// which routes the caller to the same rebuild-from-log recovery.
+export function hydrateProjection(db, roomId, state, { verifyBodyHashes = false } = {}) {
   const messages = Array.isArray(state?.messages) ? state.messages : [];
   const refs = messages.some(message => message && typeof message.bodyRef === "string");
   if (!refs && !messages.some(hasMarker)) return { state, missing: [] };
+  if (refs) markedRooms(db).add(roomId);
   const bodies = refs ? new Map(prepared(db).read.all(roomId).map(row => [row.sha, row.body])) : new Map();
   const missing = [];
   messages.forEach((message, index) => {
@@ -152,7 +220,7 @@ export function hydrateProjection(db, roomId, state) {
     if (hasMarker(message)) message = messages[index] = restoreEnvelope(message);
     if (typeof message.bodyRef !== "string") return;
     const body = bodies.get(message.bodyRef);
-    if (typeof body !== "string" || shaOf(body) !== message.bodyRef) { missing.push(message.id); return; }
+    if (typeof body !== "string" || (verifyBodyHashes && shaOf(body) !== message.bodyRef)) { missing.push(message.id); return; }
     messages[index] = renameKey(message, "bodyRef", "body", body);
   });
   return { state, missing };

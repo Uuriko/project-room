@@ -23,6 +23,7 @@ import { randomBytes } from "node:crypto";
 import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
+import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
 const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
@@ -805,21 +806,23 @@ export class AgentHeartbeats {
     }
     const at = this.now();
     this.ensureListenerSchema();
-    const placeholders = signalIds.map(() => "?").join(",");
+    // The Worker's SQL takes at most 100 binds and the REST door does not cap
+    // signalIds, so the id lists below are bound in chunks (sql-binds.mjs).
+    const chunks = [...sqlChunks(signalIds)];
     // The store's own transaction runner owns the write lock: BEGIN IMMEDIATE on
     // Node, transactionSync on a Durable Object (which rejects raw BEGIN,
     // SAVEPOINT and COMMIT), and a join when the caller already holds one. The
     // check and the UPDATE loop run under one lock, so a lease expiring or
     // changing hands between them cannot let a stale ack through.
     return this.store.transaction(() => {
-      const holders = this.db.prepare(`SELECT DISTINCT l.fencing_token AS fencingToken
+      const holders = chunks.flatMap(chunk => this.db.prepare(`SELECT DISTINCT l.fencing_token AS fencingToken
         FROM agent_wake_signals s
         JOIN agent_wake_listener_leases l
           ON l.agent_id = s.agent_id AND l.room_key = COALESCE(s.room_id, '')
-        WHERE s.agent_id = ? AND s.signal_id IN (${placeholders})
+        WHERE s.agent_id = ? AND s.signal_id IN (${sqlPlaceholders(chunk)})
           AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id = ?)
           AND l.lease_expires_at > ?`)
-        .all(agentId, ...signalIds, roomId, roomId, at);
+        .all(agentId, ...chunk, roomId, roomId, at));
       if (holders.some(({ fencingToken: holder }) => holder !== fencingToken)) {
         fail(409, "listener_fenced",
           "a live listener lease holds this agent's wake queue — ack with its fencing token");
@@ -830,13 +833,13 @@ export class AgentHeartbeats {
       // flag and never deleted by a listener that did not handle it. Signals
       // that were never claimed keep the old behavior. Same write lock as the
       // check above, so nothing can change between this read and the UPDATE.
-      const foreign = this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals s
+      const foreign = chunks.reduce((n, chunk) => n + this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals s
         JOIN agent_wake_signal_claims c ON c.signal_id = s.signal_id
-        WHERE s.agent_id = ? AND s.signal_id IN (${placeholders})
+        WHERE s.agent_id = ? AND s.signal_id IN (${sqlPlaceholders(chunk)})
           AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id = ?)
           AND (? IS NULL OR c.claimed_by != ?)`)
-        .get(agentId, ...signalIds, roomId, roomId, fencingToken, fencingToken);
-      if (foreign.n > 0) {
+        .get(agentId, ...chunk, roomId, roomId, fencingToken, fencingToken).n, 0);
+      if (foreign > 0) {
         fail(409, WAKE_SIGNAL_FENCED_CODE, WAKE_SIGNAL_FENCED_MESSAGE);
       }
       const acknowledged = [];
@@ -848,10 +851,9 @@ export class AgentHeartbeats {
       // #3345: acks are the delivery completion — count them per door,
       // with each signal's own kind/room (an ack may span rooms).
       if (acknowledged.length > 0) {
-        const marks = acknowledged.map(() => "?").join(",");
-        const kinds = new Map(this.db.prepare(
-          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${marks})`)
-          .all(...acknowledged).map(row => [row.signalId, row]));
+        const kinds = new Map([...sqlChunks(acknowledged)].flatMap(chunk => this.db.prepare(
+          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${sqlPlaceholders(chunk)})`)
+          .all(...chunk)).map(row => [row.signalId, row]));
         for (const signalId of acknowledged) {
           const row = kinds.get(signalId);
           recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",

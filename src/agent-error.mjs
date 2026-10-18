@@ -517,6 +517,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
+  // #3883: the credential-less invite-replay rotation window (30 days from
+  // the redemption receipt) has closed. The replay cannot rotate; only the
+  // sponsor's re-mint (or remove + re-invite) recovers the member.
+  if (reasonCode === "invite_replay_rotation_expired") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This redemption's secret-rotation window closed 30 days after the original redemption, so a credential-less replay can no longer issue a fresh identity secret. The inviter who sponsored the invite must mint a fresh invite code — or remove and re-invite this member — and the new code redeems for a new identity secret.",
+      next: [path("/api/agent-invites/redeem"),
+        command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
+    };
+  }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
@@ -626,6 +637,22 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : named
           ? `Ask ${named} to reassign or release the claim, then claim it.`
           : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+    };
+  }
+  // #3880: the claim was refused because the work's dependsOn are not all
+  // done — the same gate the AvailableWork projection applies. The route
+  // message names each unmet dependency with its state; the recovery is
+  // to finish (or get reassigned) those, never to retry this claim.
+  if (reasonCode === "work_claim_dependencies_unmet") {
+    const text = String(message || "");
+    const deps = /dependencies not done: (.+?)\. Finish/.exec(text)?.[1] ?? null;
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_dependencies_unmet",
+      hint: deps
+        ? `This work cannot be claimed yet — its dependencies are not done: ${deps}. It becomes claimable when every dependency is done; the board projection already excludes it until then.`
+        : "This work cannot be claimed yet — its dependencies are not done. It becomes claimable when every dependency is done.",
+      next: [path(boardPath), command(`Read the board (GET ${boardPath}) to see the dependencies' state; finish or claim the unfinished dependencies first, then claim this item.`)]
     };
   }
   // Recovery requires an actual current review, never an implied approval
