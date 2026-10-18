@@ -1301,7 +1301,9 @@ const LOOKUP_INDEXES = `
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+// SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
+// They must invalidate too now that metadata-only commits keep their cache.
+const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -3345,7 +3347,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (boundary) {
       const pending = frames.pop();
-      this._projectionCache?.clear();
+      // ROOMS_WRITE invalidates immediately in the projection watch. A commit
+      // of heartbeat/cursor/claim metadata must not discard unrelated parses.
       if (!outermost) {
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
