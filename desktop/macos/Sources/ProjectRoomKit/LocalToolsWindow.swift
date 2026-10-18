@@ -17,6 +17,9 @@ import CoreGraphics
     private var timer: Timer?
     private var hostIssue: String?
     private var setupWindow: LocalRoomHostSetupWindow?
+    public var onReadinessChange: ((String?) -> Void)? { didSet { onReadinessChange?(lastReadiness) } }
+    public var conversationIsVisible: (() -> Bool)?
+    private var lastReadiness: String?
     public init(service: LocalTools? = nil, host: LocalRoomHost? = nil) throws {
         let owned = try service ?? LocalTools()
         self.host = try host ?? LocalRoomHost()
@@ -46,7 +49,10 @@ import CoreGraphics
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
         refresh(); window.center()
-        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in if self?.window.isVisible == true { self?.refresh() } } }
+        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in
+            guard let self, self.window.isVisible || self.conversationIsVisible?() == true else { return }
+            self.refresh()
+        } }
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     public func stop() { setupWindow?.stop(); timer?.invalidate(); host.stopAndWait(); connection.stop() }
@@ -109,6 +115,9 @@ import CoreGraphics
         toggle.title = enabled ? "Pause all local tools" : "Enable local tools"
         permissions.stringValue = LocalToolReadiness.summary(snapshot["capabilities"] as? [[String: Any]] ?? [])
             + "\n\nFiles and apps may require additional access. These local checks do not verify your agent connection or model access."
+        let readiness = LocalHostReadiness.notice(host: agent, local: snapshot, connection: connection.connectionURL.path)
+        if hostIssue == nil, let readiness { hostState.stringValue = readiness }
+        if readiness != lastReadiness { lastReadiness = readiness; onReadinessChange?(readiness) }
     }
     @objc private func copyConnection() {
         let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")

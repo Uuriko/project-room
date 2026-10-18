@@ -120,6 +120,7 @@ let originalRuntime = try Data(contentsOf: sourceRuntime)
 let nativeConnection = setupDir.appendingPathComponent("native-connection.json")
 try write(["fixture": true], nativeConnection.path)
 try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: false)
+check((setupHost.snapshot()["macTools"] as? [String: String])?["mode"] == "approval_required", "observation selection reports input approval requirement")
 let setupSaved = setupDir.appendingPathComponent("managed/selected-host.json")
 let observedManifest = try RoomHostManifest.read(setupSaved)
 let observedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: observedManifest.runtimeConfig))) as! [String: Any]
@@ -130,6 +131,7 @@ check(unchangedRuntime == originalRuntime, "imported runtime remains unchanged")
 let managedAttributes = try fm.attributesOfItem(atPath: observedManifest.runtimeConfig)
 check((managedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "generated runtime private")
 try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true)
+check((setupHost.snapshot()["macTools"] as? [String: String])?["mode"] == "control", "control selection reports configured input exposure")
 let approvedManifest = try RoomHostManifest.read(setupSaved)
 let approvedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: approvedManifest.runtimeConfig))) as! [String: Any]
 check((approvedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "approve", "explicit owner choice connects input")
@@ -160,6 +162,7 @@ check(host.snapshot()["running"] as? Bool == true, "same-identity token rotation
 do { try host.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true); check(false, "active configuration refused") }
 catch { print("PASS: active host configuration cannot change") }
 check(until { (host.snapshot()["message"] as? String)?.hasPrefix("Listening") == true }, "owned fresh status reaches listening without claiming model ready")
+check(host.snapshot()["statusFresh"] as? Bool == true && host.snapshot()["credentials"] as? String == "not_required", "fresh native snapshot exposes qualified provider evidence")
 do { try restored.start(); check(false,"duplicate refused") } catch { print("PASS: duplicate desktop host refused") }
 let pinnedScope = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: host.journalURL!.path + ".scope"))) as! [String: String]
 check(pinnedScope == ["origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent"], "child receives exact selected room identity without a token")
@@ -168,6 +171,9 @@ check(host.snapshot()["message"] as? String == "Agent stopped", "terminal status
 for mode in ["wrongpid","stale","unverified","exit"] {
     let (other,_) = try fixture(mode); try other.start(); Thread.sleep(forTimeInterval:0.4)
     check(!(other.snapshot()["message"] as? String ?? "").hasPrefix("Listening"), "\(mode) status cannot claim listening")
+    if mode == "wrongpid" || mode == "stale" {
+        check(other.snapshot()["statusFresh"] as? Bool == false && other.snapshot()["credentials"] as? String == "unknown", "\(mode) cannot carry fresh provider evidence")
+    }
     check(other.stopAndWait(), "\(mode) cleanup bounded")
 }
 let (resistant,_) = try fixture("resistant"); try resistant.start()
@@ -177,4 +183,5 @@ let child = Int32(try String(contentsOfFile:childPath))!
 check(resistant.stopAndWait(), "resistant process group shutdown bounded")
 check(until { kill(child,0) != 0 }, "resistant descendant removed")
 check(resistant.snapshot()["message"] as? String == "Host ended · execution needs reconciliation", "forced termination does not assert model stopped")
+check(resistant.snapshot()["lastExit"] as? String == "unconfirmed", "forced exit remains an actionable unresolved status")
 print("LOCAL_ROOM_HOST_ACCEPTANCE_OK")

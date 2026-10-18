@@ -39,6 +39,8 @@ public final class LocalRoomHost {
     private var lastMessage = "Connect an agent to this room"
     private var scope: [String: String] = [:]
     private var session: String?
+    private var macTools: [String: String] = ["mode": "unknown"]
+    private var lastExit = "none"
     public private(set) var journalURL: URL?
     public init(directory: URL? = nil) throws {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Project Room/Room Host")
@@ -65,6 +67,8 @@ public final class LocalRoomHost {
         try JSONEncoder().encode(selected).write(to: saved, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saved.path)
         manifest = selected; scope = identity
+        lastExit = "none"
+        macTools = LocalHostReadiness.toolConfiguration(URL(fileURLWithPath: selected.runtimeConfig))
         journalURL = directory.appendingPathComponent("room-\(key).sqlite")
         lastMessage = "Ready to start · \(identity["roomId"]!)"
     }
@@ -130,12 +134,14 @@ public final class LocalRoomHost {
         guard pid == 0, !stopping else { throw LocalToolFailure("host_already_running") }
         guard let manifest, let journalURL else { throw LocalToolFailure("host_not_configured") }
         guard (try? Self.connectionIdentity(manifest)) == scope else { throw LocalToolFailure("room_connection_changed") }
+        macTools = LocalHostReadiness.toolConfiguration(URL(fileURLWithPath: manifest.runtimeConfig))
         let fd = Darwin.open(directory.appendingPathComponent("desktop-owner.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LocalToolFailure("host_lock_unavailable") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw LocalToolFailure("another_desktop_host_running") }
         do { pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
         catch { close(fd); throw error }
         ownerFD = fd; stopping = false; session = nil; launchTime = Date(); lastMessage = "Starting agent…"
+        lastExit = "none"
         let child = pid; finished.enter()
         work.async { [self] in supervise(child, manifest: manifest, journal: journalURL); finished.leave() }
     }
@@ -173,6 +179,7 @@ public final class LocalRoomHost {
         reapGroup(child)
         lock.lock()
         pid = 0; stopping = false
+        lastExit = confirmed ? "confirmed_stop" : "unconfirmed"
         lastMessage = confirmed ? "Agent stopped" : requested ? "Host ended · execution needs reconciliation" : "Agent ended · check connection setup"
         if ownerFD >= 0 { close(ownerFD); ownerFD = -1 }
         lock.unlock()
@@ -204,10 +211,13 @@ public final class LocalRoomHost {
         return value
     }
     public func snapshot() -> [String: Any] {
-        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope; lock.unlock()
+        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit; lock.unlock()
         var text = message
+        var evidence: [String: Any] = ["statusFresh": false, "phase": "unknown", "protocol": "unverified", "credentials": "unknown"]
         if child != 0 && !isStopping {
             if let value = readStatus(child: child) {
+                evidence = ["statusFresh": true, "phase": value["phase"] as? String ?? "unknown",
+                            "protocol": value["protocol"] as? String ?? "unverified", "credentials": value["credentials"] as? String ?? "unknown"]
                 if value["credentials"] as? String == "login_required" { text = "Sign in to the dedicated Codex account" }
                 else {
                     switch value["phase"] as? String {
@@ -222,6 +232,7 @@ public final class LocalRoomHost {
                 }
             } else { text = "Connecting · current status unavailable" }
         }
-        return ["configured": configured, "running": child != 0, "stopping": isStopping, "message": text, "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]
+        return evidence.merging(["configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
+            "macTools": selectedTools, "lastExit": exitState, "modelExecution": "not_tested", "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]) { _, new in new }
     }
 }

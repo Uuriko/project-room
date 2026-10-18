@@ -92,11 +92,45 @@ final class LocalToolsTests {
             expectEqual(status["runningProcesses"] as? Int, 0)
         }
     }
+    func testConnectedReadiness() throws {
+        let connection = "/fixture/private-connection.json"
+        let local: [String: Any] = ["enabled": true, "capabilities": LocalToolReadiness.capabilities(enabled: true, accessibility: true, screenCapture: true)]
+        let base: [String: Any] = ["configured": true, "running": true, "statusFresh": true,
+            "phase": "watching_room", "credentials": "present", "protocol": "qualified", "macTools": ["mode": "control", "connection": connection]]
+        func notice(_ changes: [String: Any], _ state: [String: Any]? = nil) -> String? {
+            LocalHostReadiness.notice(host: base.merging(changes) { _, new in new }, local: state ?? local, connection: connection)
+        }
+        expectEqual(notice([:]), nil)
+        for (change, fragment) in [
+            (["configured": false], "Set up"), (["running": false], "stopped"), (["stopping": true], "stopping"),
+            (["running": false, "lastExit": "unconfirmed"], "without a confirmed stop"),
+            (["statusFresh": false, "credentials": "present"], "unavailable"),
+            (["credentials": "login_required"], "sign-in"), (["credentials": "unknown"], "checking"),
+            (["phase": "retrying_room"], "reconnecting"), (["phase": "recovery_pending"], "reconciling"),
+            (["phase": "new_unknown_phase"], "checking"), (["protocol": "unverified"], "checking"),
+            (["macTools": ["mode": "none"]], "connect Mac tools"),
+            (["macTools": ["mode": "control", "connection": "/different"]], "different Mac tool connection"),
+            (["macTools": ["mode": "approval_required", "connection": connection]], "needs approval")
+        ] as [([String: Any], String)] { expectEqual(notice(change)?.contains(fragment), true) }
+        expectEqual(notice([:], ["enabled": false])?.contains("paused"), true)
+        let noScreen: [String: Any] = ["enabled": true, "capabilities": LocalToolReadiness.capabilities(enabled: true, accessibility: true, screenCapture: false)]
+        expectEqual(notice([:], noScreen)?.contains("Screen Recording"), true)
+        let (root, _) = try fixture(), config = root.appendingPathComponent("runtime.json")
+        for (body, mode) in [("{}", "none"), ("invalid", "unknown"),
+            ("{\"macTools\":{\"command\":\"/tool\",\"connection\":\"/private\",\"inputApproval\":\"approve\"}}", "control"),
+            ("{\"macTools\":{\"command\":\"/tool\",\"connection\":\"/private\"}}", "approval_required") ] {
+            try body.write(to: config, atomically: true, encoding: .utf8)
+            expectEqual(LocalHostReadiness.toolConfiguration(config)["mode"], mode)
+        }
+    }
     @MainActor func testReadinessWindow() throws {
         _ = NSApplication.shared
         let (root, tools) = try fixture()
         let host = try LocalRoomHost(directory: root.appendingPathComponent("host"))
         let panel = try LocalToolsWindow(service: tools, host: host)
+        var delivered: [String?] = []
+        panel.onReadinessChange = { delivered.append($0) }
+        expectEqual(delivered.last??.contains("Set up"), true)
         defer { panel.stop(); panel.window.orderOut(nil) }
         let content = panel.window.contentView!
         func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
@@ -125,6 +159,37 @@ final class LocalToolsTests {
                 }
             }
         }
+        let room = RoomWindow(url: URL(string: "http://127.0.0.1:1")!, isolated: true, acceptanceLocalToolsFactory: { panel })
+        defer { room.stopLocalTools(); room.window.orderOut(nil) }
+        // This fixture checks native chrome, not the navigation policy covered
+        // by RoomAcceptance. Permit its in-memory document without a server.
+        room.webView.stopLoading(); room.webView.navigationDelegate = nil
+        room.webView.loadHTMLString("<html><body style='font:18px system-ui;padding:24px'><h1>Conversation</h1><p>Synthetic room fixture. No account or room connection.</p></body></html>", baseURL: room.origin)
+        room.showMyMac(); panel.window.orderOut(nil)
+        let roomContent = room.window.contentView!
+        let open = descendants(roomContent).compactMap { $0 as? NSButton }.first { $0.title == "Open My Mac" }!
+        expectEqual(open.isHiddenOrHasHiddenAncestor, false)
+        open.performClick(nil); expectEqual(panel.window.isVisible, true); panel.window.orderOut(nil)
+        let longNotice = "This agent uses a different Mac tool connection. Stop it and reconnect tools in My Mac."
+        room.updateLocalAgentNotice(longNotice)
+        for width in [480, 1200] {
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                room.window.appearance = NSAppearance(named: appearance)
+                room.window.setContentSize(NSSize(width: width, height: 700)); room.window.orderFrontRegardless()
+                roomContent.layoutSubtreeIfNeeded(); room.window.display()
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.2))
+                let label = descendants(roomContent).compactMap { $0 as? NSTextField }.first { $0.stringValue == longNotice }!
+                expectEqual(roomContent.bounds.contains(roomContent.convert(label.bounds, from: label)), true)
+                expectEqual(roomContent.bounds.contains(roomContent.convert(open.bounds, from: open)), true)
+                if let destination = ProcessInfo.processInfo.environment["ROOM_READINESS_QA_OUTPUT"] {
+                    let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    capture.arguments = ["-x", "-o", "-l", String(room.window.windowNumber), URL(fileURLWithPath: destination).appendingPathComponent("conversation-\(width)-\(appearance.rawValue).png").path]
+                    try capture.run(); capture.waitUntilExit(); expectEqual(capture.terminationStatus, 0)
+                }
+            }
+        }
+        room.updateLocalAgentNotice(nil)
+        expectEqual(open.isHiddenOrHasHiddenAncestor, true)
     }
     func testComputerObservations() throws {
         let (root, _) = try fixture(); let provider = FixtureObservation()
@@ -459,6 +524,7 @@ let checks = LocalToolsTests()
 defer { for action in checks.teardown { action() } }
 do {
     try checks.testCapabilityReadiness(); print("PASS capability preflight combinations, native IPC and pause/re-enable projection")
+    try checks.testConnectedReadiness(); print("PASS configured tool exposure, provider/room status, stale evidence and targeted corrective actions")
     try MainActor.assumeIsolated { try checks.testReadinessWindow() }; print("PASS My Mac shared readiness copy, enable/pause and dark/light layout")
     try checks.testActualOwnedWindowInput()
     try checks.testInputRetryAndPause()
