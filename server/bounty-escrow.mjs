@@ -69,6 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { claimInstanceId, declaredRuntimeOf } from "./record-stamps.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -882,6 +883,34 @@ export class BountyEscrow {
     if (!member || member.active === false)
       fail("not_authorized", `transfer recipient "${recipient}" is not a current member of this room`);
     return recipient;
+  }
+
+  // #3612 provenance helpers. The authorizing principal of a bounty is
+  // its poster: the human accountable for the poster's lane (a human
+  // poster themself), derived from the membership record the server
+  // holds — never from a caller-supplied field. The claim instance is
+  // stamped into the bounty.claimed event at claim time and recovered
+  // from that event by later records in the round, so no journal or
+  // record DDL is needed to carry it.
+  _principalOf(roomId, lane) {
+    const member = this._memberOf(roomId, lane);
+    if (!member) return null;
+    if (typeof member.accountableHumanId === "string" && member.accountableHumanId) return member.accountableHumanId;
+    return member.kind === "human" ? lane : null;
+  }
+  _claimProvenance(roomId, bounty) {
+    const row = this.db.prepare(
+      "SELECT data FROM bounty_events WHERE room_id=? AND bounty_id=? AND type='bounty.claimed' ORDER BY seq DESC LIMIT 1")
+      .get(roomId, bounty.bountyId);
+    if (row) { try { return JSON.parse(row.data)?.provenance ?? null; } catch { /* fall through to derivation */ } }
+    if (!bounty.claimant) return null;
+    return { sessionInstanceId: claimInstanceId("bounty", bounty.bountyId, bounty.claimant,
+        new Date(bounty.stateChangedMs).toISOString()),
+      principalMemberId: this._principalOf(roomId, bounty.poster), producerRuntime: null };
+  }
+  _declaredRuntime(value) {
+    try { return declaredRuntimeOf(value); }
+    catch (error) { fail("invalid_input", error.message); }
   }
 
   // Resolve the journal actor for a transition. The actor is ALWAYS derived
@@ -1703,7 +1732,7 @@ export class BountyEscrow {
   }
 
   // --- claim / submit / accept --------------------------------------------------------
-  claimBounty(roomId, bountyId, { claimant, actor } = {}) {
+  claimBounty(roomId, bountyId, { claimant, actor, declaredRuntime } = {}) {
     this._ensure();
     const lane = this._requireLane(roomId, claimant, "claimant");
     // Slice 4: the reputation claim gate runs BEFORE the write transaction.
@@ -1765,16 +1794,24 @@ export class BountyEscrow {
       bounty.claimant = lane;
       this._transition(bounty, "claimed");
       this._saveBounty(bounty);
+      // #3612: the claim event carries the round's provenance stamp —
+      // the instance id derived from server-set fields (bounty, claimant
+      // lane, server-clock claim time), the poster's authorizing
+      // principal, and the claimant's declared runtime (labelled
+      // "declared"). Later records in this round recover it from here.
+      const provenance = { sessionInstanceId: claimInstanceId("bounty", bountyId, lane, at),
+        principalMemberId: this._principalOf(roomId, bounty.poster),
+        producerRuntime: this._declaredRuntime(declaredRuntime) };
       const event = this._event(roomId, "bounty.claimed",
         { bountyId, actor: act, before: "funded", after: "claimed",
-          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung } });
+          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung, provenance } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });
   }
 
-  submitWork(roomId, bountyId, { claimant, evidence, actor } = {}) {
+  submitWork(roomId, bountyId, { claimant, evidence, actor, declaredRuntime } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, claimant, "claimant");
@@ -1785,7 +1822,19 @@ export class BountyEscrow {
       check(bounty.state === "claimed", "invalid_state", `bounty is ${bounty.state}, not awaiting submission`);
       check(bounty.claimant === lane, "not_authorized", "only the claimant may submit");
       check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the submission deadline passed");
-      const receipt = this._evidenceOf(evidence, lane);
+      const evidenceRecord = this._evidenceOf(evidence, lane);
+      // #3612: the submission record carries the claim round's
+      // provenance. The instance + principal come from the claim event
+      // the server wrote at claim time (a provenance key inside the
+      // caller's evidence object is just evidence text — _evidenceOf
+      // picks its known fields and drops it); the producer runtime is
+      // the claimant's finish-time declaration when given, else the one
+      // declared at claim.
+      const claimProvenance = this._claimProvenance(roomId, bounty);
+      const provenance = { sessionInstanceId: claimProvenance?.sessionInstanceId ?? null,
+        principalMemberId: claimProvenance?.principalMemberId ?? this._principalOf(roomId, bounty.poster),
+        producerRuntime: this._declaredRuntime(declaredRuntime) ?? claimProvenance?.producerRuntime ?? null };
+      const receipt = Object.freeze({ ...evidenceRecord, provenance: Object.freeze(provenance) });
       // Acceptance track: the work enters review, evidence-cited.
       this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
       bounty.evidence = receipt;
@@ -1796,7 +1845,7 @@ export class BountyEscrow {
       this._saveBounty(bounty);
       const at = isoNow(this.nowMs());
       const event = this._event(roomId, "bounty.submitted",
-        { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
+        { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl, provenance } });
       // Slice 10: claim-graph correlation -> review packet; above-threshold
       // clusters -> sybil flags for the arbiter review queue. Review-only:
       // packets and flags never change bounty state, balances, bonds, or
@@ -2118,7 +2167,7 @@ export class BountyEscrow {
     return false;
   }
 
-  acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
+  acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor, declaredRuntime } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, acceptor, "acceptor");
@@ -2162,9 +2211,17 @@ export class BountyEscrow {
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
         memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
         receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
+      // #3612: the attestation carries the round's provenance — placed
+      // AFTER the caller's attestation spread, so a provenance key
+      // smuggled inside verifierAttestation is overwritten by the
+      // server-derived stamp, never stored as asserted.
+      const claimProvenance = this._claimProvenance(roomId, bounty);
       bounty.attestation = Object.freeze({ ...verifierAttestation, citations,
         rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
-        recordedBy: lane, recordedAt: at });
+        recordedBy: lane, recordedAt: at,
+        provenance: Object.freeze({ sessionInstanceId: claimProvenance?.sessionInstanceId ?? null,
+          principalMemberId: claimProvenance?.principalMemberId ?? this._principalOf(roomId, bounty.poster),
+          verifierRuntime: this._declaredRuntime(declaredRuntime) }) });
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);
@@ -2204,11 +2261,17 @@ export class BountyEscrow {
     const existing = this._settledVerdict(bounty);
     if (existing) return { settlement: existing, event: null, alreadySettled: true };
     const at = isoNow(this.nowMs());
+    // #3612: every settlement record carries the round's provenance —
+    // the claim instance and the poster's authorizing principal,
+    // recovered from the server's claim event.
+    const claimProvenance = this._claimProvenance(bounty.roomId, bounty);
     const settlement = Object.freeze({ kind,
       workerMillis, workerCredits: toCredits(workerMillis),
       refundMillis, refundCredits: toCredits(refundMillis),
       reason, settledAt: at,
-      settledBy: actor ? Object.freeze({ kind: actor.kind, id: actor.id }) : null });
+      settledBy: actor ? Object.freeze({ kind: actor.kind, id: actor.id }) : null,
+      provenance: Object.freeze({ sessionInstanceId: claimProvenance?.sessionInstanceId ?? null,
+        principalMemberId: claimProvenance?.principalMemberId ?? this._principalOf(bounty.roomId, bounty.poster) }) });
     bounty.resolution = Object.freeze({ ...(bounty.resolution ?? {}), settlement });
     this._saveBounty(bounty);
     const event = this._event(bounty.roomId, "bounty.settled",

@@ -12,6 +12,12 @@ const tool = (name, description, inputSchema, readOnly) => ({ name, description,
  _meta: { authorization: ['public_work_recommend', 'public_work_read_task'].includes(name) ? 'none' : 'saved-identity-secret' },
  annotations: { readOnlyHint: readOnly, destructiveHint: name === 'public_work_release', idempotentHint: true, openWorldHint: false } });
 const binding = { taskId: id, requestId: id, expectedTermsVersion: positive };
+// #3612: an agent may declare its own model/harness at claim/finish; the
+// receipt stores it labelled "declared". Principal/session stamps are
+// server-derived and are not accepted here.
+const declaredRuntime = { type: 'object', additionalProperties: false, properties: {
+  model: { type: 'string', minLength: 1, maxLength: 128 }, harness: { type: 'string', minLength: 1, maxLength: 128 } },
+  description: 'Your model identity/version and harness version, stored on the record as declared (not server-verified).' };
 const lease = { type: 'number', exclusiveMinimum: 0, maximum: 24 };
 export const publicWorkMcpDefinitions = Object.freeze([
  tool('public_work_recommend', 'Recommend available volunteer tasks. Read only; never claims, joins a room, starts an agent or promises payment. Continue using nextCursor as after when hasMore.', schema({
@@ -21,10 +27,10 @@ export const publicWorkMcpDefinitions = Object.freeze([
    after: { ...id, description: 'Paging cursor: pass the previous response nextCursor when hasMore is true.' }
  }), true),
  tool('public_work_read_task', 'Read current public terms, repository paths and lease. No private room data or admission. Inspect before claiming.', schema({ taskId: { ...id, description: 'The task id from public_work_recommend (task.taskId), for example "t_abc".' } }, ['taskId']), true),
- tool('public_work_claim', 'Explicitly claim one public volunteer task with your saved identity. No room admission. Preserve requestId and exact arguments after an unknown response; expectedTermsVersion comes from a fresh task read.', schema({ ...binding, leaseHours: lease }, Object.keys(binding)), false),
+ tool('public_work_claim', 'Explicitly claim one public volunteer task with your saved identity. No room admission. Preserve requestId and exact arguments after an unknown response; expectedTermsVersion comes from a fresh task read.', schema({ ...binding, leaseHours: lease, declaredRuntime }, Object.keys(binding)), false),
  tool('public_work_renew', 'Renew your own public claim generation. No host execution. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive, leaseHours: lease }, [...Object.keys(binding), 'generation']), false),
  tool('public_work_release', 'Release your own public claim generation. Frees its repository paths; does not delete a submitted receipt. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive }, [...Object.keys(binding), 'generation']), false),
- tool('public_work_finish', 'Submit exact UTF-8 artifact text (at most 64 KiB) for your current claim generation and free its paths. Checks are producer-reported. The immutable receipt proves stored bytes only, not acceptance or payment. The result includes publicReceipt.url and artifactUrl for independent byte verification. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive, artifactText: { type: 'string', maxLength: 65536 }, checksReported: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 1000 } } }, [...Object.keys(binding), 'generation', 'artifactText', 'checksReported']), false),
+ tool('public_work_finish', 'Submit exact UTF-8 artifact text (at most 64 KiB) for your current claim generation and free its paths. Checks are producer-reported. The immutable receipt proves stored bytes only, not acceptance or payment. The result includes publicReceipt.url and artifactUrl for independent byte verification. Retry unchanged with the same requestId.', schema({ ...binding, generation: positive, artifactText: { type: 'string', maxLength: 65536 }, checksReported: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 1000 } }, declaredRuntime }, [...Object.keys(binding), 'generation', 'artifactText', 'checksReported']), false),
  tool('public_work_my_review', 'Read only your own contribution feedback using your saved identity. Includes shared decision feedback when recorded; excludes private Room and reviewer identities and does not imply credits or payment.', schema({ receiptId: id }, ['receiptId']), true)
 ]);
 if (publicWorkMcpDefinitions.map(tool => tool.name).join() !== PUBLIC_WORK_MCP_TOOLS.join()) throw new Error('Public work MCP catalog drift');

@@ -5,6 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
+import { claimInstanceId, declaredRuntimeOf } from './record-stamps.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
@@ -419,7 +420,7 @@ export class PublicWorkClaims {
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
     check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
-    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
+    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours', 'declaredRuntime'] : action === 'finish' ? ['criteriaAttestation', 'declaredRuntime'] : []);
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
@@ -463,7 +464,11 @@ export class PublicWorkClaims {
           const held = this.liveClaimsOf(identity.identityId);
           if (held >= PUBLIC_WORK_MAX_LIVE_CLAIMS_PER_IDENTITY)
             fail(409, 'public_work_claim_limit', `You hold ${held} live public-work claims — the per-identity ceiling is ${PUBLIC_WORK_MAX_LIVE_CLAIMS_PER_IDENTITY}. Finish or release one before claiming another.`);
-          item = claimWork(item, identity.identityId, { files, leaseHours: this.deadlineLeaseHours(offer, lease(input.leaseHours)), now: this.store.now() });
+          // #3612: a declared runtime is validated here so a malformed
+          // declaration fails with this surface's error shape; claimWork
+          // stores it on the claim item labelled "declared".
+          try { declaredRuntimeOf(input.declaredRuntime); } catch (error) { check(false, error.message); }
+          item = claimWork(item, identity.identityId, { files, leaseHours: this.deadlineLeaseHours(offer, lease(input.leaseHours)), now: this.store.now(), declaredRuntime: input.declaredRuntime });
           item = updateWork(item, identity.identityId, { state: 'in_progress', now: this.store.now() });
           this.db.prepare('UPDATE public_work_tasks SET generation=generation+1 WHERE offer_id=?').run(offerId);
           row.generation += 1;
@@ -560,9 +565,26 @@ export class PublicWorkClaims {
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
+          // #3612 provenance: every stamp is server-derived at this
+          // write. The session instance is the claim round's own id
+          // (stamped by claimWork at claim time; derived here from the
+          // server-held generation for rounds that predate it). The
+          // authorizing principal is the member who created the offer —
+          // project offers are owner-created, so owner_id on the offer
+          // row IS the human who authorized this work. The producer
+          // runtime is the finisher's declaration at finish, else the
+          // one declared at claim, stored labelled "declared". Caller
+          // input keys naming a principal or session are not in the
+          // finish shape, so a spoofed stamp is refused, never stored.
+          let finishRuntime = null;
+          try { finishRuntime = declaredRuntimeOf(input.declaredRuntime); } catch (error) { check(false, error.message); }
+          const offerRow = this.db.prepare('SELECT owner_id FROM project_offers WHERE offer_id=?').get(offerId);
+          const provenance = { sessionInstanceId: item.instanceId ?? claimInstanceId('public-work', offerId, identity.identityId, row.generation),
+            principalMemberId: offerRow?.owner_id ?? null,
+            producerRuntime: finishRuntime ?? item.producerRuntime ?? null };
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
-            artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks, provenance,
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.

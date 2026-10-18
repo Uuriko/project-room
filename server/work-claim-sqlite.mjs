@@ -22,7 +22,9 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
-  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration"];
+  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration",
+  // #3612: the claim round's instance id + declared producer runtime.
+  "instanceId", "producerRuntime"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
@@ -30,7 +32,8 @@ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, hist
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
   kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, requestOutcomes: {},
-  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0 };
+  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0,
+  instanceId: null, producerRuntime: null };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -40,6 +43,10 @@ const decodeItem = text => {
   if (item.deploy == null) delete item.deploy;
   // PRODUCT-200 A4: idempotency records are sparse; absent means none seen.
   if (item.requestOutcomes == null || Object.keys(item.requestOutcomes).length === 0) delete item.requestOutcomes;
+  // #3612: stamp fields are sparse too; absent means the claim round
+  // predates stamping (or declared no runtime).
+  if (item.instanceId == null) delete item.instanceId;
+  if (item.producerRuntime == null) delete item.producerRuntime;
   return item;
 };
 
