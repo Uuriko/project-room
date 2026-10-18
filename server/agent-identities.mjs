@@ -510,7 +510,15 @@ export class AgentIdentities {
       clauses.push("AND identity_id NOT IN (SELECT redeemed_by_identity_id FROM guest_invites WHERE redeemed_by_identity_id IS NOT NULL)");
     }
     if (table("work_claims")) {
-      clauses.push(`AND identity_id NOT IN (
+      // P0-1-RESHAPE: read the generated probe columns when they have
+      // converged (work_claims_owner_probe covers this shape); a store
+      // whose schema predates them keeps the legacy extract form.
+      const probeCols = new Set(this.db.prepare("SELECT name FROM pragma_table_xinfo('work_claims')").all().map(row => row.name));
+      clauses.push(probeCols.has("claim_owner") && probeCols.has("claim_state") ? `AND identity_id NOT IN (
+        SELECT claim_owner FROM work_claims
+        WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+          AND claim_owner IS NOT NULL
+      )` : `AND identity_id NOT IN (
         SELECT owner_id FROM (
           SELECT COALESCE(json_extract(item_json, '$.data.owner'), json_extract(item_json, '$.owner')) AS owner_id
           FROM work_claims
