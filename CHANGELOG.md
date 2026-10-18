@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Tooling (CH-1): `scripts/CANDIDATE-MANIFEST.json` is no longer committed.
+  The candidate manifest is generated from the tree: freeze/deploy
+  preparation generates it locally with
+  `node scripts/candidate-manifest.mjs --write` (freeze-mode generation is
+  unchanged), and the drift test now proves generation determinism
+  (same tree → same bytes) in CI instead of committed-file freshness —
+  retiring the recurring manifest re-pin cure commits and the merge-up
+  conflicts the committed file caused whenever any pinned asset changed.
+  (A CI job uploading the generated manifest as a run artifact follows once
+  a workflow-scope token lands the test.yml change.)
+
 - First-room setup failure no longer reads as an empty account ("No rooms
   yet."). It now says the setup failed and names the retry: "Couldn’t set
   up your first room. Choose Rooms to retry."
