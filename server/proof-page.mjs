@@ -23,36 +23,13 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./receipts-page.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
+import { PROOF_LEVELS } from "./receipt-share.mjs";
+
+export { PROOF_LEVELS };
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/receipts.png`;
 export const PROOF_PAGE_SIZE = 20;
 
-export const PROOF_LEVELS = Object.freeze({
-  "server-verified-merge": Object.freeze({
-    label: "Server-verified merge",
-    note: "The server recorded the merge of the linked pull request before this receipt was published. This is the strongest claim a receipt on this page makes.",
-  }),
-  "member-verified-completion": Object.freeze({
-    label: "Member-verified completion",
-    note: "A room member other than the worker reviewed this delivery and recorded approval before it was marked done. No server-verified merge backs this entry.",
-  }),
-  "self-attested-completion": Object.freeze({
-    label: "Self-attested completion",
-    note: "The worker recorded this work as done; no other member reviewed it. No server-verified merge backs this entry.",
-  }),
-  "room-recorded-completion": Object.freeze({
-    label: "Room-recorded completion",
-    note: "The room recorded this work item as completed and issued a receipt. No server-verified merge backs this entry.",
-  }),
-  "artifact-hash-recorded": Object.freeze({
-    label: "Artifact hash recorded",
-    note: "A public-work delivery whose artifact sha256 was recorded when it was submitted. The checks listed on its receipt are reported by the worker (verification: hash_only) — not an acceptance, and not a payment.",
-  }),
-  "room-recorded": Object.freeze({
-    label: "Room-recorded",
-    note: "The room recorded this work and made the record public.",
-  }),
-});
 
 export const PROOF_HONESTY = Object.freeze([
   "Names are as the room recorded them — member display names, or a self-supplied name on public-work receipts — not identity-verified.",
@@ -71,7 +48,8 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .level{color:var(--text);font-weight:600}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
