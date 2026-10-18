@@ -10,7 +10,9 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../server/room-entry.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
-import { ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
+import { CORE_MCP_TOOLS, ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
+import { listedMcpTools } from "../server/mcp-discovery.mjs";
+import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import {
   MCP_DISCOVERY_CACHE_CONTROL, MCP_DISCOVERY_CACHE_SCOPE, MCP_DISCOVERY_TTL_MS,
   MCP_SERVER_CARD_DESCRIPTION, MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_NAME
@@ -95,10 +97,21 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
     body: rpcBody("tools/list")
   });
   assert.equal(enrolled.status, 200);
-  const enrolledTools = (await enrolled.json()).result.tools;
-  assert.deepEqual(card.tools.enrolled, enrolledTools);
+  const bearerTools = (await enrolled.json()).result.tools;
+  // The minted identity holds no room membership, so the door serves it the
+  // non-member (public-work) catalog. That is a different subject from the
+  // card's enrolled tier, which advertises the member catalog: the default
+  // core list a member bearer gets, derived from the serving registry (#3769).
+  assert.deepEqual(bearerTools, listedMcpTools("core", false, null, "public_work"));
+  assert.deepEqual(card.tools.enrolled, listedMcpTools("core", false, null));
+  assert.equal(card.tools.enrolled.length, CORE_MCP_TOOLS.length + MCP_JOIN_TOOLS.length,
+    "enrolled count derives from the registry: core profile plus the join tools");
+  assert.ok(card.tools.enrolled.some(tool => tool.name === "room_post_message"),
+    "enrolled tier lists hosted room tools");
+  assert.notDeepEqual(card.tools.enrolled, bearerTools,
+    "enrolled tier is not the non-member catalog");
   assert.equal(responses[0].includes(secret), false);
-  assert.ok(enrolledTools.length > card.tools.public.length);
+  assert.ok(card.tools.enrolled.length > card.tools.public.length);
 
   const initialized = await fetch(`${origin}/mcp`, {
     method: "POST",

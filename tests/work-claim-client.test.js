@@ -114,11 +114,15 @@ test('SDK sends invalid declarations for server rejection instead of silently dr
 
 test('SDK preserves legacy notes and requires an explicit approval for reviewed completion', async t => {
   const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
+  const BUNDLE = { artifact: { kind: 'text', ref: 'room://artifacts/sdk', sha256: 'd'.repeat(64) },
+    checks: [{ name: 'unit', result: 'pass' }], criteria: [] };
   await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
   const before = stripTrust(await owner.workClaimGet('reviewed'));
+  // #3546: from in_progress there is no completion call at all — the work
+  // must be delivered first, whatever the review state.
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-    error => error.status === 403 && error.code === 'work_review_rejected');
+    error => error.status === 422 && error.code === 'work_not_delivered');
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), before);
   const reviewed = await peer.reviewWorkItem('reviewed', { note: 'Checked the result' });
   assert.equal(reviewed.attestations.length, 1);
@@ -126,7 +130,7 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
   assert.equal(reviewed.attestations[0].note, 'Checked the result');
   assert.deepEqual(reviewed.reviews, []);
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-    error => error.status === 403 && error.code === 'work_review_rejected');
+    error => error.status === 422 && error.code === 'work_not_delivered');
   await assert.rejects(peer.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_not_owner');
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), reviewed);
@@ -135,7 +139,7 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
     assert.equal(negative.reviews[0].verdict, verdict);
     assert.equal(negative.reviews[0].memberId, 'reviewer');
     await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-      error => error.status === 403 && error.code === 'work_review_rejected');
+      error => error.status === 422 && error.code === 'work_not_delivered');
     assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), negative);
   }
   const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
@@ -143,9 +147,15 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
   assert.equal(approved.reviews[0].memberId, 'reviewer');
   for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
   assert.deepEqual(stripTrust((await owner.workClaimGet('reviewed')).reviews), approved.reviews);
-  const done = await owner.workComplete('reviewed', { reviewedBy: 'reviewer' });
+  // the holder delivers; the reviewer verifies from their own session
+  const delivered = await owner.workDeliver('reviewed', { delivery: BUNDLE });
+  assert.equal(delivered.state, 'delivered');
+  await assert.rejects(owner.workComplete('reviewed', {}),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  const done = await peer.workComplete('reviewed', {});
   assert.equal(done.state, 'done');
   assert.equal(done.reviewedBy, 'reviewer');
+  assert.equal(done.verification.state, 'verified');
   await assert.rejects(peer.reviewWorkItem('reviewed', { note: 'Too late' }), invalid);
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), done);
 });
