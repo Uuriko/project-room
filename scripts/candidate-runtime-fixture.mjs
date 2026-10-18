@@ -192,6 +192,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/public-search.mjs'); // public search assets (imported by server/http.mjs)
   paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
+  paths.add('cloudflare/route-stats.mjs'); // PERF2-MEASURE sampled route counters (imported by cloudflare/room.mjs)
   paths.add('cloudflare/channel-drain-tick.mjs'); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
