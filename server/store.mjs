@@ -3146,11 +3146,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Reads only the authority and history fields, not the full projection, so
   // event polling stays cheap.
   historyFloor(roomId, memberId, headSequence = null) {
-    const { sequence, ownerId, members } = this.roomAuthority(roomId);
-    const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
-    let visibility = null;
-    try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
-    const state = { room: { ownerId, historyVisibility: visibility, historyDefaultsVersion: row?.defaults ?? null }, members };
+    const { sequence, ownerId, members, historyVisibility, historyDefaultsVersion } = this.roomAuthority(roomId, { includeHistory: true });
+    const state = { room: { ownerId, historyVisibility, historyDefaultsVersion }, members };
     return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? sequence);
   }
   // --- end PRIV-2 ---
@@ -3490,7 +3487,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return out;
     });
   }
-  roomAuthority(roomId) {
+  roomAuthority(roomId, { includeHistory = false } = {}) {
+    // History policy travels in the same validated prefix as membership. This
+    // keeps fresh permission reads independent of conversation JSON parsing.
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
     // WRITE-PATH-WINS win 5: ownerId and members are the first two
@@ -3502,14 +3501,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // falls back to the full-projection extract below, so the values
     // returned are always the stored ones, read fresh.
     const prefix = (this._roomAuthorityPrefixStmt ??= this.db.prepare(
-      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members') END AS authority FROM rooms WHERE id=?"));
+      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members', '$.room.historyVisibility', '$.room.historyDefaultsVersion') END AS authority FROM rooms WHERE id=?"));
     let row = prefix.get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     let authority = null;
     try { authority = JSON.parse(row.authority); } catch { /* fall through to the full extract */ }
     let [ownerId, members] = Array.isArray(authority) ? authority : [];
     if (typeof ownerId !== "string" || !members || typeof members !== "object") {
-      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?"));
+      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members','$.room.historyVisibility','$.room.historyDefaultsVersion') AS authority FROM rooms WHERE id=?"));
       row = full.get(roomId);
       if (!row) fail(404, "room_not_found", "Room not found");
       authority = JSON.parse(row.authority);
@@ -3517,7 +3516,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (typeof ownerId !== "string" || !members || typeof members !== "object")
         fail(500, "projection_corrupt", "Room projection is missing authority fields");
     }
-    return { sequence: row.sequence, ownerId, members };
+    return { sequence: row.sequence, ownerId, members,
+      ...(includeHistory ? { historyVisibility: authority[2] ?? null, historyDefaultsVersion: authority[3] ?? null } : {}) };
   }
   rebuildProjection(roomId, through = null) {
     return this._replayRoom(roomId, through ?? this.room(roomId).sequence);
