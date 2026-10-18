@@ -288,7 +288,7 @@ optional.push("server/abuse-rate-buckets.mjs"); // Durable abuse rate buckets (i
 optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /connectors/muse.md)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
-optional.push("server/operator-auth.mjs", "server/operator-actions.mjs", "server/purge-registry.mjs", "server/operator-purge.mjs", "server/operator-status.mjs", "server/operator-routes.mjs"); // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
+optional.push("server/operator-auth.mjs", "server/operator-actions.mjs", "server/purge-registry.mjs", "server/operator-purge.mjs", "server/operator-status.mjs", "server/operator-routes.mjs", "server/operator-archive.mjs"); // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs); P0-6 adds operator-archive (imported by server/operator-routes.mjs)
 optional.push("src/account-deletion.mjs"); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
@@ -362,6 +362,7 @@ optional.push("server/boot-options.mjs"); // imported by server.mjs: default boo
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/boot-config.mjs"); // imported by server.mjs: fail-loud critical-config boot gate (RC-2026-09-27-2732)
 optional.push("server/messages-store.mjs"); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+optional.push("server/messages-archive.mjs"); // P0-6: archive trigger + tick shared by the operator route and the jobs registry (imported by server/jobs.mjs and server/operator-archive.mjs)
 optional.push("server/message-redaction.mjs"); // PRIV-1: rewrite deleted message text out of the log (imported by server/store.mjs and server/account-deletion.mjs)
 optional.push("server/history-visibility.mjs"); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)
 optional.push("server/pins.mjs");

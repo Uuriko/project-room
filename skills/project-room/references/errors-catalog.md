@@ -411,6 +411,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_account_binding` | 422 | Only a human Room member can bind to an account | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_change` | 422 | Account change requires a current revision, active state, and reason | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_id` | 422 | A valid account is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_archive` | 422 | Supply a roomId; live:true performs the archival, anything else is a dry run | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_limit` | 422 | limit must be an integer between 1 and ${ACTIVITY_LIMIT_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_read` | 422 | ids is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_selection` | 422 | before must be a positive event id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
