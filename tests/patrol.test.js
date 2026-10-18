@@ -294,12 +294,14 @@ test("job wiring: after the fresh park, the patrol job records success with the 
     post(store, "p1", "poison room message", "aaa-poison");
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
     const job = jobByName("patrol");
+    let records = {};
     const tick = async at => {
       const outcomes = await runCronJobs(
         { patrol: () => job.run(store, { deadline: Date.now() + 5000 }) },
         { now: () => at, log: () => {} }
       );
-      return applyOutcomes({}, outcomes);
+      records = applyOutcomes(records, outcomes);
+      return records;
     };
     // Tick 1 fails once (the fresh park). Tick 2 must succeed: before the
     // park existed, every tick failed forever and lastSuccess never moved
@@ -308,11 +310,36 @@ test("job wiring: after the fresh park, the patrol job records success with the 
     const failedEntry = jobHealthView(failed, 1_000).jobs.find(candidate => candidate.name === "patrol");
     assert.equal(failedEntry.consecutiveFailures, 1);
     assert.equal(failedEntry.lastSuccessAt, null);
-    const records = await tick(2_000);
-    const entry = jobHealthView(records, 2_000).jobs.find(candidate => candidate.name === "patrol");
+    const settled = await tick(2_000);
+    const entry = jobHealthView(settled, 2_000).jobs.find(candidate => candidate.name === "patrol");
     assert.equal(entry.consecutiveFailures, 0, "the standing park no longer fails the job");
     assert.ok(entry.lastSuccessAt, "lastSuccess advances once the poison room is parked");
     assert.equal(entry.lastSummary.parked, 1, "the parked count stays visible in the job summary");
+
+    // Head moves on the still-corrupt room: each earns a retry, and each
+    // retry re-finds the identical break. Three in a row must record
+    // successes — the park is refreshed and counted, the failure counter
+    // holds at 0, and lastSuccessAt keeps advancing. (Before the
+    // park-refresh accounting fix, every one of these ticks failed: the
+    // job's green was hostage to the unrepaired room's event rate.)
+    let lastSuccessAt = entry.lastSuccessAt;
+    for (const at of [3_000, 4_000, 5_000]) {
+      const movedHead = headOf(store, "aaa-poison") + 1;
+      const raw = makeEvent({
+        id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+        actorId: "owner", roomId: "aaa-poison", at: new Date(at).toISOString(),
+        data: { messageId: `p-move-${at}`, body: "still corrupt" }
+      });
+      store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("aaa-poison", movedHead, raw.id, JSON.stringify(raw));
+      store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead);
+      const afterMove = await tick(at);
+      const moveEntry = jobHealthView(afterMove, at).jobs.find(candidate => candidate.name === "patrol");
+      assert.equal(moveEntry.consecutiveFailures, 0, "a same-break park refresh does not fail the job");
+      assert.equal(moveEntry.lastSummary.parked, 1, "the parked count stays in the summary");
+      assert.ok(moveEntry.lastSuccessAt > lastSuccessAt, "lastSuccessAt advances on head-move ticks");
+      lastSuccessAt = moveEntry.lastSuccessAt;
+      assert.equal(store.patrolBlocks()[0].headSeq, movedHead, "the park record was refreshed to the new head");
+    }
   } finally { store.close(); }
 });
 
@@ -326,7 +353,13 @@ test("a parked room is retried once its head moves, and a repair unparks it", ()
     assert.equal(store.patrolTick().errors, undefined, "parked: standing ticks succeed");
 
     // Head moves (a new stored message event): one retry, which throws on
-    // the same corrupt projection — the refreshed park surfaces once more.
+    // the same corrupt projection. The retry still happens and the park is
+    // still refreshed to the new head, but the re-diagnosis is not news —
+    // same cursor, same error class — so it no longer surfaces as a tick
+    // failure. (This assertion deliberately amends the #3988-era one below
+    // it in git history, which charged one failure per head move: under an
+    // unrepaired, still-active room that held the job's failure counter
+    // hostage at the room's event rate, forever.)
     const movedHead = headOf(store, "aaa-poison") + 1;
     const raw = makeEvent({
       id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
@@ -336,7 +369,9 @@ test("a parked room is retried once its head moves, and a repair unparks it", ()
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("aaa-poison", movedHead, raw.id, JSON.stringify(raw));
     store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead);
     const retried = store.patrolTick();
-    assert.equal(retried.errors, 1, "the moved head earns one re-diagnosis, surfaced once");
+    assert.equal(retried.errors, undefined, "the moved head earns one re-diagnosis, not one failure: the break is unchanged");
+    assert.equal(retried.scanError, undefined);
+    assert.equal(retried.parked, 1, "the refreshed park rides the summary as a count");
     assert.equal(store.patrolBlocks()[0].headSeq, movedHead, "the park now names the new head");
     assert.equal(store.patrolTick().errors, undefined, "and then it is parked again, not wedged");
 
@@ -358,6 +393,54 @@ test("a parked room is retried once its head moves, and a repair unparks it", ()
     const resumed = store.patrolTick();
     assert.equal(resumed.fresh, 0);
     assert.equal(resumed.errors, undefined, "normal ticks patrol the healed room again");
+  } finally { store.close(); }
+});
+
+test("a parked room whose break changes kind fails once more, with the new class", () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "first message", "aaa-poison");
+    // Park on a torn projection with no archive marker in it: the
+    // agreement leg's JSON.parse of the projection throws SyntaxError.
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    const first = store.patrolTick();
+    assert.equal(first.errors, 1, "the fresh park surfaces once as a named failure");
+    assert.equal(store.patrolBlocks()[0].errorClass, "SyntaxError");
+
+    const moveHead = messageId => {
+      const movedHead = headOf(store, "aaa-poison") + 1;
+      const raw = makeEvent({
+        id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+        actorId: "owner", roomId: "aaa-poison", at: new Date().toISOString(),
+        data: { messageId, body: "moved" }
+      });
+      store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("aaa-poison", movedHead, raw.id, JSON.stringify(raw));
+      store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead);
+      return movedHead;
+    };
+
+    // Same break, moved head: the refresh is not news and does not fail.
+    moveHead("p2");
+    const sameBreak = store.patrolTick();
+    assert.equal(sameBreak.errors, undefined, "a same-break refresh rides the count, not the failure channel");
+    assert.equal(sameBreak.parked, 1);
+    assert.equal(store.patrolBlocks()[0].errorClass, "SyntaxError");
+
+    // The stored break changes kind: the torn projection now carries the
+    // archive marker, so the snapshot's archive read (json_extract over
+    // malformed JSON) throws a plain Error before the parse leg is ever
+    // reached. Same cursor, new class — that IS news, and fails once.
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'")
+      .run('{"messagesArchive":{"throughSeq":1,"count":1,"retainedIds":["p1"');
+    moveHead("p3");
+    const changed = store.patrolTick();
+    assert.equal(changed.errors, 1, "a changed break surfaces once as a named failure");
+    assert.equal(changed.failureDetail.errorClass, "Error", "the new class is the named one");
+    assert.match(changed.scanError, /patrol could not process a room \(Error\)/);
+    assert.equal(store.patrolBlocks()[0].errorClass, "Error", "the park record carries the new break");
+    const standing = store.patrolTick();
+    assert.equal(standing.errors, undefined, "and then it is parked again — exactly once");
+    assert.equal(standing.parked, 1);
   } finally { store.close(); }
 });
 

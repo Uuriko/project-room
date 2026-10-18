@@ -229,9 +229,9 @@ function errorTextOf(error) {
 }
 
 // Record (or refresh) a room's park after patrolRoom threw. Returns the
-// recorded block plus `fresh`: true when the park is new or changed — the
-// caller surfaces a fresh park once, loudly, instead of re-failing every
-// tick on the same stored state.
+// recorded block. Whether the refresh is news worth failing the tick over
+// is the caller's judgement (isFreshPark, against the tick-start park):
+// this function only ever records the room's current break.
 function parkRoom(store, room, error) {
   const db = store.db;
   const cursor = db.prepare("SELECT sequence, event_id FROM patrol_cursor WHERE room_id=?").get(room.id);
@@ -242,9 +242,6 @@ function parkRoom(store, room, error) {
     errorClass: errorClassOf(error),
     error: errorTextOf(error)
   };
-  const existing = db.prepare("SELECT sequence, event_id, head_seq, error_class, error FROM patrol_blocks WHERE room_id=?").get(room.id);
-  const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId
-    || existing.head_seq !== block.headSeq || existing.error_class !== block.errorClass || existing.error !== block.error;
   store.transaction(() => {
     db.prepare(`INSERT INTO patrol_blocks (room_id, sequence, event_id, head_seq, error_class, error, blocked_at)
       VALUES (?,?,?,?,?,?,?)
@@ -253,7 +250,23 @@ function parkRoom(store, room, error) {
         blocked_at=excluded.blocked_at`)
       .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now());
   });
-  return { fresh, block: { roomId: room.id, ...block } };
+  return { roomId: room.id, ...block };
+}
+
+// A re-diagnosis is news — worth failing the tick over — only when it
+// changes what the park record says about the break: no prior park, or
+// the break's identity moved (the cursor it is stuck at — sequence or
+// event id — or the class of the throw). A refresh that differs from the
+// recorded park only in head_seq / blocked_at / error text is the same
+// stored break seen again after the room's head advanced: the park is
+// still refreshed, but charging the tick for it held the job's failure
+// counter hostage to an unrepaired room's event rate — every event the
+// room received earned one more failing tick, forever.
+function isFreshPark(priorBlock, block) {
+  return !priorBlock
+    || priorBlock.sequence !== block.sequence
+    || priorBlock.eventId !== block.eventId
+    || priorBlock.errorClass !== block.errorClass;
 }
 
 function clearPark(store, roomId) {
@@ -320,13 +333,14 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
       // reason to stall the others. The cursor was not advanced (patrolRoom
       // writes in one transaction), so without parking the next tick would
       // retry from the same sequence and throw again — forever. Park it:
-      // a fresh park is this tick's named failure; a standing park is
+      // a fresh park (isFreshPark, against the park recorded at tick
+      // start) is this tick's named failure; a same-break refresh is
       // carried by the `parked` count below and does not re-fail the job.
       let parkFresh = true;
       try {
         const parked = parkRoom(store, room, error);
-        parkFresh = parked.fresh;
-        blocks.set(room.id, parked.block);
+        parkFresh = isFreshPark(blocks.get(room.id), parked);
+        blocks.set(room.id, parked);
       } catch { /* parking failed: surface the throw as before */ }
       if (parkFresh) {
         errors += 1;
