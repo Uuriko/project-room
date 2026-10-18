@@ -92,7 +92,7 @@ export function isEvidenceJob(name) {
   return /shard \d+\/\d+/.test(name ?? "") || name === "cloudflare";
 }
 
-/** Strip a runner-absolute path (/home/runner/work/<repo>/<repo>/tests/…)
+/** Strip a runner-absolute path (workspace prefix ahead of tests/…)
  * down to its repo-relative form; leave relative paths untouched. */
 export function normalizeRepoPath(p) {
   if (!p || !p.startsWith("/")) return p ?? "";
