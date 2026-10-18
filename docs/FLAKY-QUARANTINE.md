@@ -28,6 +28,41 @@ A flaky test — one that fails non-deterministically while the product is fine 
    ```
 4. **Repair or re-admit within 14 days.** The owner fixes the root cause (not the assertion — the race, the clock dependency, the shared fixture) and the test re-enters the blocking suite with its entry deleted. A genuinely unfixable test is re-admitted only as a deleted test: remove the entry and delete or permanently disable the test with the reason recorded in the PR, never as an indefinite quarantine.
 
+## The entry trigger (Q-1)
+
+Entry used to be a manual act nobody was triggered to perform, and pressing
+re-run left no trace. `scripts/quarantine-trigger.mjs` is the trigger:
+
+```sh
+npm run quarantine:propose -- --hours=48
+```
+
+It scans recent `test` workflow runs for the two objective flake signatures —
+(a) a re-run that flips a shard job from failure to success, and (b) two
+completed runs at the same head SHA with opposite conclusions for the same
+shard job — resolves the failing test names from the runs' shard evidence
+artefacts (`unit-shard-evidence-*`, junit sidecars), and writes proposals to
+`tests/quarantine-proposals.json` plus a human-readable evidence file
+(`tests/quarantine-proposals.md`). Both signatures are same-head evidence, so
+the failing and passing observations ran byte-identical code.
+
+The trigger **proposes only — it never writes `tests/quarantine.json`**.
+Acceptance is a reviewed act: the owning lane confirms the candidate with
+`scripts/flaky-detect.mjs` (≥5 runs), assigns an `owner`, and the landing
+authority enters it with `quarantined_at` = the acceptance date and
+`repair_by` ≤ entry + 14 days. An entry without evidence is worse than no
+entry, so the trigger also refuses whole classes of non-evidence:
+
+- **silent runner deaths** — a failed job whose shard evidence names no
+  failing test (or in which no step is recorded as failed) is excluded and
+  referred to CI automation; a dead runner is not a flaky test;
+- **timeout cancels** — a shard cancelled at its timeout and green on re-run
+  is recorded as *needs-naming*, never proposed: a timeout names no test;
+- **real failures** — a job that fails at every observation of its head, and
+  superseded (cancelled) runs, produce no candidate at all;
+- **aggregator jobs** (`unit` / `browser` / `test`) fail *because* a shard
+  failed; they are derivative and never generate candidates.
+
 ## The enforcement
 
 The `quarantine-check` job runs `scripts/quarantine-check.mjs` in CI on every PR and every push to `main`. It exits non-zero when any entry violates the contract:
