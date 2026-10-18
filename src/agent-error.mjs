@@ -37,6 +37,105 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  // Operator archive: refuse unsafe requests with an explicit recovery.
+  invalid_archive_request: {
+    "status": "action_required",
+    "hint": "Archive request has invalid fields or types.",
+    "next": [
+      {
+        "command": "Correct the fields named in the response; use dryRun true to obtain a plan before a real run."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Correct the fields named in the response; use dryRun true to obtain a plan before a real run."
+    }
+  },
+  invalid_room_id: {
+    "status": "action_required",
+    "hint": "Archive roomId is not a valid room identifier.",
+    "next": [
+      {
+        "command": "Use the exact room id from current Room access, rather than a room URL."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Use the exact room id from current Room access, rather than a room URL."
+    }
+  },
+  invalid_keep_newest: {
+    "status": "action_required",
+    "hint": "Archive retention count is outside the supported range.",
+    "next": [
+      {
+        "command": "Set keepNewest to an integer from 100 through 100000 and obtain a new dry run."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Set keepNewest to an integer from 100 through 100000 and obtain a new dry run."
+    }
+  },
+  reason_required: {
+    "status": "action_required",
+    "hint": "Operator archive requires a bounded reason.",
+    "next": [
+      {
+        "command": "Supply a reason containing 1 through 200 characters."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Supply a reason containing 1 through 200 characters."
+    }
+  },
+  dry_run_required: {
+    "status": "action_required",
+    "hint": "Real archive lacks expected counts from a dry run.",
+    "next": [
+      {
+        "command": "Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect."
+    }
+  },
+  read_only: {
+    "status": "action_required",
+    "hint": "Archive cannot run against a read-only store.",
+    "next": [
+      {
+        "command": "Reconcile with the operator; use the authoritative writable store before planning an archive."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Reconcile with the operator; use the authoritative writable store before planning an archive."
+    }
+  },
+  archive_not_ready: {
+    "status": "action_required",
+    "hint": "Message backfill or parity certification is not ready for archive.",
+    "next": [
+      {
+        "command": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
+    }
+  },
   // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
   // of the dedicated branch #3026 landed for #3021.
   agent_not_registered: {

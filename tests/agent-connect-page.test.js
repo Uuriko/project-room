@@ -203,6 +203,20 @@ test("expired, used, and unknown invite pages say to ask for a new link", { time
   assert.equal(used.text, line);
 });
 
+test("a dead invite link opened in a browser gets a page with a way home", { timeout: 60000 }, async t => {
+  const { origin } = await serve(t);
+  const html = await send(origin, "/a/RM-0123456789ABCDEF", { headers: { Accept: "text/html,application/xhtml+xml" } });
+  assert.equal(html.status, 404);
+  assert.match(html.headers.get("content-type"), /^text\/html/);
+  assert.match(html.text, /Ask the room owner for a new link\./);
+  assert.match(html.text, /<a href="\/">/);
+  assert.match(html.headers.get("content-security-policy"), /default-src 'none'/);
+  const md = await send(origin, "/a/RM-0123456789ABCDEF?format=md", { headers: { Accept: "text/html" } });
+  assert.equal(md.text, "Ask the room owner for a new link.\n");
+  const plain = await send(origin, "/a/RM-0123456789ABCDEF");
+  assert.equal(plain.text, "Ask the room owner for a new link.\n");
+});
+
 test("the invite page allows 30 reads a minute from one address", async t => {
   const { origin } = await serve(t);
   let last = null;
