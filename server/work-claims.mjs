@@ -1086,12 +1086,18 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
 // The route layer requires the owner's public progress message — posted
 // in the room after the prior lease start — before calling this; the pure
 // machine records the renewal, never the message check.
-export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
+export function renewWork(work, agentId, { note, leaseHours, room, now, deadlineLease = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
-  check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  // The lapsed guard reads the machine's own liveness rule (#3753
+  // resize): a claim carrying preserved work has NOT lapsed even past
+  // its lease time, so its holder may re-arm the lease. A genuinely
+  // lapsed lease (an idle claim the sweep would reclaim) still refuses
+  // — renew-after-lapse stays refused (RQ-12), and the owner check
+  // above runs first, so no stranger can renew preserved inventory.
+  check(!isLeaseExpired(item, atMs, { deadlineLease }), `work "${item.id}" lease already lapsed — claim it again instead`);
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
@@ -1603,26 +1609,67 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
 // mid-review (the sweep wipes delivery, verification, and reviews), so
 // expiry pauses while any recorded review still stands on the round's
 // CURRENT basis (the issue's fix shape 1: pause the lease while review
-// is outstanding). A review whose basis has moved (new CI head, new
-// delivery) no longer holds the lease, and a delivery with no review
-// outstanding does not either — an abandoned round is still reclaimed,
-// and the sweep still clears its delivery state (bug sweep 2026-10-16
-// F1: the next claimant must never inherit the bundle).
-export function isLeaseExpired(work, now) {
+// is outstanding).
+// RESIZE (CN-10, 2026-10-18): the join over 1,403 simulated episodes
+// measured 57.5% of DELIVERED episodes lost to expiry — every one had
+// delivered well inside its lease and most had no review recorded yet,
+// so the review-outstanding pause alone cannot hold them — plus 249
+// in-progress episodes destroyed (100% had entered in_progress; zero
+// were idle squats). The pause therefore covers WORK PRODUCT, not only
+// reviews (hasLeasePreservedWork): a delivery awaiting its first
+// review, and work that has started, survive expiry as reviewable
+// inventory. What still lapses is the genuinely idle claim — never
+// started, no delivery, no current-basis review — and when the sweep
+// does fire it still clears the round's delivery state (bug sweep
+// 2026-10-16 F1: the next claimant must never inherit the bundle).
+const hasLeasePreservedWork = item =>
+  item.delivery != null
+  || item.state === "in_progress" || item.state === "blocked"
+  || (item.reviews ?? []).some(review => currentReviewBasis(review, item));
+// deadlineLease: the public-work door's leases are submission
+// deadlines by the offer's own terms (#3707) — a hard bound the door
+// chose deliberately, clamped at claim/renew time — so that door opts
+// out of the board's work-product immunity at its own call sites.
+// Every other caller gets the immunity by default.
+export function isLeaseExpired(work, now, { deadlineLease = false } = {}) {
   const item = workOf(work);
   if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null) return false;
-  if ((item.reviews ?? []).some(review => currentReviewBasis(review, item))) return false;
+  if (!deadlineLease && hasLeasePreservedWork(item)) return false;
   return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
+}
+// The expiry warning (CN-10's visibility floor): a claim is warning-due
+// when its lease lapses within LEASE_EXPIRY_WARNING_MS (the same 1h
+// window needs-me's lease_expiring flag uses), or when its lease time
+// has passed but the claim survived on preserved work — the at-expiry
+// warning, telling the holder the clock passed and the work was NOT
+// discarded. A claim whose lease has truly lapsed (idle) is not warned
+// here: the sweep reclaims it and its holder gets the lease_expired
+// wake instead. The route layer turns a due warning into one holder
+// wake per lease window.
+export const LEASE_EXPIRY_WARNING_MS = 3600 * 1000;
+export function leaseExpiryWarning(work, now) {
+  const item = workOf(work);
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null || !item.owner) return null;
+  const expiresMs = Date.parse(item.leaseExpiresAt);
+  if (!Number.isFinite(expiresMs)) return null;
+  const atMs = nowMsOf(now);
+  if (expiresMs > atMs) {
+    return expiresMs - atMs <= LEASE_EXPIRY_WARNING_MS
+      ? Object.freeze({ kind: "expiring", leaseExpiresAt: item.leaseExpiresAt })
+      : null;
+  }
+  return isLeaseExpired(item, atMs) ? null
+    : Object.freeze({ kind: "lapsed_preserved", leaseExpiresAt: item.leaseExpiresAt });
 }
 // Sweep a list: expired claims are auto-released to unclaimed (owner
 // cleared, lease cleared, history stamped). Everything else passes through
 // untouched. Returns a new list; inputs are never mutated.
-export function releaseExpired(items, now) {
+export function releaseExpired(items, now, { deadlineLease = false } = {}) {
   check(Array.isArray(items), "items must be a list");
   const atMs = nowMsOf(now);
   return items.map(entry => {
     const item = workOf(entry);
-    if (!isLeaseExpired(item, atMs)) return item;
+    if (!isLeaseExpired(item, atMs, { deadlineLease })) return item;
     // Auto-release clears owner, lease, the lapsed owner's declared
     // files, and their attestations — whoever claims next starts clean.
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a

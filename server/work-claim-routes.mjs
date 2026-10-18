@@ -39,7 +39,7 @@ import {
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
-  openClaimCount, STALE_UNCLAIMED_DAYS,
+  openClaimCount, STALE_UNCLAIMED_DAYS, leaseExpiryWarning,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -782,6 +782,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
       { reason: "lease_expired", actorId: before.owner });
   });
+  // #3753 resize (CN-10): the expiry warning — the visibility floor the
+  // sweep alone never gave (the only prior notice was needs-me's
+  // pull-only lease_expiring flag, which vanished at expiry when the
+  // claim was destroyed). On the same pass the routes already run for
+  // every board request, wake the holder of each warning-due claim:
+  // lease lapsing within the warning window, or lease time passed with
+  // the work preserved (immunity — the at-expiry warning). The message
+  // id carries the lease expiry, so the queue coalesces repeats into
+  // one warning per lease window, exactly like the lease_expired wake.
+  // A warning must never break the board: failures are swallowed here
+  // (enqueueClaimWake already never throws; the guard covers the scan).
+  try {
+    for (const item of registry.list(roomId)) {
+      const warning = leaseExpiryWarning(item, nowMs);
+      if (!warning) continue;
+      enqueueClaimWake(store, roomId, item.owner,
+        `work-claim:${item.id}:lease_expiring:${warning.leaseExpiresAt}`,
+        { reason: "lease_expiring", actorId: item.owner });
+    }
+  } catch { /* warning scan is best-effort */ }
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);

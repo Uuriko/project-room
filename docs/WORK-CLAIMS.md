@@ -158,6 +158,17 @@ lease without mutating the claim. The list's `swept` array names what that reque
 The former owner is woken once, with reason `lease_expired`. History records
 `lease_expired`. A later read of the same lapse does not wake them again.
 
+A lease does not lapse while the claim carries work product (#3753):
+a recorded delivery (including one awaiting its first review), work
+that has started (`in_progress` / `blocked`), or a review standing on
+the round's current basis. Expiry reclaims only the genuinely idle
+claim — never started, no delivery, no current review. The holder is
+woken once per lease window, with reason `lease_expiring`, when the
+lease lapses within an hour or when its time passes with the work
+preserved. Public-work offers are the exception: their leases are
+submission deadlines by the offer's terms and lapse at the deadline
+regardless (#3707).
+
 ## Reputation-cost claim bonds
 
 Claim behavior feeds the room's reputation ledger (server/claim-reputation.mjs).

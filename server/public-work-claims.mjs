@@ -2,6 +2,12 @@ import { validId } from '../src/events.js';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
+// #3707 vs #3753: this door's leases are submission deadlines by the
+// offer's terms (clamped by deadlineLeaseHours), NOT board leases —
+// the board's work-product immunity (a lease pausing on delivered or
+// in-progress work, #3753/CN-10) must not hold them, or no offer could
+// ever lapse at its deadline. Every lease read below opts out by name.
+const DEADLINE_LEASE = Object.freeze({ deadlineLease: true });
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
@@ -165,7 +171,7 @@ export class PublicWorkClaims {
     for (const row of this.db.prepare('SELECT * FROM public_work_tasks').all()) {
       if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation)) continue;
       const item = this.store.workClaims.get(row.namespace_key, row.offer_id);
-      if (item && releaseExpired([item], now)[0].owner === identityId) held++;
+      if (item && releaseExpired([item], now, DEADLINE_LEASE)[0].owner === identityId) held++;
     }
     return held;
   }
@@ -221,7 +227,7 @@ export class PublicWorkClaims {
     return outcome;
   }
   packet(row, item, offer) {
-    const live = releaseExpired([item], this.store.now())[0];
+    const live = releaseExpired([item], this.store.now(), DEADLINE_LEASE)[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
     // #3546: submitted is the delivered state, not the end of the story —
     // once the named review accepts the submission, the receipt's state
@@ -323,7 +329,7 @@ export class PublicWorkClaims {
   _starterTaskState(row) {
     if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation)) return 'submitted';
     const item = this.store.workClaims.get(row.namespace_key, row.offer_id);
-    const live = item ? releaseExpired([item], this.store.now())[0] : null;
+    const live = item ? releaseExpired([item], this.store.now(), DEADLINE_LEASE)[0] : null;
     return live?.owner ? 'claimed' : 'unclaimed';
   }
   // Replenish the starter set, bounded so it cannot spam: it fires only
@@ -438,7 +444,7 @@ export class PublicWorkClaims {
           fail(409, 'public_work_already_submitted', 'This task already has a submitted receipt');
         const offer = action === 'release' ? this.store.projectOffers.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId)) : this.offer(row);
         // Sweep the whole shared repository/ref namespace before collision checks.
-        for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
+        for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now(), DEADLINE_LEASE)) this.store.workClaims.set(row.namespace_key, item);
         let item = this.store.workClaims.get(row.namespace_key, offerId);
         if (action === 'claim') {
           // Paid tasks gate the claim on the settlement lane + reputation
@@ -485,7 +491,7 @@ export class PublicWorkClaims {
             // expiry and the task returns to the board.
             if (renewalsThisRound(item) >= PUBLIC_WORK_MAX_RENEWALS_PER_CLAIM)
               fail(409, 'public_work_renewal_limit', `This claim has used all ${PUBLIC_WORK_MAX_RENEWALS_PER_CLAIM} renewals for this claim round. Its lease runs to ${item.leaseExpiresAt} and then lapses — finish or release before then.`);
-            item = renewWork(item, identity.identityId, { leaseHours: this.deadlineLeaseHours(offer, lease(input.leaseHours)), now: this.store.now() });
+            item = renewWork(item, identity.identityId, { leaseHours: this.deadlineLeaseHours(offer, lease(input.leaseHours)), now: this.store.now(), ...DEADLINE_LEASE });
           }
           if (action === 'release') {
             item = updateWork(item, identity.identityId, { state: 'claimed', now: this.store.now() });
@@ -620,7 +626,7 @@ export class PublicWorkClaims {
           // claimable (not just unclaimed): a task past its submission
           // deadline must not be recommended as claimable (#3707).
           if (task.claim.state !== 'unclaimed' || !task.claimable) return false;
-          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
+          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now(), DEADLINE_LEASE).some(other =>
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();

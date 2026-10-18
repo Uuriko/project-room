@@ -235,12 +235,19 @@ test("round clearing: the lease sweep drops the lapsed round — files, reviews,
   // Kills WC-16/WC-17/WC-18 (one clearing field each removed from
   // releaseExpired). Same inheritance hazard as the manual release, on
   // the path nobody performs by hand.
+  // RESIZE amendment (#3753 / CN-10, 2026-10-18): the shape below used
+  // to lapse straight from in_progress. Started work is now preserved
+  // work product and never sweeps, so the round is first paused back
+  // to `claimed` (the worker parked it) — with the review's basis
+  // already moved by the new CI head, nothing holds the lease and the
+  // sweep fires on the idle round, clearing the same set as before.
   const T0 = Date.parse("2026-10-16T00:00:00.000Z");
   let item = claimWork(createWork({ id: "w-mut-6" }, { now: T0, agentId: "quill" }), "quill",
     { now: T0, leaseHours: 1, files: ["src/a.js"] });
   item = updateWork(item, "quill", { state: "in_progress", now: T0 });
   item = recordReview(item, "sage", { verdict: "approve", summary: "early look ok", now: T0 });
   item = recordCi(item, { state: "success", headSha: HEAD }, T0).item;
+  item = updateWork(item, "quill", { state: "claimed", now: T0 });
   assert.ok(item.files.length === 1 && item.reviews.length === 1 && item.attestations.length >= 1 && item.ci);
   const [released] = releaseExpired([item], T0 + 2 * 3_600_000);
   assert.equal(released.state, "unclaimed");
