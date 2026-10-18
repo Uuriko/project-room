@@ -1925,7 +1925,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
         if ([...url.searchParams].length) reject(422, "invalid_public_work_review", "No review query parameters accepted");
         rate(`public-work-review:${remoteAddress}`, 120);
-        return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
+        const contributorResult = store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1]));
+        if (req.method === "GET") {
+          // #3616 (R-11): a member-side evidence read leaves an access
+          // record. The reader/room are re-resolved here because the
+          // contributor read returns neither; a logging failure never
+          // fails the read itself.
+          try {
+            const identity = store.identities?.resolveGlobalIdentitySecret(bearer(req));
+            const readRoomId = identity ? store.publicWorkClaims?.receiptRoomId(pathId(publicWorkReviewMatch[1])) : null;
+            if (identity && readRoomId) store.decisionRows?.logAccessQuietly({ roomId: readRoomId, readerId: identity.identityId,
+              kind: "evidence_read", surface: "public-work-contributor-review", recordId: pathId(publicWorkReviewMatch[1]) });
+          } catch { /* access logging is best-effort on read surfaces */ }
+        }
+        return json(res, 200, contributorResult, req.method === "HEAD");
       }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
@@ -3948,6 +3961,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const result = publicWorkResultsMatch
             ? store.publicWorkReviews.results(roomId, auth.member.id, { limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "" })
             : store.publicWorkReviews.inspect(roomId, auth.member.id, pathId(publicWorkInspectMatch[2]));
+          if (req.method === "GET") {
+            // #3616 (R-11): member-side evidence reads leave an access record.
+            store.decisionRows?.logAccessQuietly({ roomId, readerId: auth.member.id, kind: "evidence_read",
+              surface: publicWorkResultsMatch ? "public-work-results" : "public-work-review",
+              recordId: publicWorkResultsMatch ? null : pathId(publicWorkInspectMatch[2]) });
+          }
           return json(res, 200, result, req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });

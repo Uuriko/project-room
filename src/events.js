@@ -190,7 +190,7 @@ export const trustOffMessage = targetId =>
 // an owner's explicit "all" still gives guests the full history.
 export const HISTORY_VISIBILITIES = Object.freeze(["all", "since_join"]);
 export const HISTORY_DEFAULTS_VERSION = 1;
-export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html"]);
+export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html", "decision-rows"]);
 const LINK_GUEST_ID = /^guest-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export function isHistoryGuestMemberId(memberId) {
   return typeof memberId === "string" && (LINK_GUEST_ID.test(memberId) || memberId.startsWith("guest-agent-"));
@@ -875,10 +875,22 @@ function setHistoryVisibility(state, incoming) {
 }
 
 // The export itself is a read. This audit record changes no projection field.
+// #3616: a decision-row export rides the same audit record, with format
+// "decision-rows" plus the schema version, row count and requester it
+// names. The extra fields are required for that format; the plain
+// jsonl/html exports never carry them.
 function recordRoomExport(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may export the room");
-  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl or html");
+  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl, html or decision-rows");
+  if (incoming.data.format === "decision-rows") {
+    if (typeof incoming.data.schemaVersion !== "string" || !incoming.data.schemaVersion)
+      throw new Error("Decision-row export audit requires schemaVersion");
+    if (!Number.isSafeInteger(incoming.data.rowCount) || incoming.data.rowCount < 0)
+      throw new Error("Decision-row export audit requires a non-negative rowCount");
+    if (incoming.data.requesterId !== incoming.actorId)
+      throw new Error("Decision-row export audit requesterId must be the exporting owner");
+  }
 }
 // --- end PRIV-2 writers ---
 

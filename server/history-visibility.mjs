@@ -150,3 +150,14 @@ export function recordRoomExport(store, token, roomId, format, expectedSessionBi
   if (isRoomArchived(store.room(roomId).state)) return null;
   return store.command(token, roomId, { id: randomUUID(), type: T.ROOM_EXPORTED, data: { format } }, expectedSessionBinding);
 }
+
+// #3616 (R-11): a decision-row export appends the same room.exported
+// audit record as the room export, naming the schema version, the row
+// count and the requester (the exporting owner). An archived room
+// records nothing new, so its exports leave no event; they stay
+// owner-only, exactly like recordRoomExport.
+export function recordDecisionExport(store, token, roomId, { schemaVersion, rowCount, requesterId }, expectedSessionBinding = null) {
+  if (isRoomArchived(store.room(roomId).state)) return null;
+  return store.command(token, roomId, { id: randomUUID(), type: T.ROOM_EXPORTED,
+    data: { format: "decision-rows", schemaVersion, rowCount, requesterId } }, expectedSessionBinding);
+}
