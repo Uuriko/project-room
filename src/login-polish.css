@@ -17,14 +17,17 @@
 #auth-panel [data-password-visibility] { position: absolute; right: 0; top: 0; width: 44px; height: 100%; min-height: 44px; display: grid; place-items: center; color: var(--muted); }
 #auth-panel [data-password-visibility] svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 #auth-panel [data-password-visibility][aria-pressed="true"] { color: var(--blue); }
-#auth-panel .signin-secondary { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-3); }
 #auth-panel .text-button { min-height: 44px; font-size: var(--text-sm); font-weight: 400; }
 #auth-panel [data-signin-status]:empty { display: none; }
 #auth-panel #agent-signin-button { font-size: var(--text-sm); }
-#auth-panel #terms-notice { line-height: 1.5; }
-#auth-panel #terms-notice a { display: inline-block; min-height: 24px; }
 @media (max-height: 600px) {
   #auth-panel.auth-panel { margin-top: var(--space-3); }
   #auth-panel .signin-logo { width: 36px; height: 36px; }
   #auth-panel #auth-title { font-size: var(--text-lg); margin-bottom: var(--space-3); }
 }
+
+#auth-panel .signin-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+#auth-panel .signin-actions .button { min-height: 44px; }
+#auth-panel [data-forgot-password] { grid-column: 1 / -1; justify-self: center; }
+#auth-panel #signin-entry-routes { display: flex; justify-content: center; }
+#signin-methods:not(:has(#google-signin:not([hidden]), #github-signin:not([hidden]))) .signin-divider { display: none; }

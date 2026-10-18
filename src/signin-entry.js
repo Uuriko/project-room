@@ -37,6 +37,10 @@ export function mountSigninEntry({ openWorkspace }) {
     // and offers an email sign-in link it cannot serve (Codex review of
     // the #3068 integration, 2026-10-14).
     loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
+    onProviderCapabilities: providers => {
+      if (providers?.github?.configured === false) navigation.setProviderUnavailable("github");
+      if (providers?.google?.configured === false) navigation.setProviderUnavailable("google");
+    },
     onViewChange: navigation.sync,
     onBack: navigation.back,
     onSignedIn: enterAccount,

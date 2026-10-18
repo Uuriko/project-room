@@ -183,9 +183,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       // The merged form: in login mode the password is optional whenever
       // this deployment can email a sign-in link instead — the input
       // carries `required` only for signup, or when mail is
-      // unconfigured and a password is the only way in. The hint in
-      // fragmentD teaches the blank-password path.
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured ? "" : "required"), fragmentD: !signup && mailConfigured ? uiText("signin.copy.035") : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
+      // unconfigured and a password is the only way in. Recovery options
+      // explain the email-link path when someone needs it.
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured ? "" : "required"), fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
     return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
   }
