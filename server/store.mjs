@@ -5412,6 +5412,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // head of both lists; the standing lists (assignments, routed mentions,
     // bond proposals, peer messages, DM requests) are current state, not a
     // log, and always ride in full. after=0 keeps the legacy response.
+    // #3948: the scan walks ASCENDING from the cursor — the page is the
+    // OLDEST undelivered items (displayed newest-first), the cursor is
+    // the page's own max, and cursor.hasMore says another page already
+    // exists. The previous DESC+LIMIT read with a max cursor silently
+    // skipped a burst larger than the page. An after beyond the room
+    // head is refused 409 cursor_ahead, exactly like the events door.
     if (!Number.isSafeInteger(after) || after < 0) fail(422, "invalid_inbox_cursor", "After must be a sequence number of 0 or more");
     // RC-2026-09-18-013: the first per-room collab access lazily replays the
     // persisted journal inside a WRITE transaction. That replay cannot run
@@ -5427,11 +5433,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
-      const directMessages = this.db.prepare(
+      // #3948: the events door's cursor_ahead refusal, same code and
+      // words — an ahead cursor must not silently suppress every later
+      // message whose sequence sits under it.
+      if (after > this.roomAuthority(roomId).sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      // #3948: scan ASCENDING from the cursor with one probe row past
+      // the page, then present the page newest-first (#3922's display
+      // contract). The cursor below is the delivered page's own max.
+      const dmProbe = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
-         ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
+         ORDER BY sequence ASC LIMIT ?`)
+        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit + 1);
+      const dmHasMore = dmProbe.length > limit;
+      const directMessages = dmProbe.slice(0, limit).reverse()
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -5469,7 +5484,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      // #3948: mentions walk ascending from the cursor too (one probe
+      // row past the page), presented newest-first like the DMs.
+      const mentionProbe = this.openDirectMentions(roomId, memberId, limit + 1, this.now(), { after, ascending: true });
+      const mentionHasMore = mentionProbe.length > limit;
+      const directMentions = mentionProbe.slice(0, limit).reverse();
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -5478,9 +5497,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
-      // The poll cursor: the highest sequence either event-log list
-      // returned, or the caller's own `after` when nothing was newer.
-      // Standing lists carry no sequence and never move it.
+      // The poll cursor: the highest sequence either event-log list's
+      // DELIVERED page reached, or the caller's own `after` when nothing
+      // was newer. Standing lists carry no sequence and never move it.
+      // hasMore (#3948): either log list already holds another page
+      // beyond this one — the signal the old max-cursor read never gave.
       const cursorAfter = Math.max(after,
         ...directMessages.map(row => row.sequence),
         ...directMentions.map(row => row.sequence));
@@ -5493,7 +5514,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMentions,
         bondProposals,
         peerMessages,
-        cursor: { after: cursorAfter },
+        cursor: { after: cursorAfter, hasMore: dmHasMore || mentionHasMore },
         next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
         dmRequests,
       }, memberId);
@@ -5536,19 +5557,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // list repeated items and dropped older ones.
       const after = window?.after ?? 0;
       let through = window?.through ?? Number.MAX_SAFE_INTEGER;
-      while (rows.length < limit) {
-        const want = limit - rows.length + 1;
-        const batch = stmt.all(roomId, memberId, after, through, want);
-        if (!batch.length) break;
-        const nextThrough = batch[batch.length - 1].sequence - 1;
+      const consume = batch => {
         for (const row of batch) {
           const logged = JSON.parse(row.body);
           const current = currentById.get(logged.data?.messageId ?? row.eventId);
           if (current?.deletedAt) continue;
           if (rows.length < limit) rows.push(row);
         }
-        if (batch.length < want) break;
-        through = nextThrough;
+      };
+      if (window?.ascending === true) {
+        // #3948: the agent inbox walks mentions ASCENDING from its
+        // cursor (the oldest undelivered page first), so a burst larger
+        // than the page is reachable instead of silently skipped. Same
+        // deleted-skip refill as the DESC walk, mirrored: a rising
+        // floor instead of a falling ceiling. Rows return in ascending
+        // sequence order in this mode; the caller reverses for display.
+        const stmtAsc = this.db.prepare(
+          `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+           FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+           WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
+             AND e.sequence>? AND e.sequence<=?
+           ORDER BY e.sequence ASC LIMIT ?`
+        );
+        let from = after;
+        while (rows.length < limit) {
+          const want = limit - rows.length + 1;
+          const batch = stmtAsc.all(roomId, memberId, from, Number.MAX_SAFE_INTEGER, want);
+          if (!batch.length) break;
+          const nextFrom = batch[batch.length - 1].sequence;
+          consume(batch);
+          if (batch.length < want) break;
+          from = nextFrom;
+        }
+      } else {
+        while (rows.length < limit) {
+          const want = limit - rows.length + 1;
+          const batch = stmt.all(roomId, memberId, after, through, want);
+          if (!batch.length) break;
+          const nextThrough = batch[batch.length - 1].sequence - 1;
+          consume(batch);
+          if (batch.length < want) break;
+          through = nextThrough;
+        }
       }
     } catch (error) {
       if (/no such table/i.test(error?.message ?? "")) return [];
