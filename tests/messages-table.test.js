@@ -255,6 +255,68 @@ test("backfill pruning keeps archived rows that are no longer in the projection"
   for (const row of old) assert.ok(ids.has(row.message_id), `${row.message_id} still archived in the table`);
 });
 
+// Prune guard (PRUNE-SAFETY): pruneMessages derives its keep set from
+// rooms.projection alone. The stored projection is trusted only when its
+// message-id set equals the replayed state's live set (less archived-out
+// ids); a projection that cannot be certified — $.messages absent, or a
+// valid-JSON subset at the head sequence — must skip the prune entirely
+// rather than delete live tail rows against an empty or partial keep set.
+function plantStaleRow(f, messageId) {
+  const head = f.store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
+  f.store.db.prepare(`INSERT INTO messages (room_id, message_id, seq, author_id, created_at)
+    VALUES ('commons', ?, ?, 'human', '2026-10-07T00:00:00.000Z')`).run(messageId, head);
+}
+
+function rewriteProjection(f, rewrite) {
+  const row = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+  const projection = JSON.parse(row.projection);
+  rewrite(projection);
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+}
+
+function redriveBackfill(f) {
+  f.store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id='commons'").run();
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+}
+
+function tableIds(f) {
+  return new Set(f.store.db.prepare("SELECT message_id FROM messages WHERE room_id='commons'").all().map(row => row.message_id));
+}
+
+test("backfill pruning removes a stale tail row and keeps live rows", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 4);
+  plantStaleRow(f, "stale-1");
+  redriveBackfill(f);
+  const ids = tableIds(f);
+  assert.equal(ids.has("stale-1"), false, "the stale tail row is pruned");
+  for (let i = 0; i < 4; i++) assert.ok(ids.has(`arc-${i}`), `live row arc-${i} is kept`);
+});
+
+test("backfill pruning refuses when the projection has no messages array", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 4);
+  plantStaleRow(f, "stale-1");
+  rewriteProjection(f, projection => { delete projection.messages; });
+  redriveBackfill(f);
+  const ids = tableIds(f);
+  for (let i = 0; i < 4; i++) assert.ok(ids.has(`arc-${i}`), `live row arc-${i} survives an uncertifiable projection`);
+  assert.ok(ids.has("stale-1"), "prune is skipped entirely: even the stale row survives");
+});
+
+test("backfill pruning refuses when the projection is a subset of the replayed state", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 4);
+  plantStaleRow(f, "stale-1");
+  rewriteProjection(f, projection => {
+    projection.messages = projection.messages.filter(message => message.id !== "arc-1");
+  });
+  redriveBackfill(f);
+  const ids = tableIds(f);
+  for (let i = 0; i < 4; i++) assert.ok(ids.has(`arc-${i}`), `live row arc-${i} survives a subset projection`);
+  assert.ok(ids.has("stale-1"), "prune is skipped entirely: even the stale row survives");
+});
+
 test("parity certifies a room whose old messages are archived and rejects a missing archived row", t => {
   const f = fixture(t);
   seedAndCatchUp(f, 6);
