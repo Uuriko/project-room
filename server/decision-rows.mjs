@@ -197,9 +197,19 @@ export function rowsFromBounty({ roomId, bounty }) {
   }
   if (resolution && (typeof resolution.outcome === "string" || resolution.kind === "split" || resolution.kind === "release" || resolution.kind === "cancel")) {
     // Dispute re-decision: the resolution is the terminal verdict.
+    // `accepted` derives from resolution.kind — the work's fate under
+    // the settlement (server/bounty-escrow.mjs _settleDispute:
+    // settleKind = outcome "upheld" -> "cancel", "split" -> "split",
+    // anything else -> "release"; settlement kind failed / partial /
+    // verified-complete respectively). resolution.outcome names the
+    // CHALLENGE's fate instead — "upheld" means the challenge won and
+    // the bounty was refunded, "rejected" means the challenge lost and
+    // the worker was paid — so reading `accepted` off the outcome
+    // inverts both directions. The recorded outcome still rides the
+    // row's `outcome` field verbatim.
     const outcomeText = str(resolution.outcome) ?? str(resolution.kind) ?? "decided";
-    const accepted = outcomeText === "upheld" || outcomeText === "release" || outcomeText === "split" ? true
-      : outcomeText === "overturned" || outcomeText === "cancel" ? false : null;
+    const accepted = resolution.kind === "cancel" ? false
+      : resolution.kind === "release" || resolution.kind === "split" ? true : null;
     return [row({
       rowId: `bounty:${recordId}:acceptance`,
       roomId, surface: "bounty", recordId, subjectId,

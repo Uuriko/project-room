@@ -248,3 +248,108 @@ test("store-level export refuses non-owners and logs evidence reads", t => {
   assert.deepEqual(log.map(entry => entry.kind).sort(), ["evidence_read", "export"]);
   assert.equal(log.find(entry => entry.kind === "evidence_read").recordId, "pwr_x");
 });
+
+// --- Dispute resolutions: accepted follows the work's fate ---------------
+//
+// A dispute resolution (server/bounty-escrow.mjs _settleDispute, with the
+// settlement merged in by _recordSettlement) carries two different
+// verdicts: resolution.outcome names the CHALLENGE's fate ("upheld" =
+// the challenge won) and resolution.kind names the WORK's fate under
+// the settlement ("cancel" = refunded to the poster, "release" = award
+// vests with the worker, "split" = halved). The acceptance row must
+// read the work's fate. Fixtures are the production record shapes,
+// settlement records included; each test pins the row against the
+// settlement kind the same record carries.
+
+function disputeBounty({ bountyId, state, resolution }) {
+  return {
+    bountyId, claimant: "lane-worker", poster: "owner", verifier: "lane-v",
+    disputeDecider: "lane-decider", disputeId: "dsp_" + bountyId,
+    state,
+    createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-03T00:00:00.000Z",
+    stateChangedAt: "2026-10-03T00:00:00.000Z",
+    rubric: { version: 7 },
+    attestation: { recordedBy: "lane-v", recordedAt: "2026-10-02T00:00:00.000Z",
+      rubricVersion: 7, citations: [{ criterionId: "c1", verdict: "pass" }] },
+    resolution, evidence: null,
+  };
+}
+const DISPUTE_SETTLED_BY = { kind: "member", id: "lane-decider" };
+
+test("dispute upheld (kind cancel, settlement failed) exports accepted false", () => {
+  const bounty = disputeBounty({ bountyId: "B-DISPUTE-UPHELD", state: "refunded", resolution: {
+    kind: "cancel", outcome: "upheld", terminal: "resolved",
+    decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: false,
+    settlement: { kind: "failed", workerMillis: 0, workerCredits: 0, refundMillis: 10000, refundCredits: 10,
+      reason: "dispute upheld: work judged bad — escrow returned to poster, worker settles 0",
+      settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } } });
+  // The money truth on the same record: the settlement failed, the
+  // worker settled 0 and the escrow refunded — the work was NOT accepted.
+  assert.equal(bounty.resolution.settlement.kind, "failed");
+  const rows = rowsFromBounty({ roomId: "commons", bounty });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].decisionKind, "acceptance");
+  assert.equal(rows[0].outcome, "upheld");
+  assert.equal(rows[0].accepted, false);
+});
+
+test("dispute rejected (kind release, settlement verified-complete) exports accepted true", () => {
+  const bounty = disputeBounty({ bountyId: "B-DISPUTE-REJECTED", state: "approved", resolution: {
+    kind: "release", outcome: "rejected", terminal: "resolved",
+    decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: false,
+    settlement: { kind: "verified-complete", workerMillis: 10000, workerCredits: 10, refundMillis: 0, refundCredits: 0,
+      reason: "dispute rejected: award vests with the worker",
+      settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } } });
+  assert.equal(bounty.resolution.settlement.kind, "verified-complete");
+  const rows = rowsFromBounty({ roomId: "commons", bounty });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].decisionKind, "acceptance");
+  assert.equal(rows[0].outcome, "rejected");
+  assert.equal(rows[0].accepted, true);
+});
+
+test("dispute split (kind split, settlement partial) exports accepted true", () => {
+  const bounty = disputeBounty({ bountyId: "B-DISPUTE-SPLIT", state: "approved", resolution: {
+    kind: "split", outcome: "split", terminal: "resolved",
+    decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: false,
+    settlement: { kind: "partial", workerMillis: 5000, workerCredits: 5, refundMillis: 5000, refundCredits: 5,
+      reason: "dispute split: half the award vests with the worker, half refunds to the poster",
+      settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } } });
+  assert.equal(bounty.resolution.settlement.kind, "partial");
+  const rows = rowsFromBounty({ roomId: "commons", bounty });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].decisionKind, "acceptance");
+  assert.equal(rows[0].outcome, "split");
+  assert.equal(rows[0].accepted, true);
+});
+
+test("dispute accepted follows resolution.kind when the challenge outcome differs", () => {
+  // Every non-upheld, non-split outcome settles as a release in
+  // _settleDispute — including outcomes whose names say nothing about
+  // the work (frivolous, the keeper's timeout-default) and the keeper
+  // retry shape whose outcome is null. All of them paid the worker.
+  const releases = [
+    ["B-DISPUTE-FRIVOLOUS", { kind: "release", outcome: "frivolous", terminal: "resolved",
+      decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: true,
+      settlement: { kind: "verified-complete", workerMillis: 10000, workerCredits: 10, refundMillis: 0, refundCredits: 0,
+        reason: "dispute frivolous: award vests with the worker",
+        settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } }, "frivolous"],
+    ["B-DISPUTE-TIMEOUT-DEFAULT", { kind: "release", outcome: "timeout-default", terminal: "timeout",
+      decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: false,
+      settlement: { kind: "verified-complete", workerMillis: 10000, workerCredits: 10, refundMillis: 0, refundCredits: 0,
+        reason: "dispute timeout-default: award vests with the worker",
+        settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } }, "timeout-default"],
+    ["B-DISPUTE-KIND-ONLY", { kind: "release", outcome: null, terminal: "resolved",
+      decidedAt: "2026-10-03T00:00:00.000Z", bondForfeited: false,
+      settlement: { kind: "verified-complete", workerMillis: 10000, workerCredits: 10, refundMillis: 0, refundCredits: 0,
+        reason: "dispute null: award vests with the worker",
+        settledAt: "2026-10-03T00:00:00.000Z", settledBy: DISPUTE_SETTLED_BY } }, "release"],
+  ];
+  for (const [bountyId, resolution, expectedOutcome] of releases) {
+    const rows = rowsFromBounty({ roomId: "commons",
+      bounty: disputeBounty({ bountyId, state: "approved", resolution }) });
+    assert.equal(rows.length, 1, bountyId);
+    assert.equal(rows[0].outcome, expectedOutcome, bountyId);
+    assert.equal(rows[0].accepted, true, bountyId);
+  }
+});
