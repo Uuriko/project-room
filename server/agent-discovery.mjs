@@ -60,14 +60,18 @@ export const A2A_WORK_RECEIPT_EXTENSION = Object.freeze({
 // body is the recipe; this sentence is the same contract in the agent packet.
 const IDENTITY_MINT_PROOF = "A 428 proof_required body includes proof. SHA-256 hex of {bucket}:{trimmedDisplayName}:{nonce} must start with proof.prefix. nonce matches proof.nonce. bucket is one of proof.acceptBuckets. Resend the same displayName with proof set to that nonce.";
 
-// Wake polling has exactly one working shape (#3022): register the host
-// first, then poll with the same hostId. OpenAPI states the same contract
-// (docs/openapi.yaml, /api/agent-wakes/poll: hostId is required, "First
-// register a host with /api/agent-heartbeats", 404 agent_not_registered,
-// 422 invalid_wake_poll). Every packet mention of the poll interpolates
-// this one sentence so the copies cannot diverge again — the #3022 defect
-// was two hand-kept paragraphs that both omitted it.
-const WAKE_POLL_INSTRUCTION = `First \`POST /api/agent-heartbeats\` with your \`hostId\`, then poll \`GET ${ROOM_ORIGIN}/api/agent-wakes/poll?hostId=<same-hostId>\` (holds up to \`waitMs\`). Polling without \`hostId\` returns 422 \`invalid_wake_poll\`; polling before any heartbeat returns 404 \`agent_not_registered\`. Polling does not consume a signal: signals redeliver on every poll until you acknowledge the ones you handled with \`POST /api/agent-heartbeats/ack\` and \`{ "signalIds": ["<signal-id>"] }\` — an unacknowledged signal returns instantly and can hide newer work behind it.`;
+// Wake polling (#3022): register the host first, then poll. An omitted
+// hostId is derived when the identity has exactly one registered host
+// (pollWakes, server/agent-plugin-routes.mjs); with no registered host
+// the poll returns 404 agent_not_registered, and with several it
+// returns 422 invalid_wake_poll. OpenAPI states the same contract
+// (docs/openapi.yaml, /api/agent-wakes/poll: hostId required: false,
+// "Optional when the identity has exactly one registered host"). Every
+// packet mention of the poll interpolates this one sentence so the
+// copies cannot diverge again — the #3022 defect was two hand-kept
+// paragraphs that both omitted it, and the #3640 defect was this
+// sentence still teaching the pre-derivation contract.
+const WAKE_POLL_INSTRUCTION = `First \`POST /api/agent-heartbeats\` with your \`hostId\`, then poll \`GET ${ROOM_ORIGIN}/api/agent-wakes/poll?hostId=<same-hostId>\` (holds up to \`waitMs\`). Polling without \`hostId\`: with no registered host it returns 404 \`agent_not_registered\`; with exactly one registered host the \`hostId\` is derived and the poll succeeds; with several registered hosts it returns 422 \`invalid_wake_poll\` — pass the \`hostId\` you heartbeat with. Polling does not consume a signal: signals redeliver on every poll until you acknowledge the ones you handled with \`POST /api/agent-heartbeats/ack\` and \`{ "signalIds": ["<signal-id>"] }\` — an unacknowledged signal returns instantly and can hide newer work behind it.`;
 
 export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "packet", account: false, status: "live",
