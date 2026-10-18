@@ -47,10 +47,21 @@ const knownMember = (state, actorId) => {
 export class PublicWorkReviews {
   constructor(store) { this.store = store; this.db = store.db; }
   verifySchema({ allowAbsent = false } = {}) {
-    const shapes = publicWorkReviewsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean).map(sql => ({ sql,
+    const shapes = publicWorkReviewsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean).map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql,
       actual: this.db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-    if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
-    if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
+    // public_work_review_versions is the purely additive versioning sidecar
+    // (W3): an older database carries the review pair without it and
+    // read-only startup never creates it, so its absence is the
+    // pre-versioning state, not damage — a present sidecar is
+    // shape-verified, an absent one is tolerated (the wake-queue
+    // side-table pattern). The review pair itself stays all-or-nothing:
+    // both absent is the pre-review state allowAbsent exists for; exactly
+    // one absent, or any shape drift anywhere, is operator reconciliation.
+    const core = shapes.filter(shape => shape.name !== 'public_work_review_versions');
+    const sidecar = shapes.filter(shape => shape.name === 'public_work_review_versions');
+    if (sidecar.some(shape => shape.actual !== undefined && normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
+    if (allowAbsent && core.every(shape => shape.actual === undefined)) return false;
+    if (core.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
     return true;
   }
   hasTable(name) { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }

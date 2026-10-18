@@ -50,7 +50,7 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.deepEqual(initial.offer.exclusions, []);
   assert.equal(initial.offer.repositoryUrl, 'https://github.com/example/project');
   assert.deepEqual(initial.task, { repositoryRef: 'main', files: ['result.txt'] });
-  assert.deepEqual(f.service().inspect('commons', 'owner', id), initial);
+  assert.deepEqual(f.service().inspect('commons', 'owner', id), { ...initial, history: [] });
   assert.deepEqual(f.service().contributorReview(f.producer.secret, id), minimalFeedback);
   for (const field of ['offer', 'task', 'acceptanceCriteria', 'repositoryUrl', 'files']) assert.equal(Object.hasOwn(minimalFeedback, field), false);
   assert.equal(initial.offer.status, 'withdrawn'); assert.equal(initial.review.revision, 0); assert.equal(initial.authority.acceptReady, true);
