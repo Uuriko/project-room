@@ -313,6 +313,74 @@ export class PublicWorkClaims {
     }
     return { available: true, anchored, claimable, due };
   }
+  // S-2 alarm-path form of the #3530 gate starterPoolStatus() answers:
+  // available, at least one anchored seed, exactly zero claimable board
+  // tasks, at least one due seed — computed as bounded existence checks,
+  // because the jobs registry's enabled() probes run inside the
+  // Worker's per-request alarm re-arm and list() materializes every
+  // board packet (receipt lookup, claim decode, settlement view per
+  // task). starterPoolStatus() stays the run/operator surface; this
+  // probe is pinned equivalent to it by tests/alarm-probe-cheap.test.js:
+  // - task rows come from list()'s own join (published offer at the
+  //   task's terms version, live room, eligible reward kind), narrowed
+  //   to the columns the claimable derivation reads, with operator-
+  //   unpublished rooms dropped first, exactly as list() drops them;
+  // - offer()'s eligibility re-check runs in the same terms: each
+  //   joined row goes through projectOffers.record() — the projection
+  //   offer() starts from, terms validation included — plus offer()'s
+  //   own version and reward-pricing checks, so a row list() would
+  //   refuse fails this probe with the same refusal;
+  // - a task is claimable iff packet() would call it unclaimed and its
+  //   deadline has not passed: no receipt at its current generation,
+  //   no live claim item (owner held, lease not lapsed under
+  //   releaseExpired's rule), deadline checked with Date.parse over
+  //   the recorded offer, as packet() checks it.
+  starterPoolReseedDue() {
+    if (!this.available()) return false;
+    if (this._claimableTaskExists()) return false;
+    let anchored = 0, due = 0;
+    for (const baseId of PUBLIC_WORK_STARTER_SEED_IDS) {
+      const family = this._starterFamily(baseId);
+      if (!family.length) continue;
+      anchored++;
+      if (this._starterTaskState(family.at(-1).row) === 'submitted') due++;
+    }
+    return anchored > 0 && due > 0;
+  }
+  _claimableTaskExists() {
+    const now = this.store.now();
+    const rows = this.db.prepare(`SELECT t.room_id AS task_room_id, t.terms_version, o.*,
+        EXISTS(SELECT 1 FROM public_work_receipts pr WHERE pr.offer_id = t.offer_id AND pr.generation = t.generation) AS has_receipt,
+        EXISTS(SELECT 1 FROM work_claims wc WHERE wc.room_id = t.namespace_key AND wc.claim_id = t.offer_id
+          AND COALESCE(json_extract(wc.item_json, '$.data.owner'), json_extract(wc.item_json, '$.owner')) IS NOT NULL
+          AND NOT (
+            COALESCE(json_extract(wc.item_json, '$.data.state'), json_extract(wc.item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+            AND COALESCE(json_extract(wc.item_json, '$.data.leaseExpiresAt'), json_extract(wc.item_json, '$.leaseExpiresAt')) IS NOT NULL
+            AND CAST(ROUND(unixepoch(COALESCE(json_extract(wc.item_json, '$.data.leaseExpiresAt'), json_extract(wc.item_json, '$.leaseExpiresAt')), 'subsec') * 1000) AS INTEGER) <= ?
+          )) AS has_live_claim
+      FROM public_work_tasks t JOIN project_offers o ON o.offer_id = t.offer_id
+      JOIN rooms r ON r.id = t.room_id WHERE o.status = 'published' AND r.archived_at IS NULL
+      AND o.version = t.terms_version AND (json_extract(o.terms, '$.reward.kind') = 'unpaid' OR (json_extract(o.terms, '$.reward.kind') = 'work_trade' AND json_extract(o.terms, '$.reward.unit') = 'credit'))`).all(now);
+    // list() drops operator-unpublished rooms before materializing;
+    // isUnpublished fails closed (an unreadable table hides every
+    // room), so the probe reads the room set once and mirrors both.
+    let unpublished = null;
+    try {
+      unpublished = new Set(this.db.prepare("SELECT target FROM public_unpublish WHERE kind='room'").all().map(row => row.target));
+    } catch { unpublished = null; }
+    const visible = unpublished === null ? [] : rows.filter(row => !unpublished.has(row.task_room_id));
+    // list() builds every visible row's packet — offer() first — before
+    // any count exists, so the projection and its refusals precede the
+    // claimable verdict here too.
+    const offers = visible.map(row => {
+      const offer = this.store.projectOffers.record(row);
+      if (offer.version !== row.terms_version || publicWorkRewardMillis(offer) === undefined)
+        fail(409, 'public_work_unavailable', 'Task is no longer available');
+      return offer;
+    });
+    return visible.some((row, index) => !row.has_receipt && !row.has_live_claim
+      && !(offers[index].deadline != null && Number.isFinite(Date.parse(offers[index].deadline)) && Date.parse(offers[index].deadline) <= now));
+  }
   _starterFamily(baseId) {
     const rows = this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=? OR offer_id LIKE ?').all(baseId, `${baseId}-r%`);
     return rows.map(row => ({ row, round: starterRoundOf(row.offer_id, baseId) }))
