@@ -279,11 +279,26 @@ export function measureStoreGrowth(store) {
     const bytes = Number(size?.page_size);
     if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
   } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
+  // PERF-2 §4.5 (PERF2-MEASURE): the warm-tier breakdown, so the next
+  // production census is a query, not a session. Bodies at rest live in
+  // projection_bodies; attachment bytes are the byte_length of rows whose
+  // bytes are actually stored (staged/committed) across both attachment
+  // tables. A store that never created a table reports 0 for it, matching
+  // the read-through-cache pattern above.
+  const sumOr0 = (sql) => {
+    try { return Number(store.db.prepare(sql).get()?.n) || 0; } catch { return 0; }
+  };
+  const bodyBytes = sumOr0("SELECT COALESCE(SUM(LENGTH(body)), 0) AS n FROM projection_bodies");
+  const attachmentBytes =
+    sumOr0("SELECT COALESCE(SUM(byte_length), 0) AS n FROM room_attachments WHERE bytes IS NOT NULL") +
+    sumOr0("SELECT COALESCE(SUM(byte_length), 0) AS n FROM inbox_attachment_bytes WHERE bytes IS NOT NULL");
   return {
     rooms: Number(row?.rooms) || 0,
     events: Number(row?.events) || 0,
     maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
-    dbBytes
+    dbBytes,
+    bodyBytes,
+    attachmentBytes
   };
 }
 

@@ -33,6 +33,7 @@ import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
+import { ROUTE_STATS_STORAGE_KEY, createRouteStats, foldRouteStats, recordRouteSample, routeStatsView, snapshotRouteStats } from './route-stats.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
@@ -102,6 +103,10 @@ export class ProjectRoom extends DurableObject {
     this.state = ctx;
     this.env = env;
     this.requestSignals = new AsyncLocalStorage();
+    // PERF2-MEASURE route counters: in-memory until the cron-tick fold
+    // (cloudflare/route-stats.mjs). Initialised before the paused return
+    // so the health read can always report the (empty) accumulator.
+    this.routeStats = createRouteStats();
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
@@ -199,6 +204,7 @@ export class ProjectRoom extends DurableObject {
       console.info(JSON.stringify({
         event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
+      recordRouteSample(this.routeStats, { path: requestPath(request.url), status: response.status, durationMs: appMs });
       return withServerTiming(response, 'app', appMs);
     };
     if (this.paused) return respond(maintenanceResponse(request));
@@ -274,11 +280,25 @@ export class ProjectRoom extends DurableObject {
         this.channelDrainOutcomeHeld = null;
       }
     }
+    // PERF2-MEASURE: fold the route counters into storage alongside the
+    // heartbeat. Telemetry only — a fold failure never fails the tick
+    // record; the accumulator keeps its counts and folds next tick.
+    try {
+      const snapshot = snapshotRouteStats(this.routeStats);
+      if (snapshot.total > 0) {
+        const stored = await this.ctx.storage.get(ROUTE_STATS_STORAGE_KEY);
+        await this.ctx.storage.put(ROUTE_STATS_STORAGE_KEY, foldRouteStats(stored, snapshot, Date.now()));
+        this.routeStats = createRouteStats();
+      }
+    } catch (error) {
+      console.warn(`[route-stats] fold failed: ${error?.message ?? error}`);
+    }
     return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
-    return { ...view, publicReports: countOpenPublicReports(this.store) };
+    const routeStored = await this.ctx.storage.get(ROUTE_STATS_STORAGE_KEY).catch(() => undefined);
+    return { ...view, publicReports: countOpenPublicReports(this.store), routeStats: routeStatsView(routeStored ?? null, this.routeStats) };
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook

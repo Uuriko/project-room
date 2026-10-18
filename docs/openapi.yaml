@@ -8808,7 +8808,10 @@ paths:
       description: >-
         Open (also HEAD). The Worker answers with per-job lastSuccessAt /
         lastError for the cron jobs, read through one Durable Object RPC,
-        plus `publicReports` (open public abuse reports). 200 `{ status, jobs,
+        plus `publicReports` (open public abuse reports) and `routeStats`
+        (sampled route-class × status-class × duration-bucket counters,
+        folded into storage once per cron tick; `instanceDeltaTotal` names
+        the not-yet-folded count). 200 `{ status, jobs,
         publicReports }` when every job is fresh, or with status `degraded`
         when a job ran but was held by GitHub's rate limit (that job reads
         `degraded: github_rate_limited`); 503 when a job is stale,
