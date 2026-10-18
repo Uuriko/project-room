@@ -22,10 +22,11 @@ node desktop/macos/distribute.mjs \
 This is an actual signing and notarization operation, not a dry run. It verifies
 source and identity before building, checks source provenance again, signs the
 helper and app with hardened runtime and timestamping, submits a ZIP to Apple,
-requires Accepted, staples and validates the ticket, checks signatures and
+waits at most 30 minutes and requires Accepted, staples and validates the ticket, checks signatures and
 Gatekeeper, and creates the final ZIP plus SHA256/source/version receipt. Existing
 output directories are refused. A failed run may leave diagnostic/intermediate
-artifacts; absence of a successful receipt means they are not a release.
+artifacts; Apple may continue processing after a timeout. Reconcile that submission
+before another upload. Absence of a successful receipt means they are not a release.
 
 Publish only the final versioned ZIP and release receipt after checking the
 supported-machine installation and launch journey. Do not publish the intermediate

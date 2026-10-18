@@ -86,7 +86,7 @@ export function distribute(options, { run = command, platform = process.platform
   }
   const submission = join(options.output, 'notary-submission.zip');
   run('ditto', ['-c', '-k', '--keepParent', app, submission]);
-  const notary = JSON.parse(run('xcrun', ['notarytool', 'submit', submission, '--keychain-profile', options['notary-profile'], '--wait', '--output-format', 'json']));
+  const notary = JSON.parse(run('xcrun', ['notarytool', 'submit', submission, '--keychain-profile', options['notary-profile'], '--wait', '--timeout', '30m', '--output-format', 'json']));
   if (notary.status !== 'Accepted' || typeof notary.id !== 'string' || !notary.id)
     throw new Error('Notarization was not accepted; no release receipt will be emitted');
   run('xcrun', ['stapler', 'staple', app]);
