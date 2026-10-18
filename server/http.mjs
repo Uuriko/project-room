@@ -1927,6 +1927,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`public-work-review:${remoteAddress}`, 120);
         return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
       }
+      // #3615 (R-4): the subject's own adverse-decision packet for a
+      // rejected / failed-verification contribution — same identity-secret
+      // posture as the contributor review, no review-surface membership.
+      const publicWorkPacketMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/decision-packet$/.exec(url.pathname);
+      if (publicWorkPacketMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+        if ([...url.searchParams].length) reject(422, "invalid_decision_packet", "No packet query parameters accepted");
+        rate(`public-work-packet:${remoteAddress}`, 120);
+        return json(res, 200, store.adverseDecisionPackets.forPublicWorkReceipt(bearer(req), pathId(publicWorkPacketMatch[1])), req.method === "HEAD");
+      }
+      const publicWorkPacketFollowupMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/decision-packet\/followups$/.exec(url.pathname);
+      if (publicWorkPacketFollowupMatch) {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        if ([...url.searchParams].length) reject(422, "invalid_decision_packet", "No packet query parameters accepted");
+        rate(`public-work-packet-write:${remoteAddress}`, 60);
+        const input = await body(req);
+        return json(res, 201, store.adverseDecisionPackets.filePublicWorkFollowup(bearer(req), pathId(publicWorkPacketFollowupMatch[1]), input));
+      }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
@@ -3824,6 +3842,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // submitted work. Literal segment — must never be mistaken for a bounty id.
       const bountyRejectMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/reject$/.exec(url.pathname);
       const bountyDisputeDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute\/decide$/.exec(url.pathname);
+      // #3615 (R-4): the claimant's own adverse-decision packet + follow-ups.
+      const bountyDecisionPacketMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/decision-packet$/.exec(url.pathname);
+      const bountyDecisionPacketFollowupMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/decision-packet\/followups$/.exec(url.pathname);
       const bountyDisputeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute$/.exec(url.pathname);
       const bountyFinalizeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/finalize$/.exec(url.pathname);
       const bountyRubricMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/rubric$/.exec(url.pathname);
@@ -3840,6 +3861,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
         ?? bountyRejectMatch
         ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
+        ?? bountyDecisionPacketMatch ?? bountyDecisionPacketFollowupMatch
         ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch
         ?? bountyReputationReviewsMatch;
       const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
@@ -4191,6 +4213,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : bountyClaimMatch ? "claim" : bountySubmitMatch ? "submit" : bountyAcceptMatch ? "accept"
           : bountyRejectMatch ? "reject"
           : bountyDisputeDecideMatch ? "dispute-decide" : bountyDisputeMatch ? "dispute"
+          : bountyDecisionPacketFollowupMatch ? "decision-packet-followup" : bountyDecisionPacketMatch ? "decision-packet"
           : bountyFinalizeMatch ? "finalize" : bountyRubricMatch ? "rubric"
           : bountyReviewsMatch ? "reviews"
           : bountySybilFlagsMatch ? "sybil-flags" : bountySybilDismissMatch ? "sybil-dismiss"
@@ -4200,7 +4223,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : creditsTransferMatch ? "transfer" : "epoch-close";
         const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch
           ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch ?? bountyRejectMatch
-          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch;
+          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
+          ?? bountyDecisionPacketMatch ?? bountyDecisionPacketFollowupMatch;
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,

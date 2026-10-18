@@ -185,7 +185,7 @@ export class PublicWorkSettlement {
       'Paid public work settles to a room-member ledger lane: the claimant identity is not linked to a member of the task room');
     const escrow = this.escrow();
     try {
-      escrow.claimBounty(roomId, link.bounty_id, { claimant: lane });
+      escrow.claimBounty(roomId, link.bounty_id, { claimant: lane, suppressNotice: true });
       escrow.submitWork(roomId, link.bounty_id, { claimant: lane, evidence: {
         evidenceUrl: `https://room.trydemigod.com/api/public-work/receipts/${receipt.receiptId}`,
         evidenceKind: 'public-work-receipt',

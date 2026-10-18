@@ -33,6 +33,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
+  "subject_notices", "adverse_decision_followups", // #3615 (R-4/R-6): subject notice records and adverse-decision follow-ups; purely additive, older writers have no code path to them.
   "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "room_assistant_config", "room_assistant_runs", "room_assistant_ops",

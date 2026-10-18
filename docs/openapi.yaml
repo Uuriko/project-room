@@ -7902,6 +7902,73 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/decision-packet:
+    get:
+      summary: Read your own adverse-decision packet for a rejected bounty
+      description: |
+        The claimant of a bounty whose recorded resolution is a rejection
+        (rejectWork) reads the subject-facing packet: plain-language
+        explanation, principal factors from the recorded reason,
+        agent-participation disclosure, the data relied on (submission
+        evidence, submission hash, criteria and rubric version), a
+        correction path distinct from a dispute, the claim-time
+        agent-participation notice on record, and a human-review route
+        whose reviewer is not the original decider. Any other caller —
+        including the poster — gets 404. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      responses:
+        '200':
+          description: The adverse-decision packet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  packet: { type: object }
+        '401': { description: unauthenticated }
+        '404': { description: packet_not_found or no_adverse_decision }
+  /api/rooms/{roomId}/bounties/{bountyId}/decision-packet/followups:
+    post:
+      summary: File a correction or human-review request on a rejected bounty's packet
+      description: |
+        Claimant-only, and a rejection must be recorded. kind=correction
+        records that data the decision relied on is wrong (fixes the
+        record; not a dispute, moves no money, no bond).
+        kind=human_review_request records a request routed to a human
+        reviewer who was not the rejector (room owner, else the designated
+        dispute decider or verifier); 409 no_distinct_human_reviewer when
+        none is recorded. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, statement]
+              properties:
+                kind: { type: string, enum: [correction, human_review_request] }
+                statement: { type: string, minLength: 1, maxLength: 2000 }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The recorded follow-up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  followup: { type: object }
+        '401': { description: unauthenticated }
+        '404': { description: packet_not_found or no_adverse_decision }
+        '409': { description: no_distinct_human_reviewer }
+        '422': { description: invalid_decision_packet }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute:
     post:
       summary: Dispute an accepted bounty
@@ -15510,6 +15577,117 @@ paths:
         409:
           $ref: "#/components/responses/Conflict"
           description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+  /api/public-work/receipts/{receiptId}/decision-packet:
+    get:
+      operationId: "getAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "Fresh saved global identity, receipt ownership required. Composes the recorded adverse decision (rejection or failed verification) into a subject-facing packet: plain-language explanation, principal factors from the recorded reason and any per-criterion outcomes on the record, agent-participation disclosure, the data relied on with a correction path distinct from a dispute, and a human-review route whose reviewer is not the original decider. Reviewer member identities are not exposed. 404 when no adverse decision is recorded."
+      responses:
+        200:
+          description: "The adverse-decision packet for this contribution."
+          content:
+            application/json:
+              schema:
+                type: "object"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+    head:
+      operationId: "headAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "Fresh saved global identity, receipt ownership required. Headers only."
+      responses:
+        200:
+          description: "The adverse-decision packet for this contribution."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+  /api/public-work/receipts/{receiptId}/decision-packet/followups:
+    post:
+      operationId: "fileAdverseDecisionPacketFollowup"
+      summary: "File a correction or human-review request on your own adverse-decision packet."
+      description: "Fresh saved global identity, receipt ownership required, and an adverse decision must be recorded. kind=correction records that data the decision relied on is wrong (it fixes the record; it is not a dispute and moves no money). kind=human_review_request records a request routed to a human reviewer who was not the original decider; 409 no_distinct_human_reviewer when none is recorded."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: ["kind", "statement"]
+              properties:
+                kind: { type: "string", enum: ["correction", "human_review_request"] }
+                statement: { type: "string", minLength: 1, maxLength: 2000 }
+      responses:
+        201:
+          description: "The recorded follow-up."
+          content:
+            application/json:
+              schema:
+                type: "object"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "No human reviewer distinct from the original decider is recorded."
         422:
           description: "Invalid fields or unsupported query."
           content:
