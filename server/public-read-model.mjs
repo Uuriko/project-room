@@ -6,6 +6,14 @@
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import {
+  OPERATOR_HIDDEN_RECEIPT_SQL,
+  ownerHiddenReceiptSql,
+  receiptVisibilitySqlFor,
+  ownerToggleReadable,
+  publicWorkTablesReadable,
+  lotReceiptVisible,
+} from "./public-visibility.mjs"; // the one visibility definition every public read applies
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
 const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
@@ -692,40 +700,15 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
   return { done: rows.length < cap, rooms: 0, receipts: 0, cards };
 }
 
-// An unpublished room or receipt stays out of listings, detail reads, and the sitemap.
-const HIDDEN_RECEIPT = `NOT EXISTS (
-  SELECT 1 FROM public_unpublish u
-  WHERE (u.kind='receipt' AND u.target=public_receipts.id)
-     OR (u.kind='room' AND u.target=public_receipts.room_id)
-     OR (u.kind='room' AND u.target=public_receipts.origin_room_id))`;
-
-// The owner half of hidden (#3595): a receipt also stays out when any room
-// it belongs to turned public receipts off (room_directory_settings
-// .public_receipts = 0, default 1). Resolved the way receipts-live resolves
-// the toggle — the origin room, plus the owning room of a public-work
-// receipt through its task record, since a pwr_ row's origin is a namespace
-// rather than a room id. Same predicate the directory receipt count uses.
-const OWNER_HIDDEN_RECEIPT = `NOT EXISTS (
-  SELECT 1 FROM room_directory_settings s
-  WHERE s.public_receipts = 0
-    AND (s.room_id = public_receipts.origin_room_id
-         OR s.room_id IN (
-           SELECT pwt.room_id FROM public_work_receipts pwr
-           JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
-           WHERE pwr.receipt_id = public_receipts.id)))`;
-
-// A legacy store whose settings table predates the toggle column has no
-// private rooms by definition (the column's default is public), so the
-// owner-toggle clause applies only where the column can be read.
-function ownerToggleReadable(store) {
-  try {
-    store.db.prepare("SELECT public_receipts FROM room_directory_settings LIMIT 0").all();
-    return true;
-  } catch (error) {
-    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
-    return false;
-  }
-}
+// An unpublished room or receipt stays out of listings, detail reads,
+// and the sitemap. The visibility rule — this operator-unpublish leg,
+// the owner-toggle leg (#3595: the origin room, plus the owning room of
+// a public-work receipt through its task record, since a pwr_ row's
+// origin can be a namespace rather than a room id), and their
+// composition — is defined once in server/public-visibility.mjs. The
+// directory receipt count applies the same predicate (PR 2 of the
+// visibility package); the claim that it did was false before it.
+const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 
 const receiptFilter = (room, needle) => {
   const clauses = [];
@@ -751,7 +734,9 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   // hidden (operator-unpublished, owner-toggled-off). The page query and
   // the cursor lookup apply the same set, so a served nextCursor always
   // names a receipt a follow-up request may anchor on.
-  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
+  const visibility = ownerToggleReadable(store.db)
+    ? [HIDDEN_RECEIPT, ownerHiddenReceiptSql({ taskRoomLeg: publicWorkTablesReadable(store.db) })]
+    : [HIDDEN_RECEIPT];
   let after = "";
   const afterParams = [];
   if (cursor != null) {
@@ -762,7 +747,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // is not a valid pagination position — accepting it would confirm the
     // hidden receipt exists and where it sits in the order (#3595). Both
     // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
-    // owner public-receipts toggle (OWNER_HIDDEN_RECEIPT). Same 422 as a
+    // owner public-receipts toggle (the owner leg). Same 422 as a
     // never-existent id.
     const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
@@ -783,7 +768,8 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
 export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
-  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
+  const visibility = receiptVisibilitySqlFor(store.db);
+  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${visibility}`).get(id);
   if (!row) return null;
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
@@ -945,11 +931,11 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // _recordSettlement). Before settlement, and for journal lots that are
 // not bounty movements (transfers carry no bounty_id), the id is a 404.
 // The owner's consent gates it like every other shape, through the
-// switches that can apply to a row-less record: operator unpublish,
-// the directory receipts toggle (receipts-live), and the room's own
-// recorded public-receipts setting — only a RECORDED on serves the
-// lot (#3594): a recorded off, and a room that never recorded the
-// setting, both keep the settled lot private.
+// switches that can apply to a row-less record — the lot rule of the
+// one visibility definition (server/public-visibility.mjs): operator
+// unpublish, the room's own recorded public-receipts setting (only a
+// RECORDED on serves the lot, #3594), and the directory receipts
+// toggle.
 // Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
 export function publicLotReceiptById(store, id) {
   if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
@@ -975,18 +961,13 @@ export function publicLotReceiptById(store, id) {
   try { resolution = bounty.resolution_json ? JSON.parse(bounty.resolution_json) : null; } catch { resolution = null; }
   const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
   if (!settlement || typeof settlement !== "object") return null;
-  if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
-  // No public_receipts row exists for an opt-out to delete, so the
-  // recorded setting is read from its write-time mirror
-  // (syncRoomPublication). #3594: a settled lot is public only with
-  // the owner's recorded opt-in — no mirror row (never recorded), a
-  // store whose schema cannot answer, and a recorded off all keep
-  // the lot private; only a recorded enabled = 1 serves it.
-  let settingRow = null;
-  try {
-    settingRow = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
-  } catch { settingRow = null; } // a store without the read-model schema recorded no opt-in
-  if (!settingRow || settingRow.enabled !== 1) return null;
+  // The lot gate is the visibility definition's lot rule
+  // (server/public-visibility.mjs): operator unpublish, the recorded
+  // opt-in read from its write-time mirror (syncRoomPublication —
+  // #3594: no mirror row, an unreadable schema, and a recorded off all
+  // keep the lot private; only a recorded enabled = 1 serves it), and
+  // the owner's directory receipts toggle, composed in one place.
+  if (!lotReceiptVisible(store.db, { id, roomId })) return null;
   let roomTitle = null;
   try {
     if (isListed(store, roomId)) {
@@ -1060,13 +1041,15 @@ export function publicLotReceiptById(store, id) {
 }
 
 export function collectPublicReceipts(store) {
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all()
+  const visibility = receiptVisibilitySqlFor(store.db);
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+  const visibility = receiptVisibilitySqlFor(store.db);
+  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
@@ -1124,12 +1107,12 @@ export function proofLevelOf(receipt) {
 // page's row set. Same room attribution as roomPageReceipts: rows naming
 // the room directly, plus the room's own work-claim / work-item receipts
 // (origin_room_id) which carry room_id only when the room is listed.
-// Operator unpublish applies here (HIDDEN_RECEIPT); the owner public-
-// receipts toggle is the receipts-live wrapper's job, like every other
+// The full visibility predicate applies here in SQL, like every other
 // public receipt read.
 export function roomProofRows(store, slug) {
+  const visibility = receiptVisibilitySqlFor(store.db);
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
-    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
+    WHERE ${visibility} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
 }
 
@@ -1144,8 +1127,9 @@ export function roomPageReceipts(store, slug, receiptsEnabled, { limit = 5, afte
     params.push(after.at, after.at, after.id);
   }
   params.push(cap);
+  const visibility = receiptVisibilitySqlFor(store.db);
   return store.db.prepare(`SELECT id, title, at FROM public_receipts
-    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item')))${cursor}
+    WHERE ${visibility} AND (room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item')))${cursor}
     ORDER BY at DESC, id ASC LIMIT ?`).all(...params);
 }
 
