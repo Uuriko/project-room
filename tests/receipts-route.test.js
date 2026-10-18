@@ -109,3 +109,42 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
   assert.match((await raw(origin, "/receipts")).text, /Public task/);
 });
+
+test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner toggle", async t => {
+  const { origin, store, ownerKey } = await serve(t);
+  // The public-work receipt is public from the start: its page carries
+  // structured data and points its share image at the per-receipt card.
+  const pwrPage = await raw(origin, `/receipts/${PWR}`);
+  assert.equal(pwrPage.status, 200);
+  assert.match(pwrPage.text, /application\/ld\+json/);
+  assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/og\\.png`));
+  assert.match(pwrPage.text, /og:image:alt" content="Artifact hash recorded/);
+  const og = await fetch(`${origin}/receipts/${PWR}/og.png`);
+  assert.equal(og.status, 200);
+  assert.match(og.headers.get("content-type"), /image\/png/);
+  assert.match(og.headers.get("cache-control"), /max-age=300/);
+  const bytes = new Uint8Array(await og.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
+  const post = await raw(origin, `/receipts/${PWR}/og.png`, { method: "POST" });
+  assert.equal(post.status, 405);
+  // A claim receipt joins once the owner publishes; unpublishing removes
+  // the page and the card together — the card never outlives the toggle.
+  await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "publish", type: "room.public_receipts_set", data: { enabled: true } }),
+  });
+  const id = collectPublicReceipts(store).find(item => item.title === "Ship the door")?.id;
+  assert.match(id, /^wcr_/);
+  assert.equal((await fetch(`${origin}/receipts/${id}/og.png`)).status, 200);
+  const claimPage = await raw(origin, `/receipts/${id}`);
+  assert.match(claimPage.text, /og:image:alt" content="Server-verified merge/);
+  await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "unpublish", type: "room.public_receipts_set", data: { enabled: false } }),
+  });
+  assert.equal((await fetch(`${origin}/receipts/${id}/og.png`)).status, 404);
+  assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
+  assert.equal((await fetch(`${origin}/receipts/wcr_${"0".repeat(32)}/og.png`)).status, 404);
+});
