@@ -254,6 +254,7 @@ const AX_NAMED_RECOVERIES = {
   assistant_source_denied: ["Choose your own visible shared message as the source.", "Pick one of your own visible shared messages."],
   assistant_stop_pending: ["A stop or scope decision must be acknowledged first.", "Acknowledge the pending stop or scope decision first."],
   attachment_conflict: ["That attachment id is already stored for this identity. Use the existing attachment or upload under a new id.", "Use the existing attachment, or upload with a new attachment id."],
+  attestation_conflict: ["That identity is already verified by another attester. A standing attestation is only withdrawn by its attester of record.", "Ask the attester of record to unverify the identity, then attest it yourself."],
   attachment_unavailable: ["That attachment is no longer available. Re-upload it or use a current attachment.", "Re-upload the attachment or reference a current one."],
   bad_cursor: ["The cursor is not valid. Use the opaque nextCursor from a previous response, or restart without a cursor.", "Restart the list without a cursor, or pass the nextCursor from a previous response."],
   bad_request: ["The request itself was refused — the message names the problem. Fix it and resend.", "Fix the problem named in the message and resend."],
