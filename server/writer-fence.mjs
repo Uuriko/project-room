@@ -505,6 +505,12 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "analytics_ctx",
   "claim_bond_shadow",
   "claim_reputation_signals",
+  // TD-0 MCP per-tool call telemetry (server/analytics/mcp-telemetry.mjs):
+  // daily rollups of MCP tools/call + tools/list by tool name, caller class
+  // and outcome — counts and metadata only, never arguments, bodies or
+  // identity ids (bright lines B2/B9). Created lazily on first record and
+  // pruned to a 400-day retention window on the write path.
+  "mcp_tool_daily",
 ]);
 // seeker_declarations + work_offer_terms (matchmaking, Fo ship-train
 // 2026-10-05, server/work-declarations.mjs): purely additive, created on

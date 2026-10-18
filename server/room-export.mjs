@@ -491,7 +491,11 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // TD-0 MCP telemetry (server/analytics/mcp-telemetry.mjs): lazy daily
+  // rollups, same treatment as the wake counters — a restored store
+  // restarts its telemetry window; the export still holds the rows.
+  "mcp_tool_daily"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";

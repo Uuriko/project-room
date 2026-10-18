@@ -56,6 +56,7 @@ import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
+import { recordMcpTelemetry } from "./analytics/mcp-telemetry.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
@@ -626,6 +627,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // the service instance.
   const agentRooms = new AgentRooms(store);
   const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
+  // TD-0: the dispatch layer's own answers (anonymous join surface,
+  // no-service refusals) count through this sink; the hosted profile
+  // wrapper counts everything it answers itself.
+  const hostedMcpTelemetry = event => recordMcpTelemetry(store.db, { surface: "hosted", ...event });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -1156,7 +1161,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, telemetry: hostedMcpTelemetry });
         }
         return writeRoomMcpNode(req, res, url);
       }

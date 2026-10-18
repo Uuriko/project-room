@@ -271,6 +271,9 @@ optional.push("server/wake-metrics.mjs"); // #3345: wake-reliability accounting 
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware identity->seats enumeration for read surfaces (imported by server/needs-me.mjs, server/agent-rooms.mjs and server/capability-visibility.mjs; pure, no imports)
+optional.push("server/analytics/mcp-telemetry.mjs"); // TD-0: MCP per-tool call telemetry — daily rollups + diet-programme report (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs and client/mcp-telemetry.mjs)
+optional.push("server/analytics/schema.mjs"); // analytics table helpers (utcDay/tableExists; imported by server/analytics/mcp-telemetry.mjs — first analytics module in the runtime import closure)
+optional.push("client/mcp-telemetry.mjs"); // TD-0: stdio MCP telemetry sink, same table shape (imported by scripts/agent-mcp.mjs and client/claude-channel.mjs)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)

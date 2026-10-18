@@ -51,6 +51,7 @@ import {
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
+import { classifyMcpCaller, isGuestOnlyIdentity, mcpReplyOutcome, recordMcpTelemetry } from "./analytics/mcp-telemetry.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
 import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
@@ -1038,22 +1039,70 @@ function resolveMcpIdentity(store, secret, userAgent) {
 export function createHostedRoomMcp(store, { agentRooms } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+    // TD-0 telemetry: every tools/call and tools/list this profile answers
+    // is counted by invoked name + caller class + outcome (metadata only;
+    // recordMcpTelemetry never throws, so counting cannot fail a call).
+    // room_run_action recurses inside handleAuthed, so only the outer
+    // invoked name is counted here — the wrapper is the single count point.
+    const record = event => recordMcpTelemetry(store.db, { surface: "hosted", ...event });
+    const invokedTool = typeof message?.params?.name === "string" ? message.params.name : "";
+    const presentedToken = typeof authorization === "string" ? authorization.replace(/^bearer /i, "") : "";
+    const presentedClass = () => classifyMcpCaller({ secret: presentedToken || null });
     // Anonymous enrollment: mint an identity secret without leaving MCP.
     // Handled before auth parsing — a presented credential is ignored and a
     // fresh anonymous identity is minted, mirroring POST /api/agent-identities.
     if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
-      return handleIdentityMintMcp(store, message, { remoteAddress });
+      const reply = handleIdentityMintMcp(store, message, { remoteAddress });
+      if (reply) record({ tool: "room_identity_mint", callerClass: "anonymous", outcome: mcpReplyOutcome(reply) });
+      return reply;
     }
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       const absent = authorization === undefined;
       const parsed = absent ? { secret: null } : identityBearer(authorization);
-      if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
-      return handlePublicWorkMcp(store, message, parsed.secret, mcpUrl);
+      if (parsed.error) {
+        record({ tool: invokedTool, callerClass: presentedClass(), outcome: "error" });
+        return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
+      }
+      const reply = handlePublicWorkMcp(store, message, parsed.secret, mcpUrl);
+      if (reply) {
+        let callerClass = "anonymous";
+        if (parsed.secret) {
+          let identityId = null;
+          try { identityId = store.identities.resolveGlobalIdentitySecret(parsed.secret)?.identityId ?? null; } catch { identityId = null; }
+          callerClass = classifyMcpCaller({ secret: parsed.secret, identityId });
+        }
+        record({ tool: invokedTool, callerClass, outcome: mcpReplyOutcome(reply) });
+      }
+      return reply;
     }
     const parsed = identityBearer(authorization);
-    if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
+    if (parsed.error) {
+      if (message?.method === "tools/call") record({ tool: invokedTool, callerClass: presentedClass(), outcome: "error" });
+      if (message?.method === "tools/list") record({ kind: "list", callerClass: presentedClass(), outcome: "error" });
+      return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
+    }
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
-    if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
+    if (!identity) {
+      if (message?.method === "tools/call") record({ tool: invokedTool, callerClass: presentedClass(), outcome: "error" });
+      if (message?.method === "tools/list") record({ kind: "list", callerClass: presentedClass(), outcome: "error" });
+      return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
+    }
+    const callerClass = classifyMcpCaller({
+      secret: parsed.secret, identityId: identity.identityId,
+      guestOnly: isGuestOnlyIdentity(store.db, identity.identityId)
+    });
+    const reply = await handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
+    if (reply && message.method === "tools/call") {
+      record({ tool: invokedTool, callerClass, outcome: mcpReplyOutcome(reply) });
+    }
+    if (reply && message.method === "tools/list") {
+      record({
+        kind: "list",
+        profile: reply.result?.profile ?? message.params?.profile ?? queryFlag(searchParams, "profile") ?? "core",
+        focus: reply.result?.focus ?? message.params?.focus ?? queryFlag(searchParams, "focus") ?? "",
+        callerClass, outcome: mcpReplyOutcome(reply)
+      });
+    }
+    return reply;
   };
 }

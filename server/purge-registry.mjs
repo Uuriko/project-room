@@ -1857,7 +1857,12 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // TD-0 MCP telemetry (server/analytics/mcp-telemetry.mjs): global daily
+  // rollups keyed by day/tool/caller class — the table carries no room,
+  // identity or account column, so there is nothing for a purge to key on;
+  // rows are bounded by the module's 400-day retention prune instead.
+  { table: "mcp_tool_daily", key: null, action: "retain", reason: "Global MCP tool-call rollups carry no room/identity/account key; bounded by the 400-day retention prune in server/analytics/mcp-telemetry.mjs", match: {} }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
