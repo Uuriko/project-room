@@ -3938,27 +3938,28 @@ function openEmailAuth(mode, { recordHistory = true } = {}) {
   focusSignin();
 }
 function handleSigninBack() { return signinNavigation.back(); }
-// Preserve guide deep links through sign-in, then open the Advanced guide.
+// The connection guide is public; reading it does not require room access.
 $("#connect-guide-copy").innerHTML = uiText("guide.instructions");
 let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
-  if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
+  if (!pendingAgentGuide) return;
   pendingAgentGuide = false;
-  $("#connect-guide-dialog").showModal();
+  if (!$("#connect-guide-dialog").open) $("#connect-guide-dialog").showModal();
 }
 $("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
 $("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
 $("#signout-button").addEventListener("click", () => $("#connect-guide-dialog").close(), true);
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
-const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
+const agentGuideBase = () => [location.origin, location.pathname.startsWith("/room/") || location.pathname === "/room" ? "/room" : ""].join("");
+const joinAgentPrompt = () => `Read ${agentGuideBase()}/llms.txt and join using the original shared invitation I gave you.`;
 function fillJoinAgent() {
   const field = $("#join-agent-prompt");
   if (!field) return;
   field.value = joinAgentPrompt();
   for (const [id, path] of [["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
     const link = $(id);
-    if (link) link.href = `${location.origin}${path}`;
+    if (link) link.href = new URL(path.slice(1), agentGuideBase() + "/").href;
   }
 }
 fillJoinAgent();
@@ -5147,6 +5148,7 @@ window.addEventListener("popstate", () => {
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
+  if (location.hash === "#join-agent") pendingAgentGuide = true;
   revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (redirectAgentInvite(fragment)) return;
