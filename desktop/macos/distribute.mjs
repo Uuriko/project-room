@@ -80,6 +80,8 @@ export function distribute(options, { run = command, platform = process.platform
     throw new Error('Built app source provenance does not match the clean release');
   run('plutil', ['-replace', 'CFBundleShortVersionString', '-string', options.version, plist]);
   const helper = join(app, 'Contents/MacOS/ProjectRoomTools');
+  const architecture = run('lipo', ['-archs', join(app, 'Contents/MacOS/ProjectRoom')]).trim();
+  if (!architecture || run('lipo', ['-archs', helper]).trim() !== architecture) throw new Error('App and helper architectures do not match');
   for (const target of [helper, app]) {
     run('codesign', ['--force', '--sign', options.identity, '--options', 'runtime', '--timestamp', target]);
     run('codesign', ['--verify', '--strict', '--verbose=2', target]);
@@ -97,7 +99,7 @@ export function distribute(options, { run = command, platform = process.platform
   run('ditto', ['-c', '-k', '--keepParent', app, archive]);
   const bytes = fs.readFileSync(archive);
   const receipt = { format: 1, status: 'notarized', sourceRevision: options.revision,
-    version: options.version, platform: 'macOS', architecture: run('uname', ['-m']).trim(),
+    version: options.version, platform: 'macOS', architecture,
     minimumMacOS: value('LSMinimumSystemVersion'), build: value('CFBundleVersion'),
     artifact: archive, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
     notarySubmissionId: notary.id, createdAt: new Date().toISOString(),

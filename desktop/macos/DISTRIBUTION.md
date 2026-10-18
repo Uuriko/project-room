@@ -30,8 +30,8 @@ before another upload. Absence of a successful receipt means they are not a rele
 
 Publish only the final versioned ZIP and release receipt after checking the
 supported-machine installation and launch journey. Do not publish the intermediate
-notary-submission ZIP. The archive is built for the current architecture, recorded
-in the receipt; this is not a universal binary claim. The receipt excludes signing
+notary-submission ZIP. The receipt reads the actual app and helper architectures and refuses a
+mismatch; this is not a universal binary claim. The receipt excludes signing
 identity and Keychain profile. Keep source and release checks alongside the receipt.
 
 First-version updates use a signed manual replacement: quit Project Room, verify

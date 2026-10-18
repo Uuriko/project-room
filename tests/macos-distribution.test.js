@@ -50,7 +50,7 @@ test('shipping inventory rejects stale acceptance executables and symbolic links
   assert.throws(() => assertShippingBundle(app, fs), /symbolic/);
 });
 
-function harness(t, { notaryStatus = 'Accepted', failAt = null, dirtyAfterBuild = false } = {}) {
+function harness(t, { notaryStatus = 'Accepted', failAt = null, dirtyAfterBuild = false, architecturesDiffer = false } = {}) {
   const template = bundle(t), output = join(template, 'release');
   const calls = [];
   let built = false;
@@ -67,7 +67,7 @@ function harness(t, { notaryStatus = 'Accepted', failAt = null, dirtyAfterBuild 
     if (executable === 'ditto' && args[0] === '-c') writeFileSync(args.at(-1), 'synthetic archive');
     if (executable === 'plutil' && args[0] === '-extract') return ({ ProjectRoomSourceRevision: revision, ProjectRoomSourceDirty: 'false', LSMinimumSystemVersion: '14.0', CFBundleVersion: '42' })[args[1]];
     if (executable === 'xcrun' && args[1] === 'submit') return JSON.stringify({ status: notaryStatus, id: 'synthetic-notary-id' });
-    if (executable === 'uname') return 'arm64';
+    if (executable === 'lipo') return architecturesDiffer && args[1].endsWith('ProjectRoomTools') ? 'x86_64' : 'arm64';
     return '';
   };
   return { calls, output, run, invoke: () => distribute({ ...options, output }, { run, platform: 'darwin' }) };
@@ -89,12 +89,12 @@ test('receipt is emitted only after notarization, stapling and Gatekeeper verifi
   assert.ok(h.calls.find(call => call[0] === 'xcrun' && call[1] === 'stapler' && call[2] === 'validate'));
 });
 
-for (const [name, config] of [['notary rejection', { notaryStatus: 'Invalid' }], ['Gatekeeper failure', { failAt: 'spctl' }], ['source drift during build', { dirtyAfterBuild: true }]]) {
+for (const [name, config] of [['notary rejection', { notaryStatus: 'Invalid' }], ['Gatekeeper failure', { failAt: 'spctl' }], ['source drift during build', { dirtyAfterBuild: true }], ['helper architecture mismatch', { architecturesDiffer: true }]]) {
   test(`${name} emits no success receipt`, t => {
     const h = harness(t, config);
     assert.throws(h.invoke);
     assert.equal(fs.existsSync(join(h.output, 'release-receipt.json')), false);
-    if (config.dirtyAfterBuild) assert.equal(h.calls.some(call => call[0] === 'codesign'), false);
+    if (config.dirtyAfterBuild || config.architecturesDiffer) assert.equal(h.calls.some(call => call[0] === 'codesign'), false);
     if (config.notaryStatus) assert.equal(h.calls.some(call => call[0] === 'spctl'), false);
   });
 }

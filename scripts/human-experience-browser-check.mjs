@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
+const browserEngine = process.env.ROOM_BROWSER_ENGINE ?? 'chromium';
+if (!['chromium', 'webkit'].includes(browserEngine)) throw new Error('ROOM_BROWSER_ENGINE must be chromium or webkit');
+const browserType = browserEngine === 'webkit' ? webkit : chromium;
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
@@ -58,7 +61,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     ['work.started',{workItemId:'human-result-task',expectedRevision:1}]
   ]) f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type,data});
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({headless:true});
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
   const errors = [], pages = [];
   for(const member of ['owner','guest']) {
@@ -280,7 +283,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
   const origin = `http://127.0.0.1:${server.address().port}`;
   let browser = null;
   t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
-  browser = await chromium.launch({headless:true});
+  browser = await browserType.launch({headless:true});
   for (const outcome of ['offline','conflict','success','new session','new room']) {
     await t.test(`late ${outcome} leaves the current result editor owned by its own request`, async t => {
       const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage(), held = [], errors = [];
@@ -361,7 +364,7 @@ for (const [width, height] of [[1280, 800], [390, 844]]) {
     for (let i = 0; i < 45; i++) { const mineNow = i % 3 === 0; post(mineNow ? f.keys.owner : i % 3 === 1 ? f.keys.guest : f.keys.producer, { messageId: `m${i}`, body: `Message ${i} in a long running conversation.` }); if (mineNow) mine.push(`m${i}`); }
     for (let i = 0; i < 4; i++) post(f.keys.reviewer, { messageId: `reply${i}`, body: i === 3 ? `Reply 3 ${'to your earlier message '.repeat(5)}` : `Reply ${i} to your earlier message`, replyToId: mine[i] });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+    const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
     await page.goto(origin); await signInFixture(page, f.keys.owner);
@@ -388,7 +391,7 @@ for (const [width, height] of [[1280, 800], [390, 844]]) {
 test('human Advanced tools stay out of the door and preserve squad drafts and saved preferences', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({store:f.store, streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  const origin = `http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
   t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
   const page=await browser.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/#join-agent');
@@ -441,7 +444,7 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
 test('deleted assistant prompt shows only content-free stop controls and preserves the conversation draft', {timeout:60000}, async t => {
   const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
   t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
   const api=async(actor,input)=>{
     const response=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
@@ -482,7 +485,7 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
 test('keyboard Stop on the card face keeps focus and the status change is announced (R5-1, R5-2)', {timeout:60000}, async t => {
   const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
   t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
   const api=async(actor,input)=>{
     const response=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
@@ -523,7 +526,7 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
 for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale review on a phone (${theme})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const api = async (actor, input) => {
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: input ? 'POST' : 'GET', headers: { authorization: `Bearer ${f.keys[actor]}`, ...(input ? { 'content-type': 'application/json' } : {}) }, ...(input ? { body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) } : {}) });
@@ -587,7 +590,7 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
 test('@Room in the mention list is an Ask Room, not a plain mention', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   await page.goto(origin); await signInFixture(page, f.keys.owner);
@@ -615,7 +618,7 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
 test('ask card shows not-picked-up and stalled statuses with the result on the card', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({headless:true});
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
   const errors = [];
   const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
@@ -669,7 +672,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     };
     await api('owner', { action: 'configure', name: 'Room', coordinatorMemberId: 'producer', expectedRevision: 0 });
     await api('owner', { action: 'invoke', runId: 'shared', sourceMessageId: 'shared-ask' });
-    const browser = await chromium.launch({ headless: true });
+    const browser = await browserType.launch({ headless: true });
     t.after(async () => {
       await browser.close(); server.closeStreams(); server.closeAllConnections();
       await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
@@ -741,7 +744,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
 for (const width of [1280, 390]) test(`one shared answer streams in place and becomes the final result (${width})`, {timeout:30000}, async t => {
   const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
   t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
   const api=async(actor,input)=>{
     const res=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
@@ -778,7 +781,7 @@ for (const width of [1280, 390]) test(`one shared answer streams in place and be
 test('each ask renders as one foldable row; the row keeps its open state', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({headless:true});
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
   const errors = [];
   const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
@@ -822,7 +825,7 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
 test('Add to this ask wires the composer into the run and names the ask', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({headless:true});
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
   const errors = [];
   const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
@@ -860,7 +863,7 @@ for (const width of [1280, 390]) {
   test(`Stop rejected because the host claimed after the card rendered: Review then Retry stops the new attempt (${width}px)`, { timeout: 60000 }, async t => {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+    const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const api = async (actor, input) => {
       const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys[actor]}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) });
@@ -902,7 +905,7 @@ for (const width of [1280, 390]) {
 async function claimRaceFixture(t, width, ids) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const api = async (actor, input) => {
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys[actor]}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) });
