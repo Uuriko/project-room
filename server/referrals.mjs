@@ -18,7 +18,7 @@
 // newly-joined member).
 
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";

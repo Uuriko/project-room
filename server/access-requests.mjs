@@ -29,7 +29,7 @@
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";

@@ -25,6 +25,13 @@ import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
+// PILOT_LIMITS lives in server/pilot-limits.mjs (shared, cycle-free; F-16);
+// the local import keeps the binding in scope for the write paths below
+// and it is re-exported so every existing
+// `import { PILOT_LIMITS } from "./store.mjs"` resolves to the exact same
+// frozen object and every cap check behaves identically.
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
+export { PILOT_LIMITS };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
@@ -433,15 +440,6 @@ function applyProvenanceRepair(state, events) {
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// F5: the bounded pilot caps in one place. The room write paths below enforce
-// them; server/usage-summary.mjs reports them with the remaining headroom.
-// G11 (2026-10-06): muse-room reached 82% of the 4 MB projection and was
-// ~0.7 days from refusing writes, with the event cap ~10 days out. Raised per
-// the owner's word relayed at room seq 3425. Every event cap check reads
-// eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
-// Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
-// headroom; a larger guard does not establish the deployed storage ceiling.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");

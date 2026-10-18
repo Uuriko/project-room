@@ -12,7 +12,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { PILOT_LIMITS } from "../server/pilot-limits.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";

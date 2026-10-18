@@ -11,7 +11,8 @@
 // (guest_invites + guest_members tables, IF NOT EXISTS, no schema version
 // bump), following the wake-queue / heartbeat additive pattern.
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { activeMemberCount } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";

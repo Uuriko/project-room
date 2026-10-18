@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, event } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 // Read at call time (store.mjs imports this module): one source for capacity.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 
 // Guest-agent tier primitives + seat machinery, shared by guest-invites v1
 // (server/guest-invites.mjs). The v0 link-exchange system that originally

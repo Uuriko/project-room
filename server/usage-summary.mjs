@@ -16,7 +16,8 @@
 // reserved and headroom in one place. Its period is the allowance's own
 // (30 days without one), not `?days=`; GET /spend-allowance stays as is.
 
-import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { ServiceError, activeMemberCount } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { SESSION_EVENT_TYPES } from "../src/work-item-session.js";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 

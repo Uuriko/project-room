@@ -3,7 +3,8 @@ import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, 
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
-import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { ServiceError, activeMemberCount } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";

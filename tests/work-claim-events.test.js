@@ -6,7 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomAgentClient } from '../client/room-agent.mjs';
-import { PILOT_LIMITS, RoomStore } from '../server/store.mjs';
+import { RoomStore } from '../server/store.mjs';
+import { PILOT_LIMITS } from '../server/pilot-limits.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { applyEvent, emptyRoomState } from '../src/events.js';
