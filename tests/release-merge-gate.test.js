@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT, REQUIRED, protectionPlan, candidateReady, grantOf, problemKeyCheck, pauseCheck, guardedMerge } from '../scripts/release-merge-gate.mjs';
+import { CONTEXT, REQUIRED, protectionPlan, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge } from '../scripts/release-merge-gate.mjs';
 const candidate = { repo: 'Uuriko/project-room', pr: 4102, head: 'a'.repeat(40), base: 'b'.repeat(40) };
 const grant = { kind: 'room.release-merge.v1', ...candidate, purpose: 'deploy-fix', directiveMessageId: 'owner-directive', problemKeys: ['release:landing'], workClaimId: 'source-work' };
-const protection = { strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
+const protection = { enforceAdmins: true, strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
 const info = { state: 'OPEN', isDraft: false, headRefOid: candidate.head, baseRefName: 'main', mergeable: 'MERGEABLE', statusCheckRollup: REQUIRED.map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })) };
 function view() { return { pause: { state: 'unclaimed' }, pr: structuredClone(info), main: candidate.base, protection, identity: 'coordinator', claims: [], slot: { state: 'claimed', owner: 'coordinator', claimedAt: '2026-10-18T00:00:00Z', leaseExpiresAt: new Date(Date.now() + 3600000).toISOString(), history: [{ action: 'claimed', note: JSON.stringify(grant) }, { action: 'retention_ack', note: 'ack' }] } }; }
 test('protection adds only the landing context and preserves app bindings and strictness', () => {
@@ -57,10 +57,10 @@ test('lost status or merge response still attempts revocation; expired lease nev
 });
 
 test('native pause refuses normal merges, stale exceptions and missing pause state', () => {
-  const pause = { state: 'claimed', history: [{ action: 'claimed', note: JSON.stringify({ kind: 'room.release-pause.v1', directiveMessageId: 'owner-directive' }) }] };
-  pauseCheck(pause, grant);
-  assert.throws(() => pauseCheck(pause, { ...grant, purpose: 'normal' }), /paused/);
-  assert.throws(() => pauseCheck(pause, { ...grant, directiveMessageId: 'old-ruling' }), /paused/);
+  const pause = { state: 'claimed', owner: 'coordinator', history: [{ action: 'claimed', note: JSON.stringify({ kind: 'room.release-pause.v1', directiveMessageId: 'owner-directive' }) }] };
+  pauseCheck(pause, { ...grant, owner: 'coordinator' });
+  assert.throws(() => pauseCheck(pause, { ...grant, owner: 'coordinator', purpose: 'normal' }), /paused/);
+  assert.throws(() => pauseCheck(pause, { ...grant, owner: 'coordinator', directiveMessageId: 'old-ruling' }), /paused/);
   assert.throws(() => pauseCheck(null, grant), /native/);
   assert.throws(() => pauseCheck({ state: 'done' }, grant), /native/);
 });
@@ -80,11 +80,11 @@ test('real CLI dry-run makes no writes; apply preserves protection and journals 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const bin = join(directory, 'bin'); mkdirSync(bin);
   const stored = join(directory, 'protection.json'), calls = join(directory, 'calls.jsonl'), journal = join(directory, 'journal.json');
-  writeFileSync(stored, JSON.stringify({ strict: false, checks: REQUIRED.map(context => ({ context, app_id: 15368 })) }));
+  writeFileSync(stored, JSON.stringify({ enforce_admins: { enabled: true }, required_status_checks: { strict: false, checks: REQUIRED.map(context => ({ context, app_id: 15368 })) } }));
   writeFileSync(join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';
 const args=process.argv.slice(2);const input=fs.readFileSync(0,'utf8');
 const method=args.includes('--method')?args[args.indexOf('--method')+1]:'GET';
-if(method==='PATCH') {const j=JSON.parse(fs.readFileSync(process.env.FIXTURE_JOURNAL));if(j.writes.at(-1).phase!=='unknown')process.exit(8);fs.writeFileSync(process.env.FIXTURE_PROTECTION,input);}
+if(method==='PATCH') {const j=JSON.parse(fs.readFileSync(process.env.FIXTURE_JOURNAL));if(j.writes.at(-1).phase!=='unknown')process.exit(8);const p=JSON.parse(fs.readFileSync(process.env.FIXTURE_PROTECTION));p.required_status_checks=JSON.parse(input);fs.writeFileSync(process.env.FIXTURE_PROTECTION,JSON.stringify(p));}
 fs.appendFileSync(process.env.FIXTURE_CALLS,JSON.stringify({method,input})+'\\n');
 console.log(fs.readFileSync(process.env.FIXTURE_PROTECTION,'utf8'));
 `, { mode: 0o700 });
@@ -94,9 +94,30 @@ console.log(fs.readFileSync(process.env.FIXTURE_PROTECTION,'utf8'));
   assert.equal(readFileSync(calls, 'utf8').includes('PATCH'), false);
   await run(process.execPath, [script, 'install', '--state', journal, '--apply'], { env });
   assert.equal(JSON.parse(readFileSync(journal)).phase, 'installed');
-  const after = JSON.parse(readFileSync(stored)); assert.equal(after.checks.length, 6);
+  const after = JSON.parse(readFileSync(stored)).required_status_checks; assert.equal(after.checks.length, 6);
   assert.deepEqual(after.checks.slice(0, 5), REQUIRED.map(context => ({ context, app_id: 15368 })));
   const oldJournal = readFileSync(journal, 'utf8');
   await assert.rejects(run(process.execPath, [script, 'install', '--state', journal, '--apply'], { env }), /requires reconciliation/);
   assert.equal(readFileSync(journal, 'utf8'), oldJournal);
+  const disabled = JSON.parse(readFileSync(stored)); disabled.enforce_admins.enabled = false; writeFileSync(stored, JSON.stringify(disabled));
+  const patchesBefore = readFileSync(calls, 'utf8').split('PATCH').length;
+  await assert.rejects(run(process.execPath, [script, 'install', '--state', join(directory, 'new-plan.json')], { env }), /Administrator enforcement/);
+  assert.equal(readFileSync(calls, 'utf8').split('PATCH').length, patchesBefore);
+});
+
+test('matching public pause directive does not let another slot holder land a deploy fix', async () => {
+  const calls = [];
+  await assert.rejects(guardedMerge(candidate, {
+    inspect: async () => { const v = view(); v.identity = 'other-seat'; v.slot.owner = 'other-seat'; v.pause = { state: 'claimed', owner: 'landing-lane', history: [{ action: 'claimed', note: JSON.stringify({ kind: 'room.release-pause.v1', directiveMessageId: 'owner-directive' }) }] }; return v; },
+    status: async input => calls.push(input.state), merge: async () => { calls.push('MERGED'); return { merged: true }; },
+  }), /pause holder/);
+  assert.deepEqual(calls, []);
+});
+
+test('administrator enforcement and complete claim pagination fail closed', () => {
+  assert.throws(() => candidateReady(candidate, info, candidate.base, { ...protection, enforceAdmins: false }), /Administrator/);
+  assert.throws(() => candidateReady(candidate, info, candidate.base, { ...protection, enforceAdmins: undefined }), /Administrator/);
+  assert.throws(() => claimsFromPages([{ claims: [], hasMore: true }]), /Incomplete/);
+  assert.throws(() => claimsFromPages([{ claims: [] }]), /Incomplete/);
+  assert.deepEqual(claimsFromPages([{ claims: [{ id: 'claim' }], hasMore: false }]), [{ id: 'claim' }]);
 });

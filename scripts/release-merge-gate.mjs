@@ -34,6 +34,7 @@ export function candidateReady(candidate, info, main, protection) {
   if (info.state !== 'OPEN' || info.isDraft || info.headRefOid !== candidate.head || info.baseRefName !== 'main' || main !== candidate.base ||
       !['MERGEABLE'].includes(info.mergeable)) fail('PR head/base, draft state or mergeability changed');
   if (!protection.checks.some(check => check.context === CONTEXT)) fail('Install the required landing status before authorizing a merge');
+  if (protection.enforceAdmins !== true) fail('Administrator enforcement must remain enabled');
   for (const required of protection.checks) {
     if (required.context === CONTEXT) continue;
     const found = (info.statusCheckRollup ?? []).filter(check => (check.name ?? check.context) === required.context);
@@ -52,9 +53,14 @@ export function problemKeyCheck(grant, claims) {
 export function pauseCheck(pause, grant) {
   if (!pause || !['unclaimed', 'claimed', 'in_progress', 'blocked'].includes(pause.state)) fail('Read the native RELEASE-PAUSE state; missing or terminal state is not permission');
   if (pause.state === 'unclaimed') return;
+  if (typeof pause.owner !== 'string' || !pause.owner || grant.owner !== pause.owner) fail('Only the pause holder may authorize a deploy-fix exception');
   let ruling;
   try { ruling = JSON.parse(pause.history?.findLast(stamp => stamp.action === 'claimed')?.note); } catch { fail('Pause needs its recorded owner directive'); }
   if (ruling?.kind !== 'room.release-pause.v1' || grant.purpose !== 'deploy-fix' || grant.directiveMessageId !== ruling.directiveMessageId) fail('Main is paused; only an exact deploy-fix grant under the current owner ruling may land');
+}
+export function claimsFromPages(pages) {
+  if (pages.some(page => page?.hasMore !== false || !Array.isArray(page.claims))) fail('Incomplete claim pagination; no collision verdict is safe');
+  return pages.flatMap(page => page.claims);
 }
 // All writes pass through this adapter so a durable journal records exact input
 // BEFORE each uncertain GitHub call. No shell interpolation or secret logging.
@@ -101,13 +107,17 @@ async function main() {
   };
   if (action === 'install') {
     const path = `repos/${repo}/branches/main/protection/required_status_checks`;
-    const before = gh(['api', path]); const plan = protectionPlan(before);
+    const full = gh(['api', `repos/${repo}/branches/main/protection`]);
+    if (full.enforce_admins?.enabled !== true) fail('Administrator enforcement must remain enabled');
+    const before = full.required_status_checks; const plan = protectionPlan(before);
     journal = { ...journal, before, plan }; save();
     if (apply) {
       // Change ONLY required checks; preserve strictness, app bindings, admin
       // enforcement, review requirements, bypass lists and other protections.
       write(path, plan, 'PATCH');
-      const after = gh(['api', path]);
+      const fullAfter = gh(['api', `repos/${repo}/branches/main/protection`]);
+      if (fullAfter.enforce_admins?.enabled !== true) fail('Administrator enforcement changed during installation');
+      const after = fullAfter.required_status_checks;
       if (!after.checks.some(check => check.context === CONTEXT) || after.strict !== before.strict ||
           before.checks.some(check => !after.checks.some(next => next.context === check.context && next.app_id === check.app_id))) fail('Protection read-back differs from planned additive restriction');
       journal.after = after; journal.phase = 'installed'; save();
@@ -133,14 +143,21 @@ async function main() {
     const slot = await room.workClaimGet('MERGE-SLOT');
     const pause = await room.workClaimGet('RELEASE-PAUSE');
     const pages = await Promise.all(['claimed', 'in_progress', 'blocked'].map(state => room.workClaims({ state })));
+    const claims = claimsFromPages(pages);
+    const fullProtection = gh(['api', `repos/${repo}/branches/main/protection`]);
     return { identity: access.memberId, slot, pause,
       openAuthorizations: gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '1000', '--json', 'number,headRefOid,statusCheckRollup']).filter(pr => pr.statusCheckRollup.some(check => (check.name ?? check.context) === CONTEXT && ['success', 'SUCCESS'].includes(check.conclusion ?? check.state))),
-      claims: pages.flatMap(page => page.claims),
+      claims,
       pr: gh(['pr', 'view', String(candidate.pr), '--repo', repo, '--json', 'state,isDraft,headRefOid,baseRefName,mergeable,statusCheckRollup']),
       main: gh(['api', `repos/${repo}/commits/main`]).sha,
-      protection: gh(['api', `repos/${repo}/branches/main/protection/required_status_checks`]) };
+      protection: { ...fullProtection.required_status_checks, enforceAdmins: fullProtection.enforce_admins?.enabled === true } };
   };
-  const before = await inspect(); candidateReady(candidate, before.pr, before.main, before.protection);
+  const before = await inspect();
+  if (before.openAuthorizations.length) {
+    console.error(JSON.stringify({ outstandingAuthorizations: before.openAuthorizations.map(pr => ({ pr: pr.number, head: pr.headRefOid, revoke: `node scripts/release-merge-gate.mjs revoke --pr ${pr.number} --head ${pr.headRefOid} --base ${before.main} --state NEW_JOURNAL --apply` })) }));
+    if (before.openAuthorizations.some(pr => pr.headRefOid !== candidate.head)) fail('Another open head has an unreconciled landing status; revoke it first');
+  }
+  candidateReady(candidate, before.pr, before.main, before.protection);
   const grant = grantOf(before.slot, before.identity, candidate); problemKeyCheck(grant, before.claims); pauseCheck(before.pause, grant);
   journal = { ...journal, candidate, grant }; save();
   if (apply) {

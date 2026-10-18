@@ -22,7 +22,8 @@ node scripts/release-merge-gate.mjs install --state /absolute/private/install-pl
 node scripts/release-merge-gate.mjs install --state /absolute/private/install-plan.json --apply
 ```
 
-The script reads protection, preserves all existing required contexts and App
+The script reads full branch protection and refuses disabled administrator
+enforcement. It preserves all existing required contexts and App
 bindings, adds the new status, and verifies the result after PATCH. It changes
 only required-status-check settings, never disables admin enforcement or adds a
 bypass. An unexpected protection shape refuses installation.
@@ -49,10 +50,13 @@ an exact JSON note (full forty-character SHAs):
 {"kind":"room.release-merge.v1","repo":"Uuriko/project-room","pr":123,"head":"FULL_PR_HEAD","base":"FULL_CURRENT_MAIN","purpose":"deploy-fix","directiveMessageId":"CURRENT_OWNER_PAUSE_MESSAGE_ID","workClaimId":"SOURCE_CLAIM","problemKeys":["release:landing"]}
 ```
 
-The holder must match the existing Room connection used by the coordinator,
+During a pause the MERGE-SLOT holder must also equal the RELEASE-PAUSE holder;
+a public directive ID alone grants no exception. The holder must match the
+existing Room connection used by the coordinator,
 with at least two minutes left. During a native pause, only `deploy-fix` under
 that pause's current directive passes; after release, `normal` is allowed.
-`problemKeys` checks existing live claims and names any other holder. Resolve
+`problemKeys` checks existing live claims and names any other holder. Incomplete
+claim pagination fails closed, including the client hop limit. Resolve
 conflicts or record supersession using the existing claim lifecycle before
 retrying. This consumer supports the optional durable `problemKey` carrier;
 it does not invent that field's persistence or silently infer keys from prose.
@@ -69,6 +73,7 @@ claims and lease. Mutating mode rechecks, publishes success for **only that
 head**, rechecks again, submits GitHub's SHA-matched merge, and revokes success in
 `finally`, including after an uncertain status/merge response. The maintainer
 still performs the required independent exact-head review before invoking this.
+Dry-run lists outstanding authorized heads and offers exact-head revocation commands.
 Another open head with a leftover success status refuses authorization. A changed
 head, changed base, changed holder/generation, expired lease, draft, missing or
 pending check, or unresolved problem collision stops the merge. Release the Room
