@@ -406,6 +406,9 @@ const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
+  // Older history loads on a reader gesture, not 250 ms after open: on a busy
+  // room the background fill was most of a phone's bytes (~3 MB per open).
+  lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
@@ -1998,11 +2001,13 @@ function render() {
     : `<button type="button" class="text-button" data-member-work="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>Let them take work</button>`;
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
   // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
+  // R9-1: a person (member or guest) gets Remove only; Pause is about an agent's wakes.
   const memberActions = m => {
-    if (!ownerView || m.kind !== "agent" || m.active === false) return "";
+    if (!ownerView || m.active === false || m.id === state.room.ownerId || m.id === session.member.id) return "";
+    const agent = m.kind === "agent";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
     // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}">${agent ? `<button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button>` : ""}<button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
@@ -2162,10 +2167,10 @@ function renderRecordPanel() {
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
-  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED);
+  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED || e.type === T.OWNER_DECISION_RECORDED);
   setText("#decision-count", decisions.length || "");
   renderContent("#decision-list", [...decisions].reverse().map(e =>
-    `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
+    `<li><strong>${esc(e.type === T.DECISION_RECORDED ? e.data.statement : `${humanize(e.data.decision)}${e.data.reason ? `: ${e.data.reason}` : ""}`)}</strong>${e.data.sourceMessageId ? ` <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>` : ""}${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
 $("#record-panel").addEventListener("toggle", () => {
@@ -2314,7 +2319,13 @@ function renderMessages() {
     if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  // Lazy history: a reply whose thread root is older than the held window
+  // indexes as a root; it stays in its (unloaded) thread, as it would with
+  // full history, instead of posing as a top-level message.
+  const owesHistory = client.owesHistory;
+  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
+  if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
+  const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
@@ -2371,7 +2382,7 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
-  if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
+  if (hiddenCount || showPager) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
   // after them on every arrival. They are repainted after each render.
@@ -2462,7 +2473,7 @@ function renderMessages() {
   for (const [key, node] of previous) if (key?.startsWith("work:") && !workById.has(key.slice(5))) node.remove();
   let wi = 0;
   const merged = [];
-  if (hiddenCount) {
+  if (hiddenCount || showPager) {
     let pager = previous.get(TIMELINE_PAGER_KEY);
     if (!pager) {
       pager = document.createElement("li");
@@ -2749,11 +2760,12 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
-  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room${loadingOlder ? " · loading older messages…" : ""}`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
@@ -3017,6 +3029,7 @@ function switchThread(threadId, focusComposer = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
+  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) { pendHashReveal(id); return; }
   if (!state || busy || !conversation.byId.has(id)) return;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
@@ -3399,6 +3412,7 @@ function decodeFragment(value) {
 function pendHashReveal(messageId) {
   pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
     generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+  client.loadHistory();
 }
 // Runs on every snapshot. The pending reveal fires only when this
 // snapshot first holds the target and nothing about the navigation
@@ -4364,6 +4378,7 @@ function expandTimelineTo(id) {
 }
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
+    if (client.loadHistory()) return; // older history first; it renders on arrival
     const view = `room:${activeChannelId}`;
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
@@ -4684,7 +4699,8 @@ $("#presence-list").addEventListener("click", async e => {
   const focusAction = selector => $(`#presence-list [${selector}="${CSS.escape(memberId)}"]`)?.focus();
   if (keepButton) { armedRemoval = null; render(); focusAction("data-member-remove"); return; }
   const member = state.members[memberId];
-  if (!member || member.kind !== "agent" || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (!member || member.active === false || member.id === state.room.ownerId || member.id === session.member.id || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (pauseButton && member.kind !== "agent") return;
   if (removeButton && armedRemoval !== memberId) { armedRemoval = memberId; render(); focusAction("data-member-remove"); return; }
   memberActionBusy = true;
   const generation = client.generation;
@@ -4695,7 +4711,9 @@ $("#presence-list").addEventListener("click", async e => {
       await client.send(entry.command);
       if (generation !== client.generation || !state) return;
       agentPauses.delete(memberId);
-      notice(`${displayName(memberId)} removed. Room access and connections ended; context already delivered to its provider is not recalled.`);
+      notice(member.kind === "agent"
+        ? `${displayName(memberId)} removed. Room access and connections ended; context already delivered to its provider is not recalled.`
+        : uiText("people.member_removed", { name: displayName(memberId) }));
     } else {
       const action = pauseButton.dataset.pauseAction;
       const view = await client.request(client.path("/agent-pause"), { method: "POST", data: { action, memberId, requestId: crypto.randomUUID(), ...(action === "pause" ? { reason: null } : {}) } });
@@ -5095,6 +5113,8 @@ for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
     noteReaderScroll();
+    // Lazy history: reading up toward the oldest held message loads the rest.
+    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
@@ -5894,6 +5914,10 @@ $("#work-recipe-select").addEventListener("change", event => {
   } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
 });
 $("#new-work-button").addEventListener("click", () => openWork());
+// Front-door batch B-2 (#3772): a visible, labeled New work address in the
+// Tasks navigation — the same single control the composer Options menu
+// carries, reached without opening a disclosure.
+$("#new-work-open")?.addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {
   $("#work-options").open = true;
   $("#require-verification").focus();
@@ -5922,6 +5946,20 @@ $("#create-work-button").addEventListener("click", e => {
   $("#verifier-hint").hidden = false;
   $("#verifier-select").focus();
 });
+// Front-door batch B-1 (#3771): an invalid submit must never be silent.
+// Native validation fires "invalid" per control but a dialog form can
+// swallow it without a visible word; name the first invalid field in the
+// form's own status region and open any closed disclosure around it.
+for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-status"], ["#action-form", "#action-error"], ["#decision-form", "#decision-status"]]) {
+  const form = $(formSelector); if (!form) continue;
+  form.addEventListener("invalid", event => {
+    const field = event.target;
+    const label = field.closest("label")?.textContent?.trim().replace(/\s+/g, " ").slice(0, 60)
+      || field.getAttribute?.("aria-label") || field.name || "A required field";
+    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: label }), true);
+    const details = field.closest("details"); if (details && !details.open) details.open = true;
+  }, true);
+}
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
 $("#message-list").addEventListener("click", e => {
@@ -6052,7 +6090,8 @@ function renderRoomOverview() {
     + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
     + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
     + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
-    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here."));
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here.")
+    + `<section><h3>All results</h3><p><button type="button" class="text-button" data-open-results>Open the room's Results</button></p></section>`);
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
@@ -6062,6 +6101,9 @@ $("#room-overview-open").addEventListener("click", () => {
 $("#room-overview-close").addEventListener("click", () => {
   $("#room-overview-dialog").close();
   $("#room-overview-open").focus({ preventScroll: true });
+});
+$("#room-overview-content").addEventListener("click", event => {
+  if (event.target.closest("[data-open-results]")) { $("#room-overview-dialog").close(); selectWorkView("results"); }
 });
 $("#room-overview-dialog").addEventListener("click", event => {
   // Close before the existing source-link handler moves focus to the timeline.
@@ -7740,6 +7782,9 @@ document.addEventListener("click", event => {
   const shell = $("#main");
   if (!shell.classList.contains("sidebar-open")) return;
   if (event.target.closest("#room-sidebar") || event.target.closest("#sidebar-toggle")) return;
+  // R327-n1: Remove/Keep re-render their row before this runs (Remove arms "Confirm
+  // remove"), detaching the target; the path is fixed at dispatch, so keep the drawer open.
+  if (event.composedPath().some(node => node.dataset?.memberActions !== undefined)) return;
   // Every dialog opens modal, so a dialog sits in the top layer above the inert
   // sidebar overlay: clicks inside it are dialog interactions, not "outside"
   // clicks. Dismissing the sidebar under them hides the dialog trigger while it

@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
@@ -22,6 +23,7 @@ import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
+import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleAgentConnect } from "./routes/agent-connect.mjs";
@@ -85,6 +87,8 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { renderOgPng } from "./og-render.mjs";
+import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -1231,7 +1235,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
+        // r56: the store's SQLite value limit (read-only probe) tells which
+        // Durable Object row limit the runtime enforces; null when unknown.
+        const storageLimits = req.method === "HEAD" ? null : sqliteValueLimit(store?.db);
+        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField, ...(storageLimits ? { storage: storageLimits } : {}) }, req.method === "HEAD");
       }
       // A known liveness path with the wrong method is 405 with Allow, like the
       // route table, not a 404 that reads as "this path does not exist" (#1529).
@@ -2066,7 +2073,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
-      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
+      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
+      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
@@ -2075,6 +2083,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // response cached while public would keep disclosing a room's
         // receipts after the owner switches privacy off.
         res.setHeader("Cache-Control", "no-store");
+        if (receiptCard) {
+          if (!PUBLIC_RECEIPT_ID.test(receiptCard[1])) reject(404, "not_found", "Not found");
+          const receipt = publicReceiptById(store, receiptCard[1]);
+          if (!receipt) reject(404, "not_found", "Not found");
+          // The share images are the one deliberate exception to no-store:
+          // a share card or embedded badge only travels if unfurlers and
+          // image proxies may cache it. The TTL is minutes, the read above
+          // re-checks the owner toggle on every origin fetch, and both
+          // images restate the receipt's own public verdict line.
+          res.setHeader("Cache-Control", "public, max-age=300");
+          if (receiptCard[2] === "badge.svg") {
+            const svg = Buffer.from(receiptBadgeSvg(receipt));
+            res.writeHead(200, { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Length": svg.length });
+            return res.end(req.method === "HEAD" ? undefined : svg);
+          }
+          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
+          res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+          return res.end(req.method === "HEAD" ? undefined : png);
+        }
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
@@ -2127,7 +2154,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
       }
-      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) reject(405, "method_not_allowed", "Method not allowed");
+      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) reject(405, "method_not_allowed", "Method not allowed");
       if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET", "HEAD"].includes(req.method)) {
         res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
         return res.end();
@@ -2175,8 +2202,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
+      const proofOg = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof\/og\.png$/.exec(url.pathname);
       const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
-        || url.pathname === "/agents" || templateDetail || roomPage || proofPage;
+        || url.pathname === "/agents" || templateDetail || roomPage || proofPage || proofOg;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
@@ -2209,6 +2237,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
           if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");
+        }
+        if (proofOg) {
+          // The proof page's share card, gated by the same view: a room
+          // that is not publicly listed or has receipts off gets no card.
+          // Same bounded cache exception as the receipt card.
+          const proof = roomProofView(store, proofOg[1]);
+          if (!proof || proof.error) reject(404, "not_found", "Not found");
+          const counts = proof.document.counts;
+          const png = Buffer.from(await renderOgPng({
+            title: `${proof.document.title} — proof of work`,
+            subtitle: counts.total
+              ? `${counts.total} published ${counts.total === 1 ? "result" : "results"} · ${counts.serverVerifiedMerges} server-verified ${counts.serverVerifiedMerges === 1 ? "merge" : "merges"}`
+              : "No published results yet",
+            badges: [
+              `${counts.roomRecordedCompletions} room-recorded ${counts.roomRecordedCompletions === 1 ? "completion" : "completions"}`,
+              `${counts.artifactHashRecorded} artifact-hash ${counts.artifactHashRecorded === 1 ? "record" : "records"}`,
+            ],
+            footer: "Project Room proof · hashes are stored values, not re-verified",
+          }));
+          res.setHeader("Cache-Control", "public, max-age=300");
+          res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+          return res.end(req.method === "HEAD" ? undefined : png);
         }
         if (proofPage) {
           const proof = roomProofView(store, proofPage[1], { cursor: url.searchParams.get("cursor") });
@@ -4358,7 +4408,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId, viewerId));
+        return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
       }
       // ORIENT — jill lane RC-2026-09-28 (ryska's 404): the URL outside
       // agents guess by analogy with /activation-pack. Read-only,
@@ -4375,7 +4425,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 200, buildOrient(store, roomId, viewerId, {
           focus: params.get("focus"), q: params.get("q"), maxTokens: params.get("maxTokens"),
-          token: selected.token, binding: fence
+          token: selected.token, binding: fence, boardList: memoizeBoardList(store)
         }));
       }
       if (route === "verification-policy" && req.method === "GET") {
@@ -5138,7 +5188,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
         });
         if (context.not_modified) return json(res, 200, context);
-        return json(res, 200, { ...context, orient: buildOrient(store, roomId, viewerId, { text: false, token: selected.token, binding: fence }) });
+        return json(res, 200, { ...context, orient: buildOrient(store, roomId, viewerId, { text: false, token: selected.token, binding: fence, boardList: memoizeBoardList(store) }) });
       }
       if (route === "bonds" && req.method === "GET") {
         return json(res, 200, { bonds: store.bonds.listForMember(roomId, auth.member.id) });
