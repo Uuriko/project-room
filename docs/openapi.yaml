@@ -6910,6 +6910,65 @@ paths:
         '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
+  /api/rooms/{roomId}/work-claims/follows:
+    get:
+      summary: List the caller's claim follow records for the room
+      description: |
+        CD-06 (CV-3): membership-style follow rows (one per claim the caller
+        follows, with policy, unread/mention counters and read/event seqs)
+        plus the room totals { followedClaims, unreadClaims, unreadEvents,
+        mentions }. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: The caller's follow records and totals for the room }
+        '401': { description: unauthenticated }
+        '403': { description: not_member }
+  /api/rooms/{roomId}/work-claims/{claimId}/follow:
+    post:
+      summary: Set the caller's follow policy on a claim
+      description: |
+        CD-06 (CV-3): per-claim attention override — policy follow, mute or
+        inherit. Muting sets policy only; the follow record, its counters
+        and its history are never deleted. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy]
+              properties:
+                policy: { type: string, enum: [follow, mute, inherit] }
+      responses:
+        '200': { description: The updated follow record }
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/follow-read:
+    post:
+      summary: Mark a followed claim read
+      description: |
+        CD-06 (CV-3): advances the caller's follow record lastReadSeq to the
+        claim's latest event and zeroes its unread/mention counters. A
+        member with no follow record for the claim gets a null follow.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: The follow record after the read, or null }
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters

@@ -3780,11 +3780,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
+      // CD-06 (CV-3): claim follow records. Literal 'follows' before {id}.
+      const workClaimsFollowsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/follows$/.exec(url.pathname);
+      const workClaimFollowMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/follow$/.exec(url.pathname);
+      const workClaimFollowReadMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/follow-read$/.exec(url.pathname);
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
-      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimsFollowsMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+        ?? workClaimFollowMatch ?? workClaimFollowReadMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
@@ -4075,6 +4080,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsConfigMatch ? "config"
+          : workClaimsFollowsMatch ? "follows"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"
@@ -4083,9 +4089,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
           : workClaimRenewMatch ? "renew"
+          : workClaimFollowMatch ? "follow"
+          : workClaimFollowReadMatch ? "follow-read"
           : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+          ?? workClaimFollowMatch ?? workClaimFollowReadMatch
          ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,

@@ -32,6 +32,7 @@ import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
+import { claimFollowTotals } from "./claim-follows.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 
 const MAX_ROOMS = 40;
@@ -632,6 +633,11 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myWork = [];
   const myClaims = [];
   const actionsNeeded = [];
+  // CD-06 (CV-3): claim follow totals ride as a standing section — per-room
+  // rows plus the aggregate CD-01's inbox header reads. Follow state is
+  // board state, not an event: it never moves the cursor.
+  const followTotalsByRoom = [];
+  const followTotals = { followedClaims: 0, unreadClaims: 0, unreadEvents: 0, mentions: 0 };
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -655,6 +661,13 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
     if (needed) actionsNeeded.push(needed);
+    try {
+      const roomTotals = claimFollowTotals(store.db, { roomId: link.roomId, memberId: link.memberId });
+      if (roomTotals.followedClaims > 0) {
+        followTotalsByRoom.push({ roomId: link.roomId, ...roomTotals });
+        for (const key of Object.keys(followTotals)) followTotals[key] += roomTotals[key];
+      }
+    } catch { /* a partial store has no follow totals yet */ }
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -717,5 +730,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), ...(followTotalsByRoom.length ? { claimFollowTotals: { totals: followTotals, rooms: followTotalsByRoom } } : {}), cursor, hasMore, untrusted: true };
 }

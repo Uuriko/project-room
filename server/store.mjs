@@ -66,6 +66,7 @@ import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
+import { claimIdForWorkItem, syncClaimFollowsForDiscussion } from "./claim-follows.mjs"; // CD-06: claim follow records.
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
@@ -6393,6 +6394,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // naming the DM target are relevant; other handles never create rows.
     let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
     if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
+    // CD-06 (CV-3): a message posted on a claim's discussion is a comment on
+    // that claim. The author follows via 'comment'; resolved @targets follow
+    // via 'mention' and accrue the mention. Floor messages (no workItemId,
+    // or a work item with no claim row) touch no follow state, and follow
+    // bookkeeping never breaks a post.
+    if (typeof data.workItemId === "string" && data.workItemId) {
+      try {
+        const claimId = claimIdForWorkItem(this.db, roomId, data.workItemId);
+        if (claimId) {
+          const sequence = this.db.prepare("SELECT sequence FROM events WHERE room_id=? AND id=?").get(roomId, eventId)?.sequence ?? 0;
+          const targets = new Set([
+            ...resolveMentionTargetsInText(members, identityNames, body, senderMemberId),
+            ...squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)
+          ]);
+          if (toMemberId) for (const id of [...targets]) if (id !== toMemberId) targets.delete(id);
+          syncClaimFollowsForDiscussion(this.db, { roomId, claimId, authorId: senderMemberId,
+            mentionMemberIds: [...targets], sequence, at: nowMs });
+        }
+      } catch (error) {
+        console.error("claim follow discussion sync failed:", error?.message ?? error);
+      }
+    }
     return warnings;
   }
 

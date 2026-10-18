@@ -20,6 +20,7 @@ import { ServiceError } from "./service-error.mjs";
 // binding is only safe to dereference once modules are fully loaded.
 import { PILOT_LIMITS } from "./store.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { syncClaimFollowsForEvent } from "./claim-follows.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -217,7 +218,7 @@ function isResolvingClaimEvent(action, item, previousState) {
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, previousState = null, resolving = false, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, previousState = null, resolving = false, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false, followVia = null }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
@@ -254,6 +255,24 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
+  // CD-06 (CV-3): claim follow records ride every committed claim event —
+  // implicit follows for the creator / claimer / reviewer / named reviewers
+  // / attention target, and unread accrual for the claim's other followers.
+  // Attention bookkeeping only: a follow failure never rolls back a claim.
+  try {
+    syncClaimFollowsForEvent(store.db, {
+      roomId, claimId: item.id, item, action,
+      actorId: actor && actor.active !== false ? actorId : null,
+      sequence,
+      reviewerIds: ["created", "claimed", "state_changed", "reviewed", "reassigned"].includes(action)
+        ? resolveNamedReviewers(item, room.state.members ?? {}) : [],
+      attentionMemberId: attentionMemberId ?? null,
+      followVia,
+      at: stamp
+    });
+  } catch (error) {
+    console.error("claim follow sync failed:", error?.message ?? error);
+  }
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
