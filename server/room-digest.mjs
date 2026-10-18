@@ -55,12 +55,13 @@ const byteSize = value => Buffer.byteLength(JSON.stringify(value), "utf8");
 // - context: the buildRoomContext result (carried as version + counts only;
 //   its roster/decisions/fileRefs lists are uncapped and never embedded)
 export function buildRoomDigest({
-  roomId, viewerId, since, through, now,
+  roomId, viewerId, since, through, now, requestedSince = since,
   context, byType, workChanged, workChangedTotal,
   attention, messages, decisions, actionable
 }) {
   if (typeof roomId !== "string" || typeof viewerId !== "string"
     || !Number.isSafeInteger(since) || since < 0
+    || !Number.isSafeInteger(requestedSince) || requestedSince < 0 || requestedSince > since
     || !Number.isSafeInteger(through) || through < since) {
     throw new RangeError("Room digest needs a room, viewer, and a valid seq window");
   }
@@ -99,6 +100,8 @@ export function buildRoomDigest({
     roomId,
     viewerId,
     since,
+    requestedSince,
+    ...(requestedSince !== since ? { floorApplied: true } : {}),
     through,
     next: through,
     evaluatedAt: new Date(now).toISOString(),
@@ -137,14 +140,14 @@ export function buildRoomDigest({
   // are the honesty core and are never shed; list sections shed latest-last
   // (oldest rows first) in reverse priority order and say how many went.
   const shedOrder = ["messages", "decisions", "attention", "work"];
-  const truncated = {};
   for (const key of shedOrder) {
     while (byteSize(digest) > DIGEST_MAX_BYTES && digest[key].length) {
       digest[key].shift();
-      truncated[key] = (truncated[key] ?? 0) + 1;
+      digest.truncated ??= {};
+      digest.truncated[key] = (digest.truncated[key] ?? 0) + 1;
     }
     if (byteSize(digest) <= DIGEST_MAX_BYTES) break;
   }
-  if (Object.keys(truncated).length) digest.truncated = truncated;
+  if (byteSize(digest) > DIGEST_MAX_BYTES) throw new RangeError("Room digest coverage exceeds the byte budget");
   return digest;
 }

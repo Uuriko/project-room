@@ -80,7 +80,7 @@ optional.push("src/emoji.js", "src/legacy-reaction-aliases.js"); // Historical s
 optional.push("src/emoji-catalog.js"); // Historical source packages only; removed from current public assets.
 optional.push("src/display-name-guard.js"); // Member display-name admission (imported by src/events.js and re-exported by server/display-name-guard.mjs)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
-optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
+optional.push("client/room-digest.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
 optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "client/codex-stdio.mjs", "client/room-assistant-client.mjs", "scripts/run-codex-room.mjs", "docs/CODEX-ROOM-HOST.md");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
@@ -337,7 +337,7 @@ optional.push("server/member-permission-requests.mjs", "server/routes/member-per
 optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENTS-1: fleet read model and its RT route (imported by server/routes/table.mjs and server/orient.mjs)
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
-optional.push("server/routes/typing.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
+optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)

@@ -5329,15 +5329,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         actionableTotal += 1;
       }
       const digest = buildRoomDigest({
-        roomId, viewerId, since: effectiveSince, through, now: this.now(),
+        roomId, viewerId, since: effectiveSince, requestedSince: since, through, now: this.now(),
         context, byType, workChanged, workChangedTotal: seenClaims.size,
         attention, messages, decisions, actionable: { total: actionableTotal, byKind }
       });
-      return {
-        ...digest,
-        requestedSince: since,
-        ...(floor && effectiveSince !== since ? { floorApplied: true } : {})
-      };
+      return digest;
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
