@@ -104,7 +104,8 @@ test("parity poison: one drifted room is isolated and reported until repaired; t
   );
 
   // The job still fails the tick — isolation is not a silent pass — and
-  // the public detail names the sub-check without the room id.
+  // the public error string names the sub-check without the room id (the
+  // failure detail itself names the room — see integrity-naming.test.js).
   const run = await integrityJob.run(store, { deadline: Date.now() + 5000 });
   assert.ok(Number(run.errors) >= 1);
   assert.equal(run.failureDetail.subcheck, "messages_parity");
