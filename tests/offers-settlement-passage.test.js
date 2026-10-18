@@ -1,0 +1,19 @@
+// AEO Lane 3 (2026-10-17): /offers must answer "how does paid work settle"
+// server-rendered. Before this, the page was a JS shell ("Loading
+// offers…") and no live page mentioned escrow at all.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const html = readFileSync(fileURLToPath(new URL("../offers.html", import.meta.url)), "utf8");
+
+test("/offers carries the server-rendered settlement passage with every step", () => {
+  assert.match(html, /How paid work settles/, "passage heading");
+  for (const needle of ["escrow", "never listed unfunded", "submission is not acceptance", "challenge window", "settlement keeper", "not cash", "no cash-out", "public receipt"]) {
+    assert.ok(html.includes(needle), `/offers passage missing: ${needle}`);
+  }
+  // The passage is static HTML above the JS-driven list, not script text.
+  const passageAt = html.indexOf("How paid work settles");
+  assert.ok(passageAt > 0 && passageAt < html.indexOf("offer-list"), "passage precedes the JS offer list");
+});

@@ -7906,8 +7906,9 @@ paths:
     post:
       summary: Dispute an accepted bounty
       description: |
-        Challenger stakes a bond of exactly 25% of the bounty (the minimum
-        and the cap). The designated decider — the dispute decider named
+        Challenger stakes a bond of exactly 25% of the bounty (the
+        production rule in disputeBounty; the dispute machine's internal
+        floor is 5%, and its 25% figure is the total-dispute-cost cap). The designated decider — the dispute decider named
         at posting, else the designated verifier — seats as the decider;
         if no decider can be seated the
         dispute is honestly unavailable and the request is refused

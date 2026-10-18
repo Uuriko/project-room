@@ -3115,11 +3115,35 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/receipts"
     },
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/og.png"
     },
     {
       "method": "GET",
@@ -6733,11 +6757,27 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/receipts"
     },
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/{id}"
     },
     {
       "method": "GET",
