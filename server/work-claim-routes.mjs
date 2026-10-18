@@ -1151,7 +1151,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
-          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }));
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }),
+        item.claimRound);
       if (verdict === "replay") return json(res, 200, item);
       if (verdict === "conflict") reject(409, "work_claim_conflict",
         `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
@@ -1259,7 +1260,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
         delivery: data.delivery, policy,
         jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
-        requestId: data.requestId, now: nowMs,
+        requestId: data.requestId, now: nowMs, room: roomLike,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
     if (data.state === "done" && jevDecision) {
       try {

@@ -71,7 +71,7 @@
     "src/auth-signin-ui.js": "sha256:e7f5c5337c4391e25c966482a4cac8e03ef658a40b25379774416c1a3e43d6bc",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:0ceeb4073988677ad5c2b2a6fbcf7e12d045b32175132ac8e227eefa77b19acd",
+    "src/board-ui.js": "sha256:dc79656c24f9f1ecb1ee1c0ec37dc9a745d01c856f139a0db13a1da71ce89e2d",
     "src/board.css": "sha256:97883f6b1ab6817bde7b020f1fe1ac463eb0cc002e19cda8b76895474b2c0a47",
     "src/bounty-board.js": "sha256:3c65ff411c06bcbaed3825f2b9145233af79a5439f31de36ecb152e0e1a2be14",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
@@ -148,8 +148,8 @@
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:de6071a49d7b88931ce7abbc64f18c48ad3953739af09005606a0126dd962049",
-    "strings/en.json": "sha256:085a99991f811dcb7228186f0d8154b95943e0b9e8cb80c4c5adbc4ba88f6ffc"
+    "strings/en.js": "sha256:f47d6fac34b4f572c0dfc4388f6feb2723119577f8414b2ac45e322ca05581ca",
+    "strings/en.json": "sha256:2017e7f338182d790e0a0a3f003a7f8512b1ebd30846c56bb844b66de026b926"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:3d49dedbf8f41adf17b4760a6a5de03d617160d13fa4f38989c29c2754662c7b",
