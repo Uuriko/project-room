@@ -92,7 +92,12 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal((await json(webhook, 401)).error.code, 'channel_webhook_denied');
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const version = await json(await call('/api/version'));
-    assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    // r56: storage.valueLimitBytes is the Durable Object's SQLite value limit,
+    // read without a write; it follows the workerd build (2,200,000 on the
+    // repo pin, 8,388,642 on 1.20261018.1), so only its shape is fixed here.
+    const { storage, ...versionFields } = version;
+    assert.deepEqual(versionFields, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    assert.ok(Number.isSafeInteger(storage?.valueLimitBytes) && storage.valueLimitBytes >= 2_000_000, JSON.stringify(storage));
     const versionHead = await call('/api/version', { method: 'HEAD' });
     assert.equal(versionHead.status, 200); assert.equal(await versionHead.text(), '');
     const healthHead = await call('/api/health', { method: 'HEAD' });

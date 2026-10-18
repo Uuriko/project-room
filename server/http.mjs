@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
@@ -1234,7 +1235,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
+        // r56: the store's SQLite value limit (read-only probe) tells which
+        // Durable Object row limit the runtime enforces; null when unknown.
+        const storageLimits = req.method === "HEAD" ? null : sqliteValueLimit(store?.db);
+        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField, ...(storageLimits ? { storage: storageLimits } : {}) }, req.method === "HEAD");
       }
       // A known liveness path with the wrong method is 405 with Allow, like the
       // route table, not a 404 that reads as "this path does not exist" (#1529).
