@@ -85,3 +85,5 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
 
 - [Message domain checkpoint](MESSAGE-DOMAIN-CHECKPOINT.md) — schema 39, extracted reducers, replay and measured restoration costs.
+
+- [Entity projection checkpoint](ENTITY-PROJECTION-CHECKPOINT.md): schema 40 reference storage, safety boundaries and measured write volume.

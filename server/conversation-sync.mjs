@@ -84,6 +84,9 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // One JSON parameter keeps complete same-instant exclusions within Worker
     // SQLite's bind limit even for large imported equal-timestamp histories.
     const exclusions = JSON.stringify([...(floor?.sameInstant ?? [])]);
+    // Only reference-bearing fallback projections consult entity rows. Ordinary
+    // uncertified projections must never treat the unqualified mirror as truth.
+    const entityRefs = !indexed && Boolean(store.db.prepare("SELECT instr(projection, '\"_entity\":1') AS refs FROM rooms WHERE id=?").get(roomId)?.refs);
     let rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
         AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
@@ -96,8 +99,14 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
         channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1)
       : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
-      FROM rooms r, json_each(r.projection, '$.messages') m
-      WHERE r.id=? AND CAST(m.key AS INTEGER)<?
+      FROM (
+        SELECT r.id AS room_id, m.key AS key,
+          ${entityRefs ? `CASE WHEN json_extract(m.value,'$._entity')=1 THEN (
+            SELECT record_json FROM messages WHERE room_id=r.id AND message_id=json_extract(m.value,'$.id')
+          ) ELSE m.value END` : 'm.value'} AS value
+        FROM rooms r, json_each(r.projection,'$.messages') m
+      ) m
+      WHERE m.room_id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
           OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)
         AND (? IS NULL OR (

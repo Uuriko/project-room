@@ -7,7 +7,7 @@ export class MessageContinuityTestRoom extends HttpTestRoom {
   async fetch(request) {
     if (new URL(request.url).pathname !== '/__test-message-continuity') return super.fetch(request);
     const s=this.store;
-    s.maintainMessageCertification=true;s.messageProjectionWindow=4;
+    s.maintainMessageCertification=true;s.messageProjectionWindow=4;s.messageEntityProjection=true;
     s.initialize(initialRoom());const token=s.issueAccessKey('commons','owner');s.roomFlood={consume(){}};
     while(!s.backfillMessages({limit:1000}).done) {} s.checkMessagesParity();
     const command=(type,data)=>s.command(token,'commons',{id:crypto.randomUUID(),type,data});
@@ -22,7 +22,8 @@ export class MessageContinuityTestRoom extends HttpTestRoom {
     const records=messageRepository(s,'commons');
     const recent=records.recent(3).map(m=>m.id);
     const recordCount=[...records.records()].length;
-    return Response.json({seek,window:snapshot.messagesWindow,snapshotMessages:snapshot.state.messages.map(m=>m.id),recent,recordCount,head:s.headSequence('commons'),certified:certificate.parity_at_seq,
+    const entityRefs=JSON.parse(s.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection).messages.every(m=>m._entity===1);
+    return Response.json({entityRefs,seek,window:snapshot.messagesWindow,snapshotMessages:snapshot.state.messages.map(m=>m.id),recent,recordCount,head:s.headSequence('commons'),certified:certificate.parity_at_seq,
       tail:s.room('commons').state.messages.length,body:selected.messages[0].body,archivedBody:messageRepository(s,'commons').get('fixture-1').body,parity:s.checkMessagesParity().ok});
   }
 }

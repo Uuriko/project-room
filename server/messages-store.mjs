@@ -633,7 +633,27 @@ export function messagesBackfillCaughtUp(db, roomId) {
         ))`).get(roomId));
 }
 
+// Backfill rows are a replay workspace, while archived/reference rows are
+// serving authority. Detach the serving projection before a resumable replay
+// can rewind or delete that authority. This administrative fallback can replay
+// full history; canonical entity writers will need separate staging storage.
+function detachServingMessagesForBackfill(store, roomId) {
+  store.transaction(() => {
+    const row = store.db.prepare(`SELECT projection FROM rooms WHERE id=?
+      AND (instr(projection, '"_entity":1') > 0 OR instr(projection, '"messagesArchive"') > 0)`).get(roomId);
+    if (!row) return;
+    const raw = JSON.parse(row.projection);
+    if (!raw.messagesArchive && !raw.messages?.some(message => message?._entity === 1)) return;
+    store._dropProjectionCache?.();
+    restoreArchivedMessages(store, roomId);
+    const state = store.room(roomId).state;
+    store.db.prepare('UPDATE rooms SET projection=? WHERE id=?')
+      .run(storedProjection(store.db,roomId,state,{enabled:store.bodiesAtRest}),roomId);
+  });
+}
+
 function fillRoom(store, room, budget, expired, yieldBetween) {
+  detachServingMessagesForBackfill(store, room.id);
   let cursor = readCursor(store.db, room.id);
   if (cursor && !cursorMatches(store.db, room.id, cursor, room.sequence)) {
     resetRoom(store, room.id);
@@ -1022,7 +1042,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       .get(roomId, marker.throughSeq, marker.retainedJson, JSON.stringify(next.messages.map(message => message.id)));
     if (overlaps || next.messages.some(message => movingIds.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
     next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
-    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest, messageEntities: store.messageEntityProjection }), roomId);
     return result;
   });
 }

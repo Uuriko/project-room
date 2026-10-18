@@ -1,4 +1,4 @@
-import { prepareMessageCommand, assertMessageCommandReferences } from "./message-command-service.mjs";
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -48,7 +48,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { captureMessageCertification, advanceMessageCertification, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
@@ -1365,12 +1365,14 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
+    if (messageEntityProjection && messageProjectionWindow === null) throw new Error("Entity projection requires a bounded message projection window");
+    this.messageEntityProjection = messageEntityProjection === true;
     this.messageProjectionWindow = messageProjectionWindow;
     this.maintainMessageCertification = maintainMessageCertification === true || messageProjectionWindow !== null;
     const coldStart = startColdStart();
@@ -3200,7 +3202,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     `).all();
     for (const row of missingChannel) {
       if (skipIds.has(row.id)) continue;
-      const state = JSON.parse(row.projection);
+      const state = hydrateProjection(this.db, row.id, JSON.parse(row.projection)).state;
       if (!ensureDefaultChannelState(state)) continue;
       update.run(this.storedProjection(row.id, state), row.id);
     }
@@ -3460,7 +3462,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+        // Migration validates stored authority, never a previously hydrated cache.
+        this._dropProjectionCache();
         restoreArchivedMessages(this, id);
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
@@ -6045,11 +6049,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const messageCertificate = this.maintainMessageCertification
-        ? captureMessageCertification(this.db, { roomId, sequence: room.sequence, event: incoming, state: room.state }) : null;
-      const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
+      const messageWrite = prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence});
+      const { projection } = messageWrite;
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the
@@ -6073,11 +6076,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (WORK_ITEM_BOARD_SYNC_TYPES.has(incoming.type)) {
           syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
-        // MSG-1: double-write the messages table in this same transaction.
-        // A throw here rolls the event back with the row. Certified conversation
-        // reads use these rows; older events wait for the MSG-2 backfill.
-        syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
-        advanceMessageCertification(this.db, messageCertificate, { sequence, event: incoming, state });
+        // Persist the message domain in the same transaction as event/receipt.
+        // A failure rolls back both the entity and its projection reference.
+        messageWrite.persistEntities();
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }

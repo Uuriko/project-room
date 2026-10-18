@@ -200,3 +200,29 @@ avoiding quadratic copies of accumulated event IDs and log entries. Domain state
 still uses the same reducers and input immutability remains tested. See
 [MESSAGE-DOMAIN-CHECKPOINT.md](MESSAGE-DOMAIN-CHECKPOINT.md) for the final measurements,
 verification evidence and explicit remaining work.
+
+
+### Schema 40 entity-reference execution
+
+The next implementation stores small references for qualified message commands,
+with normalized current records and reducer history in the same transaction.
+Compaction preserves references, fallback conversation reads resolve them, and
+reverse migration validates stored authority rather than cached state. A schema
+40 fence rejects already-open schema 39 writers. Unsupported commands retain the
+safe inline path; this remains opt-in.
+
+The first identical-head 10k comparison measured 7,147 versus 1,040 bytes in the
+post-edit projection, and 15,984 versus 9,792 JSON-serialized SQL binding bytes.
+Medians were 2.655 versus 2.655 ms: no established latency improvement. References
+add one prepared query and nine returned ID rows in this fixture. These are
+in-memory macOS measurements, not physical WAL bytes or production promises.
+The benchmark script now includes all three modes: normalized restoration,
+reference projection, and legacy replay. Qualification is recorded separately
+once the final checks finish.
+
+Remaining implementation order stays unchanged: finish canonical message command
+contexts, then independent work/attempt/artifact writers, durable scheduling,
+placement and experience contracts. The schema carrier alone satisfies none of
+those remaining exit criteria.
+
+See [ENTITY-PROJECTION-CHECKPOINT.md](ENTITY-PROJECTION-CHECKPOINT.md) for implementation, measurements and qualification limits.

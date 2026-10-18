@@ -4,7 +4,7 @@
     "node": ">=24.19.0",
     "ci": "24"
   },
-  "storeSchemaVersion": 39,
+  "storeSchemaVersion": 40,
   "assets": {
     "about.html": "sha256:7139f2def1bea078151f936551f566c3d06b0b36e187a0291905ea982aa4d383",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",

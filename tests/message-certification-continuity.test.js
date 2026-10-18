@@ -8,10 +8,10 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { readConversation } from '../server/conversation-sync.mjs';
 
-function setup(t, enabled = true, window = null) {
+function setup(t, enabled = true, window = null, entities = false) {
   const directory = mkdtempSync(join(tmpdir(), 'message-carrier-'));
   const file = join(directory, 'room.sqlite');
-  let store = new RoomStore(file, { maintainMessageCertification: enabled, messageProjectionWindow: window });
+  let store = new RoomStore(file, { maintainMessageCertification: enabled, messageProjectionWindow: window, messageEntityProjection: entities });
   store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -33,7 +33,7 @@ function setup(t, enabled = true, window = null) {
   };
   return { get store(){return store;},owner,command,certify,certificate,read,compare,
     post:(id,body,extra={})=>command('message.posted',{messageId:id,body,...extra}),
-    reopen:()=>{store.close();store=new RoomStore(file,{maintainMessageCertification:enabled,messageProjectionWindow:window});} };
+    reopen:()=>{store.close();store=new RoomStore(file,{maintainMessageCertification:enabled,messageProjectionWindow:window,messageEntityProjection:entities});} };
 }
 
 test('certified rows survive post/edit/pin/unpin with semantic parity, duplicate receipt and reopen',t=>{
@@ -288,4 +288,121 @@ test('a deep archived reply restores its ancestor chain with one projection writ
  assert.equal(restores,1,'ancestor restoration serializes the working set once');
  assert.equal(f.store.room('commons').state.messages.filter(m=>m.id.startsWith('chain-')).length,9);
  assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+
+test('entity projection stores references, reopens with history and preserves fallback conversation reads',t=>{
+ const f=setup(t,true,4,true);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<7;i++)f.post(`entity-${i}`,`Content ${i}. ${'long '.repeat(100)}`);
+ const raw=()=>JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+ assert.ok(raw().messages.every(m=>m._entity===1 && Object.keys(m).length===2));
+ f.command('message.edited',{messageId:'entity-0',body:'Revised.',expectedMessageRevision:0});
+ assert.equal(f.store.room('commons').state.messages[0].editHistory.length,1);
+ f.compare();f.compare({limit:2});f.reopen();
+ assert.equal(f.store.room('commons').state.messages[0].body,'Revised.');
+ assert.equal(f.store.room('commons').state.messages[0].editHistory.length,1);
+ f.compare();assert.equal(f.store.checkMessagesParity().ok,true);
+ f.store.rehydrateAllProjections();assert.equal(raw().messages.some(m=>m._entity===1),false);
+ assert.equal(raw().messages[0].body,'Revised.');
+});
+
+test('entity-reference writes roll back atomically and deletion clears every history copy',t=>{
+ const f=setup(t,true,4,true);f.certify();f.post('entity-private','Original secret.');
+ const head=f.store.headSequence('commons');
+ f.store.db.exec("CREATE TRIGGER reject_entity_update BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT,'entity update failed'); END");
+ assert.throws(()=>f.command('message.edited',{messageId:'entity-private',body:'Failed replacement.',expectedMessageRevision:0}),/entity update failed/);
+ assert.equal(f.store.headSequence('commons'),head);assert.equal(f.store.room('commons').state.messages[0].body,'Original secret.');
+ f.store.db.exec('DROP TRIGGER reject_entity_update');
+ f.command('message.edited',{messageId:'entity-private',body:'Replacement secret.',expectedMessageRevision:0});
+ f.command('message.deleted',{messageId:'entity-private',expectedMessageRevision:1});
+ f.reopen();assert.equal(f.store.room('commons').state.messages[0].body,null);
+ const rows=f.store.db.prepare("SELECT body,record_json,reducer_extras_json FROM messages WHERE room_id='commons'").all();
+ assert.equal(JSON.stringify(rows).includes('secret'),false);
+ assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+
+test('entity references fail closed on missing or malformed canonical records',async t=>{
+ const {hydrateProjection}=await import('../server/projection-at-rest.mjs');
+ const f=setup(t,true,4,true);f.certify();f.post('guarded','Canonical text.');
+ const raw=JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+ const rollback=new Error('restore fixture');
+ for(const sql of [
+  "DELETE FROM messages WHERE message_id='guarded'",
+  "UPDATE messages SET record_json='{invalid' WHERE message_id='guarded'",
+  "UPDATE messages SET body='mismatch' WHERE message_id='guarded'",
+  "UPDATE messages SET reducer_extras_json=NULL WHERE message_id='guarded'",
+  "UPDATE messages SET reducer_extras_json='{\"unexpected\":true}' WHERE message_id='guarded'"
+ ]) {
+  try {f.store.transaction(()=>{
+   f.store.db.exec(sql);
+   assert.throws(()=>hydrateProjection(f.store.db,'commons',structuredClone(raw)),/projection_corrupt/);
+   assert.throws(()=>f.store.rehydrateAllProjections(),/projection_corrupt/);
+   throw rollback;
+  });}catch(error){if(error!==rollback)throw error;}
+ }
+ assert.equal(f.store.room('commons').state.messages[0].body,'Canonical text.');
+});
+
+test('mixed legacy entities remain inline and unsupported commands safely return to inline state',async t=>{
+ const {storedProjection,hydrateProjection}=await import('../server/projection-at-rest.mjs');
+ const f=setup(t,true,4,true);f.certify();f.post('legacy','Retained legacy.');f.post('ready','Ready record.');
+ const state=f.store.room('commons').state;
+ f.store.db.prepare("UPDATE messages SET reducer_extras_json=NULL WHERE message_id='legacy'").run();
+ const mixed=JSON.parse(storedProjection(f.store.db,'commons',state,{messageEntities:true}));
+ assert.equal(mixed.messages[0].body,'Retained legacy.');assert.equal(mixed.messages[1]._entity,1);
+ assert.deepEqual(hydrateProjection(f.store.db,'commons',mixed).state.messages,state.messages);
+ // Restore the legacy row before reading the already-persisted reference.
+ f.store.db.prepare("UPDATE messages SET reducer_extras_json='{}' WHERE message_id='legacy'").run();
+ f.command('member.added',{memberId:'new-reader',displayName:'New reader',kind:'human',permissions:[]});
+ const raw=JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+ assert.equal(raw.messages.some(m=>m._entity===1),false);
+ f.reopen();assert.equal(f.store.room('commons').state.messages[0].body,'Retained legacy.');
+});
+
+
+test('entity projections pass recovery audit and channel repair after reopening',async t=>{
+ const {auditRecovery}=await import('../server/recovery.mjs');
+ const f=setup(t,true,4,true);f.certify();f.post('recoverable','Recovery content.');
+ f.command('message.edited',{messageId:'recoverable',body:'Revised recovery content.',expectedMessageRevision:0});
+ assert.doesNotThrow(()=>auditRecovery(f.store));
+ f.store.db.prepare("UPDATE rooms SET projection=json_remove(projection,'$.channels') WHERE id='commons'").run();
+ f.reopen();
+ assert.equal(f.store.room('commons').state.messages[0].body,'Revised recovery content.');
+ assert.equal(f.store.room('commons').state.messages[0].editHistory.length,1);
+ assert.doesNotThrow(()=>auditRecovery(f.store));
+});
+
+
+test('entity carrier consumes old body references before releasing their storage',async t=>{
+ const {storedProjection,hydrateProjection}=await import('../server/projection-at-rest.mjs');
+ const f=setup(t);f.store.bodiesAtRest=true;
+ const body='Old body storage. '.repeat(100);f.post('body-ref',body);f.certify();
+ const state=f.store.room('commons').state;
+ const raw=JSON.parse(storedProjection(f.store.db,'commons',state,{enabled:true}));
+ assert.equal(typeof raw.messages[0].bodyRef,'string');
+ // Legacy extras force the new carrier to keep this record inline. It must
+ // expand the old body reference before removing the old body-storage row.
+ f.store.db.prepare("UPDATE messages SET reducer_extras_json=NULL WHERE message_id='body-ref'").run();
+ const converted=JSON.parse(storedProjection(f.store.db,'commons',raw,{messageEntities:true}));
+ assert.equal(converted.messages[0].body,body);
+ assert.equal(converted.messages[0].bodyRef,undefined);
+ assert.equal(hydrateProjection(f.store.db,'commons',converted).missing.length,0);
+});
+
+
+for(const archive of [false,true]) test(`resumable backfill never rewinds serving entity records (archive=${archive})`,t=>{
+ const f=setup(t,true,archive?2:20,true);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<8;i++)f.post(`replay-${i}`,`Original ${i}.`);
+ f.command('message.edited',{messageId:'replay-0',body:'Latest must remain visible.',expectedMessageRevision:0});
+ const expected=f.read({limit:100}).messages;
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid-anchor',parity_at_seq=NULL WHERE room_id='commons'").run();
+ let done=false;
+ for(let i=0;i<50&&!done;i++) {
+  done=f.store.backfillMessages({limit:1}).done;
+  assert.deepEqual(f.read({limit:100}).messages,expected);
+  assert.equal(f.store.room('commons').state.messages.find(m=>m.id==='replay-0').body,'Latest must remain visible.');
+ }
+ assert.equal(done,true);assert.equal(f.store.checkMessagesParity().ok,true);
+ f.reopen();assert.deepEqual(f.read({limit:100}).messages,expected);
 });

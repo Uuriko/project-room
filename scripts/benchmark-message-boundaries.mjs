@@ -5,7 +5,9 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { event } from '../src/events.js';
 
-const sizes = process.argv.slice(2).map(Number);
+const args = process.argv.slice(2);
+const modes = args.includes("--without-legacy") ? ["entity", "references"] : ["entity", "references", "legacy"];
+const sizes = args.filter(arg => arg !== "--without-legacy").map(Number);
 if (!sizes.length) sizes.push(100, 1000);
 if (sizes.some(n => !Number.isSafeInteger(n) || n < 10 || n > 100000)) throw new Error('Choose message counts between 10 and 100000');
 const percentile = (values, p) => [...values].sort((a,b)=>a-b)[Math.ceil(values.length*p)-1];
@@ -41,17 +43,19 @@ for (const size of sizes) {
    }});
   };
   store._replayRoom=(...args)=>{replays++;return replay(...args);};
-  const samples={entity:[],legacy:[]},profiles={};
+  const samples=Object.fromEntries(modes.map(mode=>[mode,[]])),profiles={};
   const rollback=new Error('benchmark rollback');
-  for(let i=0;i<15;i++)for(const mode of i%2?['entity','legacy']:['legacy','entity']) {
+  for(let i=0;i<15;i++)for(const mode of i%2?modes:[...modes].reverse()) {
    let ms;
    try {store.transaction(()=>{
+    store.messageEntityProjection=mode==='references';
     if(mode==='legacy')store.db.prepare("UPDATE messages SET reducer_extras_json=NULL WHERE room_id='commons' AND message_id='m-0'").run();
     queries=0;replays=0;
     profile=i===14?{boundBytes:0,resultBytes:0,resultRows:0}:null;
     const start=performance.now();
     store.command(token,'commons',{id:'measured-edit',type:'message.edited',data:{messageId:'m-0',body:'Corrected record.',expectedMessageRevision:0}});
     ms=performance.now()-start;
+    if(profile)profile.projectionBytes=Buffer.byteLength(prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     throw rollback;
    });}catch(error){if(error!==rollback)throw error;}
    if(i===14){profiles[mode]=profile;profile=null;}

@@ -4,7 +4,7 @@ The existing `messages` table is written in the command transaction. The
 conversation reader can use it after parity certification. This carrier keeps
 that certification live for supported message mutations and optionally keeps a
 small working set in `rooms.projection` instead of rewriting settled history.
-Both options default off; this is not a production-wide storage cutover.
+All candidate options default off; this is not a production-wide storage cutover.
 
 ## Modes
 
@@ -117,8 +117,8 @@ already-open schema 38 connections, before accepting this additional history cop
 Restoration validates the stored current body and history shape and falls back to
 the journal for missing or malformed legacy data. Restoration and the command
 share a transaction, so a refused edit cannot leave a partially restored entity.
-Reverse migration rehydrates the projection on schema 39; it does not downgrade
-the SQLite schema or authorize a schema 38 binary to write it.
+Reverse migration rehydrates the projection on the current schema; it does not
+downgrade SQLite or authorize an older binary to write it.
 
 ## Reader boundaries after the schema 39 checkpoint
 
@@ -139,3 +139,33 @@ The message command service admits/restores referenced entities; the extracted
 pure reducer owns message mutations and shared receipt-withdrawal semantics.
 Neither extraction changes the public permission model. Batched ancestry
 restoration serializes once and legacy chains replay at most once per command.
+
+
+## Schema 40 entity-reference carrier
+
+`new RoomStore(path, { messageProjectionWindow: 8, messageEntityProjection: true })`
+allows certified message commands to persist `{id, _entity: 1}` in the working
+set. Current records and bounded edit history live in `messages`; hydration
+batches 256 IDs. Missing, malformed or inconsistent records fail closed. Legacy
+rows without history remain inline until qualified. Compaction preserves this
+format, and conversation fallback joins references to current records without
+changing its array-position cursor domain.
+
+Schema 40 fences schema 39 writers before accepting references, including
+connections opened before migration. Readers understand references regardless of
+the constructor flag. Switching the flag off affects new writes; explicit reverse
+migration validates stored entities and writes inline records. Reverse migration
+must run with rolling compaction disabled. It does not downgrade the schema.
+
+This is a measured transitional format, not canonical entity-only command
+execution. Reducers still receive the bounded working set, and unsupported or
+uncertified commands can return it to inline form. Reference IDs and other room
+aggregates still serialize. The next cutover must remove those costs rather than
+hide full hydration behind another interface. No production environment switch
+or default enablement accompanies this carrier.
+
+
+Resumable backfill first detaches reference/archive serving state into inline
+records before reusing the normalized table as its replay workspace. This
+preserves current reads between replay batches, but can expand full history.
+Separate replay staging is required to remove this transitional cost safely.

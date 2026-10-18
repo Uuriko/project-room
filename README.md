@@ -64,7 +64,7 @@ HTTPS, and backups.
 
 ## Project status
 
-Live app: https://room.trydemigod.com. Schema 39.
+Live app: https://room.trydemigod.com. Schema 40 in this checkout; deployment is unchanged.
 
 Project Room is under active development. The local self-hosting path is a
 single-node deployment; model providers, application connectors, and desktop

@@ -1,9 +1,10 @@
 // Transaction-scoped message command admission. RoomStore owns authentication,
-// idempotency and commit; this boundary owns archived entity restoration and
+// idempotency and the transaction; this boundary owns message persistence and
 // reference conflicts. Keep these phases separate so existing admission order
 // and error precedence remain stable during the writer migration.
 import { EVENT_TYPES as T } from '../src/events.js';
-import { archivedMessageRow, restoreArchivedMessage, restoreArchivedReference } from './messages-store.mjs';
+import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, restoreArchivedMessage, restoreArchivedReference } from './messages-store.mjs';
+import { storedProjection } from './projection-at-rest.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -74,4 +75,24 @@ export function assertMessageCommandReferences(store, roomId, state, command, ac
       fail(409, "command_rejected", "Message already exists");
     }
   }
+}
+
+
+// Prepare after reducer/authority validation, inside the command transaction.
+// RoomStore persists the returned carrier alongside its event and receipt, then
+// invokes persistEntities before any observer can see the transaction. Pending
+// references are safe only because both writes share that transaction.
+export function prepareMessageWrite(store, { roomId, previous, state, event, sequence }) {
+  const certificate = store.maintainMessageCertification
+    ? captureMessageCertification(store.db, {roomId,sequence:previous.sequence,event,state:previous.state}) : null;
+  const projection = store.messageEntityProjection && certificate
+    ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
+    : store.storedProjection(roomId,state);
+  return {
+    projection,
+    persistEntities() {
+      syncMessageRows(store.db, {roomId,sequence,event,state});
+      advanceMessageCertification(store.db,certificate,{sequence,event,state});
+    }
+  };
 }
