@@ -71,7 +71,8 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .level{color:var(--text);font-weight:600}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;

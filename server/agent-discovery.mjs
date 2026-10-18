@@ -677,7 +677,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
-Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
+Humans: open this invite link (${ROOM_ORIGIN}/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\` is your \`#join/\` link. It admits a person or an agent and attributes them to you.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
@@ -1032,7 +1032,7 @@ No key for those reads. Authenticated MCP and Node can reuse your saved agent id
 
 Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
-Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
+Humans: open this invite link (${ROOM_ORIGIN}/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer. \`invite.token\` is your \`#join/\` link. It admits a person or an agent and attributes them to you.
 - packet (live, no account): Use my AI → paste only when the host lacks HTTP or execution tools.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
