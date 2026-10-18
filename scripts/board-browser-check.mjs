@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 async function openBoard(page) {
@@ -507,7 +508,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
+  const workId = "prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "work.proposed",
     data: { workItemId: workId, title: "Prepare the handoff", definitionOfDone: "Record the prerequisite result.",
@@ -624,9 +625,19 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.locator("#board-close").click();
   }
   await openBoard();
-  await post(page, origin, "/work-claims/prerequisite/claim", {});
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
+  const acceptance = page.locator('[data-focus-key="work-acceptance:prerequisite"]');
+  await acceptance.press("Enter");
+  await page.locator(`[data-work-record-id='${workId}']`).waitFor({ state: "visible" });
+  for (const [type, data] of [["work.accepted", {}], ["work.started", {}], ["work.completed", {
+    summary: "Handoff prepared", evidenceVersion: "v1", producerId: "owner", evidenceUrl: "https://example.com/handoff", nextAction: "Continue", signedEvidence: makeTestSigner(fixture.store)()
+  }]]) {
+    await post(page, origin, "/commands", { id: crypto.randomUUID(), type, data: {
+      workItemId: workId, expectedRevision: fixture.store.room("commons").state.workItems[workId].revision, ...data
+    } }, 201);
+  }
+  await page.locator("#work-navigation-return").press("Enter");
+  await dialog.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-acceptance:prerequisite");
   await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();
   assert.equal(await dependent.locator(".claim-waiting").count(), 0);
   assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");

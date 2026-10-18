@@ -1,3 +1,5 @@
+import { terminalWork } from "../src/workflow.js";
+import { hydrateWorkItems } from "./work-repository.mjs";
 // Decision #10 (workItems -> board claims) — the migration core.
 //
 // Every projection work item (server-side state.workItems, written by the
@@ -229,11 +231,13 @@ function historyForWorkItem(item, facts) {
         boardState = next;
         break;
       }
-      case "work.completed":
-        push(at, actor, "state:done", cleanText(receiptForEvent(event.id)?.summary ?? item.receipt?.summary, 2000));
+      case "work.completed": {
+        const receipt = receiptForEvent(event.id);
+        boardState = !item.ownerDecisionRequired && !item.independentVerificationRequired && receipt?.evidenceVersion ? "done" : "delivered";
+        push(at, actor, `state:${boardState}`, cleanText(receipt?.summary ?? item.receipt?.summary, 2000));
         claimHeld = false;
-        boardState = "done";
         break;
+      }
       case "work.superseded":
         push(at, actor, "closed", cleanText(event.data?.reason, 2000));
         claimHeld = false;
@@ -243,12 +247,20 @@ function historyForWorkItem(item, facts) {
         // Event data is flat: { result, summary, completionEventId, ... }.
         const failed = event.data?.result === "fail";
         push(at, actor, "reviewed", cleanText(event.data?.summary, 512));
+        if (!failed && !item.ownerDecisionRequired && terminalWork(item) && event.data?.completionEventId === item.receipt?.eventId) {
+          push(at, actor, "state:done", cleanText(item.receipt?.summary, 2000));
+          boardState = "done";
+        }
         if (failed) { push(at, actor, "state:blocked", cleanText(event.data?.summary, 2000)); boardState = "blocked"; }
         break;
       }
       case "owner.decision_recorded": {
         // Event data is flat: { decision, reason, completionEventId, ... }.
         push(at, actor, "reviewed", cleanText(event.data?.reason, 512));
+        if (event.data?.decision === "approved" && terminalWork(item) && event.data?.completionEventId === item.receipt?.eventId) {
+          push(at, actor, "state:done", cleanText(item.receipt?.summary, 2000));
+          boardState = "done";
+        }
         if (typeof event.data?.decision === "string" && event.data.decision !== "approved") {
           push(at, actor, "state:blocked", cleanText(event.data?.reason, 2000));
           boardState = "blocked";
@@ -352,7 +364,7 @@ function evidenceForWorkItem(item) {
 export function boardStateForWorkItem(item, nowMs) {
   switch (item?.state) {
     case "superseded": return "closed";
-    case "completed": return "done";
+    case "completed": return terminalWork(item) ? "done" : "delivered";
     case "blocked": return "blocked";
     case "working": return "in_progress";
     case "accepted": return liveClaim(item, nowMs) ? "claimed" : "unclaimed";
@@ -847,7 +859,7 @@ export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRu
   const roomRow = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
   if (!roomRow) { report.errors.push("room_not_found"); return report; }
   let state;
-  try { state = JSON.parse(roomRow.projection); } catch { report.errors.push("projection_unparseable"); return report; }
+  try { state = hydrateWorkItems(store.db, roomId, JSON.parse(roomRow.projection)); } catch { report.errors.push("projection_unparseable"); return report; }
   const items = Object.values(state?.workItems ?? {});
   report.items = items.length;
   if (items.length === 0) { if (!dryRun) recordWorkItemBoardDivergence(store, roomId, [], nowMs); return report; }

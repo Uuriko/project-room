@@ -6,6 +6,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { event } from '../src/events.js';
 import { WORK_ITEM_BOARD_EVENT_SQL } from '../server/work-item-board.mjs';
 
+const workEntities = process.env.BENCH_WORK_STORAGE !== "inline";
 const sizes = process.argv.slice(2).map(Number);
 if (!sizes.length) sizes.push(100, 1000, 10000);
 if (sizes.some(n => !Number.isSafeInteger(n) || n < 1 || n > 100000)) throw new Error('Counts must be 1..100000');
@@ -16,7 +17,7 @@ for (const dimension of ['messages', 'workItems']) for (const size of sizes) {
     results.push({ dimension, size, supported: false, rejection: 'workItemsPerRoom', limit: PILOT_LIMITS.workItemsPerRoom });
     continue;
   }
-  const store = new RoomStore(':memory:', { workItemBoardBackfill: 'manual' });
+  const store = new RoomStore(':memory:', { workItemBoardBackfill: 'manual', workEntities });
   try {
     const events = initialRoom();
     const add = (type, data) => events.push(event({ id: `seed-${events.length}`, idempotencyKey: `seed-${events.length}`,
@@ -79,5 +80,5 @@ for (const dimension of ['messages', 'workItems']) for (const size of sizes) {
     results.push({ dimension, size, supported: false, rejection: error.code, message: error.message });
   } finally { store.close(); }
 }
-console.log(JSON.stringify({ runtime: process.version, platform: process.platform,
+console.log(JSON.stringify({ runtime: process.version, workStorage: workEntities ? "entities" : "inline", platform: process.platform,
   workload: 'one work.blocked command, fixed head; alternating indexed/all-event facts; 2 warmups, 12 samples; rollback excluded; synthetic local SQLite', results }, null, 2));

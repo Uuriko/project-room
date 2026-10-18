@@ -1,3 +1,4 @@
+import { workStatus } from "./work-status.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
@@ -756,32 +757,36 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
+  if (item.workItemId) {
+    const work = workItems?.[item.workItemId];
+    actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
+  }
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
   // reviewers now get the verdict form right on the card.
-  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  if (!item.workItemId && canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
   // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
   // approval is still current against the delivered bundle verifies it to
   // done from the same card. The update route re-runs canCloseWork on POST;
   // this only renders the control when the claim could actually close for
   // this viewer — policy-aware since B4 (#3885/#3887, canVerifyFromBoard).
-  if (canVerifyFromBoard(item, viewer, members, roomPolicy)) {
+  if (!item.workItemId && canVerifyFromBoard(item, viewer, members, roomPolicy)) {
     actions.push(button("verify", uiText("board.action.verify"), "primary"));
   }
   // H1 (#3888): the send-back control. After a changes_requested review
   // the delivered claim used to sit with Close as the holder's only
   // offered exit; the route-authorized actors (owner, claim manager,
   // that reviewer) now get the delivered -> in_progress transition.
-  if (canSendBackClaim(item, viewer, members)) {
+  if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
     actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
-  if (mine && item.state === "in_progress") {
+  if (!item.workItemId && mine && item.state === "in_progress") {
     // Under a reviewed policy the single-step finish is refused
     // (work_not_delivered): the holder finishes to delivered with the
     // delivery bundle, and the reviewer verifies from there — so the card
@@ -1148,6 +1153,9 @@ export function installWorkBoard({ client, getState, getSession }) {
   // the node on success; if it survives (failed action, no repaint) it is
   // re-enabled here.
   function flyButton(button, run, focus, reconcile = null, unconfirmed = undefined) {
+    // Disabling the focused control moves focus to body. Preserve this
+    // action before the loading paint can restore an older navigation link.
+    stick = { key: focus?.key ?? null, id: focus?.id ?? null, status: stick?.status ?? "" };
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     act(run, focus, reconcile, unconfirmed).finally(() => {

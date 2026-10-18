@@ -21,13 +21,16 @@ export class MessageFidelityRoom {
       store.initialize(initialRoom('fidelity'));
       const owner = store.issueAccessKey('fidelity', 'owner');
       store.command(owner, 'fidelity', { id: 'post', type: T.MESSAGE_POSTED, data: { messageId: 'message', body: 'synthetic retained text' } });
+      store.command(owner, 'fidelity', { id: 'propose-work', type: 'work.proposed', data: {
+        workItemId: 'work', title: 'Migration work', definitionOfDone: 'Preserve acceptance', accountableMemberId: 'owner', mode: 'read' } });
+      store.migrateWorkProjections({ reverse: true });
       finish(store);
       assert.equal(store.checkMessagesParity().checked, 1);
       // Construct an actual v37 SQLite/permit/fence shape after provisioning.
       // This is test-only migration input; all production behavior below uses
       // the shared RoomStore and real Durable Object adapter.
       store.transaction(() => {
-        for (const row of this.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[89]_*' OR name GLOB 'writer_v4[01]_*')").all()) this.db.exec(`DROP TRIGGER ${row.name}`);
+        for (const row of this.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[89]_*' OR name GLOB 'writer_v4[012]_*')").all()) this.db.exec(`DROP TRIGGER ${row.name}`);
         this.db.exec('ALTER TABLE messages DROP COLUMN record_json');
         this.db.exec('ALTER TABLE messages_backfill_cursor ADD COLUMN state_json TEXT');
         this.db.exec(`UPDATE messages_backfill_cursor SET state_json=(
@@ -45,7 +48,11 @@ export class MessageFidelityRoom {
     }
     if (path === '/resume-v39') {
       const { owner } = await request.json();
-      assert.equal(durableStorage.version(this.db), 41);
+      assert.equal(durableStorage.version(this.db), 42);
+      assert.equal(JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id='fidelity'").get().projection).workItems.work._workEntity, 1);
+      assert.equal(store.room('fidelity').state.workItems.work.title, 'Migration work');
+      store.command(owner, 'fidelity', { id: 'accept-work', type: 'work.accepted', data: { workItemId: 'work', expectedRevision: 0 } });
+      assert.equal(store.room('fidelity').state.workItems.work.state, 'accepted');
       assert.equal(this.db.prepare("SELECT record_json FROM messages WHERE message_id='message'").get().record_json, null);
       assert.equal(store.checkMessagesParity().checked, 0);
       finish(store);

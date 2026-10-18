@@ -722,6 +722,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // An item-backed card is a view of canonical work acceptance. Its
+  // board bundle/verdict cannot replace signed evidence or designated roles.
+  // Both human and agent callers use the existing command endpoint instead.
+  if (req.method === "POST" && typeof workClaimId === "string") {
+    const linked = registry.get(roomId, workClaimId);
+    const data = body(req);
+    const acceptance = workClaimRoute === "review" && data?.verdict !== undefined
+      || workClaimRoute === "update" && (["done", "delivered"].includes(data?.state)
+        || linked?.state === "delivered" && data?.state === "in_progress");
+    if (linked?.workItemId && acceptance) {
+      const error = new ServiceError(409, "work_claim_conflict", "Open the linked work item to submit evidence, verify its result or request changes.");
+      error.body = { error: error.message, code: error.code,
+        workItemId: linked.workItemId,
+        next: [{ path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(linked.workItemId)}` },
+          { path: `/api/rooms/${encodeURIComponent(roomId)}/commands` }],
+      };
+      throw error;
+    }
+  }
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event

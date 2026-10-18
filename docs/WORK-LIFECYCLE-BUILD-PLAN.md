@@ -179,3 +179,9 @@ with `3f240e53` and are unchanged.
   sleep/crash test, hosted CI result or production verification.
 
 Final `npm run lint`: exit 0; zero errors, 290 existing warnings; design, reachability, i18n and generated UI-string checks pass.
+
+
+The subsequent [canonical work cutover](WORK-CUTOVER-PLAN.md) supersedes the
+unimplemented-storage and cross-door-acceptance bullets above. It records exact
+qualification and remaining aggregate/legacy divergence limitations; the larger
+overhaul and v1.0 release gates remain open.

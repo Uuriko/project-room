@@ -340,3 +340,16 @@ reproduce it. Work completion is not fabricated from board verification. The
 remaining field losses above still prohibit replacing work items with claims.
 The event-fact reader uses the existing event-type index and retains mapping
 parity; whole-room mapping and serialization remain open architecture work.
+
+
+## Canonical storage and acceptance amendment (2026-10-18)
+
+The 57 source references now include work-repository.mjs; agent-identities uses
+the work_projection_items view instead of reading raw workItems. Canonical work
+payloads retain all fields outside the room carrier. The board remains a view and
+execution reservation record, not a lossy replacement for the work aggregate.
+Completed items awaiting required verification/owner acceptance map to delivered.
+Item-backed board acceptance controls open canonical work; API attempts to approve
+through board bundles return a conflict with the canonical context/command paths.
+Native board deliveries retain their existing workflow. See
+[cutover qualification](WORK-CUTOVER-PLAN.md).

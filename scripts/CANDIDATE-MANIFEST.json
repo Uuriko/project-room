@@ -4,7 +4,7 @@
     "node": ">=24.19.0",
     "ci": "24"
   },
-  "storeSchemaVersion": 41,
+  "storeSchemaVersion": 42,
   "assets": {
     "about.html": "sha256:7139f2def1bea078151f936551f566c3d06b0b36e187a0291905ea982aa4d383",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
@@ -71,7 +71,7 @@
     "src/auth-signin-ui.js": "sha256:e7f5c5337c4391e25c966482a4cac8e03ef658a40b25379774416c1a3e43d6bc",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:0ceeb4073988677ad5c2b2a6fbcf7e12d045b32175132ac8e227eefa77b19acd",
+    "src/board-ui.js": "sha256:66f670acf90a942c542fcd0ccc8f329a6f865352131796b8423230e77708146f",
     "src/board.css": "sha256:97883f6b1ab6817bde7b020f1fe1ac463eb0cc002e19cda8b76895474b2c0a47",
     "src/bounty-board.js": "sha256:3c65ff411c06bcbaed3825f2b9145233af79a5439f31de36ecb152e0e1a2be14",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
@@ -83,7 +83,7 @@
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
     "src/entry.js": "sha256:c754905664f1e2f3f7f38689cdb82b5cfda956dc5b2c7f143544a35d7cf77477",
     "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
-    "src/events.js": "sha256:8dc83dcd2dc8db556632384e65f2e11779b1e3c3bd5183a6eb30d5a76998aa62",
+    "src/events.js": "sha256:f3dc34c5d989e93fba385e1c66b5a9fb8a13bd50262ae561bb2487a27e706509",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
     "src/front-door.js": "sha256:684d02264e78a0cd62c72c7d4b1c0ca1a3a552e783b5756ec9341f55d5233e98",
@@ -146,11 +146,12 @@
     "src/work-loops.js": "sha256:93c681edd6cdd34702088505d4f0fdebab289fefa937cfc972b0a546fe0d92eb",
     "src/work-packet.js": "sha256:f9a95e18f257f42a7a954b333badb175370fd8ed5c5791849324d4a4e696b32a",
     "src/work-recipes.js": "sha256:25deaba24a7c303f41fef6925ca2e09f7334ba5de549a291515e2c3ff3ffacd0",
+    "src/work-reducers.js": "sha256:ac83c996954fdf0b301d6bb27776f929b5bf33bd92f6f4b1b493cba7c3abff63",
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:184c5340a8a28d8a3cd41cadb4d25c68bc0272508d563c84a85fd6bf4f2e0fa0",
-    "strings/en.json": "sha256:8db38bf150f0b485bc543338c0a4e013da66fe08de532e1b3a9f1b9117c7b456"
+    "strings/en.js": "sha256:2f21cc180ae1cf7669f44ae49f37a2fcb116286388a047a18f4e089ae9ce1348",
+    "strings/en.json": "sha256:b60bdac7f36f0c32935ce47f03a033ffa6dc0206a8794e6a9d33b057d4d87490"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:3d49dedbf8f41adf17b4760a6a5de03d617160d13fa4f38989c29c2754662c7b",
@@ -165,6 +166,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:b8af04e88c45036cb76900861d9675049040753680bad39c4d364248cab1dc2f"
+    "package.json": "sha256:6a1408b29c2709aedd92f7d5fa224452b0ffbc9abba686a3db921b7f7129aa41"
   }
 }

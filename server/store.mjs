@@ -1,3 +1,4 @@
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
@@ -1144,7 +1145,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1365,7 +1366,7 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
@@ -1405,6 +1406,7 @@ export class RoomStore {
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
+    this.workEntities = workEntities === true;
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
@@ -1611,6 +1613,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    this.db.exec(WORK_REPOSITORY_SCHEMA);
     if (version > 0 && version < 26 && (
       this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
       || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
@@ -2117,6 +2120,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         console.error("work-item board backfill failed at open", error);
       }
     }
+    configureWorkRepository(this.db, this.workEntities);
+    if (this.workEntities && version < 42) this.migrateWorkProjections();
+  }
+
+  // Convert one room atomically; interrupted multi-room runs resume by
+  // skipping already normalized carriers. Reverse reconstructs inline state.
+  migrateWorkProjections({ reverse = false } = {}) {
+    let converted = 0;
+    for (const { id } of this.db.prepare("SELECT id FROM rooms ORDER BY id").all()) {
+      this.transaction(() => {
+        const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(id);
+        const raw = JSON.parse(row.projection);
+        const state = hydrateWorkItems(this.db, id, raw);
+        const projection = storedProjection(this.db, id, state, { enabled: this.bodiesAtRest, workEntities: !reverse });
+        if (projection !== row.projection) {
+          this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(projection, id);
+          converted++;
+        }
+        if (reverse) this.db.prepare("DELETE FROM work_entities WHERE room_id=?").run(id);
+        const actual = hydrateWorkItems(this.db, id, JSON.parse(projection));
+        if (JSON.stringify(actual.workItems) !== JSON.stringify(state.workItems)) throw new Error("Work migration comparison failed");
+      });
+    }
+    this._dropProjectionCache();
+    return { converted, reverse };
   }
 
   // Decision #10 operator/test surface: run (or re-run, with force) the
@@ -2578,7 +2606,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => Boolean(this.db.prepare(`
       SELECT 1 AS present FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
       UNION
-      SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      SELECT 1 FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
       WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
       UNION
       SELECT 1 FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
@@ -2738,7 +2766,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const roomHelp = idsWithHelp(`
         SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
-        SELECT rooms.id AS id FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        SELECT rooms.id AS id FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
         WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
       const checkpointHelp = idsWithHelp(`
@@ -2765,10 +2793,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
         const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
         if (collect) {
-          try { auditWorkHelp(JSON.parse(row.projection), history, checkpoint); }
+          try { auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint); }
           catch (error) { collect.push({ roomId: row.id, error }); }
         } else {
-          auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
+          auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint);
         }
       }
       return { checked, auditable: [...new Set([...helpRooms, ...roomHelp, ...checkpointHelp])] };
@@ -3171,7 +3199,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
       WHERE json_type(item.value) = 'object' AND (
         json_type(item.value, '$.proposedById') IS NULL
         OR (json_type(item.value, '$.receipt') = 'object' AND (
@@ -3185,14 +3213,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       )
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.receiptHistory') AS receipt
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.receiptHistory') AS receipt
       WHERE json_type(receipt.value) = 'object' AND (
         json_type(receipt.value, '$.reportedById') IS NULL
         OR json_type(receipt.value, '$.producerId') IS NULL
         OR json_type(receipt.value, '$.producerAttribution') IS NULL)
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.verificationHistory') AS verification
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.verificationHistory') AS verification
       WHERE json_type(verification.value) = 'object'
         AND json_type(verification.value, '$.independenceConfirmed') IS NULL
     `).all().map(row => row.id);
@@ -3216,15 +3244,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
       FROM rooms
       WHERE EXISTS (
-        SELECT 1 FROM json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_extract(item.value, '$.state') = 'superseded'
+        SELECT 1 FROM work_projection_items AS item
+        WHERE item.room_id=rooms.id AND json_extract(item.value, '$.state') = 'superseded'
           AND json_type(item.value, '$.supersededBy') = 'text'
       )
     `).all();
     for (const row of linked) {
       if (skipIds.has(row.id)) continue;
-      if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      if (!repairInvalidSupersessions(hydrateWorkItems(this.db, row.id, { workItems: parseStoredJson(row.workItems, {}) }))) continue;
+      const state = hydrateWorkItems(this.db, row.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection));
       if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
     }
   }
@@ -3237,7 +3265,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const room of rooms) {
       const events = findEvents.all(room.id, ...PROVENANCE_EVENT_TYPES).map(row => JSON.parse(row.body));
       if (upgradeV1) {
-        const state = JSON.parse(room.projection);
+        const state = hydrateWorkItems(this.db, room.id, JSON.parse(room.projection));
         const changed = applyProvenanceRepair(state, events);
         if (changed) update.run(this.storedProjection(room.id, state), room.id);
         // Checkpoints keep full bodies (replay applies edits to them).
@@ -3245,13 +3273,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         continue;
       }
       const slices = slicesOf.get(room.id);
-      const partial = {
+      const partial = hydrateWorkItems(this.db, room.id, {
         room: parseStoredJson(slices?.room, null),
         channels: parseStoredJson(slices?.channels, undefined),
         workItems: parseStoredJson(slices?.workItems, {})
-      };
+      });
       if (!applyProvenanceRepair(partial, events)) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+      const state = hydrateWorkItems(this.db, room.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection));
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
@@ -3274,7 +3302,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight });
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3284,7 +3312,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
-      const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
       if (!roomsWrite && !eventAppend) return stmt;
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
@@ -3301,7 +3329,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
+        if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
     }
@@ -3441,7 +3469,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
     return { value: Object.freeze({ sequence, state }),
-      weight: Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
+      weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh

@@ -12,6 +12,7 @@ export function candidateRuntimeFixture(repository, directory) {
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
   paths.add('server/message-entity-projection.mjs');
   paths.add('server/message-replay-snapshot.mjs');
+  paths.add('server/work-repository.mjs');
   paths.add('server/message-command-service.mjs');
   paths.add('src/message-reducers.js');
   paths.add('src/work-reducers.js');
