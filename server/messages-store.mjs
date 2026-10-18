@@ -288,61 +288,6 @@ export function resyncRoomMessageRows(db, roomId, state) {
   return written;
 }
 
-// Re-derive a room's existing messages rows from a rebuilt projection
-// state (account deletion's rebuildRoom, after redaction rewrote the log).
-// Per-row redaction nulls a row's record for already-archived rooms; the
-// rebuild makes the projection the redacted truth, and without this resync
-// the rows keep the NULL records parity then mismatches forever — the room
-// is caught up, so the backfill never re-selects it. Every field written
-// here derives from the same rebuilt message parity certifies against, and
-// each row keeps the sequence it already carries (parity compares it
-// against the original posting event). Messages with no row yet are the
-// backfill's to create; messages archived out of the projection are not in
-// the state and keep their rows untouched (parity compares those by count
-// only). Returns the number of rows rewritten.
-export function resyncRoomMessageRows(db, roomId, state) {
-  const messages = state?.messages ?? [];
-  if (!messages.length) return 0;
-  const rowSeq = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?")
-    .all(roomId).map(row => [row.message_id, row.seq]));
-  if (!rowSeq.size) return 0;
-  const archive = archiveMarker(db, roomId);
-  const archivedRows = archive.throughSeq
-    ? db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))").all(roomId, archive.throughSeq, archive.retainedJson) : [];
-  // The same thread map certifyMessagesParity certifies against: archived
-  // parents stay reachable as stubs for the thread-root comparison.
-  const byId = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]),
-    ...messages.map(message => [message.id, message])]);
-  const pinned = new Set((state?.pins ?? []).map(pin => pin.messageId));
-  const upsert = statementFor(db);
-  let written = 0;
-  for (const message of messages) {
-    const seq = rowSeq.get(message?.id);
-    if (seq === undefined) continue;
-    if (typeof message.authorId !== "string" || typeof message.createdAt !== "string") continue;
-    const reactions = message.reactions && typeof message.reactions === "object" && Object.keys(message.reactions).length
-      ? JSON.stringify(message.reactions) : null;
-    upsert.run(
-      roomId, message.id, seq,
-      textOrNull(message.channelId),
-      threadRootId(byId, message),
-      textOrNull(message.replyToId),
-      textOrNull(message.toMemberId),
-      textOrNull(message.workItemId),
-      message.authorId,
-      storedBody(message),
-      message.createdAt,
-      textOrNull(message.editedAt),
-      textOrNull(message.deletedAt),
-      reactions,
-      pinned.has(message.id) ? 1 : 0,
-      JSON.stringify(currentRecord(message))
-    );
-    written += 1;
-  }
-  return written;
-}
-
 function compactState(state) {
   return { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
 }
