@@ -18,6 +18,10 @@ import {
   defaultDeadlineLocal,
   buildPostPayload,
   buildAcceptAttestation,
+  payoutSplit,
+  disputeBondCredits,
+  bountyPaySentence,
+  bountyWindowLine,
   installBountyBoard,
   bountyFocusKey,
   restoreBountyFocus,
@@ -116,7 +120,13 @@ test("bountyListHtml escapes titles and renders only the actions the model allow
   const html = bountyListHtml(model);
   assert.ok(!html.includes("<img src=x"), "raw markup must not appear");
   assert.ok(html.includes("&lt;img src=x"), "escaped markup appears instead");
-  assert.ok(html.includes("Accept &amp; release escrow"), "review action renders for the poster");
+  assert.ok(html.includes("Accept work"), "review action renders for the poster");
+  assert.ok(!html.includes("release escrow"), "the button no longer promises a release the click does not perform (H-1)");
+  assert.ok(html.includes("Accepting does not pay the worker now"), "the review block names the challenge window before the click");
+  assert.ok(html.includes("72-hour"), "a 25-credit bounty carries the 72-hour window");
+  assert.ok(html.includes("Your attestation"), "the review block is headed as the attestation it is (H-3)");
+  assert.ok(html.includes('<option value="" selected>Choose…</option>'), "verdict selects start unchosen (H-3)");
+  assert.ok(/data-bounty-action="accept" data-bounty-id="ROOMX-1" disabled/.test(html), "accept is disabled until every criterion has a verdict (H-3)");
   assert.ok(html.includes('data-bounty-action="fund"'), "fund action renders for an own proposed bounty");
   assert.ok(html.includes("25 credits"), "amount renders");
   const empty = bountyListHtml(bountyBoardModel({}));
@@ -126,6 +136,11 @@ test("bountyListHtml escapes titles and renders only the actions the model allow
 test("bountyBalanceHtml shows every bucket and the total", () => {
   const html = bountyBalanceHtml(bountyBoardModel({ balances: BALANCES }));
   for (const text of ["Payable 95", "Locked in escrow 25", "Attributed 0", "Total 120"]) assert.ok(html.includes(text), text);
+  // H-4: the strip explains its own buckets in-panel, in the plain terms of
+  // offers.html's settlement passage — Attributed above all, the bucket an
+  // accepted amount silently lands in.
+  for (const text of ["Attributed bucket", "challenge window closes", "next settlement sweep", "not cash"])
+    assert.ok(html.includes(text), `explainer names: ${text}`);
 });
 
 test("bountyReceiptsHtml highlights the named receipt and badges signed ones", () => {
@@ -156,13 +171,69 @@ test("defaultDeadlineLocal is a datetime-local string a week out", () => {
   assert.ok(Date.parse(payload.deadline) > Date.now(), "the default deadline is in the future");
 });
 
-test("buildAcceptAttestation cites every pinned criterion exactly once", () => {
+test("buildAcceptAttestation refuses unset criteria and attests exactly the chosen verdicts (H-3)", () => {
   const item = bountyBoardModel({ bounties: [SUBMITTED], selfId: "m9" }).items[0];
-  const { verifierAttestation } = buildAcceptAttestation(item, {}, "2026-10-15T00:00:00.000Z");
+  // No default-to-pass anywhere: missing, empty, and junk verdicts all refuse.
+  assert.throws(() => buildAcceptAttestation(item, {}, "2026-10-15T00:00:00.000Z"), /still unchosen/);
+  assert.throws(() => buildAcceptAttestation(item, { c1: "" }, "2026-10-15T00:00:00.000Z"), /still unchosen/);
+  assert.throws(() => buildAcceptAttestation(item, { c1: "maybe" }, "2026-10-15T00:00:00.000Z"), /still unchosen/);
+  const { verifierAttestation } = buildAcceptAttestation(item, { c1: "pass" }, "2026-10-15T00:00:00.000Z");
   assert.deepEqual(verifierAttestation.citations, [{ criterionId: "c1", verdict: "pass" }]);
   assert.equal(verifierAttestation.at, "2026-10-15T00:00:00.000Z");
   const failed = buildAcceptAttestation(item, { c1: "fail" }, "2026-10-15T00:00:00.000Z");
   assert.deepEqual(failed.verifierAttestation.citations, [{ criterionId: "c1", verdict: "fail" }]);
+  // A rubric-free bounty has nothing to attest; the build is an empty citation set.
+  const bare = bountyBoardModel({ bounties: [{ ...SUBMITTED, rubric: null }], selfId: "m9" }).items[0];
+  assert.deepEqual(buildAcceptAttestation(bare, {}, "2026-10-15T00:00:00.000Z").verifierAttestation.citations, []);
+});
+
+test("payoutSplit and disputeBondCredits mirror the server's milli rules", () => {
+  // server/bounty-escrow.mjs: fee = floor(amountMillis / 100); bond = ceil(amountMillis * 0.25).
+  assert.deepEqual(payoutSplit(25), { fee: 0.25, net: 24.75 });
+  assert.deepEqual(payoutSplit(0.5), { fee: 0.005, net: 0.495 });
+  assert.deepEqual(payoutSplit(0.05), { fee: 0, net: 0.05 }, "a sub-0.1-credit award pays no fee");
+  assert.equal(disputeBondCredits(25), 6.25);
+  assert.equal(disputeBondCredits(0.5), 0.125);
+});
+
+const ACCEPTED = {
+  ...SUBMITTED, bountyId: "ROOMX-3", title: "Accepted task", state: "accepted", group: "in-review",
+  challengeEnds: "2026-10-21T12:00:00.000Z", disputeDecider: "id:agent/max", verifier: "id:agent/max",
+  evidence: null,
+};
+
+test("an accepted card names the pay date, the net amount, and the dispute path for both parties (H-1)", () => {
+  for (const selfId of ["m9", "id:agent/jill"]) {
+    const html = bountyListHtml(bountyBoardModel({ bounties: [ACCEPTED], selfId }));
+    assert.ok(html.includes("Not paid yet"), `window line renders for ${selfId}`);
+    assert.ok(html.includes("the worker is paid 24.75 credits on Oct 21 unless disputed"),
+      "net of the 1% pool fee, on the challengeEnds date");
+    assert.ok(html.includes("25-credit award"), "the award behind the net figure is named");
+    assert.ok(html.includes("1% payout fee"), "the fee is disclosed, not hidden");
+    assert.ok(html.includes("bond of exactly 25% of the bounty (6.25 credits)"), "the dispute bond is named");
+    assert.ok(html.includes("no dispute button yet"), "the copy names where disputes actually open");
+  }
+  // A micro bounty under the fee floor quotes its full amount, no fee clause.
+  const micro = bountyListHtml(bountyBoardModel({
+    bounties: [{ ...ACCEPTED, amount: 0.05, amountMillis: 50 }], selfId: "m9",
+  }));
+  assert.ok(micro.includes("the worker is paid 0.05 credits on Oct 21 unless disputed"));
+  assert.ok(!micro.includes("payout fee"), "no fee is claimed where the server takes none");
+});
+
+test("the window line is honest when no dispute can open, and after the window closes", () => {
+  const noDecider = bountyBoardModel({
+    bounties: [{ ...ACCEPTED, disputeDecider: null, verifier: null }], selfId: "m9",
+  }).items[0];
+  assert.ok(bountyWindowLine(noDecider).includes("No dispute decider was named on this bounty"),
+    "the server refuses to seat a decider-less dispute; the copy says so");
+  assert.equal(bountyPaySentence(noDecider).includes("Oct 21"), true, "the pay date still renders");
+  const approved = bountyBoardModel({
+    bounties: [{ ...ACCEPTED, state: "approved" }], selfId: "m9",
+  }).items[0];
+  assert.ok(bountyWindowLine(approved).includes("next settlement sweep"), "approved means sweep-pending, not paid");
+  const submitted = bountyBoardModel({ bounties: [SUBMITTED], selfId: "m9" }).items[0];
+  assert.equal(bountyWindowLine(submitted), "", "no window line before acceptance");
 });
 
 test("escapeHtml neutralizes markup", () => {
@@ -226,6 +297,89 @@ test("installBountyBoard reads list, balances, and history for the session membe
     assert.equal(requested.length, 3, "a second sync without changes does not refetch");
   } finally {
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
+});
+
+test("the panel refuses an accept with unset verdicts, then attests exactly what was chosen (H-3/H-1)", async () => {
+  const realDocument = globalThis.document;
+  const realCSS = globalThis.CSS;
+  globalThis.CSS = { escape: value => String(value) };
+  const listeners = {};
+  const statusEl = { textContent: "", classList: { toggle() {} } };
+  const verdictSelect = { dataset: { verdictFor: "ROOMX-1:c1" }, value: "" };
+  const acceptButton = { dataset: { bountyAction: "accept", bountyId: "ROOMX-1" }, disabled: true };
+  let hostHtml = "";
+  const host = {
+    addEventListener(type, fn) { listeners[type] = fn; },
+    contains: () => false,
+    set innerHTML(html) { hostHtml = html; },
+    get innerHTML() { return hostHtml; },
+    querySelectorAll(selector) { return selector.includes("data-verdict-for") ? [verdictSelect] : []; },
+    querySelector(selector) { return selector.includes('data-bounty-action="accept"') ? acceptButton : null; },
+  };
+  globalThis.document = {
+    activeElement: null,
+    querySelector: selector => {
+      if (selector === "#bounty-panel") return { open: true };
+      if (selector === "#bounty-count") return { textContent: "" };
+      if (selector === "#bounty-board-host") return host;
+      if (selector === "#bounty-status") return statusEl;
+      return null;
+    },
+  };
+  let accepted = false;
+  const requests = [];
+  const client = {
+    path(suffix) { return `/api/rooms/room1${suffix}`; },
+    async request(path, opts) {
+      requests.push({ path, data: opts?.data });
+      if (opts?.method === "POST" && path.endsWith("/accept")) { accepted = true; return {}; }
+      if (path.endsWith("/bounties")) {
+        return { roomId: "room1", bounties: [accepted
+          ? { ...SUBMITTED, state: "accepted", challengeEnds: "2026-10-21T12:00:00.000Z", disputeDecider: "id:agent/max", verifier: "id:agent/max" }
+          : SUBMITTED] };
+      }
+      if (path.includes("/credits/balances/")) return { roomId: "room1", balances: BALANCES };
+      if (path.includes("/credits/history/")) return { roomId: "room1", receipts: RECEIPTS };
+      throw new Error(`unexpected path ${path}`);
+    },
+  };
+  const settle = () => new Promise(resolve => setTimeout(resolve, 10));
+  try {
+    const panel = installBountyBoard({ client, getSession: () => ({ roomId: "room1", member: { id: "m9" } }) });
+    await panel.sync();
+    const clickAccept = () => listeners.click({
+      target: { closest: sel => (sel === "[data-bounty-action]" ? acceptButton : null) },
+    });
+    const changeVerdict = () => listeners.change({
+      target: { closest: sel => (sel === "[data-verdict-for]" ? verdictSelect : null) },
+    });
+    // One click with the verdict unchosen: refused inline, nothing reaches the wire.
+    clickAccept();
+    await settle();
+    assert.equal(requests.some(r => r.path.endsWith("/accept")), false, "no accept is posted with an unset criterion");
+    assert.match(statusEl.textContent, /still unchosen/, "the refusal names the unfinished attestation");
+    // The button enables only while every verdict is chosen.
+    verdictSelect.value = "pass";
+    changeVerdict();
+    assert.equal(acceptButton.disabled, false, "all verdicts chosen enables accept");
+    verdictSelect.value = "";
+    changeVerdict();
+    assert.equal(acceptButton.disabled, true, "resetting a verdict to unchosen disables accept again");
+    verdictSelect.value = "pass";
+    changeVerdict();
+    clickAccept();
+    await settle(); await settle();
+    const posts = requests.filter(r => r.path.endsWith("/accept"));
+    assert.equal(posts.length, 1, "exactly one accept posts");
+    assert.deepEqual(posts[0].data.verifierAttestation.citations,
+      [{ criterionId: "c1", verdict: "pass" }], "the attestation carries exactly the chosen verdict");
+    assert.match(statusEl.textContent, /The worker is paid 24\.75 credits on Oct 21 unless disputed/,
+      "the post-accept status names the window instead of implying a release");
+    assert.match(statusEl.textContent, /Receipt lot_bbb/, "the movement receipt is still named");
+  } finally {
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+    if (realCSS === undefined) delete globalThis.CSS; else globalThis.CSS = realCSS;
   }
 });
 
