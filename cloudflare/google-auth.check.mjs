@@ -20,10 +20,8 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
  try {
   const res = await mf.dispatchFetch(origin + '/api/auth/google/start', { redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
   assert.equal(res.status, 302, await res.clone().text());
-  // The start response sets the account-session cookie for the slot the state
-  // is bound to; a real browser sends it back on the callback. dispatchFetch
-  // keeps no cookie jar, so propagate it explicitly (mirrors the pinned
-  // browser behavior in tests/google-oauth-http.test.js).
+  // dispatchFetch has no cookie policy. Model the cross-site return without
+  // the Strict cookie, then the committed Room page's same-site continuation.
   const startCookies = res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
   const url = new URL(res.headers.get('Location'));
   assert.equal(url.origin, 'https://accounts.google.com');
@@ -37,8 +35,12 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const encode = x => Buffer.from(JSON.stringify(x)).toString('base64url');
   const input = encode({alg: 'RS256', kid: 'fixture'}) + '.' + encode({iss: 'https://accounts.google.com', aud: '123-example.apps.googleusercontent.com', sub: '123456789', email: 'synthetic@example.test', email_verified: true, iat: now, exp: now+3600});
   token = input + '.' + sign('RSA-SHA256', Buffer.from(input), keys.privateKey).toString('base64url');
-  const callback = (state, cookieHeader) => mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + state + '&code=synthetic-code', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1', ...(cookieHeader ? {Cookie: cookieHeader} : {})}});
-  const completed = await callback(url.searchParams.get('state'), startCookies);
+  const callback = (state, cookieHeader, resume = false) => mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + state + '&code=synthetic-code' + (resume ? '&room_resume=1' : ''), {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1', ...(cookieHeader ? {Cookie: cookieHeader} : {})}});
+  const crossSite = await callback(url.searchParams.get('state'));
+  assert.match(await crossSite.text(), /room_resume=1/);
+  assert.equal(crossSite.headers.get('Set-Cookie'), null);
+  assert.equal(crossSite.headers.get('Cache-Control'), 'no-store');
+  const completed = await callback(url.searchParams.get('state'), startCookies, true);
   assert.equal(completed.headers.get('X-Room-Auth-Failure'), null);
   assert.match(await completed.text(), /account=1/);
   const cookie = completed.headers.get('Set-Cookie').split(';')[0];
@@ -72,7 +74,7 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   // cookie fails closed before any provider call (login CSRF, RFC 6749
   // section 10.12) instead of adopting the state's slot.
   const unboundStart = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
-  const unbound = await callback(new URL(unboundStart.headers.get('Location')).searchParams.get('state'));
+  const unbound = await callback(new URL(unboundStart.headers.get('Location')).searchParams.get('state'), null, true);
   assert.equal(unbound.headers.get('X-Room-Auth-Failure'), 'google_state_invalid');
  } finally { await mf.dispose(); }
 });
