@@ -37,6 +37,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
 import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
 import { createOwnerCockpit } from "./owner-cockpit.js";
+import { createVerdictInbox } from "./verdict-inbox.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
@@ -742,6 +743,9 @@ const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cock
   return accountClient.request(action.path, { method: action.method, data: action.body, session,
     headers: { "X-Project-Room-Auth": "account" } });
 } });
+// COMP-DEEP #1 (CD-01): the verdict inbox on the account home, beside the
+// cockpit — the cross-room reviews this member owes, from Lane C's read.
+const verdictInbox = createVerdictInbox({ load: () => accountClient.verdictInbox(), section: $("#verdict-inbox") });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
@@ -1087,6 +1091,7 @@ async function loadAccountRooms(more = false) {
   const version = ++roomListVersion, owned = accountClient.session;
   if (!owned?.authenticated) return;
   if (!more) ownerCockpit.refresh();
+  if (!more) verdictInbox.refresh();
   if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
   $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
   try {
