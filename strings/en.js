@@ -215,6 +215,7 @@ export default {
   "message.edit_too_long": "This message is too long. Shorten it to {limit} characters or fewer; emoji may count as two.",
   "connection.connecting": "Connecting to room service…",
   "room.session_ended": "Your session in that room ended. Open the room again from your room list to continue.",
+  "people.member_removed": "{name} removed. They can no longer read or post in this room; what they already saw is not recalled.",
   "profile.editing": "editing your profile",
   "file.attach.blockedType": "That file type isn’t allowed.",
   "file.attach.failed": "Couldn’t attach that file.",

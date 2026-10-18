@@ -333,3 +333,61 @@ test('schema 40 snapshots move off the cursor atomically and an open v40 writer 
  try {assert.equal(reopened.room('commons').state.messages[0].body,'Preserve replay content.');}
  finally {reopened.close();}
 });
+
+// A state over one row's worth is split into parts; the cursor row holds
+// only a marker, and the replay still certifies.
+function longRoom(store, roomId, count = 15) {
+  const long = i => `long body ${i} `.padEnd(60000, "xyz");
+  store.initialize([
+    ...initialRoom(roomId),
+    ...Array.from({ length: count }, (_, i) => messageEvent(roomId, `ev-${i}`, T.MESSAGE_POSTED, { messageId: `m${i}`, body: long(i) }, 10 + i)),
+    messageEvent(roomId, "ev-short", T.MESSAGE_POSTED, { messageId: "short", body: "short 😀 body" }, 100)
+  ]);
+  return long;
+}
+const cursorOf = (store, roomId) => store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id=?").get(roomId)?.state_json ?? null;
+const partsOf = (store, roomId) => store.db.prepare("SELECT part, length(CAST(json AS BLOB)) AS bytes FROM messages_backfill_state WHERE room_id=? ORDER BY part").all(roomId);
+
+test("a replay state too big for one row is stored in parts and still certifies", t => {
+  const store = open(t);
+  const long = longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  assert.match(cursorOf(store, "commons"), /^parts:\d+:[0-9a-f]{64}$/);
+  const parts = partsOf(store, "commons");
+  assert.ok(parts.length >= 2, `${parts.length} parts`);
+  for (const part of parts) assert.ok(part.bytes < 2 * 1024 * 1024, `part ${part.part} is ${part.bytes} bytes`);
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+  const byId = new Map(rows(store, "commons").map(row => [row.message_id, row]));
+  assert.equal(byId.get("m3").body, long(3));
+  assert.equal(byId.get("short").body, "short 😀 body");
+});
+
+// A missing or changed part fails the hash, and the batch replays from the
+// log instead of resuming from a wrong state.
+test("a torn state replays from the log", t => {
+  const store = open(t);
+  const long = longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  store.db.prepare("DELETE FROM messages_backfill_state WHERE room_id='commons' AND part=1").run();
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+  assert.equal(rows(store, "commons").find(row => row.message_id === "m12").body, long(12));
+});
+
+// The parts can hold text a delete must remove, so a delete drops them with
+// the snapshot; an older build's JSON.parse of the marker fails, so it
+// replays rather than trusting it.
+test("a delete drops the state parts, and the marker is not JSON", t => {
+  const store = open(t);
+  longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  assert.throws(() => JSON.parse(cursorOf(store, "commons")), SyntaxError);
+  assert.ok(partsOf(store, "commons").length >= 2);
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: "delete-m0", type: T.MESSAGE_DELETED, data: { messageId: "m0", expectedMessageRevision: 0 } });
+  assert.equal(partsOf(store, "commons").length, 0);
+  assert.equal(cursorOf(store, "commons"), null);
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+});

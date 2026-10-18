@@ -125,6 +125,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+  paths.add('server/legacy-message-shape.mjs'); // projection shape upgrade v1 (imported by server/store.mjs)
   paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
   paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
@@ -138,7 +139,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
   paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
   // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
-  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs']) paths.add(path);
+  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs', 'server/operator-archive.mjs']) paths.add(path);
   paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
   paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
   paths.add('src/password-auth.mjs'); // Email+password crypto (imported by server/http.mjs, slice 2)

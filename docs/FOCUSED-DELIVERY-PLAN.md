@@ -3,13 +3,92 @@
 Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md); current [work lifecycle build and qualification](WORK-LIFECYCLE-BUILD-PLAN.md) and [canonical work cutover](WORK-CUTOVER-PLAN.md). The latest scope rule applies to every retained item too: previous discussion or implementation is not sufficient justification; retain only supported benefits over simpler alternatives.
 
 2026-10-18. This is the revised active planning scope following the request to cut,
-combine and shrink the total backlog. Current implementation status is recorded below.
-The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) remains the evidence index,
-not a promise to build 773 things. Scope reduction alone does not close issues or PRs.
+combine and shrink the total backlog. The execution evidence below records actual
+progress; the six outcomes remain acceptance criteria. The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
+remains the evidence index, not a promise to build 773 things.
 
 The product test: two people and an authorized agent turn a conversation into an
 accepted result, change direction, survive a disconnect, and return without
 reconstructing the project or losing control.
+
+## Architecture integration prompt: reconcile with deployed storage
+
+Integrate candidate `93727acb` (#4114) with deployed main `14e4320b` (#4123)
+in an isolated checkout. Produce one coherent, testable architecture candidate,
+not a mechanical choice of one side of each conflict. Preserve both parents and
+their independently useful behavior. Do not deploy, archive live rooms, downgrade
+writer fences, or overwrite another lane's source work.
+
+1. Inventory conflicts and semantic overlaps before editing. Map message entity
+   ownership, replay snapshots/cursor chunks, legacy-shape repair, operator archive,
+   canonical work, privacy purge and recovery to their authoritative modules.
+   Record which behavior is retained, combined or superseded and why.
+2. Preserve main's bounded replay cursors, version-1 display-name replay,
+   audited legacy shape repair, measured storage limits and guarded archive door.
+   Preserve the candidate's canonical work repository, exact-evidence acceptance,
+   entity-backed message reads, linear replay and fail-closed writer fences.
+3. Choose migration order explicitly: opening a schema-38 deployed database must
+   reach schema42 without losing cursor state, entities, work facts or audit rows.
+   Certification metadata must refer to the same replay snapshot representation.
+   Privacy edits and recovery must invalidate/delete every corresponding copy.
+   Older writers must remain fenced. Inverse representation conversion is not a
+   schema downgrade and must not imply an operator unarchive feature.
+4. Resolve source conflicts before generated metadata. Reconcile both parents'
+   tests without weakening their invariants; replace obsolete assertions only
+   when the new storage contract explains the change. Add a crossing-boundary
+   regression using a real pre-integration database when possible: upgrade,
+   certification/archive, canonical work, restart and recovery/privacy behavior.
+5. Run focused storage/replay/work/archive/migration tests and Worker checks first.
+   Regenerate manifests from the integrated tree, verify packaging and lint, and
+   then run affected tests and one full Node24 suite after fixes stabilize.
+   Report baseline failures separately; no skipped security tests to obtain green.
+6. Run the shared room benchmark once on the finished candidate against the pinned
+   deployed main, using bodies-at-rest and the documented statistical method.
+   Retain slower and inconclusive results. Do not claim productive-user gains
+   from microbenchmarks. Verify fixture and measured writes were accepted.
+7. Publish the integration as an update to #4114 with the conflict decisions,
+   test/benchmark evidence and explicit open gates. Verify remote head and actual
+   merge composition. Keep #4118 separate until its base is reconciled; account
+   for its follow-up rather than silently dropping it. Release only this source
+   claim at the checkpoint, leaving shared deployment roles untouched.
+
+Done means a published integrated source candidate with inspectable evidence and
+no unexplained new failures in exercised boundaries. Hosted exact-head checks,
+production rollout, physical sleep/wake and the human productivity pilot remain
+separate acceptance gates; no local result closes those automatically.
+
+Initial inventory: seven textual conflicts (store, messages-store, Worker package,
+generated manifest and three recovery/backfill tests). Main remains schema38;
+candidate is schema42. Replay snapshot/cursor composition is a semantic review
+requirement even where Git reports a clean merge.
+
+### Integration decisions and evidence (2026-10-18)
+
+The candidate incorporates deployed `14e4320b` and the subsequent copy-only
+main update `342f250c`. Snapshot serialization/chunk ownership lives in
+`server/message-replay-snapshot.mjs`; cursor metadata stays in
+`server/messages-store.mjs`. Large bodies use the deployed chunk format and hash
+verification, while independent replay/certification anchors retain linear replay.
+Blocked-room diagnosis reads that same snapshot contract, including replay ahead
+of certification. Privacy discard deletes the marker and all chunks; small
+replacements remove obsolete chunks. Main's legacy-shape repair, v1 name replay,
+storage limits and guarded archive route remain present. No retired direct message
+writer was restored to resolve an import conflict.
+
+Both parents' regression cases are retained. New boundary tests cover a deployed
+schema38 chunked cursor migrating to schema42, Unicode boundaries, corrupt chunks,
+transaction rollback and shrinking away private chunks. A separate experiment
+created a database using the actual deployed revision, then opened it with this
+candidate: chunks migrated unchanged, the old connection could not write, parity
+certified, work acceptance persisted, 18 of 20 messages archived, and restart
+preserved the archived tail and accepted work. This was synthetic data on disk,
+not a live-room archive. Recovery comparison covers 205 application tables.
+
+Qualification results and the full shared benchmark are recorded with the updated
+PR #4114. The next source slice remains #4118 after this base is qualified. Its
+continuity work, exact-head Linux checks, supported-host sleep/wake, deployment
+rehearsal and the human productivity pilot are not silently marked complete by
+this integration.
 
 ## Active list — six outcomes
 
@@ -241,3 +320,24 @@ reader/caller census, atomic entity/event/effect writes, privacy/order parity, m
 and recovery, then remove superseded serialization. Attach the existing user send/edit/
 return journey and a fresh-agent read to that slice. Baseline first, exact-tree evidence
 at completion. This advances F1, F3 and F4 without starting three independent products.
+
+## Current execution: continuity on the reconciled architecture
+
+Integrate PR #4118 `d611d138` with qualified architecture source `aa69cf95`.
+Preserve both histories and every retained C1–C8 acceptance task. Resolve planning
+text by retaining both execution records, regenerate the manifest from the combined
+package, and inspect runtime-package unions for dropped modules. Do not change the
+storage behavior already qualified on #4114 or expand into new feature lanes.
+
+1. Check #4114 exact-head hosted results and diagnose new failures if any. Keep
+   pending checks explicit; a clean merge is not hosted qualification.
+2. Merge the new base, run preflight and focused brief/cache/preparation/native
+   runtime/packaging tests, then lint and affected checks against the actual stacked
+   base. Run the required full suite once after the merge is stable.
+3. Preserve context version/omission semantics and exact runtime input provenance.
+   Verify new base modules remain packaged and bounded snapshot migration tests
+   still pass. Use existing source-identical performance evidence where justified;
+   do not repeat a benchmark merely to replace inconclusive results.
+4. Publish the refreshed #4118 head and source-bound qualification. Explain the
+   stacked diff and its large-diff justification. Keep #4114's hosted gate separate,
+   and leave production release and physical sleep/wake unclaimed.
