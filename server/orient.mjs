@@ -1,12 +1,13 @@
-// Orient endpoint builder (jill lane, RC-2026-09-28 — ryska's 404).
+// Orient payload builder (jill lane, RC-2026-09-28 — ryska's 404).
 //
-// The URL outside agents guess by analogy with /activation-pack:
-// GET /api/rooms/{roomId}/orient. Read-only, member-scoped orientation
-// payload: contract version, the authenticated member and their scope,
-// room summary, evaluated-through sequence, and a bounded list of open
-// work records with their next steps — the same "where the room stands"
-// the client-side orient() computes from a snapshot, served to cold-HTTP
-// agents with no client SDK.
+// Read-only, member-scoped orientation payload: contract version, the
+// authenticated member and their scope, room summary, evaluated-through
+// sequence, and a bounded list of open work records with their next
+// steps — the same "where the room stands" the client-side orient()
+// computes from a snapshot. The standalone GET /api/rooms/{roomId}/orient
+// endpoint was deleted (simplification register D1); this builder is the
+// shared helper embedded by the activation pack, the context response,
+// and the MCP room profile.
 //
 // Everything returned is derivable from the activation pack plus the
 // caller's own member record, so this adds no new visibility and has no
