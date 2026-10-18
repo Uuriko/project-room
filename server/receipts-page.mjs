@@ -34,7 +34,7 @@ footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:v
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, ldJson = null }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -51,6 +51,7 @@ function head({ title, description, path }) {
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${OG_IMAGE}">
+${ldJson ? `<script type="application/ld+json">${ldJson}</script>` : ""}
 <style>${pageStyle()}</style>
 </head>`;
 }
@@ -74,6 +75,42 @@ const when = value => {
 const verificationLabel = state => state === "verified" ? "Member-verified completion"
   : state === "self_attested" ? "Self-attested completion" : null;
 
+// How verification works (AEO Lane 3, 2026-10-17): the citable model
+// passage behind every receipt page's honesty line. Every sentence is
+// lifted from server/receipt-verify.mjs (verifyPublicReceipt): the checks
+// it runs at read time, its five verdicts, and its never-checked scope.
+// The FAQ JSON-LD on the index is generated from the same Q&A list, so
+// the structured data can never drift from the visible passage.
+export const RECEIPT_VERIFICATION_FAQ = Object.freeze([
+  Object.freeze({ q: "How do I verify a Project Room receipt?",
+    a: "Open the public receipt and choose \"Verify this receipt now\". The server re-checks the record at read time: it re-derives the record from its source and compares it field by field, re-hashes the stored delivered artifact when the receipt carries one, re-hashes a bounty lot's escrow ledger entries and re-checks every hash-chain link, and re-fetches a linked pull request from GitHub. Any stranger can run it without an account." }),
+  Object.freeze({ q: "What does \"record-checked\" mean?",
+    a: "Record-checked (record-checked) is one of the re-check verdicts: the server re-checked the record just now against its source, and everything it ran still matches. The other verdicts are server-verified (the source matches and GitHub confirms the merge the record claims), partially verifiable (at least one check could not run, and what was not checked is listed), contradicted (a re-check found a mismatch), and no longer verifiable (the source behind the record is gone)." }),
+  Object.freeze({ q: "What is the difference between a verified and a self-attested receipt?",
+    a: "The record's own verification label describes how the work was closed, which is a different fact from a fresh re-check. Verified means a member other than the worker reviewed the delivery, and the platform re-checked the delivery bundle itself — its digest, the criteria coverage, and the settled CI state — at the close. Self-attested means the worker's finish is the only record. Hash only means the platform recorded the artifact's sha256 and no platform-executed check passed for that delivery." }),
+  Object.freeze({ q: "What does a Project Room receipt not prove?",
+    a: "A receipt does not prove the work is any good — no check judges quality. Names are as the room recorded them, not identity-verified. Hashes shown on the page are stored values, not re-verified while you read, and public receipts are unsigned, so there is no signature to check." }),
+]);
+
+export function receiptVerificationExplainerHtml() {
+  return `<section class="receipt-how-verification" id="how-verification-works" aria-label="How verification works">
+<h2>How verification works</h2>
+<p>A receipt page first shows the record as stored. Its hashes are stored values — recorded when the work was projected, not re-verified while you read — and the record is unsigned. The page says so on every receipt, in the note under the record.</p>
+<p>Choose <strong>Verify this receipt now</strong> and the server re-checks the record at read time. It re-derives the record from its source and compares it field by field; it re-hashes the stored delivered artifact, when the receipt carries one, and checks it still matches the sha256 the record carries; for a bounty lot it re-hashes the escrow ledger entries and re-checks every hash-chain link; and when the record links a pull request, it re-fetches that pull request from GitHub and compares its current state with the merge the record claims. Any stranger can open a public receipt and run the re-check without an account.</p>
+<p>The re-check ends in one verdict. <strong>Server-verified</strong>: the source record still matches, and GitHub confirms the merge. <strong>Record re-checked</strong>: everything the server ran still matches, and the record claims no merge. <strong>Partially verifiable</strong>: most of the record re-checked clean, but at least one check could not run — what was not checked is listed with the verdict. <strong>Contradicted</strong>: a re-check found the record does not match its evidence. <strong>No longer verifiable</strong>: the source behind the record is gone or no longer supports it.</p>
+<p>The record's own verification label is a different fact from a fresh re-check. <strong>Verified</strong> means a member other than the worker reviewed the delivery, and the platform re-checked the delivery bundle itself — its digest, the criteria coverage, and the settled CI state — at the close. <strong>Self-attested</strong> means the worker's finish is the only record. <strong>Hash only</strong> means the platform recorded the artifact's sha256 and no platform-executed check passed for that delivery.</p>
+<p>What no check here does: judge whether the work is any good, verify a person's real-world identity, or check a signature — public receipts are unsigned, so there is none to check.</p>
+</section>`;
+}
+
+const receiptVerificationFaqLd = () => JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: RECEIPT_VERIFICATION_FAQ.map(({ q, a }) => ({
+    "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a },
+  })),
+}).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
+
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
@@ -82,11 +119,12 @@ export function renderReceiptsHtml(page) {
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
-  return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
+  return `${head({ title: "Project Room — public receipts", description, path: "/receipts", ldJson: receiptVerificationFaqLd() })}
 <body><header><p><a href="/">Project Room</a></p></header>
 <main>
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
+${receiptVerificationExplainerHtml()}
 ${items}
 ${next}
 </main>
@@ -134,7 +172,7 @@ export function renderVerificationBlock(receipt, verification) {
     return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
 <p><strong>Not yet verified.</strong> This page shows the record as stored; nothing on it has been re-checked at read time.</p>
-<p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
+<p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran. <a href="/receipts#how-verification-works">How verification works</a> explains the checks, the verdicts, and what a receipt does not prove.</p>
 </section>`;
   }
   const checks = verification.checks.map(check => {
