@@ -602,9 +602,27 @@ export class AgentIdentities {
 
   stampActivated(identityId) {
     if (this.store.readOnly || !this.capacityReady()) return;
-    this.db.prepare(
+    // PERF-BUILDS P0-2: an in-memory activated set stands in for the
+    // UPDATE on repeat calls. Authentication calls this on every
+    // request, and the UPDATE — gated on activated_at IS NULL — can
+    // only ever change a row once; after the first stamp attempt the
+    // outcome is settled for this process (stamped by us, already
+    // stamped in a previous run, or revoked/missing, in which case no
+    // later UPDATE can stamp it either), so repeats are memory reads.
+    // A restart re-checks once per identity, which is the correct
+    // freshness bound for a first-activation timestamp.
+    const stamped = this.stampedActivations ??= new Set();
+    if (stamped.has(identityId)) return;
+    const result = this.db.prepare(
       "UPDATE agent_identities SET activated_at=? WHERE identity_id=? AND activated_at IS NULL AND revoked_at IS NULL"
     ).run(this.store.now(), identityId);
+    if (result.changes > 0) { stamped.add(identityId); return; }
+    // No row changed: the identity was already stamped in an earlier
+    // run, or is revoked — both settled, so remember it. A missing
+    // identity is NOT remembered: it may be created later and still
+    // need its first stamp.
+    const row = this.db.prepare("SELECT identity_id FROM agent_identities WHERE identity_id=?").get(identityId);
+    if (row) stamped.add(identityId);
   }
 
   flushActivation() {

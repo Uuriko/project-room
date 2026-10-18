@@ -46,7 +46,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archiveMarkerFromState, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
@@ -3139,7 +3139,39 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // their join event. Callers already hold a transaction.
   // Reads only the authority and history fields, not the full projection, so
   // event polling stays cheap.
+  // PERF-BUILDS P0-2: the cached frozen projection at the room's current
+  // sequence, or null on a cache miss. The only SQL is one primary-key
+  // sequence read (the 0.003 ms class); the projection watch invalidates
+  // the cache on any rooms write and entries are keyed by sequence, so a
+  // hit is exactly as fresh as the sequence read that vouches for it —
+  // the same contract room() serves (and ROOM_VERIFY_PROJECTION_CACHE=1
+  // cross-checks there). Metadata readers below answer from this and
+  // fall back to their storage probes only on a miss.
+  _cachedProjection(roomId) {
+    this._armProjectionWatch();
+    const cache = this._projectionCache;
+    if (!cache) return null;
+    const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
+    if (!meta) return null;
+    return cache.lookup(roomId, meta.sequence);
+  }
   historyFloor(roomId, memberId, headSequence = null) {
+    // PERF-BUILDS P0-2: answer from the cached projection when warm —
+    // the json_extract probes below tokenize the whole projection text
+    // to read two small fields that the cached state already carries.
+    const cached = this._cachedProjection(roomId);
+    if (cached && typeof cached.state?.room?.ownerId === "string"
+      && cached.state?.members && typeof cached.state.members === "object") {
+      const state = {
+        room: {
+          ownerId: cached.state.room.ownerId,
+          historyVisibility: cached.state.room.historyVisibility ?? null,
+          historyDefaultsVersion: cached.state.room.historyDefaultsVersion ?? null
+        },
+        members: cached.state.members
+      };
+      return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? cached.sequence);
+    }
     const { sequence, ownerId, members } = this.roomAuthority(roomId);
     const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
     let visibility = null;
@@ -3521,6 +3553,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   roomAuthority(roomId) {
+    // PERF-BUILDS P0-2: answer from the cached frozen projection when it
+    // is warm at the room's current sequence (one sequence read + memory).
+    // This is not an authorization cache layered over storage: the
+    // projection cache is invalidated by the watch on every rooms write
+    // and keyed by sequence, so the members served are the members at
+    // the sequence just read — revocation and membership changes land
+    // in the rooms row (and its sequence) before they can be served.
+    // On a miss (or a malformed cached shape) the fresh storage read
+    // below runs unchanged.
+    const cached = this._cachedProjection(roomId);
+    if (cached && typeof cached.state?.room?.ownerId === "string"
+      && cached.state?.members && typeof cached.state.members === "object") {
+      // The cached members are the frozen projection's own objects;
+      // the storage path below returns fresh objects per call and
+      // callers rely on that (they may hold or mutate the result).
+      // Hand out a deep copy so the cache is never shared or mutated
+      // through an authority result.
+      return { sequence: cached.sequence, ownerId: cached.state.room.ownerId, members: structuredClone(cached.state.members) };
+    }
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
     // WRITE-PATH-WINS win 5: ownerId and members are the first two
@@ -4663,6 +4714,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
+      // Authentication runs INSIDE this read transaction on purpose: it
+      // is the committed-read recheck — a membership, sponsor, or
+      // credential change that lands after the HTTP funnel's routing
+      // auth but before this read must refuse the read, not be served
+      // from the funnel's earlier result (room-authority tests: "managed
+      // discovery rechecks ... before-committed-read"). P0-2 originally
+      // handed the funnel auth down (preAuth) to skip this call; that
+      // withdrew the recheck and is removed. The recheck stays cheap
+      // because authenticate's roomAuthority read is memory-served.
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -5729,14 +5789,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       let room = this.room(roomId);
       refuseArchivedWrite(room.state);
+      // PERF-BUILDS P0-2: the archive marker comes from the state already
+      // in hand, not from archiveMarker's projection-text probes — a post
+      // whose id is not in the projection used to pay two full-text scans
+      // here (three call sites below share this one marker).
+      let stateArchiveMarker = archiveMarkerFromState(room.state);
       // The author or the Room owner can still delete an archived message: bring
       // that one message back into the projection (it stays retained) and let the
       // normal delete and redaction run. Anyone else falls through to the
       // archived-message refusal below, which confirms nothing to a non-party.
       if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
-        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId);
+        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId, stateArchiveMarker);
         if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
-            && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
+            && restoreArchivedMessage(this, roomId, command.data.messageId)) {
+          room = this.room(roomId);
+          stateArchiveMarker = archiveMarkerFromState(room.state);
+        }
       }
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
@@ -5814,7 +5882,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (archivedRef) {
         const refId = command.data?.[archivedRef];
         if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
-          const archivedRow = archivedMessageRow(this.db, roomId, refId);
+          const archivedRow = archivedMessageRow(this.db, roomId, refId, stateArchiveMarker);
           const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
           // An archived message can still hold a pin (older archives did not retain pins).
           // Unpinning is allowed for anyone who may see the message and refused, like a
@@ -5833,7 +5901,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         const newId = command.data?.messageId || command.id;
         if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
-            && archivedMessageRow(this.db, roomId, newId)) {
+            && archivedMessageRow(this.db, roomId, newId, stateArchiveMarker)) {
           fail(409, "command_rejected", "Message already exists");
         }
       }
