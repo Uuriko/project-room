@@ -40,6 +40,7 @@ import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { signinOptionsResponse } from './signin-options.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -676,6 +677,17 @@ export default {
       // whether email gates are enforced or relaxed.
       const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
       return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
+    }
+    // Sign-in options are the Worker (P0-5). The route is config-only
+    // (scope "worker" in server/routes/signin-options.mjs): the answer is
+    // computed from env with the same derivations the Durable Object's
+    // constructor and handler use (see ./signin-options.mjs), so the
+    // logged-out wall never wakes the object for it. GET only — any other
+    // method falls through to the object, whose route table answers 405
+    // exactly as before. The url.pathname literal also keeps this route
+    // visible to scripts/route-docs-check.mjs's Worker-surface scan.
+    if ((url.pathname === '/api/auth/signin-options' || url.pathname === '/api/auth/signin-options/') && request.method === 'GET') {
+      return finish(signinOptionsResponse(request, env, url.origin), 'worker');
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.

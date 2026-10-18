@@ -506,6 +506,14 @@
       "path": "/api/auth/recovery-codes/status"
     },
     {
+      "method": "GET",
+      "path": "/api/auth/signin-options"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/auth/signin-options"
+    },
+    {
       "method": "POST",
       "path": "/api/claims/validate"
     },
@@ -4266,6 +4274,14 @@
     {
       "method": "GET",
       "path": "/api/auth/recovery-codes/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/signin-options"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/auth/signin-options"
     },
     {
       "method": "POST",
