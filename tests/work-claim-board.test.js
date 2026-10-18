@@ -518,7 +518,7 @@ test("a superseded claim cannot be manually completed with an otherwise valid ap
 });
 
 test("a deploy claim closes when the live revision matches, and status reports main", async t => {
-  const { call, coordKey } = await fixture(t);
+  const { store, call, coordKey } = await fixture(t);
   const created = await call(coordKey, "/work-claims", { id: "ship", kind: "deploy", revision: SOURCE_REVISION, title: "Ship" });
   assert.equal(created.status, 201);
   assert.equal(created.value.kind, "deploy");
@@ -526,6 +526,10 @@ test("a deploy claim closes when the live revision matches, and status reports m
   assert.equal(read.status, 200);
   assert.equal(read.value.state, "done");
   assert.equal(read.value.deliveryMode, "production");
+  // STATUS-LEG (C-07): the status route serves the cache only — the
+  // claim-prs job materializes it first (here, with the fixture's stub).
+  const { refreshMainHeadCache } = await import("../server/claim-pr-sync.mjs");
+  await refreshMainHeadCache(store, { fetchImpl: fakeGitHub({ failure: false }), token: "test-token", nowMs: Date.now(), force: true });
   const status = await call(coordKey, "/work-claims/status");
   assert.equal(status.status, 200);
   assert.equal(status.value.live, SOURCE_REVISION);

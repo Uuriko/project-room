@@ -426,3 +426,71 @@ test("deploy chip: a missing sha, no status, or a held (stale) read stays unknow
     assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
   }
 });
+
+// --- STATUS-LEG (AUDIT-50X C-07): paint does not await the status leg ---
+// The status request is held on a gate the test controls; claims and
+// config resolve immediately. Before this change load() awaited all
+// three in one Promise.all, so whenReady could not settle while the
+// status leg was outstanding and a status failure failed the whole load.
+
+function heldStatusFixture(t, { statusFails = false } = {}) {
+  const statusGate = held();
+  const previous = { document: globalThis.document, CSS: globalThis.CSS };
+  const body = {};
+  const line = { textContent: "" };
+  let html = "";
+  const root = {
+    isConnected: true,
+    addEventListener() {},
+    contains() { return false; },
+    querySelector(selector) {
+      if (selector === "#board-status") return line;
+      return null;
+    },
+    set innerHTML(value) { html = value; },
+    replaceChildren() { html = ""; },
+  };
+  globalThis.document = { activeElement: body, body, querySelector(selector) {
+    assert.equal(selector, "#work-board"); return root;
+  } };
+  globalThis.CSS = { escape: value => value };
+  t.after(async () => {
+    statusGate.resolve({ behind: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  });
+  const item = claim("painted", { title: "Painted without status" });
+  const client = { generation: 1, path: path => path, request(path) {
+    if (path === "/work-claims?limit=200") return Promise.resolve({ claims: [item] });
+    if (path === "/work-claims/status") return statusFails ? Promise.reject(new Error("status unavailable")) : statusGate.promise;
+    if (path === "/work-claims/config") return Promise.resolve({ maxMemberOpenClaims: 20 });
+    throw new Error(`Unexpected request: ${path}`);
+  } };
+  const board = installWorkBoard({ client,
+    getState: () => ({ room: { ownerId: "owner" }, members: { owner: { id: "owner", active: true } }, eventLog: [] }),
+    getSession: () => ({ roomId: "commons", member: { id: "owner" } }) });
+  return { board, statusGate, html: () => html };
+}
+
+test("Board paints claims without awaiting the deploy-status leg, then applies the status when it lands", async t => {
+  const f = heldStatusFixture(t);
+  f.board.sync();
+  assert.equal(await f.board.whenReady(), true, "loading completes while the status leg is still held");
+  assert.match(f.html(), /Painted without status/, "cards are painted");
+  assert.match(f.html(), /Deploy status unknown/, "the chip is honest while the leg is outstanding");
+  f.statusGate.resolve({ behind: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(f.html(), /Live matches main/, "the chip updates when the leg lands, without a reload");
+  assert.match(f.html(), /Painted without status/, "the painted cards survive the chip update");
+});
+
+test("a failed deploy-status leg does not fail the board load", async t => {
+  const f = heldStatusFixture(t, { statusFails: true });
+  f.board.sync();
+  assert.equal(await f.board.whenReady(), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(f.html(), /Painted without status/, "cards are painted");
+  assert.ok(!f.html().includes("Could not load the board."), "no load error from the status leg");
+});

@@ -637,19 +637,11 @@ export async function handleWorkClaims(options) {
   let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
   let deployStatus = null;
   if (options.workClaimRoute === "status" && req.method === "GET") {
-    const credential = options.githubToken !== undefined
-      ? options.githubToken
-      : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
-    // SEC-2 / Q3-A: every member reads the shared cached status; only a
-    // Board writer's ?refresh=1 skips the 60 s cache.
-    const access = resolveWorkClaimAccess(options.store, options.roomId, options.auth);
-    const force = options.url?.searchParams?.get("refresh") === "1" && maySweepWorkClaims(access);
-    deployStatus = await readBoardDeployStatus(options.store, {
-      fetchImpl: options.fetchPullRequest ?? fetch,
-      token: credential || null,
-      nowMs: Date.now(),
-      force,
-    });
+    // STATUS-LEG (AUDIT-50X C-07): the status route serves the main-HEAD
+    // cache the claim-prs job materializes — no GitHub fetch, token or
+    // refresh forcing on this request path, ever. Freshness is the job's
+    // 60 s cadence, the same floor the old per-request cache had.
+    deployStatus = readBoardDeployStatus(options.store, { nowMs: Date.now() });
   }
   if (options.workClaimRoute === "sweep" && req.method === "POST"
     && !maySweepWorkClaims(resolveWorkClaimAccess(options.store, options.roomId, reauthorize ? reauthorize() : options.auth))) {

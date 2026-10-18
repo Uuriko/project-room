@@ -28,6 +28,12 @@ async function room(t) {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
+  // STATUS-LEG (C-07): the claim-prs tick also materializes the main-HEAD
+  // cache. Seed it checked past every clock these tests use (2026-10-01
+  // fixtures and real time) so the deploy refresh is never due here —
+  // these tests count the tick's pull lookups exactly.
+  store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
+    .run("_claim-main-head", JSON.stringify({ sha: "a".repeat(40), behind: null, checkedAt: "2027-01-01T00:00:00.000Z" }), Date.parse("2027-01-01T00:00:00Z"));
   const helpers = {
     json: (_res, status, value) => ({ status, value }),
     reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },

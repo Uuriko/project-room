@@ -11,7 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { MAX_CLAIM_HISTORY, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
-import { readClaimPullBudget, writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
+import { readClaimPullBudget, refreshMainHeadCache, writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
 import {
   boardText, clientPullRequestInput, assertBoardLeaseHours, assertDependsOnKnown, assertBoardEventBudget,
   roomEventsRemaining, BOARD_LEASE_HOURS_MAX, EVENT_BUDGET_RESERVE
@@ -349,21 +349,27 @@ test("with under 10% of the event budget left a writer's sweep is refused and em
   assert.equal(f.events(), before + 1);
 });
 
-test("deploy status is fetched at most once per 60 s, and only writers can refresh", async t => {
+test("deploy status is served from the job-materialized cache only; reads and ?refresh=1 fetch nothing", async t => {
   const f = roomFixture(t);
   let fetches = 0;
   const fetchPullRequest = async () => {
     fetches += 1;
     return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ sha: "c".repeat(40) }), json: async () => ({ sha: "c".repeat(40) }) };
   };
+  // STATUS-LEG (C-07): the claim-prs job materializes the cache — its
+  // GitHub read is the only one the status value ever costs.
+  const materialized = await refreshMainHeadCache(f.store, { fetchImpl: fetchPullRequest, token: null, nowMs: Date.now(), force: true });
+  assert.equal(materialized.refreshed, true);
+  assert.equal(materialized.main, "c".repeat(40));
+  assert.equal(fetches, 1, "the job's materialization is the only GitHub read");
   const reads = await Promise.all(Array.from({ length: 20 }, () => f.call("chatter", "status", { fetchPullRequest })));
   for (let i = 0; i < 180; i++) reads.push(await f.call("chatter", "status", { fetchPullRequest }));
   assert.ok(reads.every(read => read.status === 200 && read.value.main === "c".repeat(40) && read.value.stale === false));
-  assert.equal(fetches, 1, "200 reads share one GitHub request");
+  assert.equal(fetches, 1, "200 status reads perform no GitHub request");
   await f.call("chatter", "status", { fetchPullRequest, query: "?refresh=1" });
-  assert.equal(fetches, 1, "a read-only member cannot force a refresh");
+  assert.equal(fetches, 1, "?refresh=1 fetches nothing for a read-only member");
   await f.call("contrib", "status", { fetchPullRequest, query: "?refresh=1" });
-  assert.equal(fetches, 2, "a Board writer can");
+  assert.equal(fetches, 1, "?refresh=1 fetches nothing for a Board writer either");
   // While the GitHub budget is held, status is the stale cached value.
   writeClaimPullBudget(f.store, Date.now() + 600_000, Date.now());
   const heldUntil = readClaimPullBudget(f.store);
@@ -372,7 +378,7 @@ test("deploy status is fetched at most once per 60 s, and only writers can refre
   assert.equal(held.value.stale, true);
   assert.equal(held.value.heldUntil, new Date(heldUntil).toISOString());
   assert.equal(held.value.main, "c".repeat(40));
-  assert.equal(fetches, 2);
+  assert.equal(fetches, 1);
 });
 
 test("titles and notes are normalized and refuse control, bidi, unpaired and invisible-only text", async t => {
@@ -426,14 +432,15 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: "add-guest", type: "member.added", data: { memberId: "guest", displayName: "Guest", kind: "agent", permissions: [] } });
   const guestKey = store.issueAccessKey("commons", "guest");
-  // The /work-claims/status read below must be hermetic: without an injected
-  // fetch it performs a live api.github.com commits/main request and reports
-  // stale:true whenever that request fails or is rate-limited (as in the
-  // coverage CI run for PR #3129), which is unrelated to what this test checks.
+  // The /work-claims/status read below serves the job-materialized cache
+  // (STATUS-LEG, C-07): seed it through the job path with a hermetic fetch
+  // so the read reports a fresh cached main, unrelated to what this test
+  // checks.
   const fetchPullRequest = async () => ({
     ok: true, status: 200, headers: { get: () => null },
     text: async () => JSON.stringify({ sha: "c".repeat(40) }), json: async () => ({ sha: "c".repeat(40) }),
   });
+  await refreshMainHeadCache(store, { fetchImpl: fetchPullRequest, token: "test-token", nowMs: Date.now(), force: true });
   const server = createRoomServer({ store, fetchPullRequest, githubToken: "test-token" });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

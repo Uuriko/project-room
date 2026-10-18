@@ -917,17 +917,24 @@ export function installWorkBoard({ client, getState, getSession }) {
     boardLoading = true; boardLoadError = false; paint();
     let pending = null;
     try {
+      // STATUS-LEG (AUDIT-50X C-07): deploy status is chrome, not board
+      // content. Cards paint on claims + config alone; the status leg
+      // runs beside the paint and updates the chip when it lands, so a
+      // slow or failed status read can no longer delay or fail the board.
+      client.request(client.path("/work-claims/status")).then(live => {
+        if (mine !== operation || context() !== owned) return;
+        status = live;
+        if (!boardLoading) paint();
+      }, () => { /* the chip keeps its last known state */ });
       pending = Promise.all([
         readClaims(client, () => mine === operation && context() === owned),
-        client.request(client.path("/work-claims/status")),
         client.request(client.path("/work-claims/config"))
       ]);
       readFlight = pending;
-      const [page, live, config] = await pending;
+      const [page, config] = await pending;
       if (mine !== operation || context() !== owned) return;
       items = page.claims;
       older = page.older;
-      status = live;
       cap = config?.maxMemberOpenClaims ?? cap;
       reviewPolicy = config?.reviewPolicy ?? reviewPolicy;
       loadedRoom = session.roomId;

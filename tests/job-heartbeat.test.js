@@ -435,6 +435,12 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
     // The genesis log starts tailed: the patrol is work-gated on untailed
     // events, and this test grades the gmail/channel gates, not the patrol.
     store.patrolTick();
+    // STATUS-LEG (C-07): claim-prs has standing deploy-status work, so a
+    // store where it has never ticked reads stale. Seed the main-HEAD
+    // cache it maintains as checked at this test's "now" (below), i.e.
+    // claim-prs ticked a moment ago; the gates under test are unaffected.
+    store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
+      .run("_claim-main-head", JSON.stringify({ sha: "a".repeat(40), behind: null, checkedAt: "2026-09-24T22:00:00.000Z" }), Date.parse("2026-09-24T22:00:00Z"));
     const now = Date.parse("2026-09-24T22:00:00Z");
     const alwaysOn = ["retention", "integrity", "public-read-model", "room-backup", "store-growth"];
     const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));

@@ -11,11 +11,12 @@
 // - event budget: Board writes from members without claim authority stop
 //   when less than 10% of the room's lifetime event budget is left (note-only
 //   writes coalesce in server/work-claim-events.mjs);
-// - deploy status: one GitHub read per store per 60 s, single-flight, with
-//   the stale cached value while the GitHub budget is held.
+// - deploy status: the cached value the claim-prs job materializes,
+//   served without any GitHub read on the request path, marked stale
+//   once it ages past 60 s or while the GitHub budget is held.
 import { TEXT_CHARACTER_CLASSES } from "./display-name-guard.mjs";
 import { PILOT_LIMITS } from "./store.mjs";
-import { readCachedDeployStatus, readClaimPullBudget, readRoomDeployStatus } from "./claim-pr-sync.mjs";
+import { readCachedDeployStatus, readClaimPullBudget } from "./claim-pr-sync.mjs";
 
 const INVISIBLE = new RegExp(TEXT_CHARACTER_CLASSES.invisible.source, "gu");
 const SPACES = new RegExp(TEXT_CHARACTER_CLASSES.spaces.source, "gu");
@@ -127,33 +128,22 @@ export function assertBoardEventBudget(sequence, { privileged }) {
   throw error;
 }
 
-// Deploy status for GET /work-claims/status. Readers share one cached value
-// per store; a GitHub read happens at most once per 60 s (single-flight).
-// Only Board writers may force a refresh. While the GitHub budget is held,
-// the cached value comes back with stale:true and heldUntil, and nothing
-// is fetched.
-const statusFlights = new WeakMap();
-
-export async function readBoardDeployStatus(store, { fetchImpl, token, nowMs = Date.now(), force = false } = {}) {
+// Deploy status for GET /work-claims/status. STATUS-LEG (AUDIT-50X C-07):
+// this reader serves the main-HEAD cache ONLY — no GitHub fetch ever
+// happens on a room's request path. The claim-prs job materializes the
+// cache on its 60 s cadence (refreshMainHeadCache in claim-pr-sync.mjs),
+// which is the freshness floor this value already had when the route
+// fetched live behind a 60 s cache. A value older than that TTL — or any
+// value served while the GitHub budget is held, when the job cannot
+// refresh — is marked stale; while held, heldUntil says when the budget
+// releases. There is no refresh parameter: freshness is the job's job.
+export function readBoardDeployStatus(store, { nowMs = Date.now() } = {}) {
   const heldUntil = readClaimPullBudget(store);
   if (heldUntil > nowMs) {
     return { ...readCachedDeployStatus(store), stale: true, heldUntil: new Date(heldUntil).toISOString() };
   }
-  const key = store && typeof store === "object" ? store : statusFlights;
-  const flight = statusFlights.get(key);
-  if (flight?.promise) return flight.promise;
   const cached = readCachedDeployStatus(store);
   const cachedAt = cached.checkedAt ? Date.parse(cached.checkedAt) : NaN;
-  const fresh = (flight && nowMs - flight.atMs < DEPLOY_STATUS_MAX_AGE_MS)
-    || (Number.isFinite(cachedAt) && nowMs - cachedAt >= 0 && nowMs - cachedAt < DEPLOY_STATUS_MAX_AGE_MS);
-  // A reader inside the window after a failed read gets the same cached main
-  // that read fell back to; it stays stale unless the cache itself is fresh.
-  const cacheFresh = Number.isFinite(cachedAt) && nowMs - cachedAt >= 0 && nowMs - cachedAt < DEPLOY_STATUS_MAX_AGE_MS;
-  if (fresh && !force) return { ...cached, stale: !cacheFresh && flight?.stale === true };
-  const entry = { atMs: nowMs, promise: null };
-  entry.promise = readRoomDeployStatus(store, { fetchImpl, token, nowMs })
-    .then(status => { entry.stale = status.stale === true; return { ...status, stale: entry.stale }; })
-    .finally(() => { entry.promise = null; });
-  statusFlights.set(key, entry);
-  return entry.promise;
+  const fresh = Number.isFinite(cachedAt) && nowMs - cachedAt >= 0 && nowMs - cachedAt < DEPLOY_STATUS_MAX_AGE_MS;
+  return { ...cached, stale: !fresh };
 }

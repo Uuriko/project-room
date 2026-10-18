@@ -174,12 +174,19 @@ test("staleSweepDueAt: a sweep pass inside the interval defers the next wake to 
     "dormancy is already past, but the sweep's own cadence is the next wake");
 });
 
-test("claim-prs stays disabled when only an opted-out room has dormant items", async t => {
+test("with no sweep candidate the sweep probe stays null; claim-prs carries only the deploy-status refresh (C-07)", async t => {
   const { store } = await roomStore(t);
   store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  // #3739's probe is unchanged: an opted-out room schedules no sweep wake.
+  assert.equal(staleSweepDueAt(store, NOW), null);
+  // STATUS-LEG (AUDIT-50X C-07) supersedes this test's old "job disabled"
+  // expectation: claim-prs now has standing deploy-status work in every
+  // store — the main-HEAD cache refresh — so the job is enabled and due
+  // for that alone, and its next due time is the deploy probe's.
   const job = jobByName("claim-prs");
-  assert.equal(jobEnabled(job, {}, store), false);
-  assert.equal(jobIsDue(job, store, NOW, undefined), false);
+  assert.equal(jobEnabled(job, {}, store), true);
+  assert.equal(jobNextDue(job, store, NOW, undefined), NOW, "no cache yet: the deploy-status refresh is due now");
+  assert.equal(jobIsDue(job, store, NOW, undefined), true);
 });
 
 test("claim-prs wakes for the stale sweep with no pull request waiting (#3739)", async t => {
@@ -187,6 +194,10 @@ test("claim-prs wakes for the stale sweep with no pull request waiting (#3739)",
   const job = jobByName("claim-prs");
   store.workClaims.configure("commons", { staleSweep: true });
   store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  // C-07: seed a fresh main-HEAD cache so the tick's deploy-status
+  // refresh is not due — this test's subject is the sweep, not GitHub.
+  store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
+    .run("_claim-main-head", JSON.stringify({ sha: "a".repeat(40), behind: null, checkedAt: new Date().toISOString() }), Date.now());
   assert.equal(jobEnabled(job, {}, store), true);
   assert.equal(jobIsDue(job, store, NOW, undefined), true);
   await job.run(store, { env: {}, deadline: Infinity });

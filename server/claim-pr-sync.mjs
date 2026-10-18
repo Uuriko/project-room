@@ -796,6 +796,19 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   if (staleProgress.complete === false) return starved();
   const access = token === undefined ? githubToken(env ?? process.env) : token;
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1, ...skipSummary() };
+  // STATUS-LEG (C-07): this tick materializes the main-HEAD cache the
+  // Board status route serves, so a status read never fetches GitHub.
+  // The refresh runs AFTER pull settlement — never before it: the tick's
+  // lookup budget and rate-limit hold belong to the pulls first, and a
+  // rate limit the batch just recorded makes the refresh a no-op. It is
+  // fail-soft: a status-cache problem must never fail the tick.
+  let deployStatus = null;
+  const refreshDeployStatus = async () => {
+    try {
+      deployStatus = await refreshMainHeadCache(store, { env, fetchImpl, token: access, nowMs, deadline });
+    } catch { /* the status cache is chrome; the poll is the job */ }
+  };
+  const deploySummary = () => deployStatus?.refreshed ? { deployStatusRefreshed: 1 } : {};
   // While the shared core budget is spent, the REST poll makes no call; the
   // search batch (separate quota) still settles merged and closed pulls.
   if (readClaimPullBudget(store) > nowMs) {
@@ -807,7 +820,12 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   // live claims leave unused, appended after them so the lookup budget is
   // spent live-first.
   const due = [...live, ...loadVerificationClaims(store, nowMs, PULL_CANDIDATE_CAP - live.length)];
-  if (due.length === 0) return { checked: 0, updated: 0, ...skipSummary() };
+  if (due.length === 0) {
+    // An idle board with no due pulls still needs its per-minute
+    // deploy-status refresh — this is the refresh's primary home.
+    await refreshDeployStatus();
+    return { checked: 0, updated: 0, ...deploySummary(), ...skipSummary() };
+  }
   // Claim ids are room-scoped, so lookup results carry their room and the
   // room map is keyed by (roomId, claimId): the same claimId can be due in
   // two rooms in one tick, and a bare-claimId key would settle one room's
@@ -846,7 +864,10 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...skipSummary() };
+  // Settlement is done; the deploy-status refresh takes whatever budget
+  // and deadline remain (a rate limit the batch just recorded holds it).
+  await refreshDeployStatus();
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...deploySummary(), ...skipSummary() };
 }
 
 // #3698: housekeeping candidate selection. The phases below used to decode
@@ -1229,6 +1250,12 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
 
 const MAIN_ROOM = "_claim-main-head";
 
+// STATUS-LEG (AUDIT-50X C-07): the main-HEAD cache is materialized by the
+// claim-prs job, never by a request. Its freshness floor is this TTL —
+// the same 60 s the status route's cache used when the route fetched
+// live — so job materialization does not regress freshness.
+export const MAIN_HEAD_TTL_MS = 60_000;
+
 function readMainCache(store) {
   if (!store?.db || typeof store.db.prepare !== "function") return null;
   try {
@@ -1264,8 +1291,9 @@ export function readCachedDeployStatus(store) {
 // Live revision against the last known GitHub main head. One commits/main
 // read, inside the same rate-limit hold as pull polling. behind is 0 when
 // the two shas match, and null when this server is unstamped or the compare
-// is not known yet.
-export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = null, nowMs = Date.now(), repo = null } = {}) {
+// is not known yet. STATUS-LEG (C-07): this fetch belongs to the claim-prs
+// job (refreshMainHeadCache below); the Board status route never calls it.
+export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = null, nowMs = Date.now(), repo = null, deadline = Infinity } = {}) {
   const live = SOURCE_REVISION;
   // Every path that does not complete a fresh GitHub read returns the cached
   // main marked stale: it can predate a deploy, and callers must not read a
@@ -1275,11 +1303,18 @@ export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = n
   const repository = repo || process.env.GITHUB_REPOSITORY || "Uuriko/project-room";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return fallback;
   const [owner, name] = repository.split("/");
+  const headers = githubHeaders(token);
+  // A 304 is not billed against the GitHub rate budget, so the job's
+  // per-minute read stays cheap while main is quiet.
+  const etag = usableEtag(readMainCache(store)?.etag);
+  if (etag) headers["If-None-Match"] = etag;
+  const budgetMs = deadline - Date.now();
+  if (budgetMs <= 0) return fallback;
   let response;
   try {
     response = await fetchImpl(
       `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/main`,
-      { headers: githubHeaders(token), signal: AbortSignal.timeout(5000) }
+      { headers, signal: AbortSignal.timeout(Math.min(5000, budgetMs)) }
     );
   } catch {
     return fallback;
@@ -1289,12 +1324,60 @@ export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = n
     if (limited.rateLimitedUntil) writeClaimPullBudget(store, limited.rateLimitedUntil, nowMs);
     return fallback;
   }
+  if (response.status === 304) {
+    // Not modified: the cached head is still main. Only the check time
+    // moves, so the next refresh is a full TTL away.
+    const checkedAt = new Date(nowMs).toISOString();
+    const cached = readMainCache(store);
+    writeMainCache(store, { sha: fallback.main, behind: fallback.behind, checkedAt, ...(cached?.etag ? { etag: cached.etag } : {}) }, nowMs);
+    return { live, main: fallback.main, behind: fallback.behind, checkedAt, stale: false };
+  }
   if (!response.ok) return { live, main: fallback.main, behind: fallback.behind, checkedAt: new Date(nowMs).toISOString(), stale: true };
   const read = await readJson(response);
   const sha = typeof read.body?.sha === "string" && SHA.test(read.body.sha) ? read.body.sha : null;
   const behind = sha && live === sha ? 0 : null;
   const checkedAt = new Date(nowMs).toISOString();
-  const next = { sha, behind, checkedAt };
+  const nextEtag = usableEtag(responseHeader(response, "etag"));
+  const next = { sha, behind, checkedAt, ...(nextEtag ? { etag: nextEtag } : {}) };
   writeMainCache(store, next, nowMs);
   return { live, main: sha, behind, checkedAt };
+}
+
+// STATUS-LEG (C-07): when the job should next materialize the main-HEAD
+// cache — the cached check time plus the TTL, or the rate-limit hold's
+// end when that is later. A store with no cached check is due now. Null
+// only when there is no store to hold the cache. The claim-prs job's
+// due probes (server/jobs.mjs) read this so an idle board still gets its
+// per-minute refresh; the refresh re-checks due itself, so this probe
+// only decides whether the job wakes.
+export function deployStatusDueAt(store, nowMs = Date.now()) {
+  if (!store?.db || typeof store.db.prepare !== "function") return null;
+  const heldUntil = readClaimPullBudget(store);
+  const cached = readCachedDeployStatus(store);
+  const cachedAt = cached.checkedAt ? Date.parse(cached.checkedAt) : NaN;
+  if (!Number.isFinite(cachedAt)) return heldUntil > nowMs ? heldUntil : nowMs;
+  return Math.max(cachedAt + MAIN_HEAD_TTL_MS, heldUntil > nowMs ? heldUntil : 0);
+}
+
+// STATUS-LEG (C-07): the job-side materialization of the main-HEAD cache.
+// Reads GitHub at most once per MAIN_HEAD_TTL_MS (and never while the
+// shared pull budget is held), writing through readRoomDeployStatus into
+// the same cache the Board status route serves. Returns the resulting
+// status plus `refreshed` — whether a GitHub read was attempted.
+export async function refreshMainHeadCache(store, { env = null, fetchImpl = fetch, token = undefined, nowMs = Date.now(), deadline = Infinity, force = false } = {}) {
+  const cached = { ...readCachedDeployStatus(store), stale: true };
+  if (!store?.db || typeof store.db.prepare !== "function") return { ...cached, refreshed: false };
+  if (deadline - Date.now() <= 0) return { ...cached, refreshed: false };
+  if (readClaimPullBudget(store) > nowMs) return { ...cached, refreshed: false };
+  if (!force) {
+    const due = deployStatusDueAt(store, nowMs);
+    if (due != null && due > nowMs) {
+      const cachedAt = cached.checkedAt ? Date.parse(cached.checkedAt) : NaN;
+      const fresh = Number.isFinite(cachedAt) && nowMs - cachedAt >= 0 && nowMs - cachedAt < MAIN_HEAD_TTL_MS;
+      return { ...cached, stale: !fresh, refreshed: false };
+    }
+  }
+  const access = token === undefined ? githubToken(env ?? process.env) : token;
+  const status = await readRoomDeployStatus(store, { fetchImpl, token: access, nowMs, deadline });
+  return { ...status, stale: status.stale === true, refreshed: true };
 }

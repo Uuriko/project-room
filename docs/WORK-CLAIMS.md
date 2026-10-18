@@ -483,11 +483,14 @@ These rules hold on every Board write and read.
   write. When fewer than 10% of the room's 10,000 lifetime events remain,
   Board writes from members who are not the room owner or a `manage_claims`
   holder get **409** `room_event_budget_low`.
-- **Status.** `GET .../work-claims/status` reads GitHub at most once per 60
-  seconds and shares the cached value with every member. A Board writer can
-  send `?refresh=1` to skip the cache. While the GitHub budget is held, the
-  response is the cached value with `stale: true` and `heldUntil`. The
-  response also carries `eventsRemaining`.
+- **Status.** `GET .../work-claims/status` serves the main-HEAD cache
+  only — it never reads GitHub. The claim-prs job materializes the cache
+  on its 60-second cadence (the same freshness floor the former
+  per-request cache had), and every member reads that shared value.
+  There is no `?refresh=1`: freshness is the job's job. A cached value
+  older than 60 seconds is served with `stale: true`; while the GitHub
+  budget is held, the response is the cached value with `stale: true`
+  and `heldUntil`. The response also carries `eventsRemaining`.
 - **Content trust.** List, single-claim and receipts reads add
   `contentTrust`. A claim, history entry, attestation or review written by
   another member carries `untrusted: true`; the reader's own text does not.
