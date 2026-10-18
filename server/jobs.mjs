@@ -366,8 +366,16 @@ export const JOBS = Object.freeze([
     disabledReason: () => "No open pull request or stale board sweep is waiting",
     nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
     async run(store, ctx) {
-      if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
-      const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
+      // The poll is the only runtime-specific step: on the Worker the
+      // Durable Object runs it (paused guard, request yields, its own cron
+      // deadline); on Node it runs inline here. The autolink follow-ups
+      // below live in this shared body — not behind the ctx.room
+      // shortcut — so neither runtime can skip them (#4061: the Worker
+      // shortcut returned early and discovery + deploy linking never ran
+      // in production, while autolinkDueAt still woke the job for them).
+      const out = ctx.room?.refreshClaimPullRequests
+        ? await ctx.room.refreshClaimPullRequests()
+        : await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
       // plan-pr-autolink: poll fallback for repos without the webhook, and
       // link the recorded deploy revision back to the items it shipped.
       // Neither may fail the linked-PR poll above.

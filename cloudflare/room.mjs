@@ -413,9 +413,15 @@ export class ProjectRoom extends DurableObject {
     this.store.landQueue.configure({ env: this.env });
     return this.store.landQueue.refreshDue({ deadline: cronDeadline() });
   }
-  // Linked work claims follow the same tick. There is no GitHub webhook
-  // receiver; a merged pull completes the claim and a close releases it.
-  // The poll is conditional, capped, and waits out a GitHub 403 or 429.
+  // Linked work claims follow the same tick. The shared route table does
+  // mount a GitHub PR webhook receiver (PR_WEBHOOK_ROUTES, from
+  // server/claim-autolink.mjs), but it is flag-gated by ROOM_PR_WEBHOOK
+  // and off by default, so this poll is the fallback that always runs: a
+  // merged pull completes the claim and a close releases it. The poll is
+  // conditional, capped, and waits out a GitHub 403 or 429. This method
+  // is only the poll step — the claim-prs job body (server/jobs.mjs)
+  // runs the autolink discovery + deploy-linking follow-ups after it on
+  // both runtimes (#4061).
   async refreshClaimPullRequests() {
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
@@ -465,6 +471,11 @@ export class ProjectRoom extends DurableObject {
       webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
+    } catch {
+      // A room that has never stored these caches has no table (the
+      // webhook prune queries its table directly). Same catch as
+      // runNodeRetention in server/jobs.mjs: the defaults above stand
+      // and the retention receipt is still this tick's result.
     } finally {
       console.info(JSON.stringify({
         event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
