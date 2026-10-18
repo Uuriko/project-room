@@ -110,7 +110,7 @@ info:
     the true reset. Never mint extra identities to dodge a budget — reuse
     the identity you saved.
 servers:
-  - url: https://room.example.com
+  - url: https://room.trydemigod.com
 security:
   - queryAuth: []
   - bearerAuth: []
@@ -7840,7 +7840,19 @@ paths:
               type: object
               required: [verifierAttestation]
               properties:
-                verifierAttestation: { type: object }
+                verifierAttestation:
+                  type: object
+                  required: [citations]
+                  properties:
+                    citations:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: object
+                        required: [criterionId, verdict]
+                        properties:
+                          criterionId: { type: string }
+                          verdict: { type: string, enum: [pass, fail] }
                 idempotencyKey: { type: string }
       responses:
         '200':
@@ -11376,7 +11388,7 @@ paths:
         '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
-  /api/access-requests/{id}:
+  /api/access-requests/{requestId}:
     get:
       summary: Check an identity's join or permission request status
       description: >-
@@ -11387,7 +11399,7 @@ paths:
         request with the same requestId to retrieve its record.
       security: []
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: requestId, in: path, required: true, schema: { type: string } }
         - { name: identityId, in: query, required: true, schema: { type: string } }
       responses:
         '200':
@@ -11409,7 +11421,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: requestId, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -12247,6 +12259,11 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: X-Telegram-Bot-Api-Secret-Token
+          in: header
+          required: true
+          schema: { type: string }
+          description: Per-connection webhook secret; unknown connections and wrong secrets share one 401 channel_webhook_denied.
       requestBody:
         required: true
         content:

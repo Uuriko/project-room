@@ -586,6 +586,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_policy` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_profile` | 422 | displayName must be a string | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_project_offer` | 422 | No detail query parameters accepted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_proof_query` | 422 | cursor is not a receipt from this page | fix+resend | Use a receipt id from this proof page as the cursor, or omit the cursor for the first page. |
 | `invalid_provider` | 422 | OAuth provider must be google or github | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_public_receipts` | 422 | publicReceipts (boolean) is the accepted field | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_public_review` | 422 | fail(422, 'invalid_public_review', message); }; const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g,  | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -985,6 +986,7 @@ response's own `hint`/`next` when it names something more specific.
 | `stale_session_revision` | 409 | The browser session changed; refresh before resetting | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stream_limit` | 429 | Close another room connection before opening more | wait | Wait for the Retry-After interval; retry the exact same request. |
 | `supervision_unwired` | 500 | The supervision card store is not wired yet (B5) | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `terms_changed` | 409 | The terms changed. Read the current terms and accept them. | fix+resend | Re-read the current terms, then accept the current version. |
 | `text_too_long` | 422 | Claim text must be at most ${CLAIM_TEXT_MAX_LENGTH} characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `thread_mute_store_missing` | 500 | ThreadMutes requires a store with a db handle | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `thread_not_found` | 404 | No such peer DM thread | re-list | Re-list the resource and use a current id. Do not guess ids. |
