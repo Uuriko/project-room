@@ -174,13 +174,29 @@ export function applyOutcomes(previous, outcomes) {
     // (runCronJobs records null); then the prior summary stands, still
     // labelled by its own lastSummaryAt.
     const failureSummary = outcome.ok ? null : compactSummary(outcome.summary);
-    next[outcome.job] = outcome.ok
+    const record = outcome.ok
       ? outcome.unobserved
         ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
         : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
         lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure),
         ...(failureSummary ? { lastSummary: failureSummary, lastSummaryAt: at } : {}) };
+    // Degraded-since (F6 / CN-8): the view's degraded state
+    // (github_rate_limited) is a predicate of this record — a rateLimited
+    // summary on a non-failing job — and until now it carried no age, so
+    // a stretch that began a minute ago read exactly like one running
+    // for days. Stamp the tick that ENTERS the state, keep the stamp
+    // stable across ticks that stay in it, and clear it on any tick that
+    // leaves it (recovery or failure): degradedSince always names the
+    // start of the CURRENT stretch. A record stored before this field
+    // existed has no stamp; its next degraded tick stamps afresh.
+    const wasDegraded = prior.lastSummary?.rateLimited === true && (prior.consecutiveFailures ?? 0) === 0 && Number.isFinite(prior.degradedSince);
+    if (record.lastSummary?.rateLimited === true && (record.consecutiveFailures ?? 0) === 0) {
+      record.degradedSince = wasDegraded ? prior.degradedSince : at;
+    } else {
+      delete record.degradedSince;
+    }
+    next[outcome.job] = record;
   }
   return next;
 }
@@ -234,6 +250,11 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       required: job.required === true,
       stale,
       degraded,
+      // Start of the current degraded stretch (stamped by applyOutcomes
+      // when the job entered the state). Projected only while degraded
+      // is showing, so a stored stamp can never outlive the state it
+      // describes; null on every non-degraded row.
+      degradedSince: degraded ? iso(record.degradedSince) : null,
       reason,
       status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
