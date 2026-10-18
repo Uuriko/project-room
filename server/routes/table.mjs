@@ -94,6 +94,7 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "conversation", group: "room", method: "GET", path: "/api/rooms/{roomId}/conversation" }),
   Object.freeze({ id: "return-brief", group: "room", method: "GET", path: "/api/rooms/{roomId}/return-brief" }),
   Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
+  Object.freeze({ id: "digest", group: "room", method: "GET", path: "/api/rooms/{roomId}/digest" }),
   Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
   Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
