@@ -141,3 +141,30 @@ test("H2: verify ids are round-bound — a new round is a new operation, a retry
     "a moved history basis derives a new verify id");
 });
 
+test("H3/G5: verify and deliver bodies carry the displayed round basis", () => {
+  const item = { id: "w-h3", state: "in_progress", owner: "alice",
+    claimedAt: "2026-10-18T10:00:00.000Z", deliveryGeneration: 0,
+    history: [{ action: "created" }, { action: "claimed" }, { action: "state:in_progress" }],
+    historyOmitted: 2, acceptanceCriteria: ["tests green"] };
+  const verify = claimVerifyBody(item, "rev-1");
+  assert.equal(verify.expectedClaimedAt, item.claimedAt);
+  assert.equal(verify.expectedHistoryLength, 5, "history length + omitted, as release/reassign compute it");
+  const deliver = claimDeliverBody(item, fields("https://example.com/h3"), "alice");
+  assert.equal(deliver.expectedClaimedAt, item.claimedAt);
+  assert.equal(deliver.expectedHistoryLength, 5);
+});
+
+test("H3/G5: a stale first submission's basis no longer matches after release + reclaim", () => {
+  const { item: delivered } = roundOneDelivered("w-h3-stale");
+  const staleBody = claimDeliverBody(delivered, fields("https://example.com/r1"), "alice");
+  let item = reclaimAndStart(sendBackAndRelease(delivered));
+  // The exact comparison the update route performs before applying an
+  // update carrying basis preconditions (work-claim-routes.mjs).
+  const basisMatches = item.claimedAt === staleBody.expectedClaimedAt
+    && claimHistoryLength(item) === staleBody.expectedHistoryLength;
+  assert.equal(basisMatches, false,
+    "the round-1 basis is stale in round 2, so the route refuses it as a conflict");
+  item = updateWork(item, "alice", { ...claimDeliverBody(item, fields("https://example.com/r2"), "alice"), now: now() });
+  assert.equal(item.state, "delivered", "the fresh round-2 submission still applies");
+});
+

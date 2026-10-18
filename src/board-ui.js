@@ -397,13 +397,22 @@ export function verifyRequestId(item, memberId) {
 const deliverRequestId = (item, memberId) =>
   ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 
+// The round basis a first Verify/Deliver submission is fenced by (H3):
+// the kernel's existing preconditions, computed exactly as the board's
+// release/reassign posts compute them, so a stale form held across a
+// release + re-claim is refused as a conflict instead of replaying into
+// the new round. Only a claimed round carries a basis worth posting.
+const roundBasis = item => typeof item?.claimedAt === "string"
+  ? { expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyLengthOf(item) }
+  : {};
+
 // The reviewer's verify as a pure body, so the requestId wiring is
 // unit-testable at this boundary (the newItemCreateBody precedent). Before
 // this the board posted { state: "done" } alone: no operation identity, so
 // a lost response could only be retried as a brand-new update against a
 // claim that was already done.
 export function claimVerifyBody(item, memberId) {
-  return { state: "done", requestId: verifyRequestId(item, memberId) };
+  return { state: "done", requestId: verifyRequestId(item, memberId), ...roundBasis(item) };
 }
 
 const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
@@ -500,7 +509,7 @@ export function claimDeliverBody(item, data, memberId) {
   }
   return { state: "delivered",
     delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
-    requestId: deliverRequestId(item, memberId) };
+    requestId: deliverRequestId(item, memberId), ...roundBasis(item) };
 }
 
 // One anchor literal for both record targets, so the board's link shape
