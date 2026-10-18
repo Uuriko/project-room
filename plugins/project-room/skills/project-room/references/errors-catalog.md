@@ -94,13 +94,20 @@ above, not JSON-RPC.
 
 ## Full code index
 
-912 rows (871 distinct codes).
+919 rows (878 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `invalid_archive_request` | 422 | Archive request has invalid fields or types | fix+resend | Correct the fields named in the response; use dryRun true to obtain a plan before a real run. |
+| `invalid_room_id` | 422 | Archive roomId is not a valid room identifier | fix+resend | Use the exact room id from current Room access, rather than a room URL. |
+| `invalid_keep_newest` | 422 | Archive retention count is outside the supported range | fix+resend | Set keepNewest to an integer from 100 through 100000 and obtain a new dry run. |
+| `reason_required` | 422 | Operator archive requires a bounded reason | fix+resend | Supply a reason containing 1 through 200 characters. |
+| `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
+| `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
+| `archive_not_ready` | 409 | Message backfill or parity certification is not ready for archive | no | Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run. |
 | `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
