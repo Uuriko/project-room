@@ -998,7 +998,17 @@ export function installWorkBoard({ client, getState, getSession }) {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     act(run, focus, reconcile, unconfirmed).finally(() => {
-      if (root.contains(button)) { button.disabled = false; button.removeAttribute("aria-busy"); }
+      if (root.contains(button)) {
+        button.disabled = false; button.removeAttribute("aria-busy");
+        // #3793 residual: disabling the focused button dropped focus to
+        // <body>, and a refused action never repaints (its message is
+        // written into #board-status in place), so nothing restored it —
+        // the user lost their place at the moment the error needed
+        // attention. When focus is stranded, return it to the invoking
+        // control. A repaint that already placed focus (the success and
+        // reconcile paths restore via the stick machinery) is untouched.
+        if (document.activeElement === document.body) button.focus({ preventScroll: true });
+      }
     });
   }
 

@@ -8082,7 +8082,18 @@ const ready = (async () => {
       target?.focus({ preventScroll: true });
     }, 0);
   });
-  $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
+  $("#board-panel").addEventListener("toggle", () => {
+    // #3793 residual: a panel close that belongs to closing the dialog
+    // itself must not bump the epoch a second time. The #board-close
+    // flow (and resetNavigationBoard) closes the dialog first, so this
+    // bump landed between dialog.close() and the close listener's
+    // epoch capture — the listener's focus repair then saw a changed
+    // epoch and stranded focus on <body>, deterministically (the
+    // Escape path never closes the panel and was never hit). The bump
+    // still applies when the panel collapses inside the OPEN dialog,
+    // the in-flight-navigation invalidation it exists for.
+    if (!$("#board-panel").open && $("#board-dialog").open) navigationBoardEpoch++;
+  });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
   const priorEntries = roomActionEntries;
