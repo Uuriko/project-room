@@ -153,6 +153,7 @@ export default {
   "board.action.verify": "Verify",
   "board.action.verify.already": "'{title}' is already verified",
   "board.action.verify.unconfirmed": "Could not confirm the verify for '{title}'. Refresh the board before trying again.",
+  "board.action.deliver.unconfirmed": "Could not confirm the delivery for '{title}'. Refresh the board before trying again.",
   "board.action.outcome.deliver": "Delivered '{title}'",
   "board.action.outcome.verify": "Verified '{title}'",
   "board.deliver.legend": "Deliver this work",

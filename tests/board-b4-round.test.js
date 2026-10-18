@@ -3,9 +3,15 @@
 // recorded requestOutcomes entry. The G4 sequence is encoded verbatim:
 // round-1 deliver -> send-back -> release -> same-owner reclaim ->
 // deliver again.
+// H3 (B7 §3/G5): claimVerifyBody / claimDeliverBody carry the round basis
+// (expectedClaimedAt + expectedHistoryLength) the route fences stale
+// first submissions with.
+// H4 (B7 §3/G6): deliverOutcomeConfirmed is the Deliver submit's
+// reconcile readback — success only for a claim actually delivered with
+// the submitted bundle.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimDeliverBody, claimVerifyBody, verifyRequestId } from "../src/board-ui.js";
+import { claimDeliverBody, claimVerifyBody, verifyRequestId, deliverOutcomeConfirmed } from "../src/board-ui.js";
 import { createWork, claimWork, updateWork, releaseWork, reassignWork, releaseExpired, claimHistoryLength,
   requestReplayVerdict, updateRequestDigest } from "../server/work-claims.mjs";
 
@@ -168,3 +174,16 @@ test("H3/G5: a stale first submission's basis no longer matches after release + 
   assert.equal(item.state, "delivered", "the fresh round-2 submission still applies");
 });
 
+test("H4/G6: deliverOutcomeConfirmed only confirms the submitted bundle, delivered by the submitter", () => {
+  const { item, body } = roundOneDelivered("w-h4");
+  assert.equal(deliverOutcomeConfirmed(item, body, "alice"), true,
+    "delivered by alice with the submitted bundle confirms");
+  assert.equal(deliverOutcomeConfirmed(item, body, "bob"), false,
+    "a delivery by someone else does not confirm alice's submit");
+  const other = claimDeliverBody(item, fields("https://example.com/other"), "alice");
+  assert.equal(deliverOutcomeConfirmed(item, other, "alice"), false,
+    "a claim delivered with a different bundle does not confirm this submit");
+  assert.equal(deliverOutcomeConfirmed({ ...item, state: "in_progress", delivery: null }, body, "alice"), false,
+    "the G4 swallowed state (in_progress, no delivery) never confirms");
+  assert.equal(deliverOutcomeConfirmed(null, body, "alice"), false);
+});

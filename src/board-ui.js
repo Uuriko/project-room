@@ -512,6 +512,22 @@ export function claimDeliverBody(item, data, memberId) {
     requestId: deliverRequestId(item, memberId), ...roundBasis(item) };
 }
 
+// H4 readback for the Deliver submit: the refreshed claim confirms the
+// delivery only when it is actually delivered, by this member, carrying
+// the submitted bundle. The kernel's delivery digest is a pure function
+// of exactly { artifact, checks, criteria } (deliveryDigest in
+// work-claims.mjs), so field equality with the submitted bundle is
+// equality with the submitted bundle's digest — a claim delivered with
+// any other bundle does not confirm this submit.
+export function deliverOutcomeConfirmed(item, body, memberId) {
+  if (!item || item.state !== "delivered" || !item.delivery || !body?.delivery) return false;
+  if (item.delivery.deliveredBy !== memberId) return false;
+  const same = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  return same(item.delivery.artifact, body.delivery.artifact)
+    && same(item.delivery.checks, body.delivery.checks)
+    && same(item.delivery.criteria, body.delivery.criteria);
+}
+
 // One anchor literal for both record targets, so the board's link shape
 // (and its i18n-harness footprint) stays exactly the one the legacy link
 // already had; claim links differ only by the prebuilt marker attribute.
@@ -1126,10 +1142,10 @@ export function installWorkBoard({ client, getState, getSession }) {
   });
   // Same in-flight treatment for form submits (BU-02): disable the submit
   // button with aria-busy; restore it only if the node survives the repaint.
-  function flySubmit(form, run, focus) {
+  function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }
@@ -1190,9 +1206,22 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
       if (!body) { note(uiText("board.deliver.invalid")); return; }
       const title = item.title || id;
+      // H4: the Deliver submit gets the Verify treatment — success is
+      // announced only when the refreshed claim is actually delivered
+      // with the submitted bundle (deliverOutcomeConfirmed). A replayed
+      // or lost response that left the claim undelivered reports
+      // unconfirmed instead of the canned "Delivered" text.
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (deliverOutcomeConfirmed(current, body, viewer.id)) {
+          return uiText("board.action.outcome.deliver", { title });
+        }
+        return error?.message || uiText("board.action.deliver.unconfirmed", { title });
+      };
       flySubmit(deliver,
         () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
-        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) });
+        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) },
+        reconcile, uiText("board.action.deliver.unconfirmed", { title }));
       return;
     }
     const review = event.target.closest("[data-claim-review]");
