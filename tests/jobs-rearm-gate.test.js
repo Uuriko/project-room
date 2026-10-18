@@ -15,7 +15,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { MINUTE_MS, earliestFutureAlarm, jobByName, jobEnabled, jobNextDue } from "../server/jobs.mjs";
-import { ensureWorkClaimProbeColumns, workClaimSchema } from "../server/work-claim-sqlite.mjs";
+import { createDurableWorkClaimRegistry, ensureWorkClaimProbeColumns, workClaimSchema } from "../server/work-claim-sqlite.mjs";
 import { RoomStore } from "../server/store.mjs";
 
 const NOW = 1_800_000_000_000;
@@ -159,10 +159,32 @@ test("(d) generated probe columns: same due answers, index-backed plan", () => {
   const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT MIN(claim_next_poll_at) AS due, COUNT(*) AS n
     FROM work_claims
     WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
-      AND typeof(claim_pr_url) = 'text'
+      AND claim_pr_url IS NOT NULL
       AND claim_pr_outcome IS NULL`).all().map(row => row.detail).join(" | ");
-  assert.match(plan, /work_claims_due_probe/, `due probe must use the index, got: ${plan}`);
-  assert.doesNotMatch(plan, /^SCAN work_claims$/, "due probe must not full-scan");
+  assert.match(plan, /SEARCH work_claims USING INDEX work_claims_due_probe/, `due probe must SEARCH the partial index, got: ${plan}`);
+
+  // The claim-pr-sync due poll (same partial-index predicate shape, plus
+  // the rate-limit column) must SEARCH too — it was the unconverted
+  // production call site the reshape exists for.
+  const pollPlan = db.prepare(`EXPLAIN QUERY PLAN SELECT room_id, claim_id
+    FROM work_claims
+    WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+      AND claim_pr_url IS NOT NULL
+      AND claim_pr_outcome IS NULL
+      AND (claim_next_poll_at IS NULL OR claim_next_poll_at <= ?)
+      AND (claim_pr_rate_limited_until IS NULL OR claim_pr_rate_limited_until <= ?)
+    ORDER BY claim_next_poll_at ASC LIMIT 32`).all(NOW, NOW).map(row => row.detail).join(" | ");
+  assert.match(pollPlan, /SEARCH work_claims USING INDEX work_claims_due_probe/, `due poll must SEARCH the partial index, got: ${pollPlan}`);
+
+  // The agent-identities claims-by-owner probe rides the owner index.
+  const ownerPlan = db.prepare(`EXPLAIN QUERY PLAN SELECT claim_owner
+    FROM work_claims
+    WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+      AND claim_owner IS NOT NULL`).all().map(row => row.detail).join(" | ");
+  assert.match(ownerPlan, /USING INDEX work_claims_owner_probe/, `owner probe must use its index, got: ${ownerPlan}`);
+  const owners = db.prepare(`SELECT claim_owner AS owner_id FROM work_claims
+    WHERE claim_state IN ('claimed', 'in_progress', 'blocked') AND claim_owner IS NOT NULL`).all();
+  assert.equal(owners.length, 0, "fixture claims carry no owner field");
 
   // Legacy fallback: a store whose table predates the columns still
   // answers (the probe-columns check fails and the json_extract form runs).
@@ -174,4 +196,35 @@ test("(d) generated probe columns: same due answers, index-backed plan", () => {
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/1", nextPollAt: NOW + 240_000, outcome: null }
   }), NOW);
   assert.equal(claimJob.nextDueAt({ db: legacyDb }, NOW), NOW + 240_000);
+});
+
+test("(e) verifySchema accepts a converged database (probe columns in stored DDL)", () => {
+  // Regression pin for the reshape's CI root cause: ALTER TABLE ADD
+  // COLUMN rewrites the stored CREATE TABLE text, so a database the
+  // probe columns converged onto failed the strict DDL-text verify with
+  // "Work-claim schema requires operator reconciliation" on every
+  // reopen — unit, browser and cloudflare suites all hit it.
+  const db = new DatabaseSync(":memory:");
+  db.exec(workClaimSchema);
+  const registry = createDurableWorkClaimRegistry(db);
+  assert.equal(registry.verifySchema(), true);
+  assert.equal(ensureWorkClaimProbeColumns(db), true);
+  assert.equal(registry.verifySchema(), true, "converged DDL must verify");
+  assert.equal(registry.verifySchema({ allowAbsent: true }), true);
+  // A pre-reshape non-partial due index is replaced by the partial one.
+  db.exec("DROP INDEX work_claims_due_probe");
+  db.exec("CREATE INDEX work_claims_due_probe ON work_claims(claim_state, claim_pr_url)");
+  assert.equal(ensureWorkClaimProbeColumns(db), true);
+  const indexSql = db.prepare("SELECT sql FROM sqlite_master WHERE name='work_claims_due_probe'").get().sql;
+  assert.match(indexSql, /WHERE claim_pr_url IS NOT NULL AND claim_pr_outcome IS NULL/);
+  // Drift is still refused: a foreign column, or a tampered probe
+  // expression, is operator reconciliation territory.
+  const drifted = new DatabaseSync(":memory:");
+  drifted.exec(workClaimSchema);
+  drifted.exec("ALTER TABLE work_claims ADD COLUMN bogus TEXT");
+  assert.throws(() => createDurableWorkClaimRegistry(drifted).verifySchema(), /operator reconciliation/);
+  const tampered = new DatabaseSync(":memory:");
+  tampered.exec(workClaimSchema);
+  tampered.exec("ALTER TABLE work_claims ADD COLUMN claim_state TEXT GENERATED ALWAYS AS ('x') VIRTUAL");
+  assert.throws(() => createDurableWorkClaimRegistry(tampered).verifySchema(), /operator reconciliation/);
 });
