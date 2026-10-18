@@ -10,6 +10,16 @@
 //   node scripts/coverage-thresholds.mjs            # collect (runs the suite) + evaluate
 //   node scripts/coverage-thresholds.mjs --collect-only
 //   node scripts/coverage-thresholds.mjs --coverage-dir <dir>   # evaluate existing data
+//   node scripts/coverage-thresholds.mjs --evaluate <dir> [<dir> ...]
+//       # T-1: merge per-shard coverage payloads (collected inside the unit
+//       # shards by scripts/unit-ci.mjs --coverage) and evaluate the SAME
+//       # thresholds with the SAME semantics — no second full-suite run.
+//       # Each <dir> is searched recursively for coverage-*.json payloads;
+//       # a dir with no payloads is a usage error (exit 2), so a missing
+//       # shard fails closed instead of silently evaluating partial data.
+//       # When shard coverage-manifest.json files are present, the set
+//       # must be complete (every shard 1..total exactly once), successful
+//       # (status 0), and bound to one plan/revision/run — else exit 2.
 //   node scripts/coverage-thresholds.mjs --baseline             # collect + print measured JSON
 //   node scripts/coverage-thresholds.mjs --config <path>        # alternate config
 //
@@ -126,6 +136,110 @@ export function* readCoveragePayloads(coverageDir) {
     }
     // Hint GC: each payload is large; don't let them pile up behind the iterator.
   }
+}
+
+const isCoveragePayloadName = name =>
+  name.startsWith("coverage-") && name.endsWith(".json") && name !== "coverage-manifest.json";
+
+/**
+ * Recursively list V8 coverage payload files (coverage-*.json) under dir,
+ * sorted for deterministic evaluation. Missing dirs yield []. Only payload
+ * names match: shard receipts, junit files, and coverage-manifest.json in
+ * the same tree are evidence, not payloads.
+ */
+export function listCoveragePayloadFiles(dir) {
+  if (!dir || !existsSync(dir)) return [];
+  const out = [];
+  const walk = absDir => {
+    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+      const full = join(absDir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (isCoveragePayloadName(entry.name)) out.push(full);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+/** Read payload files listed by listCoveragePayloadFiles, tolerating truncated writes. */
+export function* readCoveragePayloadFiles(files) {
+  for (const file of files) {
+    try {
+      yield JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      // Same tolerance as readCoveragePayloads: a truncated write from a
+      // killed child must not fail the gate.
+    }
+  }
+}
+
+/** Recursively find and parse every coverage-manifest.json under the given dirs. */
+export function readCoverageManifests(dirs) {
+  const manifests = [];
+  const walk = absDir => {
+    if (!existsSync(absDir)) return;
+    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+      const full = join(absDir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "coverage-manifest.json") {
+        try {
+          manifests.push(JSON.parse(readFileSync(full, "utf8")));
+        } catch {
+          manifests.push(null); // surfaced as an error by checkCoverageManifests
+        }
+      }
+    }
+  };
+  for (const dir of dirs) walk(dir);
+  return manifests;
+}
+
+/**
+ * Validate the shard coverage manifest set (T-1). An empty set is valid:
+ * payloads collected without manifests (e.g. a plain --coverage-dir run or
+ * synthetic fixtures) keep the pre-T-1 evaluate behaviour. When manifests
+ * ARE present they must describe one complete, successful shard run:
+ * every shard index 1..total exactly once, all agreeing on planHash,
+ * revision, runId, and runAttempt, each with status 0 and >= 1 payload.
+ * Returns { ok, errors } — callers treat !ok as a usage error (exit 2),
+ * never as a threshold verdict.
+ */
+export function checkCoverageManifests(manifests) {
+  const errors = [];
+  if (!Array.isArray(manifests) || manifests.length === 0) return { ok: true, errors };
+  for (const m of manifests) {
+    if (!m || typeof m !== "object" || m.kind !== "unit-shard-coverage") {
+      errors.push("coverage manifest is missing, unparseable, or not a unit-shard-coverage manifest");
+      break;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  const first = manifests[0];
+  const total = first.total;
+  if (!Number.isInteger(total) || total < 1) {
+    return { ok: false, errors: ["coverage manifest has an invalid shard total"] };
+  }
+  const seen = new Set();
+  for (const m of manifests) {
+    if (m.total !== total) errors.push(`shard ${m.index}: total ${m.total} disagrees with ${total}`);
+    if (!Number.isInteger(m.index) || m.index < 1 || m.index > total) {
+      errors.push(`coverage manifest has invalid shard index ${m.index}`);
+      continue;
+    }
+    if (seen.has(m.index)) errors.push(`duplicate coverage manifest for shard ${m.index}/${total}`);
+    seen.add(m.index);
+    if (m.status !== 0) errors.push(`shard ${m.index}/${total}: shard run did not succeed (status ${m.status})`);
+    if (!(m.payloadCount >= 1)) errors.push(`shard ${m.index}/${total}: manifest records no coverage payloads`);
+    for (const field of ["planHash", "revision", "runId", "runAttempt"]) {
+      if (m[field] !== first[field]) {
+        errors.push(`shard ${m.index}/${total}: ${field} disagrees with shard ${first.index}/${total} (stale or mixed run)`);
+      }
+    }
+  }
+  for (let i = 1; i <= total; i++) {
+    if (!seen.has(i)) errors.push(`missing coverage manifest for shard ${i}/${total}`);
+  }
+  return { ok: errors.length === 0, errors };
 }
 
 /**
@@ -441,6 +555,8 @@ function parseArgs(argv) {
     coverageDir: null,
     collectOnly: false,
     baseline: false,
+    evaluate: false,
+    dirs: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -448,9 +564,12 @@ function parseArgs(argv) {
     else if (a === "--coverage-dir") opts.coverageDir = resolve(argv[++i] || "");
     else if (a === "--collect-only") opts.collectOnly = true;
     else if (a === "--baseline") opts.baseline = true;
+    else if (a === "--evaluate") opts.evaluate = true;
     else if (a === "--help" || a === "-h") {
-      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline]");
+      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline] [--evaluate <dir> [<dir> ...]]");
       process.exit(0);
+    } else if (!a.startsWith("-")) {
+      opts.dirs.push(resolve(a));
     } else {
       console.error(`unknown argument: ${a}`);
       process.exit(2);
@@ -458,6 +577,14 @@ function parseArgs(argv) {
   }
   if (!opts.config) {
     console.error("--config requires a path");
+    process.exit(2);
+  }
+  if (opts.dirs.length && !opts.evaluate) {
+    console.error("coverage directories are only accepted with --evaluate");
+    process.exit(2);
+  }
+  if (opts.evaluate && opts.collectOnly) {
+    console.error("--evaluate and --collect-only cannot be combined");
     process.exit(2);
   }
   return opts;
@@ -474,21 +601,47 @@ if (isMain) {
     process.exit(2);
   }
 
-  let coverageDir = opts.coverageDir;
-  if (!coverageDir) {
-    const { status, coverageDir: collected } = collectCoverage({ root: ROOT });
-    coverageDir = collected;
-    if (status !== 0) {
-      console.error(`coverage gate: test suite failed (exit ${status}); not evaluating thresholds`);
-      process.exit(1);
+  let payloads;
+  if (opts.evaluate) {
+    // T-1 evaluate mode: merge per-shard payloads, apply the thresholds.
+    // Identical evaluation below — only the payload source differs from
+    // the collect path (shard runs instead of one unsharded re-run).
+    const dirs = opts.dirs.length ? opts.dirs : opts.coverageDir ? [opts.coverageDir] : [];
+    if (!dirs.length) {
+      console.error("coverage gate: --evaluate requires at least one coverage directory");
+      process.exit(2);
     }
-    if (opts.collectOnly) {
-      console.log(`coverage collected in ${coverageDir}`);
-      process.exit(0);
+    const manifestCheck = checkCoverageManifests(readCoverageManifests(dirs));
+    if (!manifestCheck.ok) {
+      for (const err of manifestCheck.errors) console.error(`coverage gate: ${err}`);
+      process.exit(2);
     }
+    const files = [];
+    for (const dir of dirs) {
+      const found = listCoveragePayloadFiles(dir);
+      if (!found.length) {
+        console.error(`coverage gate: no coverage payloads in ${dir} (missing shard?)`);
+        process.exit(2);
+      }
+      files.push(...found);
+    }
+    payloads = readCoveragePayloadFiles(files);
+  } else {
+    let coverageDir = opts.coverageDir;
+    if (!coverageDir) {
+      const { status, coverageDir: collected } = collectCoverage({ root: ROOT });
+      coverageDir = collected;
+      if (status !== 0) {
+        console.error(`coverage gate: test suite failed (exit ${status}); not evaluating thresholds`);
+        process.exit(1);
+      }
+      if (opts.collectOnly) {
+        console.log(`coverage collected in ${coverageDir}`);
+        process.exit(0);
+      }
+    }
+    payloads = readCoveragePayloads(coverageDir);
   }
-
-  const payloads = readCoveragePayloads(coverageDir);
   const grouped = new Map();
   let payloadCount = 0;
   for (const payload of payloads) {
@@ -504,7 +657,7 @@ if (isMain) {
     }
   }
   if (payloadCount === 0) {
-    console.error(`coverage gate: no coverage data in ${coverageDir}`);
+    console.error("coverage gate: no coverage data found in the given coverage directories");
     process.exit(2);
   }
   const results = evaluateModules(ROOT, config, grouped);

@@ -6,10 +6,16 @@
 // binds the shard to the exact plan (planHash), run, revision and attempt so
 // the `unit` merge gate can fail closed on stale or partial evidence.
 //
-// Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
+// Usage: node scripts/unit-ci.mjs --shard=1/3 [--coverage]   (run from the repo root)
+// With --coverage (or --coverage-dir=<dir>), the shard also collects V8
+// coverage payloads for its own files (default dir:
+// test-results/coverage-shard-<i>-of-<n>, inside the evidence artefact the
+// shard already uploads) plus a coverage-manifest.json binding them to
+// this run. scripts/coverage-thresholds.mjs --evaluate merges the shards'
+// payloads and applies the coverage ratchet — no second full-suite run.
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 import { parseFailingTests } from "./failing-tests.mjs";
@@ -106,6 +112,36 @@ export function readJunitFileDurations(path, options = {}) {
   }
 }
 
+/** Default per-shard V8 coverage directory, inside the already-uploaded test-results/ tree. */
+export function shardCoverageDir(shard) {
+  return `test-results/coverage-shard-${shard.index}-of-${shard.total}`;
+}
+
+/**
+ * Create a shard coverage directory and drop stale payloads/manifests from a
+ * previous run, so a re-run never mixes old and new V8 data (same rule as
+ * coverage-thresholds.mjs collectCoverage). Other files are left alone.
+ */
+export function prepareCoverageDir(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (const name of readdirSync(dir)) {
+    if ((name.startsWith("coverage-") && name.endsWith(".json")) || name === "coverage-manifest.json") {
+      rmSync(join(dir, name), { force: true });
+    }
+  }
+  return dir;
+}
+
+/** Names of the V8 coverage payload files currently in a directory (top level). */
+export function listCoveragePayloads(dir) {
+  if (!dir || !existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(
+      (name) => name.startsWith("coverage-") && name.endsWith(".json") && name !== "coverage-manifest.json"
+    )
+    .sort();
+}
+
 /**
  * Run test files with `node --test`, teeing the reporter stream to the console.
  * Returns { status, signal, failures, fileDurationsMs }: failing test names
@@ -125,6 +161,16 @@ export function runTestFiles(files, options = {}) {
   // runner, whether invoked from CI or from a test.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  // Shard-side coverage collection (T-1): when a coverage directory is
+  // requested, the shard's own test processes emit V8 coverage payloads
+  // there — the exact same NODE_V8_COVERAGE mechanism the standalone
+  // coverage job uses (scripts/coverage-thresholds.mjs), just scoped to
+  // this shard's files instead of a second, unsharded full-suite run.
+  // The evaluate side unions payloads per test process, so splitting the
+  // suite across shards does not change the verdict math.
+  if (options.coverageDir) {
+    env.NODE_V8_COVERAGE = prepareCoverageDir(resolve(options.coverageDir));
+  }
   const junitPath = options.junitPath ?? null;
   const args = ["--test"];
   if (junitPath) {
@@ -160,10 +206,23 @@ export function runTestFiles(files, options = {}) {
 
 function main() {
   const argv = process.argv.slice(2);
-  if (argv.length !== 1 || !argv[0].startsWith("--shard=")) {
-    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
+  if (!argv[0]?.startsWith("--shard=")) {
+    throw new Error(
+      "Usage: node scripts/unit-ci.mjs --shard=1/3 [--coverage | --coverage-dir=<dir>]"
+    );
   }
   const shard = parseShard(argv[0].slice("--shard=".length));
+  // Coverage collection is opt-in so existing shard runs (and their
+  // receipts' timing) are unchanged until the workflow opts in.
+  let coverageDir = null;
+  for (const arg of argv.slice(1)) {
+    if (arg === "--coverage") coverageDir = shardCoverageDir(shard);
+    else if (arg.startsWith("--coverage-dir=")) coverageDir = arg.slice("--coverage-dir=".length);
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (coverageDir !== null && coverageDir.trim() === "") {
+    throw new Error("--coverage-dir requires a non-empty path");
+  }
   // Fresh checkouts do not contain ignored .tmp/. Initialize before both
   // dependency preflight and test children, matching scripts/test-env.sh.
   const worktreeScratch = resolve(".tmp");
@@ -184,7 +243,37 @@ function main() {
   console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
   const junitPath = `test-results/unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`;
   const started = Date.now();
-  const { status, signal, failures, fileDurationsMs } = runTestFiles(files, { junitPath });
+  const { status, signal, failures, fileDurationsMs } = runTestFiles(files, {
+    junitPath,
+    ...(coverageDir ? { coverageDir } : {}),
+  });
+  // Bind the emitted payloads to this exact shard run, in the same spirit
+  // as the shard receipt: the coverage evaluate step fails closed when a
+  // shard is missing, duplicated, stale (plan/revision/run mismatch), or
+  // failed. Written after the run so payloadCount is the real count.
+  let coverage = null;
+  if (coverageDir) {
+    const payloads = listCoveragePayloads(coverageDir);
+    const manifest = {
+      kind: "unit-shard-coverage",
+      ...shard,
+      files,
+      planHash: plan.planHash,
+      status,
+      signal,
+      payloadCount: payloads.length,
+      revision: process.env.GITHUB_SHA ?? "local",
+      runId: process.env.GITHUB_RUN_ID ?? "local",
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "local",
+    };
+    writeFileSync(join(coverageDir, "coverage-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+    coverage = {
+      dir: coverageDir.split(sep).join("/"),
+      manifest: "coverage-manifest.json",
+      payloads: payloads.length,
+    };
+    console.log(`unit-ci: shard ${shard.index}/${shard.total} coverage: ${payloads.length} payloads in ${coverage.dir}`);
+  }
   writeFileSync(
     receiptPath,
     JSON.stringify(
@@ -199,6 +288,9 @@ function main() {
         // sidecar). Backward compatible: older receipts omit this field
         // and verifyUnitShards does not require it.
         fileDurationsMs,
+        // Coverage evidence for this shard (T-1), when collected. Older
+        // receipts omit this field; verifyUnitShards does not require it.
+        ...(coverage ? { coverage } : {}),
         revision: process.env.GITHUB_SHA ?? "local",
         runId: process.env.GITHUB_RUN_ID ?? "local",
         runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "local",
