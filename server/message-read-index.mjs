@@ -4,12 +4,15 @@ const snapshots = new WeakMap();
 const empty = Object.freeze([]);
 const fields = ["id", "authorId", "toMemberId", "replyToId"];
 
-function immutableRecord(message) {
+function stableIndexFields(message) {
   if (!message || typeof message !== "object" || Object.getPrototypeOf(message) !== Object.prototype
     || !Object.isFrozen(message)) return false;
-  const descriptors = Object.getOwnPropertyDescriptors(message);
-  if (Reflect.ownKeys(descriptors).some(key => !Object.hasOwn(descriptors[key], "value"))) return false;
-  return fields.every(key => Object.hasOwn(descriptors, key) || !(key in message));
+  // Only these fields determine index membership. Unindexed fields are read
+  // from the source record by consumers, never captured as derived values.
+  return fields.every(key => {
+    const descriptor = Object.getOwnPropertyDescriptor(message, key);
+    return descriptor ? Object.hasOwn(descriptor, "value") : !(key in message);
+  });
 }
 
 export function messageReadIndex(messages) {
@@ -21,7 +24,7 @@ export function messageReadIndex(messages) {
   for (let i = 0; i < messages.length; i++) {
     const descriptor = reusable ? Object.getOwnPropertyDescriptor(messages, i) : null;
     const message = messages[i];
-    if (reusable && (!descriptor || !Object.hasOwn(descriptor, "value") || !immutableRecord(message))) reusable = false;
+    if (reusable && (!descriptor || !Object.hasOwn(descriptor, "value") || !stableIndexFields(message))) reusable = false;
     if (!message) continue;
     byId.set(message.id, message); // Match existing readers: last duplicate wins.
     if (message.toMemberId) {

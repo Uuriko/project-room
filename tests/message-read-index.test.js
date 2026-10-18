@@ -42,7 +42,7 @@ test("mutable and partially frozen snapshots recompute after identity, recipient
   }
 });
 
-test("new snapshots preserve edits/deletion and accessor-backed frozen data is never memoized", () => {
+test("new snapshots preserve edits/deletion and accessor-backed indexed fields are never memoized", () => {
   const first = frozen([{ id: "a", body: "before" }]), second = frozen([{ id: "a", body: null, deletedAt: "now" }]);
   assert.notEqual(messageReadIndex(first), messageReadIndex(second));
   assert.equal(messageReadIndex(second).get("a").deletedAt, "now");
@@ -54,4 +54,15 @@ test("new snapshots preserve edits/deletion and accessor-backed frozen data is n
   const accessorArray = []; Object.defineProperty(accessorArray, 0, { get: () => value }); Object.freeze(accessorArray);
   const a = messageReadIndex(accessorArray); value = second[0];
   assert.notEqual(messageReadIndex(accessorArray), a); assert.equal(messageReadIndex(accessorArray).get("a"), second[0]);
+});
+
+test("unindexed accessors remain live and are not evaluated or cached by the index", () => {
+  let body = "before", reads = 0;
+  const message = Object.freeze({ id: "a", get body() { reads++; return body; } });
+  const rows = Object.freeze([message]); const index = messageReadIndex(rows);
+  assert.equal(reads, 0);
+  body = "after";
+  assert.equal(messageReadIndex(rows), index);
+  assert.equal(index.get("a").body, "after");
+  assert.equal(reads, 1);
 });
