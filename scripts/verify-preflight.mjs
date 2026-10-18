@@ -2,7 +2,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { verifyRuntimeSource } from "./runtime-package.mjs";
+import { buildCandidateManifest, manifestDrift, MANIFEST_PATH } from "./candidate-manifest.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const started = performance.now();
@@ -14,5 +16,7 @@ for (const script of ["check-deps.mjs", "untested-modules-lint.mjs"]) {
 }
 try {
   const result = verifyRuntimeSource(root);
+  const drift = manifestDrift(buildCandidateManifest(root), JSON.parse(readFileSync(join(root, MANIFEST_PATH), "utf8")));
+  if (drift.length) throw new Error(`Candidate manifest drift: ${drift.join(", ")}. Run node scripts/candidate-manifest.mjs --write and inspect the diff.`);
   console.log(`preflight: ${result.files} runtime source files checked in ${Math.round(performance.now() - started)}ms; cold-package tests and full qualification still required`);
 } catch (error) { console.error(error.message); process.exitCode = 1; }

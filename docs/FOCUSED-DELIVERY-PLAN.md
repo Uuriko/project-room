@@ -15,10 +15,38 @@ reconstructing the project or losing control.
 
 ## Current execution: work continuity (2026-10-18)
 
+### Next execution: qualify and integrate the existing slice
+
+Finish the existing architecture/continuity candidates before adding features.
+This sequence owns the immediate work; it does not replace C1–C8 or count
+unmeasured acceptance criteria as completed.
+
+| Step | Concrete task | Acceptance / evidence | Execution status |
+|---|---|---|---|
+| Q1 | Reconcile PR heads, remote refs, CI results and active release ownership | Every result names its exact revision; stale checks are not reused | Git confirms #4114 baseline repair `93727acb`; initial PR API still reports `b9c4afed`. Release hold remains active |
+| Q2 | Integrate local validation tooling with the continuity tree | One existing PR (#4118), no third feature queue; clean merge of baseline repair | Local `4c7678a5` and `93727acb` integrated on the qualification branch |
+| Q3 | Finish the cheap preflight contract | Missing imports/new uncovered server modules refuse before workers; abnormal child termination fails; generic dependency checker stays reusable | Complete: shared package verifier plus manifest-drift gate; refusal/termination subprocess tests pass |
+| Q4 | Freeze runtime/tooling edits and qualify once on Node 24 | Focused failures fixed first; affected tests, lint, package checks, CI-mode checks and one full suite; exact baseline failures retained | Complete locally: 11,126 pass / 24 exact baseline failures / 8 skipped; lint and contract checks pass. Earlier manifest failure repaired and rechecked |
+| Q5 | Publish the same tested tree to #4118 | Updated PR scope, full qualification evidence, clean source checkpoint and release-owner handoff | Source checkpoint qualified for #4118; published head and live CI tracked on the PR. No force push or policy-role release |
+| Q6 | Land and qualify the supported product journey | Exact required CI, coordinated merge/release, production smoke, physical sleep/wake and comparative pilot evidence | Separate open gates; automation cannot substitute for physical/human observations |
+
+Development loop: preflight first, focused tests while changing code, then one
+full run after the code stops changing. Metadata/documentation updates do not
+justify rerunning unrelated expensive experiments. A new failing invariant or
+runtime change does. Compare CI to the candidate's merged tree as well as its
+head so generated-baseline conflicts are found before another CI queue cycle.
+Keep a published candidate separate from production status and never interpret
+queued checks or absence of a result as approval.
+
+The preflight checks installed dependencies, existing module-coverage rules and
+all allowlisted runtime imports and candidate-manifest drift. It warns about Node-major differences from CI,
+does not install or switch runtimes, and leaves cold-package and full-suite
+qualification intact. The Node engine range remains unchanged.
+
 This section owns the next concrete tasks; the six outcomes below remain the scope.
-The release candidate is PR #4114; `b9c4afed` adds direct storage-module tests to
+The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
 repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
-work is isolated on `codex/work-brief-continuity-20261018`.
+work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).
 
 | Task | Feature / work | Completion evidence | State |
 |---|---|---|---|
