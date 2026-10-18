@@ -113,4 +113,10 @@ test("real server digest supports since-wake reads without marking the window ha
   assert.ok(next.messages.every(m => m.seq > first.next));
   assert.deepEqual(store.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get("commons", "worker"), before);
   await assert.rejects(c.roomDigest({ since: next.next + 100 }), { code: "cursor_ahead" });
+  send(T.MESSAGE_EDITED, { messageId: "fresh", body: "Replacement evidence", expectedMessageRevision: 0 });
+  const edited = await c.roomDigest();
+  assert.equal(edited.messages.find(m => m.id === "fresh")?.summary, "Replacement evidence");
+  assert.equal(JSON.stringify(edited).includes("New evidence for the room"), false);
+  send(T.MESSAGE_DELETED, { messageId: "fresh", expectedMessageRevision: 1, reason: "remove" });
+  assert.equal(JSON.stringify(await c.roomDigest()).includes("Replacement evidence"), false);
 });
