@@ -5,6 +5,7 @@ import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { recordRefusalBestEffort } from './refusal-journal.mjs'; // #3617 (R-8): refused reviews are first-class records
 
 // Private review is a separate fact. Submission bytes, leases and work
 // gates are never changed here. Two deliberate exceptions, both inside
@@ -182,8 +183,25 @@ export class PublicWorkReviews {
     this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
     projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
   }
-  decide(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'decide', input); }
-  verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
+  // #3617 (R-8): a refused review (decide/verify) is a refusal-journal
+  // record. mutate() runs inside a store transaction, so the record is
+  // written here — after that transaction has rolled back — and survives.
+  decide(roomId, actorId, receiptId, input) { return this._reviewGuarded(roomId, actorId, receiptId, 'decide', input); }
+  verify(roomId, actorId, receiptId, input) { return this._reviewGuarded(roomId, actorId, receiptId, 'verify', input); }
+  _reviewGuarded(roomId, actorId, receiptId, action, input) {
+    try { return this.mutate(roomId, actorId, receiptId, action, input); }
+    catch (error) {
+      recordRefusalBestEffort(this.db, {
+        roomId: typeof roomId === 'string' ? roomId : null, surface: 'public-work', actorId,
+        refusedAction: `review-${action}`,
+        reasonCode: typeof error?.code === 'string' ? error.code : 'error',
+        subjectId: typeof receiptId === 'string' ? receiptId : null,
+        detail: { message: String(error?.message ?? '').slice(0, 500) },
+        at: new Date(this.store.now()).toISOString(),
+      });
+      throw error;
+    }
+  }
   mutate(roomId, actorId, receiptId, action, input) {
     const keys = ['requestId', 'expectedReviewRevision', 'taskId', 'expectedTermsVersion', 'generation', 'artifactSha256', 'reason', action === 'decide' ? 'decision' : 'verdict'];
     check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key)), 'Unexpected or missing review fields');

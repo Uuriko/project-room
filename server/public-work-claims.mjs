@@ -7,6 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { recordRefusalBestEffort } from './refusal-journal.mjs'; // #3617 (R-8): refused public-work actions are first-class records
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -208,6 +209,23 @@ export class PublicWorkClaims {
     return offer;
   }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
+  // #3617 (R-8): record a refused public-work action in the refusal
+  // journal. Callers invoke this only where the record survives: request()
+  // catches inside whatever transaction the caller opened (a record made
+  // inside a transaction that then rolls back is rolled back with it —
+  // harmless, because the door-level catches in act()/match() re-record
+  // after rollback), and act()/match() catch outside their writer-fence
+  // transaction. Best-effort: journaling never masks the refusal itself.
+  _recordRefusal({ roomId = null, action, actorId = null, subjectId = null, error }) {
+    recordRefusalBestEffort(this.db, {
+      roomId, surface: 'public-work', actorId,
+      refusedAction: action,
+      reasonCode: typeof error?.code === 'string' ? error.code : 'error',
+      subjectId,
+      detail: { message: String(error?.message ?? '').slice(0, 500) },
+      at: new Date(this.store.now()).toISOString(),
+    });
+  }
   request(row, actorId, action, input, operation) {
     check(identifier(input.requestId), 'Invalid request ID');
     const encoded = canonicalJson({ action, ...input });
@@ -216,7 +234,17 @@ export class PublicWorkClaims {
       if (previous.input_json !== encoded) fail(409, 'request_id_reused', 'Request ID was already used for different input');
       return JSON.parse(previous.outcome_json);
     }
-    const outcome = operation();
+    // #3617 (R-8): a throw from operation() used to record nothing — the
+    // request journal writes only successful outcomes. Refusals now land
+    // in the refusal journal (a separate table: public_work_requests still
+    // journals successes only, so a refused claim still burns no
+    // requestId and a retry with the same requestId is not a reuse).
+    let outcome;
+    try { outcome = operation(); }
+    catch (error) {
+      this._recordRefusal({ roomId: row.room_id ?? null, action, actorId, subjectId: row.offer_id, error });
+      throw error;
+    }
     this.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)').run(row.offer_id, actorId, input.requestId, encoded, JSON.stringify(outcome));
     return outcome;
   }
@@ -423,11 +451,22 @@ export class PublicWorkClaims {
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
-    return withPublicWorkClaimWriter(this.store, () => {
-      const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
-      if (!identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
-      return this.apply(offerId, identity, action, input);
-    });
+    try {
+      return withPublicWorkClaimWriter(this.store, () => {
+        const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+        if (!identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
+        return this.apply(offerId, identity, action, input);
+      });
+    } catch (error) {
+      // #3617 (R-8): the writer-fence transaction has rolled back by now,
+      // so this refusal record survives (request()'s in-transaction record
+      // was rolled back with the refused action).
+      let identityId = null, roomId = null;
+      try { identityId = this.store.identities.resolveGlobalIdentitySecret(secret)?.identityId ?? null; } catch { /* best-effort */ }
+      try { roomId = this.task(offerId)?.room_id ?? null; } catch { /* best-effort */ }
+      this._recordRefusal({ roomId, action, actorId: identityId, subjectId: offerId, error });
+      throw error;
+    }
   }
   // Both direct commands and matchmaking share the same serialized claim path.
   apply(offerId, identity, action, input, journal = true) {
@@ -457,9 +496,11 @@ export class PublicWorkClaims {
           }
           // #3707: the per-identity live-claim ceiling. Counted here, inside
           // the writer fence on the shared claim path, so every door —
-          // direct act() and match() auto-claim alike — is bound by it, and
-          // a journaled refusal is impossible (request() journals only
-          // successful outcomes, so a refused claim burns no requestId).
+          // direct act() and match() auto-claim alike — is bound by it. The
+          // refusal itself is journaled in the refusal journal (#3617,
+          // R-8: request()/act() record it after rollback); it still burns
+          // no requestId, because public_work_requests journals only
+          // successful outcomes.
           const held = this.liveClaimsOf(identity.identityId);
           if (held >= PUBLIC_WORK_MAX_LIVE_CLAIMS_PER_IDENTITY)
             fail(409, 'public_work_claim_limit', `You hold ${held} live public-work claims — the per-identity ceiling is ${PUBLIC_WORK_MAX_LIVE_CLAIMS_PER_IDENTITY}. Finish or release one before claiming another.`);
@@ -599,7 +640,7 @@ export class PublicWorkClaims {
     check(input.after === undefined || identifier(input.after), 'Invalid matching cursor');
     lease(input.leaseHours);
     const run = operation => input.autoClaim === true ? withPublicWorkClaimWriter(this.store, operation) : this.store.readTransaction(operation);
-    return run(() => {
+    try { return run(() => {
       const identity = secret ? this.store.identities.resolveGlobalIdentitySecret(secret) : null;
       if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
       // match with autoClaim is a claim door (#3271): when it actually
@@ -657,7 +698,15 @@ export class PublicWorkClaims {
         return outcome;
       };
       return input.autoClaim === true ? this.request({ offer_id: '@match' }, identity.identityId, 'match', input, recommend) : recommend();
-    });
+    }); }
+    catch (error) {
+      // #3617 (R-8): a refused auto-claim inside match() is a refusal-journal
+      // record, written after the claim transaction rolled back.
+      let identityId = null;
+      try { identityId = secret ? this.store.identities.resolveGlobalIdentitySecret(secret)?.identityId ?? null : null; } catch { /* best-effort */ }
+      this._recordRefusal({ action: 'match', actorId: identityId, error });
+      throw error;
+    }
   }
 
   receiptRoomId(receiptId) {

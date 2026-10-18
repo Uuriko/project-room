@@ -526,6 +526,16 @@ const ROWS = [
     }
   },
   {
+    "table": "refusal_journal",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_review_packets",
     "key": "room_id",
     "action": "delete",

@@ -65,6 +65,30 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
+import { recordRefusalBestEffort } from "./refusal-journal.mjs"; // #3617 (R-8): board refusals are first-class records
+
+// #3617 (R-8): record a refused board (work-claim) action in the refusal
+// journal. Called from handleWorkClaims AFTER the registry transaction has
+// completed or rolled back, so the record survives the refusal — including
+// the claim-fencing refusals (work_claim_conflict / claim_lease_lapsed)
+// raised by the state machine; those codes are recorded here, at the
+// surface boundary, and no fencing record is created or duplicated in the
+// state machine itself. Best-effort: in-memory registries and test stores
+// without a db simply skip journaling, and a journaling fault never masks
+// the refusal response.
+function recordBoardRefusal(options, { status = null, code = null, message = null } = {}) {
+  const db = options?.store?.db;
+  if (!db) return;
+  recordRefusalBestEffort(db, {
+    roomId: typeof options.roomId === "string" ? options.roomId : null,
+    surface: "board",
+    actorId: options.auth?.member?.id ?? options.auth?.memberId ?? null,
+    refusedAction: `${options.workClaimRoute ?? "work-claims"}:${options.req?.method ?? "?"}`,
+    reasonCode: typeof code === "string" && code ? code : `http_${status ?? "error"}`,
+    subjectId: typeof options.workClaimId === "string" ? options.workClaimId : null,
+    detail: { status, message: String(message ?? "").slice(0, 500) },
+  });
+}
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -626,7 +650,10 @@ export async function handleWorkClaims(options) {
         auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
       return helpers.json(res, 200, item);
     } catch (error) {
-      if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
+      if (Number.isInteger(error?.status) && error.body && error.code) {
+        recordBoardRefusal(options, { status: error.status, code: error.code, message: error.message });
+        return helpers.json(res, error.status, error.body);
+      }
       throw error;
     }
   }
@@ -678,10 +705,22 @@ export async function handleWorkClaims(options) {
   });
   try {
     const result = registry.transaction ? registry.transaction(run) : run();
+    // #3617 (R-8): a >=400 result from the core is a refused board action —
+    // journal it now the registry transaction has completed.
+    if (Number.isInteger(result?.status) && result.status >= 400)
+      recordBoardRefusal(options, { status: result.status,
+        code: result.value?.error?.code ?? result.value?.code ?? null,
+        message: result.value?.error?.message ?? result.value?.message ?? null });
     return helpers.json(res, result.status, result.value);
   } catch (error) {
-    if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
-    if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
+    if (error?.code === "file_lease_conflict" && error.body) {
+      recordBoardRefusal(options, { status: 409, code: error.code, message: error.message });
+      return helpers.json(res, 409, error.body);
+    }
+    if (Number.isInteger(error?.status) && error.body && error.code) {
+      recordBoardRefusal(options, { status: error.status, code: error.code, message: error.message });
+      return helpers.json(res, error.status, error.body);
+    }
     throw error;
   }
 }

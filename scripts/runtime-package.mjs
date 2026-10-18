@@ -247,6 +247,7 @@ optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed2551
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-reputation.mjs"); // integration-map slice #4: bounty -> reputation projector (imported by server/bounty-escrow.mjs)
 optional.push("server/reputation.mjs"); // B019: pure reputation tracker with typed signals + bands (imported by server/bounty-reputation.mjs)
+optional.push("server/refusal-journal.mjs"); // #3617 (R-7/R-8): refusal journal + obligation stamps (imported by server/bounty-escrow.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs, server/work-claim-routes.mjs; pure, node:crypto only)
 optional.push("server/bounty-epoch-keeper.mjs"); // #3693/#3844: automatic payout-epoch progression (imported by server/jobs.mjs and cloudflare/room.mjs; imports server/bounty-escrow.mjs)
 optional.push("server/patrol.mjs"); // ClueBot phase 1: resident per-event invariant patrol, read-only (imported by server/jobs.mjs, server/store.mjs and cloudflare/room.mjs; imports server/work-claims.mjs, server/projection-at-rest.mjs, server/messages-store.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
