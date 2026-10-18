@@ -32,8 +32,8 @@ import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, PROBE_ERRORS_STORAGE_KEY, applyOutcomes, applyProbeError, clearPersistedProbeError, incrementUnrecordedTicks, jobHealthResponse, jobHealthUnavailable, jobHealthView, mergeProbeErrorFacts, readUnrecordedTicks, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom, setProbeErrorSink } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -101,6 +101,14 @@ export class ProjectRoom extends DurableObject {
     // as aliases so existing reads of either name stay valid.
     this.state = ctx;
     this.env = env;
+    // R-5 (ATLAS-JOBS-WAKES WP-10): the registry wrappers record due-ness
+    // probe failures in module memory and notify this sink so the failure
+    // is also a durable fact on the health surface. Persistence is
+    // coalesced per (job, probe, error) signature on this instance: a
+    // permanently broken probe throws on every request, and the record
+    // must not become a storage write per request.
+    this.probeErrorWrites = new Map();
+    setProbeErrorSink(fact => { void this.#persistProbeError(fact); });
     this.requestSignals = new AsyncLocalStorage();
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
@@ -246,38 +254,77 @@ export class ProjectRoom extends DurableObject {
     return this.gmailSync.tick({ deadline: cronDeadline() });
   }
 
+  // Persists one probe-error sink event (R-5). A throw writes the durable
+  // fact at most once per 30s per signature on this instance; a recovery
+  // (cleared) removes it. Never throws: a failed record here has nothing
+  // above it to report to, so it is logged like the drain stamp failure.
+  async #persistProbeError(fact) {
+    try {
+      const persisted = this.probeErrorWrites.get(fact.job);
+      if (fact.cleared) {
+        if (!persisted) return;
+        this.probeErrorWrites.delete(fact.job);
+        const previous = await this.ctx.storage.get(PROBE_ERRORS_STORAGE_KEY);
+        await this.ctx.storage.put(PROBE_ERRORS_STORAGE_KEY, clearPersistedProbeError(previous, fact.job));
+        return;
+      }
+      const signature = `${fact.probe}:${fact.error}`;
+      const now = Date.now();
+      if (persisted?.signature === signature && now - persisted.at < 30_000) return;
+      this.probeErrorWrites.set(fact.job, { signature, at: now });
+      const previous = await this.ctx.storage.get(PROBE_ERRORS_STORAGE_KEY);
+      await this.ctx.storage.put(PROBE_ERRORS_STORAGE_KEY, applyProbeError(previous, fact));
+    } catch (error) {
+      console.error(`[job-heartbeat] probe error record failed: ${error?.message ?? error}`);
+    }
+  }
+
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
-    const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    const next = applyOutcomes(previous, outcomes);
-    // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
-    // outcome; it is consumed here, once the heartbeat record reporting
-    // it is durable. If the put fails, the report marker is released and
-    // the stash stays, so the next drain tick reports the same outcome
-    // again instead of it being lost with the failed write.
-    const reported = this.channelDrainOutcomeReported ?? null;
-    const drainRecorded = reported !== null && Array.isArray(outcomes)
-      && outcomes.some(outcome => outcome?.job === 'channel-drain');
     try {
-      await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const next = applyOutcomes(previous, outcomes);
+      // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
+      // outcome; it is consumed here, once the heartbeat record reporting
+      // it is durable. If the put fails, the report marker is released and
+      // the stash stays, so the next drain tick reports the same outcome
+      // again instead of it being lost with the failed write.
+      const reported = this.channelDrainOutcomeReported ?? null;
+      const drainRecorded = reported !== null && Array.isArray(outcomes)
+        && outcomes.some(outcome => outcome?.job === 'channel-drain');
+      try {
+        await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      } catch (error) {
+        this.channelDrainOutcomeReported = null;
+        throw error;
+      }
+      if (drainRecorded) {
+        this.channelDrainOutcomeReported = null;
+        if (this.channelDrainOutcome === reported) {
+          // Consume exactly once; a completion that queued behind the
+          // reported outcome while it awaited this record is promoted.
+          this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
+          this.channelDrainOutcomeHeld = null;
+        }
+      }
+      return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
     } catch (error) {
-      this.channelDrainOutcomeReported = null;
+      // R-6 (ATLAS-JOBS-WAKES WP-5): a failed record used to leave only a
+      // console line in #runDueJobs — the tick's work stood, its record
+      // vanished, and the health surface kept grading from the previous
+      // record with no sign anything was missing. Count the loss durably
+      // before it propagates; the count rides the health view as
+      // unrecordedTicks.
+      await incrementUnrecordedTicks(this.ctx.storage);
       throw error;
     }
-    if (drainRecorded) {
-      this.channelDrainOutcomeReported = null;
-      if (this.channelDrainOutcome === reported) {
-        // Consume exactly once; a completion that queued behind the
-        // reported outcome while it awaited this record is promoted.
-        this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
-        this.channelDrainOutcomeHeld = null;
-      }
-    }
-    return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
   }
   async readJobHealth() {
-    const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
+    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    const probeErrors = await this.ctx.storage.get(PROBE_ERRORS_STORAGE_KEY).catch(() => null);
+    const unrecordedTicks = await readUnrecordedTicks(this.ctx.storage);
+    const view = jobHealthView(mergeProbeErrorFacts(stored, probeErrors), Date.now(), this.env, this.store, { unrecordedTicks });
     return { ...view, publicReports: countOpenPublicReports(this.store) };
   }
 

@@ -8809,7 +8809,12 @@ paths:
       description: >-
         Open (also HEAD). The Worker answers with per-job lastSuccessAt /
         lastError for the cron jobs, read through one Durable Object RPC,
-        plus `publicReports` (open public abuse reports). 200 `{ status, jobs,
+        plus `publicReports` (open public abuse reports). Each job row also
+        carries `stopTolerance` (the registry's declared tolerance for the
+        job not running: incident / day / week) and `probeError` (a recorded
+        due-ness probe failure — probe, redacted error, first/last seen,
+        count — or null), and the top level carries `unrecordedTicks`, the
+        durable count of ticks whose heartbeat record write failed. 200 `{ status, jobs,
         publicReports }` when every job is fresh, or with status `degraded`
         when a job ran but was held by GitHub's rate limit (that job reads
         `degraded: github_rate_limited`); 503 when a job is stale,
