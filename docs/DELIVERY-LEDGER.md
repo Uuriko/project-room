@@ -1,5 +1,7 @@
 # Project Room delivery ledger
 
+Execution order and complete scope mapping: [build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
+
 Updated 2026-10-18. Owner role for these local items: Codex implementation.
 This ledger preserves the seven stages in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md),
 plus the [infra research](FRONTIER-INFRA-RESEARCH-2026-10-18.md) and

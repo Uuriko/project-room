@@ -8,6 +8,9 @@ Supporting evidence: [infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-1
 [automation design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md), and
 [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md).
 
+Implementation packages, dependencies and exit gates are specified in the
+[build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
+
 ## Vision
 
 Project Room holds the intent, knowledge, execution and evidence of a project.

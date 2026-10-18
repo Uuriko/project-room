@@ -97,3 +97,5 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 - [Automation research and execution design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md)
 
 - [Adaptive Project Room master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md)
+
+- [Build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md)
