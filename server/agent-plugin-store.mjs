@@ -539,9 +539,18 @@ export class AgentPluginStore {
   // genuine and under legitimate control. Everything unattested is
   // unverified. Attestation is global (one row per identity); rooms gate on
   // the tier through the per-room verification policy below.
+  //
+  // SECURITY-FIX C1 (HUNT-ADVERSARY P1): attestation authority is
+  // relationship-scoped, not ownership-anywhere. Room ownership is free
+  // (anonymous mint + self-serve room creation), so the pre-fix rule let
+  // any self-bootstrapped owner verify or strip ANY identity. Now the
+  // attester must own a room in which the target is a linked member, an
+  // identity can never attest itself, a standing attestation can only be
+  // withdrawn by its attester of record, and a second attester cannot
+  // silently overwrite verified_by (409 in identity-verification.mjs).
 
   // True when the identity is linked as a member in at least one room where
-  // that member is the room's owner: the attestation authority.
+  // that member is the room's owner.
   isRoomOwner(identityId) {
     return this.store.readTransaction(() =>
       !!this.db.prepare(
@@ -549,6 +558,22 @@ export class AgentPluginStore {
          WHERE il.identity_id = ?
            AND json_extract(r.projection, '$.room.ownerId') = il.member_id
          LIMIT 1`).get(identityId));
+  }
+
+  // The attestation relationship: the attester owns at least one room in
+  // which the target identity is a linked member. Self-attestation never
+  // counts (an owner linked as owner of their own room is not a member
+  // being vouched for by another party).
+  canAttestIdentity(attesterIdentityId, targetIdentityId) {
+    if (!attesterIdentityId || !targetIdentityId || attesterIdentityId === targetIdentityId) return false;
+    return this.store.readTransaction(() =>
+      !!this.db.prepare(
+        `SELECT 1 FROM identity_links att
+         JOIN rooms r ON att.room_id = r.id
+         JOIN identity_links tgt ON tgt.room_id = att.room_id AND tgt.identity_id = ?
+         WHERE att.identity_id = ?
+           AND json_extract(r.projection, '$.room.ownerId') = att.member_id
+         LIMIT 1`).get(targetIdentityId, attesterIdentityId));
   }
 
   verifyIdentity({ identityId, verifiedBy }) {
@@ -562,9 +587,9 @@ export class AgentPluginStore {
     });
   }
 
-  unverifyIdentity({ identityId }) {
+  unverifyIdentity({ identityId, unverifiedBy }) {
     return this.mutate(() => {
-      const result = this.identityVerification.unverify(identityId);
+      const result = this.identityVerification.unverify(identityId, { by: unverifiedBy });
       this.db.prepare("DELETE FROM agent_identity_verification WHERE identity_id=?").run(identityId);
       return result;
     });

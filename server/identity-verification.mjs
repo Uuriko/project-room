@@ -14,9 +14,9 @@ const UNVERIFIED = "unverified";
 const LEVELS = Object.freeze([VERIFIED, UNVERIFIED]);
 
 class VerificationError extends Error {
-  constructor(code, message) { super(message); this.name = "VerificationError"; this.code = code; }
+  constructor(code, message, status) { super(message); this.name = "VerificationError"; this.code = code; if (status !== undefined) this.status = status; }
 }
-const fail = (code, message) => { throw new VerificationError(code, message); };
+const fail = (code, message, status) => { throw new VerificationError(code, message, status); };
 const check = (condition, code, message) => { if (!condition) fail(code, message); };
 
 const checkIdentityId = identityId => check(
@@ -38,11 +38,20 @@ export function createIdentityVerification({ store, clock } = {}) {
     return records.get(identityId) ?? null;
   };
 
-  // Owner attests an identity as verified. Overwriting an existing
-  // attestation refreshes it (re-attestation is idempotent and explicit).
+  // Owner attests an identity as verified. Re-attestation by the SAME
+  // attester refreshes the row (idempotent); an attestation standing under
+  // a DIFFERENT attester is never silently overwritten — the attester of
+  // record must withdraw first (SECURITY-FIX C1: verified_by is provenance,
+  // not a last-writer-wins field).
   const verify = (identityId, { verifiedBy } = {}) => {
     checkIdentityId(identityId);
     checkAttester(verifiedBy);
+    const existing = records.get(identityId);
+    if (existing && existing.verifiedBy !== verifiedBy) {
+      fail("attestation_conflict",
+        `Identity is already verified by ${existing.verifiedBy}; that attester must unverify before another attestation can stand`,
+        409);
+    }
     const record = Object.freeze({
       identityId,
       level: VERIFIED,
@@ -53,9 +62,18 @@ export function createIdentityVerification({ store, clock } = {}) {
     return record;
   };
 
-  // Withdraw an attestation. Idempotent: unknown identities are a no-op.
-  const unverify = identityId => {
+  // Withdraw an attestation. When the caller names itself (`by`), only the
+  // attester of record may withdraw: a stranger who merely owns a room
+  // somewhere cannot strip another owner's attestation (SECURITY-FIX C1).
+  // Idempotent: unknown identities are a no-op.
+  const unverify = (identityId, { by } = {}) => {
     checkIdentityId(identityId);
+    const existing = records.get(identityId);
+    if (existing && by !== undefined && by !== existing.verifiedBy) {
+      fail("not_attester",
+        `Only the attester of record (${existing.verifiedBy}) can revoke this verification`,
+        403);
+    }
     records.delete(identityId);
     return { identityId, level: UNVERIFIED };
   };
