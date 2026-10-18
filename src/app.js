@@ -1998,11 +1998,13 @@ function render() {
     : `<button type="button" class="text-button" data-member-work="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>Let them take work</button>`;
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
   // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
+  // R9-1: a person (member or guest) gets Remove only; Pause is about an agent's wakes.
   const memberActions = m => {
-    if (!ownerView || m.kind !== "agent" || m.active === false) return "";
+    if (!ownerView || m.active === false || m.id === state.room.ownerId || m.id === session.member.id) return "";
+    const agent = m.kind === "agent";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
     // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}">${agent ? `<button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button>` : ""}<button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
@@ -4684,7 +4686,8 @@ $("#presence-list").addEventListener("click", async e => {
   const focusAction = selector => $(`#presence-list [${selector}="${CSS.escape(memberId)}"]`)?.focus();
   if (keepButton) { armedRemoval = null; render(); focusAction("data-member-remove"); return; }
   const member = state.members[memberId];
-  if (!member || member.kind !== "agent" || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (!member || member.active === false || member.id === state.room.ownerId || member.id === session.member.id || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (pauseButton && member.kind !== "agent") return;
   if (removeButton && armedRemoval !== memberId) { armedRemoval = memberId; render(); focusAction("data-member-remove"); return; }
   memberActionBusy = true;
   const generation = client.generation;
@@ -4695,7 +4698,9 @@ $("#presence-list").addEventListener("click", async e => {
       await client.send(entry.command);
       if (generation !== client.generation || !state) return;
       agentPauses.delete(memberId);
-      notice(`${displayName(memberId)} removed. Room access and connections ended; context already delivered to its provider is not recalled.`);
+      notice(member.kind === "agent"
+        ? `${displayName(memberId)} removed. Room access and connections ended; context already delivered to its provider is not recalled.`
+        : uiText("people.member_removed", { name: displayName(memberId) }));
     } else {
       const action = pauseButton.dataset.pauseAction;
       const view = await client.request(client.path("/agent-pause"), { method: "POST", data: { action, memberId, requestId: crypto.randomUUID(), ...(action === "pause" ? { reason: null } : {}) } });
@@ -7762,6 +7767,9 @@ document.addEventListener("click", event => {
   const shell = $("#main");
   if (!shell.classList.contains("sidebar-open")) return;
   if (event.target.closest("#room-sidebar") || event.target.closest("#sidebar-toggle")) return;
+  // R327-n1: Remove/Keep re-render their row before this runs (Remove arms "Confirm
+  // remove"), detaching the target; the path is fixed at dispatch, so keep the drawer open.
+  if (event.composedPath().some(node => node.dataset?.memberActions !== undefined)) return;
   // Every dialog opens modal, so a dialog sits in the top layer above the inert
   // sidebar overlay: clicks inside it are dialog interactions, not "outside"
   // clicks. Dismissing the sidebar under them hides the dialog trigger while it

@@ -8,6 +8,7 @@ export { closeKeepSet };
 // do not double-write. The integrity cron runs that replay.
 import { applyEvent, emptyRoomState } from "../src/events.js";
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -60,6 +61,12 @@ CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
   state_json TEXT,
   parity_at_seq INTEGER,
   sweep_after TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS messages_backfill_state (
+  room_id TEXT NOT NULL,
+  part INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  PRIMARY KEY (room_id, part)
 );
 `;
 
@@ -307,7 +314,57 @@ function cursorMatches(db, roomId, cursor, sequence) {
   return row?.id === cursor.applied_event_id;
 }
 
+// state_json holds the whole replay state, every message body included. On
+// a busy room that is one row of several MB (muse-room: ~8.6 MB on Oct 16),
+// over Worker SQLite's row limit (2 MB locally), so the save was refused and
+// the backfill could never finish or certify. A state over STATE_PART_CHARS
+// is split into rows of messages_backfill_state, and state_json holds only
+// "parts:<count>:<sha256>". The load joins the parts and checks the count and
+// the hash; anything else replays from the log, as a torn snapshot does. The
+// marker is not JSON, so an older build's JSON.parse fails and it replays.
+const STATE_PART_CHARS = 600000; // at most 3 UTF-8 bytes per UTF-16 unit: under 1.8 MB
+const PARTS_PREFIX = "parts:";
+
+function splitState(text) {
+  const parts = [];
+  for (let at = 0; at < text.length;) {
+    let end = Math.min(text.length, at + STATE_PART_CHARS);
+    // Never cut a surrogate pair: half a pair does not survive a TEXT column.
+    if (end < text.length && /[\uDC00-\uDFFF]/.test(text[end])) end -= 1;
+    parts.push(text.slice(at, end));
+    at = end;
+  }
+  return parts;
+}
+
+function deleteStateParts(db, roomId, from = 0) {
+  db.prepare("DELETE FROM messages_backfill_state WHERE room_id=? AND part>=?").run(roomId, from);
+}
+
+function readCursorState(db, roomId, text) {
+  if (!text.startsWith(PARTS_PREFIX)) return JSON.parse(text);
+  const [, count, sha] = text.split(":");
+  const parts = db.prepare("SELECT json FROM messages_backfill_state WHERE room_id=? ORDER BY part").all(roomId).map(row => row.json);
+  const joined = parts.join("");
+  if (String(parts.length) !== count || createHash("sha256").update(joined, "utf8").digest("hex") !== sha) {
+    throw new Error(`messages backfill state for ${roomId} is torn`);
+  }
+  return JSON.parse(joined);
+}
+
 function saveCursor(db, roomId, appliedSeq, eventId, state) {
+  const text = JSON.stringify(state);
+  let stored = text;
+  if (text.length > STATE_PART_CHARS) {
+    const parts = splitState(text);
+    const insert = db.prepare(`INSERT INTO messages_backfill_state (room_id, part, json) VALUES (?, ?, ?)
+      ON CONFLICT(room_id, part) DO UPDATE SET json=excluded.json`);
+    parts.forEach((part, index) => insert.run(roomId, index, part));
+    deleteStateParts(db, roomId, parts.length);
+    stored = `${PARTS_PREFIX}${parts.length}:${createHash("sha256").update(text, "utf8").digest("hex")}`;
+  } else {
+    deleteStateParts(db, roomId);
+  }
   db.prepare(`INSERT INTO messages_backfill_cursor
       (room_id, applied_seq, applied_event_id, state_seq, state_json, parity_at_seq)
     VALUES (?, ?, ?, ?, ?, NULL)
@@ -316,7 +373,7 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
       applied_event_id=excluded.applied_event_id,
       state_seq=excluded.state_seq,
       state_json=excluded.state_json,
-      parity_at_seq=NULL`).run(roomId, appliedSeq, eventId, appliedSeq, JSON.stringify(state));
+      parity_at_seq=NULL`).run(roomId, appliedSeq, eventId, appliedSeq, stored);
 }
 
 // Messages at or below projection.messagesArchive.throughSeq were moved out of
@@ -403,6 +460,7 @@ function resetRoom(store, roomId) {
     store.db.prepare("DELETE FROM messages WHERE room_id=?").run(roomId);
     store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
     store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+    deleteStateParts(store.db, roomId);
   });
 }
 
@@ -428,6 +486,47 @@ function diagnoseBlock(db, roomId) {
     }
   }
   return null;
+}
+
+// r52: diagnose from the backfill's own resume point instead of sequence 0.
+// diagnoseBlock replays the whole room log; for muse-room (about 14k events)
+// that was 35.8 s of CPU in one integrity tick on a shared 4-CPU box, over
+// the production Durable Object's 30 s cpu_ms, and the head-moved
+// re-diagnosis runs it with no deadline. The cursor already holds the state
+// the backfill resumes from (state_json at applied_seq, anchored to the
+// event id it names), so the question "does this room move past its block
+// now" only needs the events after it: through the old blocked sequence on a
+// re-diagnosis, or to the first failure on a fresh park. Returns undefined
+// when there is no usable snapshot (no cursor, torn or stale snapshot, a
+// rewritten anchor event), and the caller falls back to the full replay.
+function diagnoseFromCursor(db, roomId, upTo) {
+  const cursor = db.prepare("SELECT applied_seq, applied_event_id, state_seq, state_json FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  if (!cursor || typeof cursor.state_json !== "string" || cursor.state_seq !== cursor.applied_seq || !(cursor.applied_seq > 0)) return undefined;
+  if (!(Number.isInteger(upTo) && upTo > cursor.applied_seq)) return undefined;
+  const anchor = db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, cursor.applied_seq);
+  if (!anchor || anchor.id !== cursor.applied_event_id) return undefined;
+  let state;
+  try { state = JSON.parse(cursor.state_json); } catch { return undefined; }
+  const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
+    .all(roomId, cursor.applied_seq, upTo);
+  for (const row of rows) {
+    try {
+      state = compactState(applyEvent(state, JSON.parse(row.body)));
+    } catch (error) {
+      return { sequence: row.sequence, eventId: row.id, error: error.message };
+    }
+  }
+  return null;
+}
+
+function rediagnoseBlock(db, roomId, blockedSeq) {
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (maxSeq >= head && Number.isInteger(blockedSeq) && blockedSeq > 0) {
+    const resumed = diagnoseFromCursor(db, roomId, Math.min(blockedSeq, head));
+    if (resumed !== undefined) return resumed;
+  }
+  return diagnoseBlock(db, roomId);
 }
 
 // Record (or refresh) a room's block. Returns true when the block is new or
@@ -492,7 +591,7 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
     if (head !== row.head_seq) {
-      const block = diagnoseBlock(store.db, row.room_id);
+      const block = rediagnoseBlock(store.db, row.room_id, row.sequence);
       if (!block) clearBlock(store, row.room_id);
       else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
       continue;
@@ -506,7 +605,7 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
     if (Date.now() - row.last_diagnosed_at < MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS) continue;
     if (Date.now() > deadline) break;
     periodicLeft -= 1;
-    const block = diagnoseBlock(store.db, row.room_id);
+    const block = rediagnoseBlock(store.db, row.room_id, row.sequence);
     if (!block) { clearBlock(store, row.room_id); continue; }
     const changed = row.sequence !== block.sequence || row.event_id !== block.eventId || row.error !== block.error;
     if (changed) {
@@ -528,11 +627,11 @@ function loadState(db, roomId, cursor) {
     return current;
   };
   if (typeof cursor.state_json === "string" && cursor.state_seq === cursor.applied_seq) {
-    try { return { state: JSON.parse(cursor.state_json), seq: cursor.applied_seq }; }
+    try { return { state: readCursorState(db, roomId, cursor.state_json), seq: cursor.applied_seq }; }
     catch { /* a torn snapshot replays from the log */ }
   }
   if (typeof cursor.state_json === "string" && Number.isInteger(cursor.state_seq) && cursor.state_seq >= 0 && cursor.state_seq < cursor.applied_seq) {
-    try { return { state: replayFrom(cursor.state_seq, JSON.parse(cursor.state_json)), seq: cursor.applied_seq }; }
+    try { return { state: replayFrom(cursor.state_seq, readCursorState(db, roomId, cursor.state_json)), seq: cursor.applied_seq }; }
     catch { /* fall through to a full replay */ }
   }
   return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
@@ -771,12 +870,13 @@ function rememberSweep(store, roomId) {
 // fields and original posting sequences as well as aggregate count/order.
 // A room still being replayed is left for a later call. Certification is
 // recorded only after all comparisons pass; a mismatch clears it and throws.
-export function checkMessagesParity(store) {
+export function checkMessagesParity(store, { roomId = null } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
+  if (roomId !== null && typeof roomId !== "string") throw new TypeError("roomId must be a string");
   // Hold the writer lock across the comparison and certification. Commit a
   // detected mismatch's invalidation before reporting the failure to callers.
   const result = store.transaction(() => {
-    try { return { value: certifyMessagesParity(store) }; }
+    try { return { value: certifyMessagesParity(store, roomId) }; }
     catch (error) {
       if (!error.message.startsWith("messages parity failed for ")) throw error;
       return { error };
@@ -818,9 +918,19 @@ export function runMessagesParityCheck(store, { report = () => {} } = {}) {
   return { ok: failures.length === 0, checked: 0, roomId: null, failures };
 }
 
-function certifyMessagesParity(store) {
-  const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
-  const roomId = nextParityRoom(store.db, sweepAfter);
+// `target` certifies that one room instead of the sweep's next room (the
+// operator archive door, which must certify the room it is about to archive
+// at its current head). A target that has not replayed to its head is not
+// checked, and the sweep position does not move for a targeted call.
+function certifyMessagesParity(store, target = null) {
+  let roomId;
+  if (target !== null) {
+    if (!messagesBackfillCaughtUp(store.db, target)) return { ok: false, checked: 0, roomId: target, reason: "not_caught_up" };
+    roomId = target;
+  } else {
+    const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
+    roomId = nextParityRoom(store.db, sweepAfter);
+  }
   if (!roomId) return { ok: true, checked: 0 };
   // A failed recheck must not leave an earlier certification usable.
   store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId));
@@ -864,7 +974,7 @@ function certifyMessagesParity(store) {
     }
   }
   store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=applied_seq WHERE room_id=?").run(roomId));
-  rememberSweep(store, roomId);
+  if (target === null) rememberSweep(store, roomId);
   return { ok: true, checked: 1, roomId, ...numbers };
 }
 
