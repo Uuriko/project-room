@@ -152,7 +152,8 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   rooms.create(owner.secret, {
     roomId: "budget-den", title: "Budget den", purpose: "Catalog budget", kind: "personal", displayName: "Budget owner"
   });
-  const coreBody = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
+  const coreBody = await (await rpc(origin, "tools/list", { profile: "core" }, owner.secret)).json();
+  const defaultBody = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   const fullBody = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   const coreTools = coreBody.result.tools;
   const fullTools = fullBody.result.tools;
@@ -160,6 +161,12 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   const fullTokens = JSON.stringify(fullTools).length / 4;
   assert.ok(coreTools.length <= 25 && coreTokens <= 9000,
     `core profile has ${coreTools.length} tools and ${coreTokens} tokens of tool JSON; limits are 25 tools and 9000 tokens`);
+  // The default list is the lean profile now, and it must fit the same
+  // budget with room to spare.
+  const defaultTools = defaultBody.result.tools;
+  assert.equal(defaultBody.result.profile, "lean");
+  assert.ok(JSON.stringify(defaultTools).length / 4 <= 9000,
+    `lean default has ${defaultTools.length} tools and ${JSON.stringify(defaultTools).length / 4} tokens of tool JSON; limit is 9000 tokens`);
   // Keep the existing catalog budget while accounting explicitly for the
   // assistant facade and claim provenance added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
