@@ -8,8 +8,11 @@ import assert from "node:assert/strict";
 import {
   jsonLdScriptTag,
   proofLabelOf,
+  receiptBadgeSvg,
+  receiptEmbedSnippet,
   receiptJsonLd,
   receiptOgFields,
+  receiptShareLinks,
   shareTextOf,
   verdictLineOf,
 } from "../server/receipt-share.mjs";
@@ -107,4 +110,35 @@ test("OG fields put the verdict on the card and the honesty line in the footer",
   assert.equal(fields.subtitle, verdictLineOf(merged));
   assert.deepEqual(fields.badges, ["Server-verified merge", "Project Room Commons", "2026-10-01"]);
   assert.match(fields.footer, /not re-verified/);
+});
+
+test("badge renders the graded verdict in words, never a bare checkmark", () => {
+  for (const [receipt, label] of [
+    [merged, "Server-verified merge"],
+    [workItem, "Room-recorded completion"],
+    [publicWork, "Artifact hash recorded"],
+    [lot, "Ledger-recorded movement"],
+  ]) {
+    const svg = receiptBadgeSvg(receipt);
+    assert.ok(svg.startsWith("<svg"), svg);
+    assert.ok(svg.includes(label), svg);
+    assert.ok(svg.includes("Project Room receipt"), svg);
+    assert.ok(!svg.includes("✓"), svg);
+  }
+  const evil = receiptBadgeSvg({ ...merged, title: "</title><script>alert(1)</script>" });
+  assert.ok(!evil.includes("<script>"), evil);
+  assert.ok(evil.includes("&lt;/title&gt;"), evil);
+});
+
+test("share links carry the visible text and the canonical URL; the embed snippet links the badge to the receipt", () => {
+  const links = receiptShareLinks(merged);
+  assert.equal(links.text, shareTextOf(merged));
+  assert.match(links.x, /^https:\/\/twitter\.com\/intent\/tweet\?text=/);
+  assert.ok(decodeURIComponent(links.x).includes("Server-verified merge"));
+  assert.ok(links.linkedin.includes(encodeURIComponent(links.canonical)));
+  assert.ok(links.email.startsWith("mailto:?subject="));
+  const snippet = receiptEmbedSnippet(merged);
+  assert.ok(snippet.includes(`href="${links.canonical}"`));
+  assert.ok(snippet.includes(`src="${links.canonical}/badge.svg"`));
+  assert.ok(snippet.includes("Server-verified merge"));
 });
