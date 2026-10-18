@@ -737,11 +737,23 @@ const requireBundleComplete = (item, bundle, { required }) => {
 // How a stored replay record answers a new update under the same
 // requestId: "replay" when the record binds this payload (or predates the
 // binding), "conflict" when it binds a different payload, null when the
-// requestId has not landed on this claim.
-export const requestReplayVerdict = (outcomes, requestId, digest) => {
+// requestId has not landed on this claim. HUNT-RACE (2026-10-18): records
+// are tagged with the claim generation that landed them, and the verdict
+// is scoped to that generation — a record from an earlier claim round is
+// neither a replay nor a conflict for this round's write, because the
+// round is a new idempotency scope (first-party clients derive
+// requestIds from the item, the delivery generation and the member, and
+// the delivery generation restarts at 0 every round, so a round-1
+// derived id deterministically names round 2's first write). Untagged
+// records predate the tagging and bind as before. The route's reviewer
+// tombstone (a seen requestId held to its bound actor) is a separate
+// check over the ledger's existence and is deliberately not scoped here.
+export const requestReplayVerdict = (outcomes, requestId, digest, generation) => {
   if (!outcomes || !Object.hasOwn(outcomes, requestId)) return null;
   const record = outcomes[requestId];
   if (typeof record === "string") return "replay";
+  if (Number.isSafeInteger(record.generation) && Number.isSafeInteger(generation)
+    && record.generation !== generation) return null;
   return record.digest === digest ? "replay" : "conflict";
 };
 const requestOutcomeRecordOf = record => {
@@ -750,6 +762,10 @@ const requestOutcomeRecordOf = record => {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
   if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
   if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
+  // HUNT-RACE: the claim generation that landed this record, when the
+  // writer tagged it (see requestReplayVerdict). Malformed tags lose the
+  // tag, never the record.
+  const generation = Number.isSafeInteger(record.generation) && record.generation >= 0 ? record.generation : undefined;
   // Reviewer replay authority is never inferred from legacy timestamps or
   // digest-only records. Malformed provenance loses only this extra authority.
   let reviewer;
@@ -765,7 +781,9 @@ const requestOutcomeRecordOf = record => {
         basis: reviewBasisOf(value.basis), readingAckDigest: value.readingAckDigest });
     } catch { /* old or malformed provenance cannot authorize reviewer replay */ }
   }
-  return Object.freeze({ at: record.at, digest: record.digest, ...(reviewer ? { reviewer } : {}) });
+  return Object.freeze({ at: record.at, digest: record.digest,
+    ...(generation !== undefined ? { generation } : {}),
+    ...(reviewer ? { reviewer } : {}) });
 };
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
@@ -776,11 +794,11 @@ const requestOutcomesOf = value => {
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({
+const recordRequestOutcome = (current, key, at, digest, generation) => requestOutcomesOf({
   // Reserve the new record's slot before adding it: integer-like ids sort
   // ahead of string keys and must not be evicted by the normalization cap.
   ...Object.fromEntries(Object.entries(current ?? {}).filter(([id]) => id !== key).slice(-(MAX_REQUEST_OUTCOMES - 1))),
-  [key]: { at, digest },
+  [key]: { at, digest, ...(Number.isSafeInteger(generation) && generation >= 0 ? { generation } : {}) },
 });
 // The route seals a successful reviewer exit after all same-request writes
 // (including readingAck). This metadata is server-created, never request input.
@@ -874,6 +892,12 @@ export const workOf = value => {
     // round's first delivery; the counter is what makes "first" a fact
     // the kernel can check rather than a narrative.
     deliveryGeneration: Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration > 0 ? value.deliveryGeneration : 0,
+    // HUNT-RACE: how many claim rounds this item has opened (0 = never
+    // claimed, or claimed only before this counter existed). claimWork
+    // and a fresh reassignWork increment it; it never resets, so it can
+    // scope records to the round that wrote them (the idempotency
+    // ledger's generation tag) even when two rounds share a claimedAt.
+    claimGeneration: Number.isSafeInteger(value.claimGeneration) && value.claimGeneration > 0 ? value.claimGeneration : 0,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
@@ -1073,6 +1097,13 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     // to inherit any residue that reached the pool anyway (bug sweep
     // 2026-10-16 F1 — the lease sweep once leaked exactly this).
     ci: null, deliveryGeneration: 0, delivery: null, verification: null,
+    // HUNT-RACE: a fresh claim opens a new claim generation. The
+    // idempotency ledger keeps its records (the route's reviewer
+    // tombstone reads their existence), but every record is tagged with
+    // the generation that landed it, and this bump is what makes the
+    // previous round's records inert for this round's writes — see
+    // requestReplayVerdict.
+    claimGeneration: (item.claimGeneration ?? 0) + 1,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -1198,7 +1229,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   const digest = key === undefined ? undefined
     : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
   if (key !== undefined) {
-    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest);
+    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest, item.claimGeneration ?? 0);
     if (verdict === "replay") return item;
     if (verdict === "conflict") fail("work_claim_conflict",
       `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
@@ -1356,7 +1387,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
-      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest) });
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest, item.claimGeneration ?? 0) });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
@@ -1578,6 +1609,9 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const fresh = item.state === "unclaimed";
   const hours = fresh ? roomWorkClaimConfig(room).defaultLeaseHours : null;
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
+    // A fresh assignment opens a claim round without passing through
+    // claimWork: the claim generation bumps here too (see claimWork).
+    claimGeneration: (item.claimGeneration ?? 0) + 1,
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
   // A fresh assignment opens a fresh round (delivery state cleared,
@@ -1590,7 +1624,8 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     : item.state === "delivered"
       ? { state: "in_progress", verification: null }
       : {};
-  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+  const reassigned = { ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) };
+  return withHistory(reassigned,
     atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
