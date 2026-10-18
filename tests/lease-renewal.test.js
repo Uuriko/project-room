@@ -180,15 +180,19 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 // Part 2: the pure renewWork state machine
 // ---------------------------------------------------------------------------
 test("renewWork starts a fresh lease window from now", () => {
+  // B1: the fresh window starts from now. A2: an omitted leaseHours reuses
+  // the claim's current window duration (6h here) — the room default (24h)
+  // governs claim creation only and no longer resets the window on renew
+  // (RQ-12 ruling, 2026-10-18; this pin previously asserted the default).
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
   assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 8 * H)); // now + the current window's 6h
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
 });
 
 test("renewWork records the caller's note in history", () => {
@@ -252,8 +256,20 @@ const claimedRegistry = async (claimBody = { leaseHours: 6 }) => {
   return registry;
 };
 
+// Backdate a stored claim's window by 1h (same 6h duration): under the
+// RQ-12 semantics (A2 reuse-duration + B1 from-now) a renew at the claim
+// instant barely moves the expiry, so extension assertions need elapsed
+// time in the window to be deterministic instead of relying on the old
+// silent upgrade to the 24h room default.
+const backdateWindow = registry => {
+  const item = registry.get("room1", "w1");
+  const start = Date.parse(item.leaseStartAt) - H;
+  registry.set("room1", { ...item, leaseStartAt: iso(start), leaseExpiresAt: iso(start + 6 * H) });
+};
+
 test("handler: renew extends the lease on a fresh public check-in", async () => {
   const registry = await claimedRegistry();
+  backdateWindow(registry);
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
     storeMessages: [liveMessage()], registry });
@@ -265,10 +281,14 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
 
 test("handler: renew without a progress message id extends the lease", async () => {
   const registry = await claimedRegistry();
+  backdateWindow(registry);
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
   assert.equal(error, null);
   assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  // A2 at the HTTP door: the omitted leaseHours reuses the claim's 6h
+  // window — the renewed expiry is ~6h out, not the 24h room default.
+  assert.ok(Date.parse(out.value.leaseExpiresAt) - Date.parse(out.value.leaseStartAt) === 6 * H);
 });
 
 test("handler: renew with a DM check-in is refused", async () => {

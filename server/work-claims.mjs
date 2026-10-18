@@ -1078,11 +1078,20 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
-// Renew a claim's lease: starts a fresh lease window from now, extending
-// leaseExpiresAt by the lease duration (explicit leaseHours, else the
-// room's default). Only the owner may renew, only while the claim is
-// active, and only when the claim carries a lease (claims that opted out
-// of leases have nothing to renew; lapsed leases must be claimed again).
+// Renew a claim's lease: starts a fresh lease window from now (RQ-12
+// ruling B1: extension runs from now, never stacked on the old expiry —
+// stacking would let renewals bank unbounded lease and defeat the
+// lease's anti-squatting purpose), extending leaseExpiresAt by the lease
+// duration. Duration resolution (RQ-12 ruling A2): an explicit
+// leaseHours wins; explicit null opts out of leases; an OMITTED
+// leaseHours reuses the claim's CURRENT window duration
+// (leaseExpiresAt − leaseStartAt) — the room default governs claim
+// creation only and must not silently reset an existing claim's window
+// (it truncated a 72h claim to 24h and upgraded a 6h claim to 24h).
+// Only the owner may renew, only while the claim is active, and only
+// when the claim carries a lease (claims that opted out of leases have
+// nothing to renew; lapsed leases must be claimed again — a renew after
+// expiry is refused below, never a resurrection).
 // The route layer requires the owner's public progress message — posted
 // in the room after the prior lease start — before calling this; the pure
 // machine records the renewal, never the message check.
@@ -1098,7 +1107,16 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
   // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  // A2: an omitted leaseHours reuses the current window's duration,
+  // derivable from the live window (both stamps are set whenever a lease
+  // exists — the guards above have already refused leaseless and lapsed
+  // claims). The room default is only the fallback for a window whose
+  // stamps cannot be parsed (no such claim is produced by claimWork).
+  const currentWindowHours = (Date.parse(item.leaseExpiresAt) - Date.parse(item.leaseStartAt ?? item.claimedAt)) / 3600 / 1000;
+  const effective = wanted === null ? null
+    : wanted ?? (Number.isFinite(currentWindowHours) && currentWindowHours > 0
+      ? currentWindowHours
+      : roomWorkClaimConfig(room).defaultLeaseHours);
   const renewed = { ...item,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };

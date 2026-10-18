@@ -110,7 +110,10 @@ for further work.
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
 
 Only the holder can renew, and only while the claim is active and the lease
-has not lapsed. A heartbeat with no message extends the lease. When
+has not lapsed. A heartbeat with no message extends the lease. The renewed
+window starts from now; when `leaseHours` is omitted the claim's current
+window duration is reused (the room default applies at claim time only),
+and `leaseHours: null` removes the lease. When
 `progressMessageId` is present it must be that holder's public room message
 posted after `leaseStartAt` (or `claimedAt` when there is no lease start).
 A DM, someone else's message, or an older message is refused. A lapsed lease
