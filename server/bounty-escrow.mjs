@@ -2862,6 +2862,58 @@ export class BountyEscrow {
     return { paid: toCredits(earner), fee: toCredits(fee), signed: movement?.receipt ? [movement.receipt] : [] };
   }
 
+  // Due-filter for closeEpoch (AUDIT-50X X-06 / M-2): true exactly when a
+  // keeper pass over this bounty could act — or could throw, which
+  // closeEpoch converts into a summary.failed entry, an observable outcome
+  // the filter must preserve. Without it, closeEpoch wrapped EVERY open
+  // bounty in its own isolated transaction (#3275) just to learn it was
+  // not due: ~2 statements of pure wrapper overhead per not-due bounty,
+  // scaling O(open bounties) per epoch call.
+  //
+  // The enumeration below mirrors _keeperPass condition for condition,
+  // plus closeEpoch's own approved sweep. It is proven against _keeperPass
+  // by tests/bounty-escrow-due-filter.test.js, which enumerates every
+  // acting condition including the boundary operators:
+  //   approved  -> the sweep runs unconditionally (closeEpoch branch);
+  //   proposed  -> now >= deadlineMs, and any snooze has lapsed
+  //                (snoozedUntilMs null or now >= snoozedUntilMs);
+  //   accepted  -> challengeEndsMs set and now >= challengeEndsMs;
+  //   submitted -> now >= deadlineMs (not in closeEpoch's SELECT, but the
+  //                pass acts on it, so the predicate stays exact);
+  //   funded / claimed -> now >= deadlineMs;
+  //   disputed  -> disputeId set and no recorded resolution, and the
+  //                dispute record is terminal (resolved/withdrawn: the
+  //                inline settle must have thrown, retry now), or the
+  //                dispute has been open past DISPUTE_TIMEOUT_MS
+  //                (strict >, matching the pass). The terminal condition
+  //                lives in the dispute record, not the bounty row, so a
+  //                MISSING record is also due here: _keeperPass throws
+  //                via _disputes.get for it, and skipping it would
+  //                silently drop the summary.failed entry the epoch
+  //                records today.
+  // Every other state, and every bounty below its threshold, makes
+  // _keeperPass return null without touching anything — those are the
+  // bounties closeEpoch now skips without opening a transaction.
+  _keeperDue(bounty, now) {
+    switch (bounty.state) {
+      case "approved": return true;
+      case "proposed": return now >= bounty.deadlineMs
+        && (bounty.snoozedUntilMs === null || now >= bounty.snoozedUntilMs);
+      case "accepted": return bounty.challengeEndsMs !== null && now >= bounty.challengeEndsMs;
+      case "submitted":
+      case "funded":
+      case "claimed": return now >= bounty.deadlineMs;
+      case "disputed": {
+        if (!bounty.disputeId || bounty.resolution) return false;
+        const dispute = this._disputeRecords?.get(bounty.disputeId);
+        if (!dispute) return true;
+        if (dispute.state === "resolved" || dispute.state === "withdrawn") return true;
+        return bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS;
+      }
+      default: return false;
+    }
+  }
+
   // One mechanical pass over a single bounty; returns { action, signed } or null.
   _keeperPass(bounty, now, at) {
     const actor = RULE_ACTOR;
@@ -2930,6 +2982,12 @@ export class BountyEscrow {
       const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
+        // X-06 due-filter: skip bounties the keeper pass provably cannot
+        // act on (see _keeperDue for the condition-for-condition
+        // enumeration) instead of opening the isolated transaction below
+        // to learn they are not due. The acting path is unchanged,
+        // byte for byte, inside the transaction.
+        if (!this._keeperDue(bounty, now)) continue;
         // #3275: each bounty's keeper action is atomic. Keeper actions are
         // multi-move (_settleDispute, _sweep), so catching an error inside
         // the single epoch transaction would COMMIT whatever moves already
