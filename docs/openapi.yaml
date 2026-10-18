@@ -14929,6 +14929,15 @@ paths:
                     properties:
                       requireIndependentReview: { type: boolean }
                       requireOwnerDecision: { type: boolean }
+                      pacing:
+                        description: "#661 anti-shout pacing policy; null when the room never set one"
+                        type: [object, "null"]
+                        properties:
+                          enabled: { type: boolean }
+                          maxUnnamedAgentReplies: { type: integer, minimum: 0, maximum: 16, default: 2 }
+                          revision: { type: integer }
+                          setById: { type: [string, "null"] }
+                          setAt: { type: [string, "null"] }
                   coordinationNorms:
                     type: object
                     properties:

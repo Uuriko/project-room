@@ -76,7 +76,7 @@ test("the projection keeps refs and drops message, file, and result bodies", () 
   assert.deepEqual(owner.decisions, [{ workItemId: "old", decision: "rejected", actorId: "owner", eventId: "d1", completionEventId: "c1", evidenceVersion: "ev1" }]);
   assert.ok(owner.focusWork.some(item => item.id === "live" && item.nextAction === "triaged_handoff" && item.nextMemberId === "owner"));
   assert.equal(owner.focusWork.some(item => item.id === "old"), false);
-  assert.deepEqual(owner.policy, { requireIndependentReview: true, requireOwnerDecision: false, revision: 2 });
+  assert.deepEqual(owner.policy, { requireIndependentReview: true, requireOwnerDecision: false, pacing: null, revision: 2 });
   assert.deepEqual(owner.cursors, { roomSequence: 12, caughtUp: 4, eventsQuery: "after", resumeAfter: 4 });
   assert.ok(owner.fileRefs.some(ref => ref.kind === "evidence" && ref.url === "https://example.test/result" && ref.record === "receipt"));
   assert.deepEqual(owner.locks.map(lock => [lock.holderId, lock.paths[0]]), [["worker", "src/app.js"]]);

@@ -9,7 +9,7 @@
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
-import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { pinnedMessages, roomKind, roomPolicy, roomPacingPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
@@ -84,6 +84,8 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *     requireIndependentReview: boolean,
  *     requireOwnerDecision: boolean,
  *     trust: boolean           // Room Trust. true (open) until the owner flips it off
+ *     pacing: null | { enabled: true, maxUnnamedAgentReplies: number, revision: number, setById: string, setAt: string }
+ *                              // #661 anti-shout pacing; null = room never set it
  *   },
  *   coordinationNorms: {       // room-wide defaults; an agent honours these
  *     maxClaimsPerAgentPerCycle: number, // 1: one write claim per agent at a time
@@ -192,7 +194,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     // keeps the owner non-exempt on DMs.)
     pinnedResources: pinnedMessages(state).filter(pin => messageVisibleToViewer(pin.message, viewerId, floor)).map(pinnedOf),
     repoHead: null,
-    participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },
+    participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled, pacing: roomPacingPolicy(state) },
     coordinationNorms: { ...COORDINATION_NORMS },
     eventCursor: sequence,
     generatedAt: now

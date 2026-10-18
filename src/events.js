@@ -18,6 +18,9 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
+  // #661: per-room anti-shout pacing policy for agent replies. Sibling of
+  // room.policy_set (not one of its boolean fields): it carries a number.
+  ROOM_PACING_POLICY_SET: "room.pacing_policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   // Owner kill-switch for the priced-tool gate. Default enabled when absent.
   ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
@@ -166,6 +169,159 @@ export function roomPolicy(state) {
   const stored = state?.room?.policy ?? {};
   return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
 }
+
+// --- #661 anti-shout pacing -------------------------------------------------
+// A per-room pacing policy for AGENT replies, server-enforced in postMessage
+// (the reducer every message.posted passes through, on every surface).
+// Event-sourced like the other room policies: room.pacing_policy_set writes
+// state.room.pacingPolicy, and a room that never records it has no pacing —
+// its behaviour is exactly today's. Default max replies to an unnamed
+// message is 2, the category norm named in issue #661's evidence.
+//
+// Governed traffic is deliberately narrow: an agent member's plain room
+// thread reply (replyToId set; no toMemberId, so not a DM thread; no
+// workItemId, so not a work draft; no reply-request fields, so not a
+// directed answer a named member was asked for). Human posts are never
+// governed, and the parent message itself is never delayed or reordered.
+// A governed reply that is out of turn or past the cap is REFUSED with a
+// named code the agent can see (pacing_out_of_turn / pacing_cap_exceeded) —
+// never queued silently and never dropped without a signal.
+export const PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES = 2;
+export const PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT = 16;
+export const PACING_OUT_OF_TURN_CODE = "pacing_out_of_turn";
+export const PACING_CAP_EXCEEDED_CODE = "pacing_cap_exceeded";
+
+export function roomPacingPolicy(state) {
+  const stored = state?.room?.pacingPolicy;
+  if (!stored || stored.enabled !== true) return null;
+  return {
+    enabled: true,
+    maxUnnamedAgentReplies: Number.isSafeInteger(stored.maxUnnamedAgentReplies)
+      ? stored.maxUnnamedAgentReplies : PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
+
+// Deterministic rank from stable inputs only (message id + member id): two
+// FNV-1a passes in pure JS, so the reducer — which also runs in the browser
+// client — gets the identical order on every platform with no clock, no
+// randomness and no node:crypto. This is the "jitter": responders are
+// shuffled per parent message, but the shuffle is a recorded fact of the
+// parent's id, so tests assert the exact sequence.
+function pacingRank(parentMessageId, memberId) {
+  const text = `${parentMessageId}:${memberId}`;
+  let hi = 0x811c9dc5, lo = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    hi = Math.imul(hi ^ text.charCodeAt(i), 0x01000193) >>> 0;
+    lo = Math.imul(lo ^ (text.charCodeAt(text.length - 1 - i) + i), 0x85ebca6b) >>> 0;
+  }
+  return `${hi.toString(16).padStart(8, "0")}${lo.toString(16).padStart(8, "0")}`;
+}
+
+// The deterministic responder sequence for a broadcast parent: every active
+// agent member except the parent's author, in pacing-rank order (rank, then
+// member id as the total-order tiebreak).
+export function pacingBroadcastOrder(state, parent) {
+  return Object.values(state?.members ?? {})
+    .filter(member => member && member.kind === "agent" && member.active !== false
+      && typeof member.id === "string" && member.id !== parent?.authorId)
+    .map(member => member.id)
+    .sort((a, b) => {
+      const rankA = pacingRank(parent.id, a), rankB = pacingRank(parent.id, b);
+      return rankA < rankB ? -1 : rankA > rankB ? 1 : a < b ? -1 : a > b ? 1 : 0;
+    });
+}
+
+// Mention tokens, mirroring the room's own rule (growth-mentions /
+// messageMentionsMember): "@" + displayName or "@" + member id, followed by
+// end-of-string or whitespace. @channel and @all are the broadcast tokens.
+const isPacingBoundary = ch => ch == null || /\s/.test(ch);
+function bodyMentionsToken(body, token) {
+  let from = 0;
+  while (from <= body.length) {
+    const i = body.indexOf(token, from);
+    if (i === -1) return false;
+    if (isPacingBoundary(body[i + token.length])) return true;
+    from = i + 1;
+  }
+  return false;
+}
+export function isBroadcastMessage(body) {
+  return typeof body === "string"
+    && (bodyMentionsToken(body, "@channel") || bodyMentionsToken(body, "@all"));
+}
+function parentNamesAnAgent(state, parent) {
+  if (typeof parent?.body !== "string") return false;
+  for (const member of Object.values(state?.members ?? {})) {
+    if (!member || member.kind !== "agent" || typeof member.id !== "string") continue;
+    if (typeof member.displayName === "string" && member.displayName.trim()
+      && bodyMentionsToken(parent.body, `@${member.displayName}`)) return true;
+    if (!member.id.includes("@") && !/\s/.test(member.id)
+      && bodyMentionsToken(parent.body, `@${member.id}`)) return true;
+  }
+  return false;
+}
+
+function threadRootOf(state, message) {
+  const byId = new Map((state.messages ?? []).map(m => [m.id, m]));
+  let root = message, seen = new Set();
+  while (root?.replyToId && !seen.has(root.id)) {
+    seen.add(root.id);
+    const next = byId.get(root.replyToId);
+    if (!next) break;
+    root = next;
+  }
+  return root;
+}
+const threadAgentReplies = (state, rootId) => (state.messages ?? [])
+  .filter(m => m.replyToId && threadRootOf(state, m)?.id === rootId
+    && state.members?.[m.authorId]?.kind === "agent");
+
+// The pacing gate itself. Throws an Error carrying .code (and .pacing
+// detail) when the reply is refused; returns silently when it may land.
+// Pure in (state, incoming): replay of an admitted log re-admits the same
+// replies, because the counts and order derive only from recorded state.
+function enforcePacing(state, incoming, actor) {
+  const policy = roomPacingPolicy(state);
+  if (!policy) return;
+  if (actor.kind !== "agent") return;
+  const data = incoming.data;
+  if (!data.replyToId || data.toMemberId || data.workItemId) return;
+  // Redacted rewrites carry a null body: they are already-admitted posts
+  // being replayed from a rewritten log, never new replies to gate.
+  if (typeof data.body !== "string") return;
+  const parent = (state.messages ?? []).find(m => m.id === data.replyToId);
+  if (!parent) return; // unknown parent: postMessage refuses it itself
+  const root = threadRootOf(state, parent);
+  if (!root || root.toMemberId || typeof root.body !== "string") return;
+  const replies = threadAgentReplies(state, root.id);
+  if (isBroadcastMessage(root.body)) {
+    const order = pacingBroadcastOrder(state, root);
+    const slot = order.indexOf(actor.id);
+    if (slot === -1) return; // not a room agent responder (inactive/absent)
+    const responded = new Set(replies.map(m => m.authorId));
+    if (responded.has(actor.id)) return; // sequence governs first answers
+    if (slot !== responded.size) {
+      const error = new Error(
+        `Pacing: broadcast replies are sequential in this room. Responder ${responded.size + 1} of ${order.length} is ${order[responded.size]}; ${actor.id} is responder ${slot + 1}. Wait for your turn and post again.`);
+      error.code = PACING_OUT_OF_TURN_CODE;
+      error.pacing = { parentMessageId: root.id, slot, admittedResponders: responded.size, expectedResponderId: order[responded.size] };
+      throw error;
+    }
+    return;
+  }
+  if (parentNamesAnAgent(state, root)) return; // named: asked directly
+  if (replies.length >= policy.maxUnnamedAgentReplies) {
+    const error = new Error(
+      `Pacing: this room allows at most ${policy.maxUnnamedAgentReplies} agent replies to an unnamed message, and message ${root.id} already has ${replies.length}. This reply was not posted.`);
+    error.code = PACING_CAP_EXCEEDED_CODE;
+    error.pacing = { parentMessageId: root.id, maxUnnamedAgentReplies: policy.maxUnnamedAgentReplies, admittedReplies: replies.length };
+    throw error;
+  }
+}
+// --- end #661 pacing ---
 
 // Room Trust is one binary kill-switch, separate from Bond and from review
 // policy. Default is open: no stored value means cross-owner assign and wake
@@ -621,6 +777,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
+    [EVENT_TYPES.ROOM_PACING_POLICY_SET]: setPacingPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
@@ -828,6 +985,24 @@ function setRoomPolicy(state, incoming) {
   state.room.policy = {
     requireIndependentReview: incoming.data.requireIndependentReview,
     requireOwnerDecision: incoming.data.requireOwnerDecision,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function setPacingPolicy(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room pacing policy");
+  if (typeof incoming.data.enabled !== "boolean") throw new Error("Room pacing policy requires enabled as true or false");
+  const max = incoming.data.maxUnnamedAgentReplies ?? PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES;
+  if (!Number.isSafeInteger(max) || max < 0 || max > PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT) {
+    throw new Error(`Room pacing policy requires maxUnnamedAgentReplies as an integer from 0 to ${PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT}`);
+  }
+  const previous = state.room.pacingPolicy ?? null;
+  state.room.pacingPolicy = {
+    enabled: incoming.data.enabled,
+    maxUnnamedAgentReplies: max,
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
     setAt: incoming.at
@@ -1297,6 +1472,9 @@ function postMessage(state, incoming) {
     error.code = CHANNEL_ARCHIVED_CODE;
     throw error;
   }
+  // #661: pacing gate for agent replies. Reply-request posts (requestMode
+  // set) are directed answers to a named member and stay out of scope.
+  if (!requestMode) enforcePacing(state, incoming, actor);
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({

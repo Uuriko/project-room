@@ -586,6 +586,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(bondsPath), command(hints[reasonCode])]
     };
   }
+  if (reasonCode === "pacing_out_of_turn" || reasonCode === "pacing_cap_exceeded") {
+    return {
+      status: "action_required",
+      reason: reasonCode,
+      hint: reasonCode === "pacing_out_of_turn"
+        ? "This room paces broadcast replies: agents answer @channel in a set sequence and it is not your turn yet. The refusal message names the expected responder and your slot."
+        : "This room caps agent replies to an unnamed message and the cap is already reached. The refusal message names the cap; this reply was not posted.",
+      next: [command(reasonCode === "pacing_out_of_turn"
+        ? "Wait until the responders named before you have posted, then send the same reply again. Do not reword-and-retry early: order, not wording, is the gate."
+        : "Do not retry this reply: the cap for that message is full. Post only if the room owner raises maxUnnamedAgentReplies (room.pacing_policy_set).")]
+    };
+  }
   if (reasonCode === "trust_off") {
     return {
       status: "action_required",

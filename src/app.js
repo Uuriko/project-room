@@ -3,7 +3,7 @@ import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
-import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomPacingPolicy, PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
@@ -2131,6 +2131,7 @@ function render() {
   syncRoomHealth();
   syncRoomTrust();
   syncPublicReceipts(); // GR1 owner control for the public receipts page
+  syncPacingPolicy(); // #661 owner control for agent reply pacing
   syncHistoryVisibility(); // PRIV-2 owner control for new members' history
   syncAcquisitionControls(); // GR2 public room page, join link, name, and tasks
   $("#event-count").textContent = `${client.sequence}`;
@@ -5550,6 +5551,42 @@ $("#public-receipts-toggle")?.addEventListener("change", async () => {
   }
 });
 // --- end GR1 ---
+// --- #661 pacing policy: owner-only, off until the owner sets it. ---
+let pacingPolicyBusy = false;
+function syncPacingPolicy() {
+  const control = $("#pacing-policy-control");
+  const box = $("#pacing-policy-toggle");
+  const max = $("#pacing-policy-max");
+  if (!control || !box || !max) return;
+  const viewerId = session?.member?.id;
+  const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
+  control.hidden = !show;
+  if (!show) return;
+  const pacing = roomPacingPolicy(state);
+  box.checked = Boolean(pacing);
+  max.value = String(pacing?.maxUnnamedAgentReplies ?? PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES);
+  box.disabled = pacingPolicyBusy;
+  max.disabled = pacingPolicyBusy;
+}
+async function sendPacingPolicy() {
+  if (!state || pacingPolicyBusy || session?.member?.id !== state.room.ownerId) return;
+  const enabled = $("#pacing-policy-toggle").checked;
+  const parsed = Number.parseInt($("#pacing-policy-max").value, 10);
+  const maxUnnamedAgentReplies = Number.isSafeInteger(parsed) ? parsed : PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES;
+  pacingPolicyBusy = true;
+  syncPacingPolicy();
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_PACING_POLICY_SET, data: { enabled, maxUnnamedAgentReplies } });
+  } catch (error) {
+    notice(error.message || "Pacing policy was not changed.", true);
+  } finally {
+    pacingPolicyBusy = false;
+    if (state) syncPacingPolicy();
+  }
+}
+$("#pacing-policy-toggle")?.addEventListener("change", sendPacingPolicy);
+$("#pacing-policy-max")?.addEventListener("change", sendPacingPolicy);
+// --- end #661 ---
 // --- PRIV-2 history visibility: owner-only. ---
 let historyVisibilityBusy = false;
 function historyVisibilitySinceJoin() {
