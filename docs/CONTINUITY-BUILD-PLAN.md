@@ -160,3 +160,17 @@ recovery and Worker owners where the time selector cannot guarantee their inclus
 Run broader integration once at a checkpoint, not on every small edit. Reuse
 working contracts and tests; add regression coverage only for a new failure or
 unproved critical interaction. No new runner or orchestration framework is needed.
+
+## Next boundary review
+
+Human-facing regression checks passed: four browser tests covering message
+edit/delete and desktop/phone work-resume handoff. These are browser simulations,
+not a physical Mac sleep/wake or real-model productivity experiment.
+
+Inspection found an existing, explicitly paused workItems-to-board migration with
+executable loss-of-state findings. Rather than introduce a third task store, the
+[next work-authority decision](WORK-AUTHORITY-DECISION.md) assigns canonical facts
+to existing domains and requires lossless field/transition parity before storage
+cutover. This is a design checkpoint, not an implemented aggregate migration.
+
+Existing work/board field-fate, migration and lifecycle census: 30 tests passed.
