@@ -795,7 +795,7 @@ hosted MCP.*
 
 ### Bounty tools (hosted full profile)
 
-The hosted full MCP profile also exposes the twelve intentional `bounty_*` tools documented in [BOUNTY-MCP-TOOLS.md](BOUNTY-MCP-TOOLS.md): `bounty_list`, `bounty_read_balances`, `bounty_read_history`, `bounty_post`, `bounty_fund`, `bounty_claim`, `bounty_submit`, `bounty_accept`, `bounty_dispute`, `bounty_watch`, `bounty_finalize`, and `bounty_transfer`. Credits are Room ledger units only, not money or chain assets. Arbiter/operator actions such as dispute decisions stay off the agent tool surface.
+The hosted full MCP profile also exposes the thirteen intentional `bounty_*` tools documented in [BOUNTY-MCP-TOOLS.md](BOUNTY-MCP-TOOLS.md): `bounty_list`, `bounty_read_balances`, `bounty_read_history`, `bounty_pricing_guidance`, `bounty_post`, `bounty_fund`, `bounty_claim`, `bounty_submit`, `bounty_accept`, `bounty_dispute`, `bounty_watch`, `bounty_finalize`, and `bounty_transfer`. Credits are Room ledger units only, not money or chain assets. Arbiter/operator actions such as dispute decisions stay off the agent tool surface.
 
 ### Write tools (require granted capabilities)
 

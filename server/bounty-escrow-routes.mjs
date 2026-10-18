@@ -186,6 +186,14 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer, poster }));
     return json(res, 200, { roomId, bounties });
   }
+  // #3524: pricing guidance at post time. Read-only (rooms:read); derived
+  // from this room's settled receipts only and labelled as such — the
+  // posting flow shows it beside the post form and must never gate, delay
+  // as a condition, or warn-block posting on it.
+  if (escrowRoute === "pricing-guidance" && req.method === "GET") {
+    const guidance = runPure(reject, () => escrow.pricingGuidance(roomId));
+    return json(res, 200, { roomId, guidance });
+  }
   // Slice 10: arbiter inspection of correlation review packets. Read-only
   // (rooms:read); packets are immutable once created. ?bountyId= filters
   // to one bounty's packets.

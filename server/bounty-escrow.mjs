@@ -592,6 +592,64 @@ export function toMillis(amount) {
 }
 export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
+// --- pricing guidance at post time (#3524) -----------------------------------
+// The simplest honest derivation the issue's filed text supports: a room's
+// OWN settled receipts, at room level. A settled receipt here is one bounty
+// record carrying a recorded settlement (resolution.settlement, stamped by
+// _recordSettlement alongside the immutable bounty.settled event) whose
+// worker leg actually paid (workerMillis > 0). Failed / unverified
+// settlements pay the worker 0 and never enter the derivation; bounties that
+// have not settled have no settlement record and never enter it either.
+// There is deliberately NO similarity engine, category taxonomy, or
+// cross-room input: "comparable work" in the filed issue names no taxonomy,
+// so the guidance is the room-level range of what settled bounties in this
+// room actually paid, with the count named. Amounts are the worker's settled
+// (net) paid amounts from the settlement records — for verified-complete
+// payouts that is the payout net of the 1% room-pool fee; for partial
+// dispute splits it is the worker leg that settled. Every number is
+// historical: a description of settled receipts, never a recommendation for
+// what a new bounty should pay and never a platform price.
+//
+// Pure: entries are { paidMillis, approvalMode, rubricCriteria } and the
+// result is hand-computable from them — range is min–max of the paid
+// amounts, the typical value is the median (computed in millis; an even
+// count averages the two middle millis, rounded to the nearest milli).
+export function derivePricingGuidance(settledEntries) {
+  const entries = (Array.isArray(settledEntries) ? settledEntries : [])
+    .filter(entry => entry && Number.isSafeInteger(entry.paidMillis) && entry.paidMillis > 0);
+  const settledCount = entries.length;
+  if (settledCount === 0) {
+    return Object.freeze({ source: "settled-receipts", settledCount: 0, coldStart: true,
+      paidRangeCredits: null, medianPaidCredits: null,
+      approvalModes: Object.freeze({}), rubricCriteria: null });
+  }
+  const paidMillis = entries.map(entry => entry.paidMillis).sort((a, b) => a - b);
+  const mid = Math.floor(settledCount / 2);
+  const medianMillis = settledCount % 2 === 1 ? paidMillis[mid]
+    : Math.round((paidMillis[mid - 1] + paidMillis[mid]) / 2);
+  const approvalModes = {};
+  for (const entry of entries) {
+    const mode = typeof entry.approvalMode === "string" && entry.approvalMode ? entry.approvalMode : "legacy";
+    approvalModes[mode] = (approvalModes[mode] ?? 0) + 1;
+  }
+  const criteriaCounts = entries
+    .map(entry => entry.rubricCriteria)
+    .filter(n => Number.isSafeInteger(n) && n > 0);
+  return Object.freeze({
+    source: "settled-receipts",
+    settledCount,
+    coldStart: false,
+    paidRangeCredits: Object.freeze({
+      min: toCredits(paidMillis[0]), max: toCredits(paidMillis[settledCount - 1]),
+    }),
+    medianPaidCredits: toCredits(medianMillis),
+    approvalModes: Object.freeze(approvalModes),
+    rubricCriteria: criteriaCounts.length
+      ? Object.freeze({ min: Math.min(...criteriaCounts), max: Math.max(...criteriaCounts) })
+      : null,
+  });
+}
+
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
 
 // The journal hash core — the ONE computation _append writes with, the
@@ -3052,6 +3110,28 @@ export class BountyEscrow {
         : Object.freeze({ kind: r.actorKind, id: r.actorId }),
       before: r.beforeState, after: r.afterState, track: r.track,
       data: JSON.parse(r.data) }));
+  }
+
+  // Pricing guidance at post time (#3524): the room-level derivation over
+  // this room's settled receipts only (see derivePricingGuidance). Reads the
+  // settlement records already stamped on bounty_records — no new store, no
+  // cross-room read. Read-only: it never writes, never moves credits, and a
+  // caller must never gate posting on it.
+  pricingGuidance(roomId) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const rows = this.db.prepare(
+        "SELECT resolution_json, approval_mode, rubric_json, rubric_hash, criteria FROM bounty_records WHERE room_id=?").all(roomId);
+      const settled = [];
+      for (const row of rows) {
+        const settlement = row.resolution_json ? JSON.parse(row.resolution_json)?.settlement : null;
+        if (!settlement || !Number.isSafeInteger(settlement.workerMillis) || settlement.workerMillis <= 0) continue;
+        settled.push({ paidMillis: settlement.workerMillis,
+          approvalMode: row.approval_mode ?? "legacy",
+          rubricCriteria: this._rubricOfRow(row).criteria.length });
+      }
+      return Object.freeze({ roomId, ...derivePricingGuidance(settled) });
+    });
   }
 
   metrics(roomId) {

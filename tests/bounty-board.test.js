@@ -203,6 +203,7 @@ test("installBountyBoard reads list, balances, and history for the session membe
     path(suffix) { return `/api/rooms/room1${suffix}`; },
     async request(path) {
       requested.push(path);
+      if (path.endsWith("/bounties/pricing-guidance")) return { roomId: "room1", guidance: { source: "settled-receipts", settledCount: 0, coldStart: true, paidRangeCredits: null, medianPaidCredits: null, approvalModes: {}, rubricCriteria: null } };
       if (path.endsWith("/bounties")) return { roomId: "room1", bounties: [SUBMITTED, PROPOSED] };
       if (path.includes("/credits/balances/")) return { roomId: "room1", balances: BALANCES };
       if (path.includes("/credits/history/")) return { roomId: "room1", receipts: RECEIPTS };
@@ -216,14 +217,16 @@ test("installBountyBoard reads list, balances, and history for the session membe
       "/api/rooms/room1/bounties",
       "/api/rooms/room1/credits/balances/m9",
       "/api/rooms/room1/credits/history/m9",
+      "/api/rooms/room1/bounties/pricing-guidance",
     ]);
     assert.equal(chipText, "2", "count chip shows the bounty count");
     assert.ok(hostHtml.includes("Write the thing"), "bounty rows render");
     assert.ok(hostHtml.includes("Payable 95"), "balance renders");
     assert.ok(hostHtml.includes("lot_bbb"), "receipts render");
     assert.ok(hostHtml.includes('id="bounty-post-form"'), "post form renders");
+    assert.ok(hostHtml.includes("No settled bounties in this room yet"), "cold-start guidance panel renders beside the form (#3524)");
     await panel.sync();
-    assert.equal(requested.length, 3, "a second sync without changes does not refetch");
+    assert.equal(requested.length, 4, "a second sync without changes does not refetch");
   } finally {
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
   }

@@ -173,7 +173,7 @@ const HOSTED_STDIO_WRITE_TOOLS = new Set([
   "room_post_draft", "room_close_work_claim",
 ]);
 const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
-  "bounty_list", "bounty_read_balances", "bounty_read_history",
+  "bounty_list", "bounty_read_balances", "bounty_read_history", "bounty_pricing_guidance",
 ]);
 function hostedStdioWriteTool(name) {
   if (HOSTED_STDIO_WRITE_TOOLS.has(name)) return true;
@@ -455,6 +455,9 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
     case "bounty_read_history":
       return { roomId, receipts: escrow.history(roomId, caller,
         { state: rest.state ?? null, since: rest.since ?? null }) };
+    case "bounty_pricing_guidance":
+      // #3524: read-only, derived from this room's settled receipts only.
+      return { roomId, guidance: escrow.pricingGuidance(roomId) };
     case "bounty_post": {
       return idem("bounty.post", 201, () => {
         const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,

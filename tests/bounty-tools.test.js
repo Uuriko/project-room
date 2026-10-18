@@ -11,7 +11,8 @@ test("the hosted profile now advertises the bounty economy", () => {
   const names = hostedStdioToolDefinitions().map(entry => entry.name);
   for (const expected of ["bounty_list", "bounty_post", "bounty_fund", "bounty_claim",
     "bounty_submit", "bounty_accept", "bounty_dispute", "bounty_finalize",
-    "bounty_transfer", "bounty_read_balances", "bounty_read_history", "bounty_watch"])
+    "bounty_transfer", "bounty_read_balances", "bounty_read_history", "bounty_watch",
+    "bounty_pricing_guidance"])
     assert.ok(names.includes(expected), `${expected} missing from the hosted profile`);
 });
 
@@ -36,7 +37,7 @@ test("every bounty tool is routable and carries roomId", () => {
 });
 
 test("reads are marked read-only and writes are not", () => {
-  const readOnly = new Set(["bounty_list", "bounty_read_balances", "bounty_read_history"]);
+  const readOnly = new Set(["bounty_list", "bounty_read_balances", "bounty_read_history", "bounty_pricing_guidance"]);
   for (const entry of bountyTools)
     assert.equal(entry.annotations.readOnlyHint, readOnly.has(entry.name),
       `${entry.name} has the wrong readOnlyHint`);
