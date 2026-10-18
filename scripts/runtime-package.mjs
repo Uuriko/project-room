@@ -59,6 +59,7 @@ optional.push("scripts/build-ui-strings.mjs", "src/strings.js", "strings/en.js",
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)
+optional.push("server/decision-rows.mjs", "server/routes/decision-rows.mjs"); // #3616 decision-row export (imported by server/store.mjs; route rows registered in server/routes/table.mjs)
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");

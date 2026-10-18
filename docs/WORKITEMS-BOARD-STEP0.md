@@ -59,10 +59,12 @@ signed evidence or checks (§4.4).
 ## 2. Census — every live reader and writer
 
 Method: full-text scan for `workItems` over the shipped tree at the Step 0
-base, pinned file-by-file in the Step 0 census test (55 files under
+base, pinned file-by-file in the Step 0 census test (56 files under
 `server/` + `src/`; outside those trees: `client/` 2, `machine/` 1,
 `cloudflare/` 4 check/fixture files, `scripts/` ≈60 operational and
-browser-check scripts that consume the client/store shapes).
+browser-check scripts that consume the client/store shapes). Amended
+2026-10-18: `server/decision-rows.mjs` (#3616, PR #4051) added as a
+reference site — the count above is 56.
 
 ### Writers of `state.workItems`
 
