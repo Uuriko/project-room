@@ -11,7 +11,7 @@
 // the submitted bundle.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimDeliverBody, claimVerifyBody, verifyRequestId, deliverOutcomeConfirmed } from "../src/board-ui.js";
+import { claimDeliverBody, claimSendBackBody, claimVerifyBody, verifyRequestId, deliverOutcomeConfirmed } from "../src/board-ui.js";
 import { createWork, claimWork, updateWork, releaseWork, reassignWork, releaseExpired, claimHistoryLength,
   requestReplayVerdict, updateRequestDigest } from "../server/work-claims.mjs";
 
@@ -106,7 +106,7 @@ test("H2: the round binding survives lease expiry and fresh assignment", () => {
   assert.equal(requestReplayVerdict(delivered.requestOutcomes, body.requestId, digest, delivered.claimRound), "replay");
   // Lease-expiry path: send the delivered claim back, let its lease lapse,
   // then re-claim — the new round answers the old record with null.
-  let item = updateWork(delivered, "bob", { state: "in_progress", authority: true, now: now() });
+  const item = updateWork(delivered, "bob", { state: "in_progress", authority: true, now: now() });
   const [lapsed] = releaseExpired([item], Date.parse(item.leaseExpiresAt) + 1);
   const reclaimed = updateWork(claimWork(lapsed, "alice", { now: now() }), "alice", { state: "in_progress", now: now() });
   assert.equal(requestReplayVerdict(reclaimed.requestOutcomes, body.requestId, digest, reclaimed.claimRound), null,
@@ -186,4 +186,17 @@ test("H4/G6: deliverOutcomeConfirmed only confirms the submitted bundle, deliver
   assert.equal(deliverOutcomeConfirmed({ ...item, state: "in_progress", delivery: null }, body, "alice"), false,
     "the G4 swallowed state (in_progress, no delivery) never confirms");
   assert.equal(deliverOutcomeConfirmed(null, body, "alice"), false);
+});
+
+
+test("send-back gets a fresh operation identity after same-owner release and redelivery", () => {
+  const { item: first } = roundOneDelivered("sendback-reclaim");
+  const firstBody = claimSendBackBody(first, "bob");
+  let second = reclaimAndStart(sendBackAndRelease(first));
+  second = updateWork(second, "alice", { ...claimDeliverBody(second, fields("https://example.com/r1"), "alice"), now: now() });
+  const secondBody = claimSendBackBody(second, "bob");
+  assert.equal(second.deliveryGeneration, first.deliveryGeneration);
+  assert.notEqual(secondBody.requestId, firstBody.requestId,
+    "the new round must not reuse the old reviewer's cross-round tombstone");
+  assert.deepEqual(claimSendBackBody(second, "bob"), secondBody, "retrying an unchanged read stays identical");
 });

@@ -1287,3 +1287,50 @@ test("board close returns focus to the opener, else the conversation title", { t
   await closeWithEscape();
   await focusLandsOn("conversation-title");
 });
+
+test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "lifecycle", title: "Reviewable result", reviewPolicy: "self_attested", acceptanceCriteria: ["Result checked"] }, 201);
+  await post(page, origin, "/work-claims/lifecycle/claim", {});
+  await post(page, origin, "/work-claims/lifecycle/update", { state: "in_progress" });
+  await openBoard(page);
+  const card = page.locator('article[data-claim-id="lifecycle"]');
+  const form = card.locator('[data-claim-deliver="lifecycle"]');
+  await form.waitFor();
+  await form.locator('[name="artifactKind"]').fill("report");
+  await form.locator('[name="artifactRef"]').fill("room://artifacts/lifecycle");
+  await form.locator('[name="artifactSha256"]').fill("a".repeat(64));
+  await form.locator('[name="checkName"]').fill("Result checked");
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Send back", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").state, "delivered");
+  await card.getByRole("button", { name: "Send back", exact: true }).click();
+  await form.waitFor();
+  const sentBack = fixture.store.workClaims.get("commons", "lifecycle");
+  assert.equal(sentBack.state, "in_progress");
+  assert.equal(sentBack.verification.state, "changes_requested");
+  assert.ok(sentBack.delivery);
+  // The form retains the previous bundle. A new delivery creates a new
+  // review generation even when the artifact bytes are unchanged.
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Verify", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").deliveryGeneration, 2);
+  await card.getByRole("button", { name: "Verify", exact: true }).click();
+  await page.locator('[aria-labelledby="board-col-landed"] article[data-claim-id="lifecycle"]').waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").verification.state, "self_attested");
+});

@@ -122,6 +122,7 @@
   "src/work-loops.js",
   "src/work-packet.js",
   "src/work-recipes.js",
+  "src/work-reducers.js",
   "src/work-selectors.js",
   "src/work-status.js",
   "src/work-templates.js",

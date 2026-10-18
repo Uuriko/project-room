@@ -72,7 +72,7 @@ test("H1: claimSendBackBody posts the transition with operation identity and rou
   const item = claim("wc_sb5", { history: [{ action: "claimed" }, { action: "state:delivered" }], historyOmitted: 1 });
   const body = claimSendBackBody(item, "rev-1");
   assert.equal(body.state, "in_progress");
-  assert.match(body.requestId, /^sendback-wc_sb5-1-rev-1$/);
+  assert.match(body.requestId, /^sendback-wc_sb5-1-[a-z0-9]+-rev-1$/);
   assert.equal(body.expectedClaimedAt, T0);
   assert.equal(body.expectedHistoryLength, 3);
   // Kernel composition: the body drives the real transition for the

@@ -1,6 +1,6 @@
 # Project Room: six-outcome delivery plan
 
-Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md). The latest scope rule applies to every retained item too: previous discussion or implementation is not sufficient justification; retain only supported benefits over simpler alternatives.
+Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md); current [work lifecycle build and qualification](WORK-LIFECYCLE-BUILD-PLAN.md). The latest scope rule applies to every retained item too: previous discussion or implementation is not sufficient justification; retain only supported benefits over simpler alternatives.
 
 2026-10-18. This is the revised active planning scope following the request to cut,
 combine and shrink the total backlog. It changes scope, not implementation status.

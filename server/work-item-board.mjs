@@ -483,7 +483,12 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     evidenceRefs,
     premiseFlag: null,
     pullRequest: existing?.pullRequest ?? null,
-    pullRequests: claimForScope ? pullRequestsFrom(facts?.pullRequests) : [],
+    // Existing links and their polling outcomes belong to the board. Rebuilding
+    // them from acquisition events erased board-added links and completed polls.
+    pullRequests: [...new Map([
+      ...pullRequestsFrom(claimForScope ? facts?.pullRequests : []),
+      ...(existing?.pullRequests ?? []),
+    ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
     repo: claimForScope ? (claimForScope.repository ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
@@ -510,6 +515,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     acceptanceCriteria: Array.isArray(existing?.acceptanceCriteria) ? [...existing.acceptanceCriteria] : [],
     delivery: existing?.delivery ?? null,
     verification: existing?.verification ?? null,
+    claimRound: Number.isSafeInteger(existing?.claimRound) && existing.claimRound > 0 ? existing.claimRound : 0,
     deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0 ? existing.deliveryGeneration : 0,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
@@ -537,9 +543,16 @@ function mergeReviews(mapped, existing) {
   const merged = [...mapped];
   for (const review of existing) {
     if (!review || typeof review.memberId !== "string" || typeof review.at !== "string") continue;
-    if (seen.has(key(review))) continue;
+    // Preserve the exact recorded basis, never rebind a review to today's
+    // delivery. Prefer the board's complete record over an identical mapped
+    // summary which cannot express its authority.
+    if (seen.has(key(review))) {
+      const index = merged.findIndex(entry => key(entry) === key(review));
+      if (review.basis) merged[index] = { ...review };
+      continue;
+    }
     seen.add(key(review));
-    merged.push({ memberId: review.memberId, verdict: review.verdict, summary: review.summary, url: review.url ?? null, at: review.at });
+    merged.push({ ...review, url: review.url ?? null });
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   return merged.slice(-MAX_REVIEWS);
@@ -551,9 +564,13 @@ function mergeAttestations(mapped, existing) {
   const merged = [...mapped];
   for (const attestation of existing) {
     if (!attestation || typeof attestation.memberId !== "string" || typeof attestation.at !== "string") continue;
-    if (seen.has(key(attestation))) continue;
+    if (seen.has(key(attestation))) {
+      const index = merged.findIndex(entry => key(entry) === key(attestation));
+      if (attestation.basis) merged[index] = { ...attestation };
+      continue;
+    }
     seen.add(key(attestation));
-    merged.push({ memberId: attestation.memberId, at: attestation.at, note: attestation.note ?? null });
+    merged.push({ ...attestation, note: attestation.note ?? null });
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   return merged;
@@ -622,6 +639,9 @@ function provablyCompleted(item, facts) {
     || Boolean(item?.receipt) || (Array.isArray(item?.receiptHistory) && item.receiptHistory.length > 0);
 }
 export function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
+  // A board delivery is an independent execution record. Work receipts cannot
+  // prove that its verification or send-back should be rewritten.
+  if (current?.delivery) return "board_native";
   if (current?.state === "done" && !TERMINAL_BOARD_STATES.has(mapped?.state) && provablyCompleted(item, facts)) return "rework";
   return "board_native";
 }
@@ -728,6 +748,10 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
 }
 
 function isDiverged(current, mapped, item) {
+  // The work projection has no representation of a board delivery or its
+  // exact review round. Even when both say in_progress after send-back,
+  // rebuilding the row would erase execution history and stale its fences.
+  if (current.delivery && !sameClaimRow(current, mapped)) return true;
   // A stale mirror card for THIS item is not divergence: it sits in an
   // active state under the item's own claim holder or accountable
   // member (the mirror never learned work.started / work.completed, so
@@ -764,8 +788,19 @@ export const sameClaimRow = (a, b) => JSON.stringify(canonicalClaimRow(a)) === J
 // dryRun, writes nothing. Emits NO room events — the work_claims table
 // is the board's source of truth and the migration must not spam the
 // room timeline or fire receipt cards for historical completions.
+// Only these event types supply timestamps, claim scope or lineage to the
+// mapping. Reuse the existing type index instead of decoding every message
+// and unrelated board event on each work command.
+export const WORK_ITEM_BOARD_EVENT_SQL = `SELECT body FROM events INDEXED BY events_room_type
+  WHERE room_id=? AND json_extract(body, '$.type') IN (
+    'work.proposed', 'work.accepted', 'work.started', 'work.blocked',
+    'work.blocker_resolved', 'work.completed', 'work.superseded',
+    'work.handoff_recorded', 'claim.acquired', 'claim.renewed',
+    'claim.released', 'verification.recorded', 'owner.decision_recorded'
+  ) ORDER BY sequence`;
 export function roomEvents(store, roomId) {
-  return store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)
+  store.ensureEventTypeIndex();
+  return store.db.prepare(WORK_ITEM_BOARD_EVENT_SQL).all(roomId)
     .map(row => { try { return JSON.parse(row.body); } catch { return null; } })
     .filter(Boolean);
 }

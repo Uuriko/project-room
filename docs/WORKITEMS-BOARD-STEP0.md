@@ -324,3 +324,19 @@ references: proposal context, evidence immutability checks, and receipt text
 withdrawal on delete/redaction. These moved from `src/events.js`; field fates and
 board synchronization semantics are unchanged. The reference-site inventory adds
 this module. This extraction does not complete the work-item/board migration.
+
+
+## 2026-10-18 lifecycle integration amendment
+
+The live reference-site census is now 58 files. `src/work-reducers.js` owns the
+existing work lifecycle transitions extracted from `src/events.js`; the event
+coordinator composes those reducers with the same authority guards. No work
+fields, event semantics or persistence owners changed in that extraction.
+
+The board mapper now retains board review/attestation basis, claimRound and
+linked PR polling outcomes. A board delivery (including its retained send-back
+record) is protected as board-native divergence when the work projection cannot
+reproduce it. Work completion is not fabricated from board verification. The
+remaining field losses above still prohibit replacing work items with claims.
+The event-fact reader uses the existing event-type index and retains mapping
+parity; whole-room mapping and serialization remain open architecture work.

@@ -366,7 +366,7 @@ export function canSendBackClaim(item, viewer, members) {
 }
 
 const sendBackRequestId = (item, memberId) =>
-  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 
 // The send-back POST body, pure like claimVerifyBody: the transition
 // plus its operation identity (#3829's replay binding covers reviewer
