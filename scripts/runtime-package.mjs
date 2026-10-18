@@ -2,7 +2,7 @@
 // This verifier is standalone: it can be copied outside the source checkout.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -428,6 +428,34 @@ function runtimeMetadata(files) {
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
 
+// Shared by exact-package verification and the cheap working-tree preflight.
+export function verifyRuntimeImports(files) {
+  // Check this codebase's literal imports, including dynamic literal imports.
+  // This is not a complete JavaScript dependency parser; cold runtime tests and
+  // source review remain required, especially if a computed loader is added.
+  for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
+    // Quoted actions such as "import" or "source.import" are not declarations.
+    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
+      const specifier = match[1];
+      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
+      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
+      check(specifier.startsWith(".") && files.has(resolved),
+        `${path} imports ${JSON.stringify(specifier)} (resolves to ${resolved}), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs`);
+    }
+  }
+}
+
+export function verifyRuntimeSource(directory) {
+  const files = new Map();
+  for (const path of allowed) {
+    if (existsSync(join(directory, path))) files.set(path,
+      /\.m?js$/.test(path) ? readFileSync(join(directory, path)) : null);
+  }
+  for (const path of required) check(files.has(path), `required runtime source is missing: ${path}`);
+  verifyRuntimeImports(files);
+  return { files: files.size };
+}
+
 export function createRuntimePackage({ repository, commit, destination }) {
   check(typeof commit === "string" && hashPattern.test(commit),
     `commit must be a full 40-char hash, got: ${String(commit).slice(0, 64)}`);
@@ -520,19 +548,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
   const absentAssets = expectedAssets.filter(path => !files.has(path));
   check(absentAssets.length === 0, `runtime public assets missing from packaged files: ${absentAssets.join(", ")}`);
-  // Check this codebase's literal imports, including dynamic literal imports.
-  // This is not a complete JavaScript dependency parser; cold runtime tests and
-  // source review remain required, especially if a computed loader is added.
-  for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
-    // Quoted actions such as "import" or "source.import" are not declarations.
-    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
-      const specifier = match[1];
-      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
-      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
-      check(specifier.startsWith(".") && files.has(resolved),
-        `${path} imports ${JSON.stringify(specifier)} (resolves to ${resolved}), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs`);
-    }
-  }
+  verifyRuntimeImports(files);
   const actualRuntime = runtimeMetadata(files);
   check(same(manifest.runtime, actualRuntime),
     `runtime manifest metadata differs from recomputed: manifest ${JSON.stringify(manifest.runtime)} vs computed ${JSON.stringify(actualRuntime)}`);
