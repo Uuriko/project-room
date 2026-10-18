@@ -3075,6 +3075,25 @@ export class BountyEscrow {
     });
   }
 
+  // #3962 companion: pure-read check the SERVED ledger read paths (the
+  // escrow routes and the bounty_read_* MCP tools) use to provision
+  // outstanding genesis before reading — a fresh room must not read as
+  // unfunded. Deliberately NOT inside balances()/history() themselves:
+  // those stay write-free (the cold-isolate read contract) and lazy at
+  // the unit level (Option B pins balances-before-ensureGenesis at 0).
+  genesisOutstanding(roomId) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const members = this._members(roomId);
+      if (members === null) return false;
+      const issued = new Set(this.db.prepare(
+        "SELECT DISTINCT account_id AS a FROM bounty_journal WHERE room_id=? AND kind='genesis'")
+        .all(roomId).map(row => row.a));
+      return Object.entries(members).some(([id, member]) =>
+        member && member.active !== false && !issued.has(canonicalLane(id)));
+    });
+  }
+
   balances(roomId, identity) {
     return this.store.readTransaction(() => {
       this._ensure();

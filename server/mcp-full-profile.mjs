@@ -451,8 +451,12 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer, poster }) };
     }
     case "bounty_read_balances":
+      // #3962: provision outstanding genesis before the read, as the
+      // HTTP ledger routes do — a fresh room must not read as unfunded.
+      if (escrow.genesisOutstanding(roomId)) escrow.ensureGenesis(roomId);
       return { roomId, balances: escrow.balances(roomId, caller) };
     case "bounty_read_history":
+      if (escrow.genesisOutstanding(roomId)) escrow.ensureGenesis(roomId);
       return { roomId, receipts: escrow.history(roomId, caller,
         { state: rest.state ?? null, since: rest.since ?? null }) };
     case "bounty_post": {
