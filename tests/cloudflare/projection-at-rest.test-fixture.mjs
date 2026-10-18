@@ -1,10 +1,10 @@
 // Synthetic Worker entry point. Never deploy this fixture.
 import assert from 'node:assert/strict';
 import { DurableObject } from 'cloudflare:workers';
-import { RoomStore } from '../server/store.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { readConversation } from '../server/conversation-sync.mjs';
-import { DurableDatabase, durableStorage } from './storage.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { readConversation } from '../../server/conversation-sync.mjs';
+import { DurableDatabase, durableStorage } from '../../cloudflare/storage.mjs';
 const text='Worker retained text 😀 '.repeat(700);
 const revised='Worker revised text 🚀 '.repeat(700);
 const finish=store=>{for(let i=0;i<20;i++) if(store.backfillMessages({limit:400}).done)return;assert.fail('Small replay did not finish');};

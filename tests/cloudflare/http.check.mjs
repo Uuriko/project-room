@@ -19,7 +19,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     serviceBindings: { ASSETS: async request => {
       const pathname = new URL(request.url).pathname;
       if (!/^\/(index\.html|src\/[a-z-]+\.(js|css))$/.test(pathname)) return new Response(null, { status: 404 });
-      return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
+      return new Response(await readFile(new URL('../..' + pathname, import.meta.url)));
     } }
   });
   const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => mf.dispatchFetch(origin + path, {
@@ -490,7 +490,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
 });
 
 test('getdasha entry and canonical browser app share identities, rooms and invites through one namespace', async () => {
-  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
+  const release = JSON.parse(await readFile(new URL('../../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(release.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
   assert.equal(release.durable_objects.bindings[0].script_name, release.env.production.name);
   assert.equal(release.env.production.durable_objects.bindings[0].script_name, undefined);
@@ -511,7 +511,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
   assert.equal(release.env.staging.durable_objects.bindings[0].script_name, undefined);
   assert.equal(release.env.staging.vars.ROOM_DEPLOYMENT, 'staging');
   assert.equal(release.env.staging.vars.ROOM_ORIGIN, 'https://project-room-stage.getdasha.workers.dev');
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))], bundle: true,
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('../../cloudflare/room.mjs', import.meta.url))], bundle: true,
     write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const common = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: release.compatibility_date,
     compatibilityFlags: release.compatibility_flags, bindings: release.vars,

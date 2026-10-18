@@ -1,10 +1,10 @@
 // LOCAL TEST ONLY: public Room entrypoint never exports this provisioning route.
-import { hashPassword } from '../src/password-auth.mjs';
-import entry, { ProjectRoom } from './room.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
-import { normalizeGraphEmail } from '../server/graph-email.mjs';
-import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
+import { hashPassword } from '../../src/password-auth.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { emailContractFixture } from '../../scripts/email-contract-fixture.mjs';
+import { normalizeGraphEmail } from '../../server/graph-email.mjs';
+import { seedRecordedReply } from '../../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);

@@ -21,7 +21,7 @@
 // with no related test, or a global file (package.json, the runner), adds a
 // small smoke set. This is a fast local signal, not a replacement for CI.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { dirname, extname, join, normalize, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -263,6 +263,13 @@ async function main() {
   const changed = changedFiles(opts.base, root);
   const { discoverUnitTests } = await import("./unit-shards.mjs");
   const tests = discoverUnitTests(".").filter((f) => !f.includes("node_modules"));
+  // The folded cloudflare checks are not Node-discovered unit tests, but
+  // verify:affected selects them by the same import/path-mention rules
+  // (decision-17 fold, #4073).
+  for (const checkFile of globSync("tests/cloudflare/*.check.mjs", { cwd: root })) {
+    if (!tests.includes(checkFile)) tests.push(checkFile);
+  }
+  tests.sort();
   const tracked = parseGitPathList(git(["ls-files"], root));
   const known = new Set([...tracked, ...changed.filter((f) => existsSync(join(root, f)))]);
   const cache = new Map();
