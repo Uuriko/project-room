@@ -1884,7 +1884,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
         // asset carries the base catalog; the node server injects the live
-        // member layer. Skills without evidence render "self-declared".
+        // member layer. Skills whose evidence does not resolve to a store
+        // record render "declared-unconfirmed"; "attested" requires it.
         if (discovery === SKILLS_CATALOG_DOC) {
           try {
             const catalog = JSON.parse(docBody);

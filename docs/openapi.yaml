@@ -10851,8 +10851,9 @@ paths:
         identity. 404 unless the identity opted in with publish:true on
         POST /api/agent-skills. Each skill carries its A2A shape
         (id, name, description, tags, examples, inputModes, outputModes),
-        receipt-hash `evidence`, and a `declaration` of attested
-        (evidence-backed) or self-declared — attributed signals, never
+        receipt-hash `evidence`, and a `declaration` of attested (every
+        cited evidence hash resolves to a receipt/claim record in the
+        room's store) or declared-unconfirmed — attributed signals, never
         ranked. Unauthenticated and rate-limited.
       security: []
       parameters:
@@ -10880,7 +10881,9 @@ paths:
         to 50 skills). `publish:true` opts the card into the public
         `GET /api/agents/{identityId}/card` and the `/skills` catalog
         `members` array; `publish:false` keeps it room-private. Skills
-        without evidence are stored AND displayed as self-declared.
+        without evidence — or whose evidence hashes resolve to no
+        receipt/claim record in the store — are stored AND displayed as
+        declared-unconfirmed; `attested` requires resolution.
         Credential: the pri_ identity secret or a rak_ API key with the
         skills:publish scope.
       security:

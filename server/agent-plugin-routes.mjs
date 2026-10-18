@@ -379,8 +379,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   // RC-2026-09-24-202: skill cards. An identity publishes its own skill set
   // (A2A skill shape + receipt-hash evidence); replaces the caller's set
-  // only. Skills without evidence are returned AND displayed as
-  // self-declared — attributed signals, never ranked.
+  // only. Skills render "attested" only when every cited evidence hash
+  // resolves to a store record; otherwise they are returned AND displayed
+  // as declared-unconfirmed — attributed signals, never ranked.
   const publishSkills = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-skills-publish:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("skills:publish"));

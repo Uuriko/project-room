@@ -5,9 +5,11 @@
 // this module ships only the skill-card surfaces (instinct's correction
 // on RC-2026-09-24-005, #266 comment 5810190089):
 //   POST /api/agent-skills            — an identity publishes its own skill
-//        set (A2A skill shape + receipt-hash evidence). Skills without
-//        evidence are stored AND displayed as self-declared; no karma,
-//        no ranking.
+//        set (A2A skill shape + receipt-hash evidence). A skill renders
+//        "attested" only when every cited evidence hash resolves to a
+//        receipt/claim record in this store; skills without evidence, or
+//        whose evidence resolves to nothing, are stored AND displayed as
+//        declared-unconfirmed. No karma, no ranking.
 //   GET  /api/agents/{identityId}/card — the public A2A-shaped card, 404
 //        unless the identity opted in with publish:true.
 //
@@ -61,43 +63,85 @@ function validateSkill(skill, index) {
     examples: Object.freeze([...(skill.examples ?? [])]),
     inputModes: Object.freeze([...(skill.inputModes ?? ["text/plain"])]),
     outputModes: Object.freeze([...(skill.outputModes ?? ["text/plain"])]),
-    evidence: Object.freeze([...(skill.evidence ?? [])]),
-    // Attributed signal: evidence-backed skills render "attested",
-    // everything else renders "self-declared" — never ranked.
-    declaration: (skill.evidence ?? []).length > 0 ? "attested" : "self-declared"
+    evidence: Object.freeze([...(skill.evidence ?? [])])
   });
 }
+
+// Attributed signal — never ranked. "attested" is earned, not asserted:
+// the skill must cite at least one evidence hash and EVERY cited hash
+// must resolve to a receipt/claim record in this store (see
+// MembersDirectory#evidenceResolves). Anything else — no evidence, or
+// evidence that resolves to nothing — is "declared-unconfirmed": the
+// member declares the skill; the room confirms nothing. (EXP-T4 found
+// the directory's one "attested" skill attested by a hash that resolves
+// nowhere; presence of a well-formed hash is not attestation.)
+const declarationFor = (skill, resolves) => {
+  const evidence = skill.evidence ?? [];
+  return evidence.length > 0 && evidence.every(hash => resolves(hash))
+    ? "attested" : "declared-unconfirmed";
+};
 
 export class MembersDirectory {
   constructor(store) { this.store = store; this.db = store.db; }
 
   now() { return this.store.now(); }
 
+  // Does this evidence hash resolve to a receipt/claim record in this
+  // store? The store's evidence positions for a sha256:<hex> pointer:
+  // a public receipt's evidence list (claim blobs + work-item
+  // evidenceVersions), a work claim's blob pointers, and a public-work
+  // receipt's artifact hash. A hash found in none of them attests
+  // nothing, however well-formed it is.
+  evidenceResolves(hash) {
+    const needle = `%"${hash}"%`;
+    if (this.db.prepare("SELECT 1 AS hit FROM public_receipts WHERE hashes_json LIKE ? LIMIT 1").get(needle)) return true;
+    if (this.db.prepare("SELECT 1 AS hit FROM work_claims WHERE item_json LIKE ? LIMIT 1").get(needle)) return true;
+    return !!this.db.prepare("SELECT 1 AS hit FROM public_work_receipts WHERE artifact_sha256=? LIMIT 1")
+      .get(hash.slice("sha256:".length));
+  }
+
+  // Per-call memoizing resolver: one publish/read checks each distinct
+  // hash at most once.
+  resolver() {
+    const cache = new Map();
+    return hash => {
+      if (!cache.has(hash)) cache.set(hash, this.evidenceResolves(hash));
+      return cache.get(hash);
+    };
+  }
+
   // Replace the caller's own skill set. publish:true opts the card into
   // the public card route and the /skills catalog members array.
   setSkills(identityId, { publish, skills }) {
     if (typeof publish !== "boolean") fail(422, "invalid_skills", "publish (boolean) is required");
     if (!Array.isArray(skills) || skills.length > 50) fail(422, "invalid_skills", "skills must be an array of at most 50 skills");
+    const resolves = this.resolver();
     const seen = new Set();
     const normalized = skills.map((skill, i) => {
       const v = validateSkill(skill, i);
       if (seen.has(v.id)) fail(422, "invalid_skills", `duplicate skill id: ${v.id}`);
       seen.add(v.id);
-      return v;
+      return Object.freeze({ ...v, declaration: declarationFor(v, resolves) });
     });
     const at = this.now();
     this.db.prepare(`INSERT INTO agent_skill_cards(identity_id, publish, skills_json, updated_at)
       VALUES(?, ?, ?, ?) ON CONFLICT(identity_id) DO UPDATE SET publish=excluded.publish,
       skills_json=excluded.skills_json, updated_at=excluded.updated_at`)
       .run(identityId, publish ? 1 : 0, JSON.stringify(normalized), at);
-    const selfDeclared = normalized.filter(s => s.declaration === "self-declared").map(s => s.id);
+    const selfDeclared = normalized.filter(s => s.declaration === "declared-unconfirmed").map(s => s.id);
     return Object.freeze({ skills: normalized.length, publish, selfDeclared: Object.freeze(selfDeclared) });
   }
 
   getSkills(identityId) {
     const row = this.db.prepare("SELECT * FROM agent_skill_cards WHERE identity_id=?").get(identityId);
     if (!row) return null;
-    return Object.freeze({ identityId, publish: row.publish === 1, skills: Object.freeze(JSON.parse(row.skills_json)), updatedAt: row.updated_at });
+    // Re-derive the declaration at read: cards stored before evidence
+    // had to resolve — or whose evidence has since left the store —
+    // downgrade at render instead of keeping a stale "attested".
+    const resolves = this.resolver();
+    const skills = JSON.parse(row.skills_json)
+      .map(skill => Object.freeze({ ...skill, declaration: declarationFor(skill, resolves) }));
+    return Object.freeze({ identityId, publish: row.publish === 1, skills: Object.freeze(skills), updatedAt: row.updated_at });
   }
 
   // Public A2A-shaped card. 404 unless the identity opted in.
