@@ -97,7 +97,9 @@ export function ensureIdentityCapacitySchema(db) {
 // The identity HOLDER mints a single-use enrollment code with their own
 // secret; a sponsor presents it on agent-connections create. Only the
 // SHA-256 hash is stored — the raw code is returned once, never logged,
-// never persisted. 10-minute TTL, bound to the minting identityId.
+// never persisted. 10-minute TTL, bound to the minting identityId and —
+// SECURITY-FIX C2 — to the room it enrolls into (roomId required at mint)
+// plus an optional pre-named sponsor account.
 export const LINK_CODE_TTL_MS = 10 * 60 * 1000;
 export const LINK_CODE_BYTES = 16; // 128 bits of entropy
 export const LINK_CODE_RE = /^[A-Za-z0-9_-]{22}$/; // base64url(16 bytes)
@@ -107,6 +109,8 @@ export const identityLinkCodeSchema = `
   CREATE TABLE IF NOT EXISTS identity_link_codes (
     code_hash TEXT PRIMARY KEY,
     identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id),
+    room_id TEXT,
+    sponsor_account_id TEXT,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
     consumed_at INTEGER
@@ -120,6 +124,13 @@ export const identityLinkCodeSchema = `
 // hash-only, and mint/consume verify their own shape on open.
 export function ensureIdentityLinkCodeSchema(db) {
   db.exec(identityLinkCodeSchema);
+  // SECURITY-FIX C2: room/sponsor binding columns, added additively for
+  // stores whose table predates the binding. Rows minted before the
+  // binding have NULL room_id and read as unbound at consume — they fail
+  // closed (10-minute TTL bounds the exposure to one mint window).
+  const columns = new Set(db.prepare("PRAGMA table_info(identity_link_codes)").all().map(column => column.name));
+  if (!columns.has("room_id")) db.exec("ALTER TABLE identity_link_codes ADD COLUMN room_id TEXT");
+  if (!columns.has("sponsor_account_id")) db.exec("ALTER TABLE identity_link_codes ADD COLUMN sponsor_account_id TEXT");
 }
 
 export const IDENTITY_SECRET_PREFIX = "pri_";
@@ -1092,15 +1103,29 @@ export class AgentIdentities {
   // secret — the mint IS the holder's consent to enroll this identity
   // (no separate consent step; a sponsor's credential or scoped API key
   // can never mint). The raw code is returned once; only its SHA-256 hash
-  // is stored, bound to the identityId, with a 10-minute TTL. Unknown
-  // identityIds 404 (no secret can ever authenticate for them, so the
-  // check order leaks nothing).
-  mintLinkCode(identityId, secret) {
+  // is stored, with a 10-minute TTL. Unknown identityIds 404 (no secret
+  // can ever authenticate for them, so the check order leaks nothing).
+  //
+  // SECURITY-FIX C2 (HUNT-ADVERSARY P2): the code is BOUND at mint to the
+  // room it enrolls into — roomId is required and must name a real room —
+  // and may pre-name the sponsor account allowed to redeem it. Pre-fix the
+  // code was an unbound bearer instrument: any room owner who obtained it
+  // inside its TTL could enroll the identity into THEIR room and receive
+  // the 30-day onboarding token bound to the victim identity.
+  mintLinkCode(identityId, secret, { roomId, sponsorAccountId } = {}) {
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)
       || !this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=?").get(identityId)) {
       fail(404, "identity_not_found", "No such agent identity");
     }
     const identity = this.authenticateIdentitySecret(identityId, secret);
+    if (typeof roomId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(roomId)
+      || !this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
+      fail(422, "invalid_link_code_request", "roomId must name the existing room this code enrolls the identity into");
+    }
+    if (sponsorAccountId !== undefined && sponsorAccountId !== null
+      && (typeof sponsorAccountId !== "string" || sponsorAccountId.length === 0 || sponsorAccountId.length > 128)) {
+      fail(422, "invalid_link_code_request", "sponsorAccountId must be a non-empty string of at most 128 chars");
+    }
     return this.store.transaction(() => {
       const now = this.store.now();
       // Sweep expired rows on every mint: consumed rows die with their TTL,
@@ -1112,10 +1137,11 @@ export class AgentIdentities {
         fail(429, "too_many_link_codes", "Too many outstanding link codes; use one or let it expire");
       }
       const code = base64url(randomBytes(LINK_CODE_BYTES));
-      this.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,NULL)")
-        .run(legacyHash(code), identityId, now, now + LINK_CODE_TTL_MS);
+      this.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,room_id,sponsor_account_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,?,?,NULL)")
+        .run(legacyHash(code), identityId, roomId, sponsorAccountId ?? null, now, now + LINK_CODE_TTL_MS);
       return { identityId: identity.identityId, displayName: identity.displayName,
-        linkCode: code, expiresAt: now + LINK_CODE_TTL_MS };
+        linkCode: code, roomId, ...(sponsorAccountId ? { sponsorAccountId } : {}),
+        expiresAt: now + LINK_CODE_TTL_MS };
     });
   }
 
@@ -1124,21 +1150,28 @@ export class AgentIdentities {
   // create that fails later never burns a code it didn't use.
   //
   // Every failure reads as 422 identity_link_proof_required — the checks
-  // (exists, bound to the claimed identityId, unexpired, unused, identity
+  // (exists, bound to the claimed identityId, bound to THIS room, bound to
+  // the pre-named sponsor when one was named, unexpired, unused, identity
   // not revoked) share one code so there is no oracle for which of them
   // failed. The raw code is never logged or persisted by the caller.
-  consumeLinkCode(identityId, code) {
+  consumeLinkCode(identityId, code, { roomId, sponsorAccountId } = {}) {
     if (typeof code !== "string" || !LINK_CODE_RE.test(code)) {
       fail(422, "identity_link_proof_required",
         "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
     }
     const now = this.store.now();
     const row = this.db.prepare(
-      "SELECT identity_id AS identityId, expires_at AS expiresAt, consumed_at AS consumedAt FROM identity_link_codes WHERE code_hash=?")
+      "SELECT identity_id AS identityId, room_id AS roomId, sponsor_account_id AS sponsorAccountId, expires_at AS expiresAt, consumed_at AS consumedAt FROM identity_link_codes WHERE code_hash=?")
       .get(legacyHash(code));
     const proofFailed = () => fail(422, "identity_link_proof_required",
       "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
     if (!row || row.identityId !== identityId || row.expiresAt <= now || row.consumedAt !== null) proofFailed();
+    // SECURITY-FIX C2: the redemption context must match the binding the
+    // holder minted. A code minted for another room (or before the
+    // binding existed — NULL room_id) never redeems here, and a pre-named
+    // sponsor must be the account actually enrolling.
+    if (!row.roomId || row.roomId !== roomId) proofFailed();
+    if (row.sponsorAccountId && row.sponsorAccountId !== sponsorAccountId) proofFailed();
     // A code minted before a revocation dies with the identity: revocation
     // stops the secret authenticating everywhere, and its delegations with it.
     const live = this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NULL").get(identityId);
@@ -1148,7 +1181,7 @@ export class AgentIdentities {
     const changed = this.db.prepare("UPDATE identity_link_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL")
       .run(now, legacyHash(code));
     if (changed.changes !== 1) proofFailed();
-    return { identityId, consumedAt: now };
+    return { identityId, roomId: row.roomId, consumedAt: now };
   }
   // Owner-only, like the sibling audit lists (agent-invites, agent-connections,
   // share-links): which identities are plugged into a room is membership

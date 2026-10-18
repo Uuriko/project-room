@@ -70,7 +70,7 @@ test("create with identityId but no code never discloses identity existence", t 
 test("valid proof enrolls atomically: link row, member stamp, receipt echo, bond resolution", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   assert.equal(minted.identityId, identity.identityId);
   assert.match(minted.linkCode, /^[A-Za-z0-9_-]{22}$/);
   assert.equal(minted.expiresAt - f.now(), 10 * 60 * 1000);
@@ -88,7 +88,7 @@ test("valid proof enrolls atomically: link row, member stamp, receipt echo, bond
 test("the raw link code is never persisted: not in the operation row, receipt, or fingerprint input", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   const req = f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode });
   const result = f.apply(req);
   const op = f.store.db.prepare("SELECT request_json, receipt_json, fingerprint FROM agent_connection_operations").get();
@@ -103,7 +103,7 @@ test("the raw link code is never persisted: not in the operation row, receipt, o
 test("wrong-bound code fails: minted for A, presented for B", t => {
   const f = fixture(t);
   const a = f.store.identities.create("Agent A"), b = f.store.identities.create("Agent B");
-  const minted = f.store.identities.mintLinkCode(a.identityId, a.secret);
+  const minted = f.store.identities.mintLinkCode(a.identityId, a.secret, { roomId: "commons" });
   const req = f.createRequest({ identityId: b.identityId, identityLinkCode: minted.linkCode });
   expectProofFailure(t, () => f.apply(req));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0, "nothing linked");
@@ -117,19 +117,19 @@ test("wrong-bound code fails: minted for A, presented for B", t => {
 test("expired code fails closed", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   f.setNow(f.now() + 10 * 60 * 1000 + 1);
   expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode })));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0);
   // The next mint prunes the expired row (TTL debris never wedges the cap).
-  f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_link_codes WHERE identity_id=?").get(identity.identityId).n, 1);
 });
 
 test("reused code fails: the second enrollment with a fresh requestId burns", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
   expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode, displayName: "My assistant again" })));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 1, "exactly one link survives");
@@ -138,7 +138,7 @@ test("reused code fails: the second enrollment with a fresh requestId burns", t 
 test("tampered code fails", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   const tampered = minted.linkCode.slice(0, 21) + (minted.linkCode[21] === "A" ? "B" : "A");
   expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: tampered })));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0);
@@ -147,7 +147,7 @@ test("tampered code fails", t => {
 test("code minted then identity revoked fails closed", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   f.store.identities.revoke(identity.identityId, identity.secret);
   expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode })));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0);
@@ -156,31 +156,31 @@ test("code minted then identity revoked fails closed", t => {
 test("mintLinkCode: wrong secret is 401, unknown identity is 404, and no code is stored for failures", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, "not-a-secret"), { code: "unauthenticated" });
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, "not-a-secret", { roomId: "commons" }), { code: "unauthenticated" });
   // Well-formed pri_ secret belonging to a DIFFERENT identity: 401, not 403/404.
   const other = f.store.identities.create("Other Agent");
-  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, other.secret), { code: "unauthenticated" });
-  assert.throws(() => f.store.identities.mintLinkCode("ai_doesnotexist000000000000000000000000000000", "pri_whatever"), { code: "identity_not_found" });
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, other.secret, { roomId: "commons" }), { code: "unauthenticated" });
+  assert.throws(() => f.store.identities.mintLinkCode("ai_doesnotexist000000000000000000000000000000", "pri_whatever", { roomId: "commons" }), { code: "identity_not_found" });
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_link_codes").get().n, 0);
 });
 
 test("mintLinkCode stores only the hash, capped per identity, and prunes expired rows", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   const row = f.store.db.prepare("SELECT * FROM identity_link_codes").get();
   assert.equal(row.code_hash.length, 64, "SHA-256 hex");
   assert(!JSON.stringify(row).includes(minted.linkCode), "raw code is not in the row");
   assert.equal(row.consumed_at, null);
   // 9 more mints OK (cap is 10 outstanding); the 11th is refused 429 —
   // the holder should use one or let it expire, not stockpile proofs.
-  for (let i = 0; i < 9; i++) f.store.identities.mintLinkCode(identity.identityId, identity.secret);
-  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, identity.secret), { code: "too_many_link_codes" });
+  for (let i = 0; i < 9; i++) f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" }), { code: "too_many_link_codes" });
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_link_codes WHERE identity_id=?").get(identity.identityId).n, 10);
   // Consuming one code frees a slot; minting works again and the fresh code verifies.
   f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
   const other = f.store.identities.create("Second Agent");
-  const otherMint = f.store.identities.mintLinkCode(other.identityId, other.secret);
+  const otherMint = f.store.identities.mintLinkCode(other.identityId, other.secret, { roomId: "commons" });
   f.apply(f.createRequest({ identityId: other.identityId, identityLinkCode: otherMint.linkCode, displayName: "Second assistant" }));
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
@@ -188,7 +188,7 @@ test("mintLinkCode stores only the hash, capped per identity, and prunes expired
 test("duplicate requestId replays the original receipt without burning a second code", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   // A true idempotency replay: the exact same request bytes, including the
   // same keyHash and the same (already-consumed) proof.
   const req = f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode });
@@ -212,7 +212,7 @@ test("create without identityId is unchanged: no link, no bond resolution", t =>
 test("disconnect removes the identity link and echoes unlinkedIdentityId on the receipt", t => {
   const f = fixture(t);
   const identity = f.store.identities.create("Atomic Agent");
-  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret);
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
   const created = f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
   const req = { action: "disconnect", requestId: randomUUID(), memberId: created.receipt.memberId, expectedOwnerRevision: 0, expectedGeneration: created.receipt.generation, expectedMemberRevision: 0 };
   const result = f.apply(req);
@@ -228,4 +228,89 @@ test("disconnect of an unlinked connection carries no unlinkedIdentityId", t => 
   const result = f.apply({ action: "disconnect", requestId: randomUUID(), memberId: created.receipt.memberId, expectedOwnerRevision: 0, expectedGeneration: created.receipt.generation, expectedMemberRevision: 0 });
   assert.equal(result.receipt.unlinkedIdentityId, undefined);
   assert.doesNotThrow(() => f.store.agentConnections.verify());
+});
+
+// ---- SECURITY-FIX C2: link codes are bound to room + sponsor ----
+
+function twoRoomFixture(t) {
+  let now = Date.now();
+  const store = new RoomStore(":memory:", { now: () => now });
+  store.initialize(initialRoom("commons"));
+  store.initialize(initialRoom("annex"));
+  t.after(() => store.close());
+  const sessionFor = room => store.createSession(store.issueAccessKey(room, "owner"));
+  const secret = () => { const token = randomBytes(32).toString("base64url"); return { token, keyHash: createHash("sha256").update(token).digest("hex") }; };
+  const createRequest = (extra = {}) => ({ action: "create", requestId: randomUUID(), memberId: `agent-${randomUUID()}`, displayName: "My assistant", access: "chat", keyHash: secret().keyHash, expiresAt: now + 3600000, expectedOwnerRevision: 0, ...extra });
+  const applyTo = (room, body) => { const s = sessionFor(room); return store.agentConnections.apply(s.token, room, body, s.session.sessionBinding); };
+  return { store, createRequest, applyTo };
+}
+
+test("C2: a code minted for one room does not redeem in another room", t => {
+  const f = twoRoomFixture(t);
+  const identity = f.store.identities.create("Bound Agent");
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
+  assert.equal(minted.roomId, "commons");
+  // The P2 attack: a different room's owner who obtains the code enrolls
+  // the identity into THEIR room. The binding refuses — same opaque 422.
+  expectProofFailure(t, () => f.applyTo("annex", f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode })));
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0, "nothing linked anywhere");
+  // The intended room still redeems, and the failed attempt did not burn the code.
+  const result = f.applyTo("commons", f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode }));
+  assert.equal(result.receipt.identityId, identity.identityId);
+  assert.equal(result.mcpToken !== null && typeof result.mcpToken === "object", true, "onboarding token issued to the intended sponsor only");
+});
+
+test("C2: consumeLinkCode enforces the room binding directly", t => {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Bound Agent");
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "commons" });
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode, { roomId: "annex" }));
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode));
+  const consumed = f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode, { roomId: "commons" });
+  assert.equal(consumed.roomId, "commons");
+});
+
+test("C2: minting without a room binding, or for a nonexistent room, is refused", t => {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Bound Agent");
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, identity.secret), { code: "invalid_link_code_request" });
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, identity.secret, {}), { code: "invalid_link_code_request" });
+  assert.throws(() => f.store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "no-such-room" }), { code: "invalid_link_code_request" });
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_link_codes").get().n, 0, "no unbound code was stored");
+});
+
+test("C2: a pre-named sponsor binds redemption to that account", t => {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Bound Agent");
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret,
+    { roomId: "commons", sponsorAccountId: "acct_named_sponsor" });
+  assert.equal(minted.sponsorAccountId, "acct_named_sponsor");
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode,
+    { roomId: "commons", sponsorAccountId: "acct_someone_else" }));
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode, { roomId: "commons" }));
+  const consumed = f.store.identities.consumeLinkCode(identity.identityId, minted.linkCode,
+    { roomId: "commons", sponsorAccountId: "acct_named_sponsor" });
+  assert.equal(consumed.identityId, identity.identityId);
+});
+
+test("C2: enrollment by the wrong sponsor account fails through the connections door", t => {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Bound Agent");
+  const minted = f.store.identities.mintLinkCode(identity.identityId, identity.secret,
+    { roomId: "commons", sponsorAccountId: "acct_the_intended_sponsor" });
+  // The fixture session's account is not the named sponsor: proof failure,
+  // nothing created, and the onboarding token is never issued.
+  expectProofFailure(t, () => f.apply(f.createRequest({ identityId: identity.identityId, identityLinkCode: minted.linkCode })));
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0);
+});
+
+test("C2: a pre-binding legacy code row (NULL room) never redeems", t => {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Legacy Agent");
+  const code = randomBytes(16).toString("base64url");
+  const hash = createHash("sha256").update(code).digest("hex");
+  const now = f.now();
+  f.store.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,NULL)")
+    .run(hash, identity.identityId, now, now + 10 * 60 * 1000);
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, code, { roomId: "commons" }));
 });

@@ -767,7 +767,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`identity-link-code:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only mint link codes for itself");
-    return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req)));
+    // SECURITY-FIX C2: the mint names the room the code enrolls into (and
+    // may pre-name the sponsor account); the code redeems only there.
+    const data = await body(req);
+    const shape = data && (exact(data, ["roomId"]) || exact(data, ["roomId", "sponsorAccountId"]));
+    if (!shape) reject(422, "invalid_link_code_request", "roomId, with optional sponsorAccountId, are the accepted fields");
+    return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req),
+      { roomId: data.roomId, sponsorAccountId: data.sponsorAccountId }));
   });
 
   // ---- Agent public-key registry (integration map slice 9) ----

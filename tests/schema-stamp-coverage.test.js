@@ -66,7 +66,7 @@ test("every additive schema step in the full pass is part of the warm-wake stamp
 const SOURCE_PINS = {
   "ensureIdentitySecretSchema@2": "751798e9c7c60b6f",
   "ensureIdentityCapacitySchema@1": "33e15d3c51616945",
-  "ensureIdentityLinkCodeSchema@1": "2e027731951257ac",
+  "ensureIdentityLinkCodeSchema@2": "d937964b3cb47781",
   "ensureAutonomyTiersSchema@1": "10220d71e7134ef8",
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
   "ensureGrantsSchema@1": "fe4b311a64923973",
