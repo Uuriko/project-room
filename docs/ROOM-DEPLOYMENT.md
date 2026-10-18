@@ -46,7 +46,7 @@ node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.wor
 ROOM_SMOKE_ORIGIN=https://project-room-stage.getdasha.workers.dev node scripts/live-smoke.mjs --browser
 ```
 
-The cold-start probe fails when the first `/api/version` takes 2 seconds or more. The smoke checks public pages only. It does not sign in.
+The cold-start probe's 2-second budget gates only the Worker cold start: its first request is `/api/version/worker`, answered by the Worker without touching the Durable Object. The probe then requests `/api/version` as a separate, ungated Durable Object cold-start measurement (`doCold` in its report), so a slow DO cold start is reported distinctly and does not fail the Worker gate. Cloudflare 1101 (JavaScript exception) and 1102 (CPU limit) responses are counted separately in the report. The smoke checks public pages only. It does not sign in.
 
 Also run the cross-worker identity check in `cloudflare/http.check.mjs` in CI (the `cloudflare` job). That check proves the entry and the canonical Worker still share one production namespace, and that staging's binding has no `script_name`.
 

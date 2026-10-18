@@ -97,9 +97,13 @@ remains the route that needs no Cloudflare runtime.
 The NDJSON export hashes every secret column (sha256). A restore recovers
 **data**, never working credentials:
 
-1. Every agent API key, token, webhook secret and push subscription secret
-   in the restored store is a hash of the original. **All of them must be
-   re-issued** after a restore before agents can act again.
+1. Every sanitized secret cell (webhook secrets, push key material and
+   tokens, join tokens, verifiers, encrypted payloads — the exact list is
+   `EXPORT_SECRET_COLUMNS` in `server/room-export.mjs`) is substituted on
+   restore — NULL, or an empty string where the column is NOT NULL — never
+   the export's sha256 placeholder as a live value. The restore result's
+   `sanitizedCells` counts every substitution per table and column. **All
+   of them must be re-issued** after a restore before agents can act again.
 2. A restore resurrects authority exactly as it was **at backup time**.
    Anything revoked between the backup and the loss (keys, share links,
    memberships, delegations) comes back looking current. The operator must
