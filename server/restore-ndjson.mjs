@@ -24,7 +24,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY, operatorDoorRateExceeded, operatorDoorAddress, operatorDoorNotFound, auditOperatorDoor } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -567,7 +567,9 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
 const sha256Hex = value => createHash("sha256").update(value).digest("hex");
 
 function authorizeOperatorRestore(authorization, expected) {
-  if (typeof expected !== "string" || expected.length < 16) return "unconfigured";
+  // SECURITY-FIX C4: floor raised 16 -> 32, purge-surface parity (see
+  // authorizeOperatorExport in room-export.mjs).
+  if (typeof expected !== "string" || expected.length < 32) return "unconfigured";
   const match = /^Bearer ([^\s]+)$/i.exec(typeof authorization === "string" ? authorization : "");
   const presented = match?.[1] ?? "";
   const actual = sha256Hex(presented);
@@ -627,35 +629,53 @@ function jsonResponse(status, body) {
 
 // POST /api/operator/restore — replay a whole-store NDJSON export into this
 // Durable Object's storage. Fail-closed: 404 when the operator token is not
-// configured, 401 on a bad token, 405 on non-POST, 409 when the store already
-// holds rooms, 413 over the body cap, 422 on a malformed export. The
-// ?audit=report query parameter is the operator's explicit opt-in to land a
-// backup whose stored projections have drifted from current-reducer replay:
-// the restore then succeeds with the drift named in the result's audit
-// field instead of refusing (default: strict).
+// configured AND on a bad token (indistinguishable — SECURITY-FIX C4), 405
+// on non-POST, 409 when the store already holds rooms, 413 over the body
+// cap, 422 on a malformed export. The ?audit=report query parameter is the
+// operator's explicit opt-in to land a backup whose stored projections have
+// drifted from current-reducer replay: the restore then succeeds with the
+// drift named in the result's audit field instead of refusing (default:
+// strict).
 export async function operatorRestoreResponse(request, token, store) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/restore") return null;
   const auth = authorizeOperatorRestore(request.headers.get("authorization"), token);
-  if (auth === "unconfigured") return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (auth === "unconfigured") return operatorDoorNotFound();
+  // SECURITY-FIX C4: purge-surface parity — per-address limit, denied ==
+  // unconfigured 404, and an operator_actions row for every use.
+  if (operatorDoorRateExceeded(store?.db, operatorDoorAddress(request))) {
+    auditOperatorDoor(store, { action: "backup_restore", result: "rate_limited" });
+    return jsonResponse(429, { error: { code: "rate_limited", message: "Too many requests; retry after a minute" } });
+  }
   if (request.method !== "POST") return jsonResponse(405, { error: { code: "method_not_allowed", message: "Use POST" } });
-  if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
+  if (auth === "denied") {
+    auditOperatorDoor(store, { action: "backup_restore", result: "denied" });
+    return operatorDoorNotFound();
+  }
   if (!store) return jsonResponse(503, { error: { code: "unavailable", message: "Restore unavailable" } });
+  const audit = (result, counts) => auditOperatorDoor(store, { action: "backup_restore", result, counts });
   // Explicit operator opt-in: ?audit=report lands a drifted backup with
   // the drift named on the result; anything else stays strict.
   const auditParam = url.searchParams.get("audit");
-  if (auditParam !== null && auditParam !== "strict" && auditParam !== "report")
+  if (auditParam !== null && auditParam !== "strict" && auditParam !== "report") {
+    audit("error", { code: "invalid_restore" });
     return jsonResponse(422, { error: { code: "invalid_restore", message: "audit must be strict or report" } });
+  }
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > RESTORE_MAX_BYTES)
+  if (Number.isFinite(declared) && declared > RESTORE_MAX_BYTES) {
+    audit("error", { code: "too_large" });
     return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
+  }
   let ndjson;
   try {
     const body = await readRestoreBody(request);
-    if (body.tooLarge)
+    if (body.tooLarge) {
+      audit("error", { code: "too_large" });
       return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
+    }
     ndjson = body.text;
   } catch {
+    audit("error", { code: "unreadable_body" });
     return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
   }
   let result;
@@ -663,13 +683,19 @@ export async function operatorRestoreResponse(request, token, store) {
     result = replayNdjsonInto(ndjson, store, { audit: auditParam ?? "strict" });
   } catch (error) {
     const message = error?.message ?? String(error);
-    if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
+    if (/non-empty/.test(message)) { audit("error", { code: "restore_refused_nonempty" }); return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } }); }
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message)) {
+      audit("error", { code: "invalid_restore" });
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
+    }
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message)) {
+      audit("error", { code: "restore_verification_failed" });
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
+    }
+    audit("error", { code: "restore_failed" });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
   }
+  audit("success", { events: result.events ?? null, tables: result.tables ?? null, sanitizedCells: result.sanitizedCells ?? null });
   return jsonResponse(200, {
     ok: true,
     verified: result.verified,
@@ -700,7 +726,7 @@ function kvBytes(value) {
 // target), without moving it through a request body: #3409's cap does not
 // apply because nothing larger than one backup part is ever held. Same
 // operator token and fail-closed posture as /api/operator/restore: 404 when
-// the token is unconfigured, 401 on a bad token, 404 when the named backup
+// the token is unconfigured or wrong (404, indistinguishable — C4), 404 when the named backup
 // does not exist, 409 on a non-empty store, 422 on a malformed or
 // unverifiable backup. The optional JSON body names the backup:
 // { "key": "room-backups/2026-10-14.ndjson" } (default: today's key) and
@@ -711,12 +737,22 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/restore-from-backup") return null;
   const auth = authorizeOperatorRestore(request.headers.get("authorization"), token);
-  if (auth === "unconfigured") return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (auth === "unconfigured") return operatorDoorNotFound();
+  // SECURITY-FIX C4: purge-surface parity — per-address limit, denied ==
+  // unconfigured 404, and an operator_actions row for every use.
+  if (operatorDoorRateExceeded(store?.db, operatorDoorAddress(request))) {
+    auditOperatorDoor(store, { action: "backup_restore_from_backup", result: "rate_limited" });
+    return jsonResponse(429, { error: { code: "rate_limited", message: "Too many requests; retry after a minute" } });
+  }
   if (request.method !== "POST") return jsonResponse(405, { error: { code: "method_not_allowed", message: "Use POST" } });
-  if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
+  if (auth === "denied") {
+    auditOperatorDoor(store, { action: "backup_restore_from_backup", result: "denied" });
+    return operatorDoorNotFound();
+  }
   if (!store) return jsonResponse(503, { error: { code: "unavailable", message: "Restore unavailable" } });
   if (!kv || typeof kv.get !== "function")
     return jsonResponse(503, { error: { code: "backup_unavailable", message: "No backup namespace is configured on this deployment" } });
+  const audit = (result, counts) => auditOperatorDoor(store, { action: "backup_restore_from_backup", result, counts });
   let key = url.searchParams.get("key");
   let auditMode = url.searchParams.get("audit");
   try {
@@ -755,7 +791,8 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     session = createBackupReplaySession(store, { audit: auditMode ?? "strict" });
   } catch (error) {
     const message = error?.message ?? String(error);
-    if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
+    if (/non-empty/.test(message)) { audit("error", { code: "restore_refused_nonempty", key }); return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } }); }
+    audit("error", { code: "restore_failed", key });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed before replay" } });
   }
   const whole = createHash("sha256");
@@ -775,6 +812,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     if (total !== manifest.bytes || whole.digest("hex") !== manifest.sha256)
       throw new Error("Backup does not match its manifest sha256");
     const result = session.finish();
+    audit("success", { events: result.events ?? null, tables: result.tables ?? null, bytes: total, key, sanitizedCells: result.sanitizedCells ?? null });
     return jsonResponse(200, {
       ok: true,
       verified: result.verified,
@@ -795,10 +833,15 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     try { cleanup = session.abort() ?? cleanup; } catch (cleanupError) { cleanup = { cleaned: false, error: cleanupError, skipped: false }; }
     const cleanupNote = !cleanup.cleaned && !cleanup.skipped ? { cleanupFailed: true } : {};
     const message = error?.message ?? String(error);
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message)) {
+      audit("error", { code: "invalid_restore", key });
       return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message))
+    }
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message)) {
+      audit("error", { code: "restore_verification_failed", key });
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
+    }
+    audit("error", { code: "restore_failed", key });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }
 }

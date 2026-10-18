@@ -23,8 +23,9 @@ honestly cannot survive yet.
     2026-10-07: 14,489 events, digests matched. Nothing in this path writes to
     Cloudflare.
   - *DO-native restore:* `POST /api/operator/restore` replays an export into
-    an empty Durable Object, fail-closed (404 token unconfigured, 401 bad
-    token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
+    an empty Durable Object, fail-closed (404 token unconfigured **or wrong
+    — indistinguishable**, 409 non-empty store, 413 over 64 MiB, 422
+    malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
   - *KV-native restore (the #3409 fix; deployed to production in revision
@@ -130,6 +131,19 @@ cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
 `Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
 backup, use the KV-native endpoint above with the backup's key instead.)
+
+**Backup-door guardrails (SECURITY-FIX C4).** All three backup-token doors
+(export, restore, restore-from-backup) now meet the operator purge
+surface's standard: the configured `ROOM_BACKUP_TOKEN` must be **at least
+32 characters** (a shorter value reads as *unconfigured* — the doors 404);
+a wrong token answers the same plain 404 as an unconfigured door (no 401
+oracle); requests are rate-limited per source address (10/min, then 429);
+and every use — success, denial, rate-limit, error — appends an
+`operator_actions` row (`backup_export` / `backup_restore` /
+`backup_restore_from_backup`). Monitoring that keyed on 401s from these
+paths should key on the audit rows instead. **Operator step:** if the
+deployed `ROOM_BACKUP_TOKEN` is shorter than 32 characters it must be
+rotated to a ≥32-character value or the doors stay closed.
 
 ## What was deliberately not done
 

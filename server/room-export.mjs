@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { appendOperatorAction } from "./operator-actions.mjs";
 import { Buffer } from "node:buffer";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -318,12 +319,72 @@ export function exportNdjsonStream(db) {
 }
 
 export function authorizeOperatorExport(authorization, expected) {
-  if (typeof expected !== "string" || expected.length < 16) return "unconfigured";
+  // SECURITY-FIX C4: the credential floor matches the purge surface's
+  // ≥32-byte presented token (operator-auth.mjs) — the backup token guards
+  // the strongest powers in the system and was the weakest floor (16).
+  if (typeof expected !== "string" || expected.length < 32) return "unconfigured";
   const match = /^Bearer ([^\s]+)$/i.exec(typeof authorization === "string" ? authorization : "");
   const presented = match?.[1] ?? "";
   const actual = sha256Hex(presented);
   const wanted = sha256Hex(expected);
   return timingSafeEqual(Buffer.from(actual), Buffer.from(wanted)) ? "ok" : "denied";
+}
+
+// SECURITY-FIX C4 (HUNT-ADVERSARY P4): purge-surface parity for the
+// backup-token doors (export here; both restores in restore-ndjson.mjs,
+// which imports these helpers). The purge surface (operator-routes.mjs)
+// rate-limits operator:<address> at 10/min BEFORE checking the token,
+// answers a bad token with the same 404 as no route at all, and appends
+// an operator_actions audit row. These doors were weaker on every axis:
+// no limit, a 401 that advertised the door, and no audit row for a
+// whole-store export or restore.
+export const OPERATOR_DOOR_RATE_LIMIT = 10;
+// Buckets are keyed by the store's db handle (WeakMap): one limiter per
+// Durable Object in production — the same granularity as the purge
+// surface's per-server rate map — and a fresh limiter per test fixture.
+const doorBucketsByDb = new WeakMap();
+const doorFallbackBuckets = new Map();
+export function operatorDoorRateExceeded(db, address, now = Date.now()) {
+  let buckets = db ? doorBucketsByDb.get(db) : doorFallbackBuckets;
+  if (!buckets) {
+    buckets = new Map();
+    doorBucketsByDb.set(db, buckets);
+  }
+  const key = `operator:${address || "unknown"}`;
+  let entry = buckets.get(key);
+  if (!entry || entry.until <= now) {
+    entry = { n: 0, until: now + 60000 };
+    buckets.set(key, entry);
+  }
+  entry.n += 1;
+  if (buckets.size > 2000) {
+    for (const [k, v] of buckets) if (v.until <= now) buckets.delete(k);
+  }
+  return entry.n > OPERATOR_DOOR_RATE_LIMIT;
+}
+
+export function operatorDoorAddress(request) {
+  return request.headers.get("cf-connecting-ip")
+    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || "unknown";
+}
+
+// The one 404 every unauthenticated backup-door answer uses: byte-identical
+// for "door not configured" and "bad token", so the doors are no oracle.
+export function operatorDoorNotFound() {
+  return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+// Audit is evidence, never a gate: a failed audit write is logged loudly
+// and the operator action proceeds (charter C4 — a restore must not be
+// blocked by its own audit row).
+export function auditOperatorDoor(store, row) {
+  if (!store) return;
+  try {
+    appendOperatorAction(store, row);
+  } catch (error) {
+    console.error(`operator-door audit failed (${row.action}/${row.result}): ${error?.message || error}`);
+  }
 }
 
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -333,14 +394,25 @@ function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 }
 
-export function operatorExportResponse(request, token, db) {
+export function operatorExportResponse(request, token, db, store = null) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/export") return null;
   const auth = authorizeOperatorExport(request.headers.get("authorization"), token);
-  if (auth === "unconfigured") return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (auth === "unconfigured") return operatorDoorNotFound();
+  // SECURITY-FIX C4: purge-surface parity — per-address limit before the
+  // token verdict is revealed, denied reads as the same 404 as
+  // unconfigured, and every use leaves an operator_actions row.
+  if (operatorDoorRateExceeded(db, operatorDoorAddress(request))) {
+    auditOperatorDoor(store, { action: "backup_export", result: "rate_limited" });
+    return jsonResponse(429, { error: { code: "rate_limited", message: "Too many requests; retry after a minute" } });
+  }
   if (request.method !== "GET" && request.method !== "HEAD") return jsonResponse(405, { error: { code: "method_not_allowed", message: "Use GET or HEAD" } });
-  if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
+  if (auth === "denied") {
+    auditOperatorDoor(store, { action: "backup_export", result: "denied" });
+    return operatorDoorNotFound();
+  }
   if (!db) return jsonResponse(503, { error: { code: "unavailable", message: "Export unavailable" } });
+  auditOperatorDoor(store, { action: "backup_export", result: "success", counts: { method: request.method } });
   if (request.method === "HEAD") return new Response(null, { status: 200, headers: ndjsonHeaders });
   return new Response(exportNdjsonStream(db), { status: 200, headers: ndjsonHeaders });
 }

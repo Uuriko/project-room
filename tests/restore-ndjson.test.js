@@ -118,7 +118,7 @@ test("operator restore stays closed until the backup token is set, then enforces
   let response = await operatorRestoreResponse(fakeRequest({ body: ndjson }), undefined, target);
   assert.equal(response.status, 404, "unconfigured token answers 404 like the export endpoint");
   response = await operatorRestoreResponse(fakeRequest({ body: ndjson, token: "wrong-token-value-here" }), OPERATOR_TOKEN, target);
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 404);
   response = await operatorRestoreResponse(fakeRequest({ method: "GET", body: ndjson }), OPERATOR_TOKEN, target);
   assert.equal(response.status, 405);
   assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "denied attempts write nothing");

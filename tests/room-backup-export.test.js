@@ -26,7 +26,7 @@ const P256 = "p256dh-key-material-value";
 const PRI = "pri_abcdefghijklmnop";
 const RAK = "rak_abcdefghij12";
 const KEPT_HASH = "cd".repeat(32);
-const OPERATOR = "operator-token-value";
+const OPERATOR = "operator-token-value-0123456789abcdef";
 const replayScript = fileURLToPath(new URL("../scripts/replay-room-export.mjs", import.meta.url));
 const restoreScript = fileURLToPath(new URL("../scripts/restore-room-backup.mjs", import.meta.url));
 
@@ -119,7 +119,7 @@ test("the operator export route stays closed until the backup token is set", asy
   const missing = operatorExportResponse(new Request(url), null, store.db);
   assert.equal(missing.status, 404);
   const wrong = operatorExportResponse(new Request(url, { headers: { authorization: "Bearer not-the-token" } }), OPERATOR, store.db);
-  assert.equal(wrong.status, 401);
+  assert.equal(wrong.status, 404);
   assert.equal((await wrong.text()).includes(VERIFIER), false);
   const post = operatorExportResponse(new Request(url, { method: "POST", headers: { authorization: `Bearer ${OPERATOR}` } }), OPERATOR, store.db);
   assert.equal(post.status, 405);
