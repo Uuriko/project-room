@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { validId, roomPolicy } from '../src/events.js';
+import { validId, roomPolicy, memberOwnerId } from '../src/events.js';
+import { claimInstanceId, declaredRuntimeOf, PLATFORM_RUNTIME } from './record-stamps.mjs';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
@@ -186,7 +187,15 @@ export class PublicWorkReviews {
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
     const keys = ['requestId', 'expectedReviewRevision', 'taskId', 'expectedTermsVersion', 'generation', 'artifactSha256', 'reason', action === 'decide' ? 'decision' : 'verdict'];
-    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key)), 'Unexpected or missing review fields');
+    // #3612: declaredRuntime is the one optional caller field — the
+    // reviewer's own model/harness declaration, stored labelled
+    // "declared". Principal/session keys are NOT admitted: they are
+    // stamped from the authenticated context below, and a caller who
+    // supplies them fails this shape check instead of spoofing a stamp.
+    const allowed = [...keys, 'declaredRuntime'];
+    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => allowed.includes(key)), 'Unexpected or missing review fields');
+    let declaredRuntime = null;
+    try { declaredRuntime = declaredRuntimeOf(input.declaredRuntime); } catch (error) { check(false, error.message); }
     check(validId(input.requestId) && validId(input.taskId) && Number.isSafeInteger(input.expectedReviewRevision) && input.expectedReviewRevision >= 0
       && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 && Number.isSafeInteger(input.generation) && input.generation > 0
       && typeof input.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(input.artifactSha256), 'Invalid review binding');
@@ -232,11 +241,28 @@ export class PublicWorkReviews {
             fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
           executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
         }
+        // #3612: the verdict record's provenance. The session instance
+        // is the one stamped on the receipt at finish (the submission's
+        // claim round; derived from server-held receipt fields only for
+        // receipts that predate stamping); the principal is the
+        // reviewer's authorizing human from room state; the verifier
+        // runtime is the reviewer's declaration when given, else — on a
+        // PASS, where the platform itself executed the artifact-
+        // integrity check — the platform stamp. A FAIL records no
+        // platform runtime: the platform ran no check for it.
+        const provenance = { sessionInstanceId: receipt.provenance?.sessionInstanceId
+            ?? claimInstanceId('public-work', receipt.taskId, receipt.identityId, receipt.generation),
+          principalMemberId: memberOwnerId(scope.state, actorId),
+          verifierRuntime: declaredRuntime ?? (executedChecks ? PLATFORM_RUNTIME : null) };
         current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
-          ...(executedChecks ? { executedChecks } : {}) };
+          ...(executedChecks ? { executedChecks } : {}), provenance };
       } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
-        current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
+        const provenance = { sessionInstanceId: receipt.provenance?.sessionInstanceId
+            ?? claimInstanceId('public-work', receipt.taskId, receipt.identityId, receipt.generation),
+          principalMemberId: memberOwnerId(scope.state, actorId),
+          verifierRuntime: declaredRuntime ?? null };
+        current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at, provenance };
       }
       current.revision += 1;
       this.db.prepare('INSERT INTO public_work_reviews VALUES (?,?,?,?) ON CONFLICT(receipt_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json')

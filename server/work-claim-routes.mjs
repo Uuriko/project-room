@@ -41,6 +41,7 @@ import {
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
+import { declaredRuntimeOf } from "./record-stamps.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
@@ -64,7 +65,7 @@ import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, memberOwnerId } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -1003,7 +1004,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "declaredRuntime"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, declaredRuntime?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
@@ -1055,7 +1056,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
       dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
       pullRequest: data.pullRequest, pullRequests: data.pullRequests,
-      repo: data.repo, branch: data.branch, room: roomLike, now: nowMs
+      repo: data.repo, branch: data.branch, room: roomLike, now: nowMs,
+      // #3612: the claimant may declare its model/harness at claim time;
+      // claimWork validates and stores it labelled "declared". A body
+      // field naming a principal or session instance is not in the shape
+      // above, so it is refused here rather than stamped.
+      declaredRuntime: data.declaredRuntime
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
@@ -1288,7 +1294,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis", "declaredRuntime"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?, declaredRuntime?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
@@ -1297,9 +1303,23 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // #2966: expectedBasis names the basis the reviewer actually read;
       // a stale one is a 409 work_claim_conflict (same as the release and
       // reassign round preconditions), not a review of the current basis.
+      // #3612: stamps come from the authenticated context — the
+      // reviewer's authorizing principal is derived from room state
+      // here, and a declared runtime is validated before the pure call.
+      // Caller-supplied principal/session fields are not in the shape
+      // and never reach the record.
+      let verifierRuntime = null;
+      try { verifierRuntime = declaredRuntimeOf(data.declaredRuntime); }
+      catch (error) { invalidInput(reject, error.message); }
+      // Partial store stubs (handler test harnesses) may not expose room
+      // state; the stamp degrades to null rather than failing the review.
+      const roomState = typeof store.room === "function" ? store.room(roomId).state : null;
+      const reviewStamps = { principalMemberId: roomState ? memberOwnerId(roomState, caller) : null,
+        verifierRuntime };
       let reviewed;
       try {
-        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs });
+        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs,
+          stamps: reviewStamps });
       } catch (error) {
         if (error instanceof ClaimError && error.code === "work_claim_conflict") {
           reject(409, error.code, `${error.message} — re-read the claim and retry with its current basis.`);

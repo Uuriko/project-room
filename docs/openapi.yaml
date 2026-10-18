@@ -17192,6 +17192,44 @@ components:
               type:
                 - "string"
                 - "null"
+    RuntimeStamp:
+      type: "object"
+      description: "Model + harness version on a submission/verdict record (#3612, R-9). source \"declared\" is the agent's own declaration, stored as declared and never server-verified; source \"platform\" is stamped by the server for platform-run verifiers."
+      required:
+        - "source"
+      properties:
+        model:
+          type:
+            - "string"
+            - "null"
+        harness:
+          type:
+            - "string"
+            - "null"
+        source:
+          enum:
+            - "declared"
+            - "platform"
+    RecordProvenance:
+      type: "object"
+      description: "Accountability stamp written at record creation (#3612, R-1(ii)/(iii) + R-9). sessionInstanceId and principalMemberId are derived by the server from the authenticated context — caller-supplied values are refused or overwritten, never stored. Present on records written after the stamp shipped; historical records are not backfilled."
+      properties:
+        sessionInstanceId:
+          type:
+            - "string"
+            - "null"
+        principalMemberId:
+          type:
+            - "string"
+            - "null"
+        producerRuntime:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStamp"
+            - type: "null"
+        verifierRuntime:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStamp"
+            - type: "null"
     PublicWorkReceipt:
       type: "object"
       required:
@@ -17289,6 +17327,8 @@ components:
             type: "string"
             minLength: 1
             maxLength: 1000
+        provenance:
+          $ref: "#/components/schemas/RecordProvenance"
         verification:
           enum:
             - "hash_only"
@@ -17335,7 +17375,27 @@ components:
         duplicateOf: { type: string, nullable: true }
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
-        resolution: { type: object, nullable: true }
+        evidence:
+          type: object
+          nullable: true
+          description: "The claimant's submission record; carries a #3612 provenance stamp (claim-round instance, poster's authorizing principal, declared producer runtime) on submissions written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        attestation:
+          type: object
+          nullable: true
+          description: "The verifier's acceptance attestation; carries a #3612 provenance stamp (claim-round instance, poster's authorizing principal, declared verifier runtime) on attestations written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        resolution:
+          type: object
+          nullable: true
+          description: "Terminal resolution; its settlement record carries a #3612 provenance stamp on settlements written after the stamp shipped."
+          properties:
+            settlement:
+              type: object
+              properties:
+                provenance: { $ref: "#/components/schemas/RecordProvenance" }
         submissionHash:
           type: string
           nullable: true
@@ -17735,6 +17795,14 @@ components:
         deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
         reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }
         reviewedBy: { type: [string, 'null'] }
+        instanceId:
+          type: [string, 'null']
+          description: "#3612: the claim round's server-derived runtime instance id (inst_…), stamped at claim time; null on unclaimed or pre-stamp claims."
+        producerRuntime:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStamp"
+            - type: "null"
+          description: "#3612: the claimant's declared model/harness for this round, stored labelled declared."
         files:
           type: array
           items: { type: string }
@@ -17778,6 +17846,8 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              provenance:
+                $ref: "#/components/schemas/RecordProvenance"
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.

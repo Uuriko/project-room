@@ -50,6 +50,7 @@
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { claimInstanceId, declaredRuntimeOf, provenanceOf, runtimeStampOf } from "./record-stamps.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -559,8 +560,12 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  // #3612: the provenance stamp (claim-round instance, reviewer's
+  // authorizing principal, declared verifier runtime) rides the record
+  // when the route stamped it; only the labelled shape survives.
+  const provenance = provenanceOf(value.provenance);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
-    ...(basis ? { basis } : {}) });
+    ...(basis ? { basis } : {}), ...(provenance ? { provenance } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -878,7 +883,15 @@ export const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
+    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
+    // #3612: the claim round's server-derived instance id and the
+    // claimant's declared producer runtime (labelled declared). Both are
+    // stamped at claim time in claimWork; stored values are re-validated
+    // here so a hand-written record cannot smuggle an unlabelled claim.
+    // Sparse like requestOutcomes/deploy: absent on unclaimed and
+    // pre-stamp claims, so their stored shape is byte-identical to before.
+    ...(typeof value.instanceId === "string" && /^inst_[0-9a-f]{24}$/.test(value.instanceId) ? { instanceId: value.instanceId } : {}),
+    ...(runtimeStampOf(value.producerRuntime) ? { producerRuntime: runtimeStampOf(value.producerRuntime) } : {}) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -1034,7 +1047,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now, declaredRuntime } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // H4 (QA-200 2026-10-08): distinguish self re-claim from a foreign holder in
   // the message — "release it first" was destructive for the holder and
@@ -1053,6 +1066,11 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
+  // #3612: validate the claimant's declared runtime here so a malformed
+  // declaration fails with this module's error shape.
+  let declaredProducerRuntime = null;
+  try { declaredProducerRuntime = declaredRuntimeOf(declaredRuntime); }
+  catch (error) { check(false, error.message); }
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
     files: declared ? declared.files : item.files,
     fileBlocks: declared
@@ -1073,8 +1091,19 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     // to inherit any residue that reached the pool anyway (bug sweep
     // 2026-10-16 F1 — the lease sweep once leaked exactly this).
     ci: null, deliveryGeneration: 0, delivery: null, verification: null,
+    // #3612: a fresh claim round is a fresh runtime instance. The
+    // instance id is derived here from server-set fields only (work id,
+    // authenticated claimant, the server-clock claimedAt) — a caller
+    // cannot assert one through the claim input, and any instanceId a
+    // stored record arrived with is overwritten. The claimant may
+    // declare its model/harness; it is stored labelled "declared"
+    // (sparse: the key exists only when a declaration was made).
+    instanceId: claimInstanceId("board", item.id, agent, isoOf(atMs)),
+    ...(declaredProducerRuntime ? { producerRuntime: declaredProducerRuntime } : {}),
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+  // A fresh round never inherits the previous round's declared runtime.
+  if (!declaredProducerRuntime) delete claimed.producerRuntime;
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
@@ -1440,7 +1469,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis, stamps } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
@@ -1492,7 +1521,17 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  // #3612: the route stamps the reviewer's authorizing principal (from
+  // room state, never the request body) and any runtime the reviewer
+  // declared; the session instance is this claim round's own id, read
+  // from the item — a `stamps` value naming a different instance or a
+  // principal for the wrong purpose cannot enter here, because the
+  // instance is not taken from stamps at all.
+  const provenance = (item.instanceId || stamps) ? provenanceOf({ sessionInstanceId: item.instanceId ?? null,
+    principalMemberId: stamps?.principalMemberId ?? null,
+    ...(stamps?.verifierRuntime ? { verifierRuntime: stamps.verifierRuntime } : {}) }) : null;
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item),
+    ...(provenance ? { provenance } : {}) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
