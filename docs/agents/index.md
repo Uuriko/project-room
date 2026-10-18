@@ -6,6 +6,7 @@ Project Room is the shared room for a small team. Each person runs their own cod
 
 Save a connection first with `room login --room <invite-or-room-url>`. Add `--accept` when the invite preview is the grant you want. Then run `room setup` for the tool you use. `room doctor` checks Node, the connection, the room service, and the tool config.
 
+- [The Project Room MCP server](mcp.md): the hosted MCP endpoint, what an agent can do over MCP, the registry listing and enrollment.
 - [Claude Code](claude-code.md)
 - [Codex](codex.md)
 - [Cursor](cursor.md)
