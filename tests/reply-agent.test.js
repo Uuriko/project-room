@@ -463,6 +463,91 @@ test("heartbeat detects new clarification and signals the running host to stop",
   assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
 });
 
+for (const change of ["clarification", "cancellation"]) {
+  test(`stream stops executing host on ${change} before its heartbeat`, { timeout: 10000 }, async t => {
+    const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("live-" + change).command.data.messageId;
+    let entered, calls = 0;
+    const started = new Promise(resolve => { entered = resolve; });
+    const pending = runRequestOnce({ ...a, requestMessageId, signal: AbortSignal.timeout(3000),
+      execute: ({ signal }) => new Promise((resolve, reject) => {
+        calls++; signal.addEventListener("abort", () => reject(signal.reason), { once: true }); entered();
+      }) });
+    const refused = assert.rejects(pending, /Request changed, paused or closed/);
+    await started;
+    const changedAt = performance.now();
+    if (change === "clarification") {
+      await f.client.replyAction("room_reply", { requestId: "live-direction", replyToId: requestMessageId, body: "Use the new requirement." });
+    } else {
+      const context = await f.client.replyContext(requestMessageId);
+      f.store.command(f.keys.owner, "commons", { id: "live-cancel", type: "reply_request.cancelled",
+        data: { requestMessageId, expectedRequestRevision: context.request.revision, reason: "No longer needed" } });
+    }
+    await refused;
+    t.diagnostic(`${change} to settled host: ${(performance.now() - changedAt).toFixed(1)} ms (local fixture)`);
+    assert.equal(calls, 1);
+    assert.equal(a.db.prepare("SELECT response FROM request_runs").get().response, null);
+    await assert.rejects(runRequestOnce({ ...a, requestMessageId, execute: () => { calls++; } }), /unknown/);
+    assert.equal(calls, 1, "stopping an execution cannot silently repeat its side effects");
+  });
+}
+
+test("live control ignores unrelated events, reads no history, and closes on completion", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("live-unrelated").command.data.messageId;
+  let entered, release, observed, listReads = 0, contextReads = 0, workingWrites = 0, hostSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const finish = new Promise(resolve => { release = resolve; });
+  const read = new Promise(resolve => { observed = resolve; });
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("/reply-context")) contextReads++;
+    if (options.method === "POST" && path.endsWith("/request-runs") && JSON.parse(options.body).action === "working") workingWrites++;
+    const result = await fetch(url, options);
+    if (path.endsWith("/reply-requests")) { listReads++; observed(); }
+    return result;
+  } };
+  const pending = runRequestOnce({ ...a, connection, requestMessageId, signal: AbortSignal.timeout(3000),
+    execute: ({ signal }) => { hostSignal = signal; entered(); return finish; } });
+  await started;
+  f.open("another-request");
+  await read;
+  assert.equal(hostSignal.aborted, false);
+  release({ body: "Original task complete" });
+  assert.equal((await pending).status, "delivered");
+  assert.equal(contextReads, 1, "control reads do not rebuild conversation history");
+  assert.equal(workingWrites, 0, "stream hints do not create heartbeat writes");
+  const completedReads = listReads;
+  f.open("after-completion");
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(listReads, completedReads, "completed hosts leave no control listener running");
+});
+
+test("unsupported control stream backs off while heartbeat still stops stale work", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("stream-fallback").command.data.messageId;
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let entered, unavailable, streamCalls = 0, hostSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const attempted = new Promise(resolve => { unavailable = resolve; });
+  const connection = { ...f.config, fetchImpl: (url, options) => {
+    if (new URL(url).pathname.endsWith("/stream")) {
+      streamCalls++; unavailable();
+      return Promise.resolve(new Response("Unsupported", { status: 404 }));
+    }
+    return fetch(url, options);
+  } };
+  const pending = runRequestOnce({ ...a, connection, requestMessageId, signal: AbortSignal.timeout(3000),
+    execute: ({ signal }) => new Promise((resolve, reject) => {
+      hostSignal = signal; signal.addEventListener("abort", () => reject(signal.reason), { once: true }); entered();
+    }) });
+  const refused = assert.rejects(pending, /Request changed, paused or closed/);
+  await started; await attempted;
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(hostSignal.aborted, false, "unsupported streaming does not kill healthy execution");
+  assert.equal(streamCalls, 1, "failed stream does not spin");
+  await f.client.replyAction("room_reply", { requestId: "fallback-direction", replyToId: requestMessageId, body: "Change the requirement." });
+  t.mock.timers.tick(30000);
+  await refused;
+});
+
 test("transient heartbeat failures do not abort the running host", { timeout: 10000 }, async t => {
   const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("heartbeat-transient").command.data.messageId;
   t.mock.timers.enable({ apis: ["setInterval"] });
