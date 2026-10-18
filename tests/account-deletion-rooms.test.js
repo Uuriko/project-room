@@ -104,7 +104,9 @@ test("a solely owned personal room is archived and its messages and files are pu
   assert.equal(file.bytes, null);
   assert.equal(file.filename, "purged");
   assert.equal(ctx.f.store.account(ctx.accountId).active, false);
-  assert.equal(ctx.f.store.db.prepare("SELECT count(*) AS n FROM account_access_events WHERE account_id=?").get(ctx.accountId).n, auditBefore);
+  // Retained audit rows survive; deletion appends exactly one "account_deleted" event.
+  assert.equal(ctx.f.store.db.prepare("SELECT count(*) AS n FROM account_access_events WHERE account_id=?").get(ctx.accountId).n, auditBefore + 1);
+  assert.deepEqual({ ...ctx.f.store.db.prepare("SELECT active, reason FROM account_access_events WHERE account_id=? ORDER BY revision DESC LIMIT 1").get(ctx.accountId) }, { active: 0, reason: "account_deleted" });
 
   ctx.f.store.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
   const rebuilt = ctx.f.store.rebuildProjection(roomId);

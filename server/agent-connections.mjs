@@ -284,6 +284,19 @@ export class AgentConnections {
       return { receipt, connection: this.view(row), duplicate: false, ...(mcpToken ? { mcpToken } : {}) };
     });
   }
+  // Completed account deletion (server/account-deletion.mjs, profile step)
+  // writes an account_access_events row with the reserved reason
+  // "account_deleted"; suspension writes active=0 with an operator reason
+  // (never that one) and can be restored.
+  accountDeleted(account) {
+    if (!account || account.active !== 0) return false;
+    const latest = this.db.prepare("SELECT revision, active, auth_epoch, reason FROM account_access_events WHERE account_id=? ORDER BY revision DESC LIMIT 1").get(account.id);
+    // The reason is reserved (changeAccountAccess refuses it), and the record
+    // must be the one the deletion wrote: same revision and auth epoch as the
+    // account row it left behind.
+    return latest?.active === 0 && latest.reason === "account_deleted"
+      && latest.revision === account.revision && latest.auth_epoch === account.auth_epoch;
+  }
   verify() {
     try { this.verifyHistory(); }
     catch { fail(503, "connection_integrity_error", "Agent connection history requires reconciliation"); }
@@ -370,7 +383,15 @@ export class AgentConnections {
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
           || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
           || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
-          || !account || account.auth_epoch < state.sponsor_auth_epoch || binding?.account_id !== state.sponsor_account_id) invalid();
+          || !account || account.auth_epoch < state.sponsor_auth_epoch
+          // A sponsor's binding is an at-the-time fact like ownership
+          // (65d1c80): account deletion purges member_accounts but keeps the
+          // account as a deactivated tombstone, so a missing binding is valid
+          // only when the account's latest access event records completed
+          // deletion. active=0 alone is not enough (temporary suspension also
+          // writes it). A live or suspended account with no binding, or a
+          // binding to another account, still fails.
+          || (binding ? binding.account_id !== state.sponsor_account_id : !this.accountDeleted(account))) invalid();
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
           || credential.parent_hash !== null || credential.account_id !== null || credential.account_auth_epoch !== null || credential.expires_at !== state.expires_at

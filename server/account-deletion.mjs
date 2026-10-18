@@ -33,6 +33,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
+export const ACCOUNT_DELETED_REASON = "account_deleted";
 export const RETENTION_POLICY = Object.freeze({
   version: "1.7.0",
   summary: "Account deletion purges the account's sign-in credentials, "
@@ -761,8 +762,20 @@ const EXECUTORS = {
   // delete here: removing one account's journal legs orphans its
   // counterparties' legs and breaks the journal hash chain.
   profile: (store, accountId) => {
-    return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
-      display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
+    // Completed deletion leaves durable evidence in the retained audit table,
+    // distinct from a temporary suspension (changeAccountAccess also writes
+    // active=0, with an operator reason, and can be restored). Integrity
+    // checks that tolerate a purged member_accounts binding read this row.
+    const current = store.db.prepare("SELECT revision FROM accounts WHERE id=?").get(accountId);
+    if (!current) return 0;
+    const audited = store.db.prepare("SELECT COALESCE(MAX(revision),0) AS revision FROM account_access_events WHERE account_id=?").get(accountId).revision;
+    const revision = Math.max(current.revision, audited) + 1;
+    const changes = store.db.prepare(`UPDATE accounts SET active=0, revision=?, auth_epoch=auth_epoch+1,
+      display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(revision, accountId).changes;
+    const { auth_epoch: authEpoch } = store.db.prepare("SELECT auth_epoch FROM accounts WHERE id=?").get(accountId);
+    store.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,0,?,?,?)")
+      .run(accountId, revision, authEpoch, ACCOUNT_DELETED_REASON, store.now());
+    return changes;
   },
   owned_rooms: (store, accountId, plan) => disposeOwnedRooms(store, plan),
 };
