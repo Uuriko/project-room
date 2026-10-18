@@ -235,6 +235,7 @@ response's own `hint`/`next` when it names something more specific.
 | `cursor_stale` | 409 | The list changed; start again without a cursor | re-read | Start the list again without a cursor. |
 | `decision_not_found` | 404 | No decision "${matchmakingId}" in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `decision_source_required` | 422 | Post the rationale in the room first, then record the decision with its message id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `decision_rows_unavailable` | 503 | Decision-row export requires a database-backed store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `demigod_contract_exists` | 409 | Contract ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `demigod_contract_not_found` | 404 | Contract not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `demigod_offer_exists` | 409 | Offer profile ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -407,6 +408,7 @@ response's own `hint`/`next` when it names something more specific.
 | `insufficient_scope` | 403 | API key lacks the ${scopeName} scope | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `internal` | 500 | { status: 500, code: 'internal', message: 'Request could not be completed' }, true); } } | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `internal_error` | 500 | Route auth is not available | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `invalid_access_log` | 422 | Choose an optional limit of 1 to 500 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account` | 422 | Invalid account id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_binding` | 422 | Only a human Room member can bind to an account | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_change` | 422 | Account change requires a current revision, active state, and reason | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -449,6 +451,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_decision_export` | 422 | The decision-row export takes no parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_deletion` | 422 | A deletion confirmation token from GET /api/account/deletion/plan is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract` | 422 | Invalid action | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract_status` | 409 | Contract is terminal and cannot move | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

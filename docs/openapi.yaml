@@ -1615,6 +1615,52 @@ paths:
               schema: { type: string }
         '422':
           description: Unknown or repeated format
+  /api/rooms/{roomId}/decision-rows:
+    get:
+      summary: Export per-subject decision rows (decision-rows/1)
+      description: >-
+        Owner-only (403 owner_required for other members). One row per
+        verdict across public-work reviews, bounty verdicts and board
+        claim reviews, in the stable decision-rows/1 schema documented in
+        docs/DECISION-ROWS.md. The payload is materialised in full before
+        the response starts; each export of a live room appends a
+        room.exported audit event naming the schema version, row count
+        and requester, and writes an export row to the evidence access
+        log, before the payload is sent.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner exports decision rows }
+        '200':
+          description: "{ schema, roomId, generatedAt, requestedBy, rowCount, fields, rows, auditEventId }"
+          content:
+            application/json:
+              schema: { type: object }
+        '422': { description: invalid_decision_export - the export takes no parameters }
+  /api/rooms/{roomId}/decision-rows/access-log:
+    get:
+      summary: Read the evidence access log for a room
+      description: >-
+        Owner-only. Entries name the reader, the kind (export or
+        evidence_read), the surface, the record id when the read was for
+        one record, and the time; export entries also name the schema
+        version and row count. Newest first.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          description: 1 to 500 (default 100); anything else is 422 invalid_access_log
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner reads the access log }
+        '200':
+          description: "{ roomId, entries }"
+          content:
+            application/json:
+              schema: { type: object }
+        '422': { description: invalid_access_log }
   /api/rooms/{roomId}/import:
     post:
       summary: Import a JSONL event-log export

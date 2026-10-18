@@ -867,6 +867,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
+    // #3616 (R-11): a member-side evidence (receipts) read leaves an access record.
+    store.decisionRows?.logAccessQuietly({ roomId, readerId: caller, kind: "evidence_read", surface: "work-claim-receipts", recordId: null });
     return json(res, 200, stampReceipts({
       receipts: page.map(item => receiptWithPublicLink(store, roomId, item)),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
