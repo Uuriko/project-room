@@ -4,6 +4,7 @@
 
 import { configuredOperatorTokenHash, presentedOperatorToken, operatorTokenMatches, carriesRoomOrAccountCookie } from "./operator-auth.mjs";
 import { createOperatorPurge } from "./operator-purge.mjs";
+import { createOperatorArchive } from "./operator-archive.mjs";
 import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
@@ -13,6 +14,7 @@ const ROUTES = Object.freeze({
   "/api/operator/purge/plan": POST,
   "/api/operator/purge/find": POST,
   "/api/operator/purge/execute": POST,
+  "/api/operator/messages/archive": POST,
   "/api/operator/actions": GET,
   "/api/operator/status": GET,
   "/api/operator/drift": GET
@@ -20,6 +22,7 @@ const ROUTES = Object.freeze({
 
 export function createOperatorRoutes({ store, json, reject, body, rate }) {
   const purge = createOperatorPurge(store);
+  const archive = createOperatorArchive(store);
   return async function operatorRoutes(req, res, { url, remoteAddress, requestId }) {
     const path = url.pathname;
     if (path !== "/api/operator" && !path.startsWith("/api/operator/")) return false;
@@ -42,6 +45,10 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     }
     if (path === "/api/operator/purge/execute") {
       json(res, 200, purge.execute(await body(req), requestId));
+      return true;
+    }
+    if (path === "/api/operator/messages/archive") {
+      json(res, 200, archive.archive(await body(req), requestId));
       return true;
     }
     if (path === "/api/operator/actions") {

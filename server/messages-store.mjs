@@ -884,11 +884,24 @@ function retainedByState(state) {
   return keep;
 }
 
+// The stored projection size of one room in bytes, or null when the room
+// does not exist. LENGTH() over the TEXT projection counts characters, and
+// projections are JSON text whose non-ASCII bodies would undercount bytes,
+// so measure the blob cast — the same measure usage-summary uses.
+export function roomProjectionBytes(store, roomId) {
+  const row = store?.db?.prepare("SELECT length(CAST(projection AS BLOB)) AS bytes FROM rooms WHERE id=?").get(roomId);
+  return row ? Number(row.bytes) || 0 : null;
+}
+
 // Move old messages out of rooms.projection into the messages table only. Keeps
 // the newest `keepNewest` messages and everything retainedByState. Needs a
 // certified messages table (parity at the room head). dryRun reports what
 // would move and changes nothing. Returns { ok, ... } and never throws for
-// "not ready" conditions.
+// "not ready" conditions. A result that would move messages also carries the
+// moving set's oldest/newest timestamps (oldestAt/newestAt), the projection
+// size before the move (projectionBytesBefore) and the size the projection
+// would have after it (resultingProjectionBytes), so a dry-run report can
+// state the effect on the room's projection cap without a second pass.
 export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
   if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
@@ -919,7 +932,21 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     const retainedIds = ordered.filter(message => seqs.get(message.id) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
     // Every message at or below the cut that is not moving is explicitly retained.
     const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
-    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq };
+    // The moving set is seq-ordered, so its ends are the oldest and newest
+    // messages that would move. The resulting size removes exactly the freed
+    // bytes plus the one separator byte each stored message carries (the
+    // `+ 1` in freedBytes), and adds back the archive marker the real run
+    // writes in their place — the same marker object built below.
+    const stamps = moving.map(message => message.createdAt).filter(value => typeof value === "string").sort();
+    const projectionBytesBefore = Buffer.byteLength(head.projection);
+    const markerBytes = Buffer.byteLength(JSON.stringify({ throughSeq, count: marker.count + moving.length, retainedIds }));
+    const priorMarkerBytes = state.messagesArchive ? Buffer.byteLength(JSON.stringify(state.messagesArchive)) : 0;
+    const resultingProjectionBytes = projectionBytesBefore - freedBytes - priorMarkerBytes + markerBytes;
+    const result = {
+      ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq,
+      oldestAt: stamps[0] ?? null, newestAt: stamps[stamps.length - 1] ?? null,
+      projectionBytesBefore, resultingProjectionBytes
+    };
     // Spot-check before anything moves (dry run too): every moving message has a
     // table row equal to its projection record, and a sample is tied back to its
     // posting event in the log.

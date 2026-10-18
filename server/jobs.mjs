@@ -12,6 +12,7 @@ import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
+import { roomsOverArchiveTrigger, runMessagesArchiveTick } from "./messages-archive.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -594,8 +595,53 @@ export const JOBS = Object.freeze([
       console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
       return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
     }
+  }),
+  defineJob({
+    name: "messages-archive",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    // P0-6: archiveRoomMessages had no caller, so a room's projection grew
+    // toward the 4 MiB cap (PILOT_LIMITS.projectionBytes) until writes
+    // refused. This job wakes only while some room's stored projection is
+    // at or over 70% of the cap (see messages-archive.mjs for the math) —
+    // the registry's standing rule that an idle store never wakes for it.
+    // Slow, like store-growth and integrity: it rides the safety-net cron.
+    enabled: (_env, store) => (store ? roomsOverArchiveTrigger(store).length > 0 : false),
+    disabledReason: () => "No room projection is at or over 70% of the projection cap",
+    // Dry-run is the default posture: the tick reports what WOULD move per
+    // room (count, bytes, oldest/newest, resulting projection size) and
+    // moves nothing. Live archival takes the ROOM_MESSAGES_ARCHIVE_LIVE=1
+    // env opt-in, checked inside the tick.
+    async run(store, ctx) {
+      if (ctx.room?.archiveMessagesTick) return ctx.room.archiveMessagesTick();
+      const result = runMessagesArchiveTick(store, { env: ctx.env ?? {} });
+      const summary = {
+        rooms: result.rooms, dryRun: result.dryRun,
+        wouldArchive: result.wouldArchive, archived: result.archived
+      };
+      if (!result.dryRun) return summary;
+      for (const report of result.reports) {
+        console.info(JSON.stringify({ event: "messages.archive.dry_run", ...summaryFields(report) }));
+      }
+      return summary;
+    }
   })
 ]);
+
+// The log line for one dry-run report: ids and counts only, never message
+// bodies — the same discipline as logIntegrity above.
+function summaryFields(report) {
+  const plan = report?.plan ?? report;
+  return {
+    roomId: report?.roomId ?? null,
+    ok: plan?.ok ?? false,
+    wouldArchive: plan?.archived ?? 0,
+    freedBytes: plan?.freedBytes ?? 0,
+    projectionBytes: report?.projectionBytes ?? plan?.projectionBytesBefore ?? null,
+    resultingProjectionBytes: plan?.resultingProjectionBytes ?? null
+  };
+}
 
 const BY_NAME = new Map(JOBS.map(job => [job.name, job]));
 
