@@ -3183,7 +3183,12 @@ export class BountyEscrow {
   // Conservation invariant: payable + locked + attributed + approved =
   // total_issued (the genesis mint). Checks the global sum, per-account
   // non-negativity, per-bounty award coverage (award lots only — bonds are
-  // tracked globally), and every per-account hash chain.
+  // tracked globally), every per-account hash chain, and — since #4125 —
+  // per-bounty PAYABLE-flow reconciliation: for terminal bounties the
+  // payable legs (payout / fee / refund / bond dispositions) must equal
+  // the amounts the bounty's state + resolution imply, so a forged or
+  // double-appended settlement pair (valid hashes, valid chain, wrong
+  // money) is a violation instead of a pass.
   verifyConservation(roomId) {
     return this.store.readTransaction(() => {
       this._ensure();
@@ -3203,7 +3208,7 @@ export class BountyEscrow {
       // Per-bounty award coverage. Proposed bounties lock nothing (triage
       // holds no budget); terminal bounties must hold nothing at all.
       const awardKinds = [...AWARD_KINDS].map(k => `'${k}'`).join(",");
-      for (const b of this.db.prepare("SELECT bounty_id, amount_millis, state, dispute_id, resolution_json FROM bounty_records WHERE room_id=?").all(roomId)) {
+      for (const b of this.db.prepare("SELECT bounty_id, amount_millis, state, dispute_id, resolution_json, poster, claimant FROM bounty_records WHERE room_id=?").all(roomId)) {
         const lots = this.db.prepare(`SELECT lot_state, COALESCE(SUM(amount),0) AS t FROM bounty_journal
           WHERE room_id=? AND bounty_id=? AND kind IN (${awardKinds}) GROUP BY lot_state`).all(roomId, b.bounty_id);
         const bucket = Object.fromEntries(lots.map(r => [r.lot_state, r.t]));
@@ -3226,6 +3231,137 @@ export class BountyEscrow {
           // disputed: award is locked (pre-accept dispute) or attributed/approved (post-accept)
           if (escrowed !== b.amount_millis && !(b.state === "approved" && resolution?.kind === "split"))
             violations.push(`bounty ${b.bounty_id} (${b.state}) escrowed ${escrowed} != ${b.amount_millis}`);
+        }
+        // --- payable-flow reconciliation (#4125) --------------------------
+        // The bucket checks above prove the award never leaves the escrow
+        // buckets early and never lingers after a terminal state; they say
+        // nothing about where payable money went. Balances are DERIVED
+        // from this journal, so a settlement pair appended by a buggy
+        // write path or a restore/replay double-append — valid hashes,
+        // valid chain — moves real balances while every check above stays
+        // green. Reconcile the payable legs against the settlement shape.
+        const flows = this.db.prepare(`SELECT kind, account_id, lot_state, COALESCE(SUM(amount),0) AS t
+          FROM bounty_journal WHERE room_id=? AND bounty_id=? GROUP BY kind, account_id, lot_state`).all(roomId, b.bounty_id);
+        const flowSum = (kind, account, lotState) => flows
+          .filter(r => r.kind === kind && r.account_id === account && r.lot_state === lotState)
+          .reduce((sum, r) => sum + r.t, 0);
+        // Every movement is a balanced pair written under one kind, so
+        // each kind's rows for one bounty must net to zero.
+        for (const kind of [...new Set(flows.map(r => r.kind))]) {
+          const net = flows.filter(r => r.kind === kind).reduce((sum, r) => sum + r.t, 0);
+          if (net !== 0)
+            violations.push(`bounty ${b.bounty_id} journal kind ${kind} nets ${net} (movements must balance)`);
+        }
+        const poster = canonicalLane(b.poster);
+        const claimant = b.claimant ? canonicalLane(b.claimant) : null;
+        // Bond bookkeeping identities hold at EVERY state: a bond lock is
+        // paid for out of the same account's payable, a return credits the
+        // account its locked debit names, forfeits land in the pool, and
+        // compensation lands with the worker — never more than was locked.
+        // Disposition COMPLETENESS is not a per-state property (a dispute
+        // verdict disposes the challenger's bond while the bounty still
+        // sits at `approved` awaiting the sweep; the claim bond disposes
+        // only at that sweep), so it is pinned at terminal states below.
+        const bondLocked = new Map(), bondDisposed = new Map();
+        let forfeitDebits = 0, compensateDebits = 0;
+        for (const account of [...new Set(flows.filter(r => r.kind.startsWith("bond-")).map(r => r.account_id))]) {
+          const lockedIn = flowSum("bond-lock", account, "locked");
+          if (lockedIn !== -flowSum("bond-lock", account, "payable"))
+            violations.push(`bounty ${b.bounty_id} bond lock for ${account}: locked ${lockedIn} != paid ${-flowSum("bond-lock", account, "payable")}`);
+          const returned = -flowSum("bond-return", account, "locked");
+          const forfeited = -flowSum("bond-forfeit", account, "locked");
+          const compensated = -flowSum("bond-compensate", account, "locked");
+          bondLocked.set(account, lockedIn);
+          bondDisposed.set(account, returned + forfeited + compensated);
+          if (returned + forfeited + compensated > lockedIn)
+            violations.push(`bounty ${b.bounty_id} bond for ${account}: disposed ${returned + forfeited + compensated} exceeds locked ${lockedIn}`);
+          if (flowSum("bond-return", account, "payable") !== returned)
+            violations.push(`bounty ${b.bounty_id} bond return to ${account} != its locked debit ${returned}`);
+          forfeitDebits += forfeited;
+          compensateDebits += compensated;
+        }
+        if (flowSum("bond-forfeit", POOL_ACCOUNT, "payable") !== forfeitDebits)
+          violations.push(`bounty ${b.bounty_id} bond forfeits to pool != locked forfeit debits ${forfeitDebits}`);
+        for (const r of flows.filter(r => r.kind === "bond-compensate" && r.lot_state === "payable" && r.t !== 0))
+          if (r.account_id !== claimant)
+            violations.push(`bounty ${b.bounty_id} bond compensation paid to ${r.account_id}, not the worker ${claimant}`);
+        if (claimant && flowSum("bond-compensate", claimant, "payable") !== compensateDebits)
+          violations.push(`bounty ${b.bounty_id} bond compensation to worker != locked compensate debits ${compensateDebits}`);
+        if (TERMINAL_STATES.has(b.state)) {
+          // Award payable legs implied by the settlement shape: a paid
+          // bounty vests `vested` with the worker (the full award, or the
+          // worker half of a split), the pool takes floor(vested / 100)
+          // as its fee on the sweep, and a split refunds the rest.
+          const vested = b.state === "paid"
+            ? (resolution?.kind === "split" ? Math.floor(b.amount_millis / 2) : b.amount_millis) : 0;
+          const fee = Math.floor(vested * FEE_NUMERATOR / FEE_DENOMINATOR);
+          const expectedPayable = new Map();
+          if (b.state !== "cancelled") expectedPayable.set(`escrow-lock|${poster}`, -b.amount_millis);
+          if (b.state === "paid") {
+            if (claimant) expectedPayable.set(`payout|${claimant}`, vested - fee);
+            if (fee > 0) expectedPayable.set(`fee|${POOL_ACCOUNT}`, fee);
+            if (resolution?.kind === "split") expectedPayable.set(`refund|${poster}`, b.amount_millis - vested);
+          } else if (b.state === "refunded") {
+            expectedPayable.set(`refund|${poster}`, b.amount_millis);
+          }
+          for (const kind of ["escrow-lock", "attribute", "approve", "payout", "refund", "fee"]) {
+            const accounts = new Set([
+              ...flows.filter(r => r.kind === kind && r.lot_state === "payable").map(r => r.account_id),
+              ...[...expectedPayable.keys()].filter(k => k.startsWith(`${kind}|`)).map(k => k.slice(kind.length + 1))
+            ]);
+            for (const account of accounts) {
+              const actual = flowSum(kind, account, "payable");
+              const expected = expectedPayable.get(`${kind}|${account}`) ?? 0;
+              if (actual !== expected)
+                violations.push(`bounty ${b.bounty_id} payable flow ${kind} -> ${account} = ${actual}, expected ${expected}`);
+            }
+          }
+          // Bond disposition completeness: at a terminal state every
+          // milli locked under a bond kind has left the locked state
+          // exactly once — the identities above bound it at lockedIn,
+          // this pins it to lockedIn.
+          for (const [account, lockedIn] of bondLocked)
+            if (bondDisposed.get(account) !== lockedIn)
+              violations.push(`bounty ${b.bounty_id} bond for ${account}: locked ${lockedIn}, disposed ${bondDisposed.get(account)}`);
+          // The settlement record stamped on resolution_json must agree
+          // with the journal it claims to describe. workerMillis is the
+          // vested share when a dispute recorded it and the net payout
+          // when the sweep did — both are honest; anything else is not.
+          const settlement = resolution?.settlement ?? null;
+          if (settlement) {
+            if (settlement.refundMillis !== flowSum("refund", poster, "payable"))
+              violations.push(`bounty ${b.bounty_id} settlement refund ${settlement.refundMillis} != journal refund ${flowSum("refund", poster, "payable")}`);
+            if (b.state === "paid" && settlement.workerMillis !== vested && settlement.workerMillis !== vested - fee)
+              violations.push(`bounty ${b.bounty_id} settlement worker ${settlement.workerMillis} != vested ${vested} (fee ${fee})`);
+            if (b.state === "refunded" && settlement.workerMillis !== 0)
+              violations.push(`bounty ${b.bounty_id} refunded settlement pays worker ${settlement.workerMillis}`);
+          }
+        } else {
+          // Payout and fee are written only by the sweep into `paid`, and
+          // attribute/approve never touch payable at all — in any live
+          // state those legs are money moving without a settlement.
+          for (const kind of ["attribute", "approve", "payout", "fee"])
+            for (const r of flows.filter(r => r.kind === kind && r.lot_state === "payable" && r.t !== 0))
+              violations.push(`bounty ${b.bounty_id} (${b.state}) has unsettled payable flow ${kind} -> ${r.account_id} = ${r.t}`);
+          if (b.state === "approved") {
+            // A dispute verdict may already have run on an approved
+            // bounty: its refund leg is exactly the split's poster half
+            // (nothing for a release), and its bond dispositions are
+            // bounded by the identities above until the sweep makes the
+            // bounty terminal and the full reconciliation applies.
+            const splitRefund = resolution?.kind === "split" ? b.amount_millis - Math.floor(b.amount_millis / 2) : 0;
+            for (const r of flows.filter(r => r.kind === "refund" && r.lot_state === "payable")) {
+              const expected = r.account_id === poster ? splitRefund : 0;
+              if (r.t !== expected)
+                violations.push(`bounty ${b.bounty_id} (approved) refund -> ${r.account_id} = ${r.t}, expected ${expected}`);
+            }
+          } else {
+            // No verdict or settlement of any kind has run yet: a refund
+            // or a bond disposition is money moving without a settlement.
+            for (const kind of ["refund", "bond-return", "bond-forfeit", "bond-compensate"])
+              for (const r of flows.filter(r => r.kind === kind && r.lot_state === "payable" && r.t !== 0))
+                violations.push(`bounty ${b.bounty_id} (${b.state}) has unsettled payable flow ${kind} -> ${r.account_id} = ${r.t}`);
+          }
         }
       }
       // Per-account hash chains.

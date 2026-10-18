@@ -248,6 +248,7 @@ optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: de
 optional.push("server/bounty-reputation.mjs"); // integration-map slice #4: bounty -> reputation projector (imported by server/bounty-escrow.mjs)
 optional.push("server/reputation.mjs"); // B019: pure reputation tracker with typed signals + bands (imported by server/bounty-reputation.mjs)
 optional.push("server/bounty-epoch-keeper.mjs"); // #3693/#3844: automatic payout-epoch progression (imported by server/jobs.mjs and cloudflare/room.mjs; imports server/bounty-escrow.mjs)
+optional.push("server/escrow-conservation.mjs"); // #4125: scheduled conservation audit — verifyConservation's production caller (imported by server/jobs.mjs; imports server/bounty-escrow.mjs)
 optional.push("server/patrol.mjs"); // ClueBot phase 1: resident per-event invariant patrol, read-only (imported by server/jobs.mjs, server/store.mjs and cloudflare/room.mjs; imports server/work-claims.mjs, server/projection-at-rest.mjs, server/messages-store.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/agent-api-keys.mjs"); // Lane D: scoped agent API-key issuance (imported by server/agent-plugin-store.mjs; pure, node:crypto only)

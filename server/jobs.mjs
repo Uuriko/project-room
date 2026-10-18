@@ -11,6 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { escrowActivityPresent, runEscrowConservationAudit } from "./escrow-conservation.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -520,6 +521,24 @@ export const JOBS = Object.freeze([
     async run(store, ctx) {
       if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
       return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
+    }
+  }),
+  defineJob({
+    name: "escrow-conservation",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #4125: the money journal's audit finally runs on a schedule.
+    // verifyConservation reconciles every room with escrow activity —
+    // hash chains, bucket coverage, and the payable flows — read-only.
+    // A room that fails the audit fails the tick (the integrity-job
+    // precedent): the finding names the room and first violation on the
+    // operator log, and the health surface carries the stable code.
+    enabled(_env, store) { return store ? escrowActivityPresent(store) : true; },
+    disabledReason: () => "No escrow activity to audit",
+    async run(store, ctx) {
+      if (ctx.room?.auditEscrowConservation) return ctx.room.auditEscrowConservation();
+      return runEscrowConservationAudit(store, { deadline: ctx.deadline ?? null });
     }
   }),
   defineJob({
