@@ -69,6 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { buildProvenance, claimedProvenanceOf, sessionInstanceIdFor } from "./records-provenance.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -232,7 +233,8 @@ export const bountyEscrowSchema = `
     actor_kind TEXT,
     actor_id TEXT,
     receipt_id TEXT,
-    track TEXT
+    track TEXT,
+    provenance_json TEXT
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
@@ -599,6 +601,25 @@ const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex")
 // (server/receipt-verify.mjs) re-validates with. Track attribution joins
 // the core only when the row carries one, so pre-track rows keep verifying
 // against their original 12-element core.
+// #3612 (R-1/R-9): provenance stamp for a bounty record. FACTS are
+// server-derived from the stored bounty row: the session instance is
+// the submission round (bounty + acting lane + the pinned submission
+// fingerprint), and the authorizing principal is the bounty's poster —
+// the human/lane who authorized the work — never caller-supplied. The
+// model/harness/environment triple is the acting runtime's own report,
+// validated into claimed* names (a claim pinned at write time, not a
+// platform attestation). Deterministic over the bounty row so replayed
+// settlements reproduce the identical stamp.
+export function bountyProvenance(kind, bounty, actorLane, claimedInput = null) {
+  try {
+    return buildProvenance({
+      sessionInstanceId: sessionInstanceIdFor(kind, [bounty.bountyId, actorLane ?? "", bounty.submissionHash ?? ""]),
+      authorizingPrincipalId: bounty.poster ?? null,
+      claimed: claimedInput ? claimedProvenanceOf(claimedInput) : null,
+    });
+  } catch (error) { fail("invalid_input", error.message); }
+}
+
 export function journalEntryHash(entry) {
   const coreParts = [entry.prev_hash, entry.entry_id, entry.account_id, entry.at, entry.kind,
     entry.bounty_id ?? "", entry.lot_id ?? "", String(entry.amount), entry.lot_state,
@@ -1001,6 +1022,11 @@ export class BountyEscrow {
     addCol("bounty_journal", "actor_id TEXT");
     addCol("bounty_journal", "receipt_id TEXT");
     addCol("bounty_journal", "track TEXT");
+    // #3612: the consequential-record provenance stamp, as JSON. Like
+    // receipt_id it is deliberately OUTSIDE the journal hash core, so
+    // pre-#3612 rows (NULL provenance = written before stamps existed)
+    // keep verifying against their original hashes.
+    addCol("bounty_journal", "provenance_json TEXT");
     addCol("bounty_events", "actor_kind TEXT");
     addCol("bounty_events", "before_state TEXT");
     addCol("bounty_events", "after_state TEXT");
@@ -1068,7 +1094,21 @@ export class BountyEscrow {
     return row?.hash ?? "genesis";
   }
 
-  _append({ roomId, accountId, at, kind, bountyId = null, lotId = null, amount, lotState, memo = null, actor = null }) {
+  // #3612: does this database's journal carry the provenance column?
+  // Write paths converge the schema first (_migrateColumns), so this is
+  // true in production; the check keeps direct legacy-schema test
+  // doubles — which may skip migration — writing without the column
+  // instead of failing on it.
+  _journalProvenanceCol() {
+    if (this._journalProvenanceColCache === undefined) {
+      try {
+        this._journalProvenanceColCache = this.db.prepare("PRAGMA table_info(bounty_journal)").all().some(row => row.name === "provenance_json");
+      } catch { this._journalProvenanceColCache = false; }
+    }
+    return this._journalProvenanceColCache;
+  }
+
+  _append({ roomId, accountId, at, kind, bountyId = null, lotId = null, amount, lotState, memo = null, actor = null, provenance = null }) {
     check(LOT_STATES.includes(lotState), "invalid_input", `unknown lot state "${lotState}"`);
     check(Number.isSafeInteger(amount) && amount !== 0, "invalid_amount", "journal amount must be a non-zero integer");
     check(JOURNAL_KIND_TRACK.has(kind), "invalid_input", `unknown journal kind "${kind}"`);
@@ -1083,10 +1123,20 @@ export class BountyEscrow {
     const hash = journalEntryHash({ prev_hash: prevHash, entry_id: entryId, account_id: accountId,
       at, kind, bounty_id: bountyId, lot_id: lotId, amount, lot_state: lotState, memo,
       actor_kind: actorKind, actor_id: actorId, track });
-    this.db.prepare(`INSERT INTO bounty_journal
-      (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track);
+    // #3612: provenance_json rides OUTSIDE the hash core (like
+    // receipt_id): stamping a movement must never rewrite what its hash
+    // attests, and rows written before stamps existed stay NULL.
+    if (provenance !== null && this._journalProvenanceCol()) {
+      this.db.prepare(`INSERT INTO bounty_journal
+        (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track, provenance_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track, JSON.stringify(provenance));
+    } else {
+      this.db.prepare(`INSERT INTO bounty_journal
+        (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track);
+    }
     return { entryId, hash, prevHash };
   }
 
@@ -1095,10 +1145,10 @@ export class BountyEscrow {
   // verifiable receipt for the movement (bounty-receipts.mjs). Only journal
   // kinds in SIGNABLE_KINDS may carry one; when no signer is configured the
   // receipt comes back null and the movement proceeds unsigned.
-  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null }) {
+  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null, provenance = null }) {
     check(Number.isSafeInteger(amountMillis) && amountMillis > 0, "invalid_amount", "movement amount must be positive");
-    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor });
-    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor });
+    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor, provenance });
+    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor, provenance });
     const movement = { debitEntryId: debit.entryId, creditEntryId: credit.entryId, lotId, receipt: null };
     if (receipt !== null && receipt !== undefined) {
       const expected = SIGNABLE_KINDS.get(kind);
@@ -1764,7 +1814,7 @@ export class BountyEscrow {
     });
   }
 
-  submitWork(roomId, bountyId, { claimant, evidence, actor } = {}) {
+  submitWork(roomId, bountyId, { claimant, evidence, actor, modelVersion, harnessVersion, environment, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, claimant, "claimant");
@@ -1775,18 +1825,26 @@ export class BountyEscrow {
       check(bounty.state === "claimed", "invalid_state", `bounty is ${bounty.state}, not awaiting submission`);
       check(bounty.claimant === lane, "not_authorized", "only the claimant may submit");
       check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the submission deadline passed");
-      const receipt = this._evidenceOf(evidence, lane);
+      const evidenceReceipt = this._evidenceOf(evidence, lane);
       // Acceptance track: the work enters review, evidence-cited.
-      this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
-      bounty.evidence = receipt;
+      this._acceptanceTransition(bounty, "submitted", { evidence: evidenceReceipt });
       // Slice 10: the normalized submission fingerprint, pinned before the
-      // save so correlation reads the stored value.
-      bounty.submissionHash = submissionHashOf(receipt);
+      // save so correlation reads the stored value. The fingerprint covers
+      // only the canonical evidence fields, so the provenance stamp below
+      // never changes it.
+      bounty.submissionHash = submissionHashOf(evidenceReceipt);
+      // #3612: the submission record (the stored evidence) carries the
+      // provenance stamp — instance + poster are server-derived facts;
+      // the claimant's model/harness/environment are pinned claims.
+      const receipt = Object.freeze({ ...evidenceReceipt,
+        provenance: bountyProvenance("bounty-submission", bounty, lane,
+          { claimedModelVersion: claimedModelVersion ?? modelVersion, claimedHarnessVersion: claimedHarnessVersion ?? harnessVersion, claimedEnvironment: claimedEnvironment ?? environment }) });
+      bounty.evidence = receipt;
       this._transition(bounty, "submitted");
       this._saveBounty(bounty);
       const at = isoNow(this.nowMs());
       const event = this._event(roomId, "bounty.submitted",
-        { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
+        { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl, provenance: receipt.provenance } });
       // Slice 10: claim-graph correlation -> review packet; above-threshold
       // clusters -> sybil flags for the arbiter review queue. Review-only:
       // packets and flags never change bounty state, balances, bonds, or
@@ -2108,7 +2166,7 @@ export class BountyEscrow {
     return false;
   }
 
-  acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
+  acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor, modelVersion, harnessVersion, environment, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, acceptor, "acceptor");
@@ -2137,12 +2195,21 @@ export class BountyEscrow {
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
       this._acceptanceTransition(bounty, "accepted", { evidence: verifierAttestation });
+      // #3612: the attestation's provenance stamp — the verifier's session
+      // instance in this submission round and the poster principal are
+      // server-derived; the verifier runtime's model/harness/environment
+      // are its pinned claims. The journal attribute leg below carries
+      // the SUBMISSION's stamp (the work being paid for), read from the
+      // stored evidence, falling back to a stamp rebuilt from the row.
+      const attestationProvenance = bountyProvenance("bounty-review", bounty, lane,
+        { claimedModelVersion: claimedModelVersion ?? modelVersion, claimedHarnessVersion: claimedHarnessVersion ?? harnessVersion, claimedEnvironment: claimedEnvironment ?? environment });
+      const submissionProvenance = bounty.evidence?.provenance ?? bountyProvenance("bounty-submission", bounty, bounty.claimant);
       // 1. Record the approval event first — it is the gate.
       const approval = Object.freeze({ decision: "approved", by: act, at });
       const event = this._event(roomId, "bounty.accepted",
         { bountyId, actor: act, before: "submitted", after: "accepted",
           data: { approval: { decision: approval.decision, by: approval.by, at: approval.at },
-            claimant: bounty.claimant, challengeEnds: new Date(this.nowMs() +
+            claimant: bounty.claimant, provenance: attestationProvenance, challengeEnds: new Date(this.nowMs() +
               (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS)).toISOString() } });
       // 2. The escrow release is the explicit consequence of the approval:
       // finality (attribute) requires the terminal acceptance verdict above.
@@ -2150,9 +2217,9 @@ export class BountyEscrow {
       this._requireFinalityMove(bounty, "attribute");
       const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.claimant, state: "attributed" },
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
-        memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
+        memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act, provenance: submissionProvenance,
         receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
-      bounty.attestation = Object.freeze({ ...verifierAttestation, citations,
+      bounty.attestation = Object.freeze({ ...verifierAttestation, citations, provenance: attestationProvenance,
         rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
         recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
@@ -2198,6 +2265,12 @@ export class BountyEscrow {
       workerMillis, workerCredits: toCredits(workerMillis),
       refundMillis, refundCredits: toCredits(refundMillis),
       reason, settledAt: at,
+      // #3612: the settlement record carries the submission round's
+      // provenance — server-derived instance + poster principal; the
+      // settledBy actor above is the settlement's own actor. No model
+      // claim is stamped here: a settlement is a verdict on the work,
+      // and the work's claimed model already rides its submission stamp.
+      provenance: bountyProvenance("bounty-submission", bounty, bounty.claimant),
       settledBy: actor ? Object.freeze({ kind: actor.kind, id: actor.id }) : null });
     bounty.resolution = Object.freeze({ ...(bounty.resolution ?? {}), settlement });
     this._saveBounty(bounty);
@@ -3156,6 +3229,11 @@ export class BountyEscrow {
         const after = credit ? { account: credit.account_id, lotState: credit.lot_state }
           : { account: first.account_id, lotState: first.lot_state };
         if (state !== null && after.lotState !== state) continue;
+        // #3612: the movement's provenance stamp, when either leg carries
+        // one (both legs of a stamped movement carry the same stamp).
+        const provenanceEntry = entries.find(e => e.provenance_json) ?? null;
+        let provenance = null;
+        if (provenanceEntry) { try { provenance = JSON.parse(provenanceEntry.provenance_json); } catch { provenance = null; } }
         receipts.push(Object.freeze({
           receiptId: first.lot_id ?? first.entry_id, at: first.at, kind: first.kind,
           memo: first.memo, bountyId: first.bounty_id, actor, before, after,
@@ -3164,6 +3242,7 @@ export class BountyEscrow {
           entries: entries.map(e => e.entry_id),
           signedReceiptIds: Object.freeze([...new Set(entries.map(e => e.receipt_id).filter(Boolean))]),
           hash: first.hash, prevHash: first.prev_hash,
+          ...(provenance ? { provenance } : {}),
         }));
       }
       return receipts;

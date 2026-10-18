@@ -131,6 +131,31 @@ const claimIdOf = (reject, id) => {
 // "explicitly null" (no lease).
 const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undefined);
 
+// #3612: caller-reported runtime claims on update/review writes. The
+// wire spellings (modelVersion / harnessVersion / environment) and the
+// stored spellings (claimed*) both map to the claimed* triple the pure
+// machine pins onto the record. When the caller reports no environment,
+// the route pins the environment the caller's own work session declared
+// at session start — read from the stored attempt record for this work
+// item — so the session's environment claim lands on the consequential
+// record instead of floating on the session alone. Server-side values
+// (session instance, authorizing principal) are never taken from here.
+const CLAIMED_BODY_FIELDS = ["modelVersion", "harnessVersion", "environment", "claimedModelVersion", "claimedHarnessVersion", "claimedEnvironment"];
+const pinnedSessionEnvironment = (store, roomId, claimId, caller) => {
+  try {
+    const workItem = store.room(roomId).state.workItems?.[claimId];
+    const attempts = Array.isArray(workItem?.attempts) ? workItem.attempts : [];
+    const mine = [...attempts].reverse().find(attempt => attempt && attempt.performer === caller
+      && typeof attempt.environment === "string" && attempt.environment.length > 0);
+    return mine?.environment ?? null;
+  } catch { return null; }
+};
+const claimedFromBody = (data, pinnedEnvironment = null) => ({
+  claimedModelVersion: data.claimedModelVersion ?? data.modelVersion ?? undefined,
+  claimedHarnessVersion: data.claimedHarnessVersion ?? data.harnessVersion ?? undefined,
+  claimedEnvironment: data.claimedEnvironment ?? data.environment ?? pinnedEnvironment ?? undefined,
+});
+
 // Writes (create, claim, renew, update) need a contribute, review, or
 // collaborate profile, the room owner, or a human who holds contribute
 // rights. Reading stays open to every member. A room that names no owner
@@ -150,6 +175,26 @@ const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"
 // heavy per-claim payload (history, description, notes, files, tags,
 // reviews, attestations, dependsOn). Trust markers stamped before the
 // projection survive, so member-authored titles stay marked untrusted.
+// #3612: provenance stamps are audit detail, not board payload. The
+// list projection drops them (the claim read serves the full stamped
+// records) so stamping every delivery/verification/review does not
+// inflate the board's page budget.
+function withoutProvenanceForList(item) {
+  const strip = value => {
+    if (!value || typeof value !== "object" || !("provenance" in value)) return value;
+    const { provenance, ...rest } = value;
+    return rest;
+  };
+  const delivery = strip(item.delivery), verification = strip(item.verification);
+  const reviews = Array.isArray(item.reviews) && item.reviews.some(entry => entry && typeof entry === "object" && "provenance" in entry)
+    ? item.reviews.map(strip) : item.reviews;
+  const attestations = Array.isArray(item.attestations) && item.attestations.some(entry => entry && typeof entry === "object" && "provenance" in entry)
+    ? item.attestations.map(strip) : item.attestations;
+  if (delivery === item.delivery && verification === item.verification
+    && reviews === item.reviews && attestations === item.attestations) return item;
+  return { ...item, delivery, verification, reviews, attestations };
+}
+
 function summarizeBoardClaim(item) {
   const summary = {
     id: item.id,
@@ -361,7 +406,7 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     // its pull record (verified / asserted / pending; link-less claims
     // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
+      claims: page.claims.map(item => withPullSettlement(withoutProvenanceForList(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
@@ -1091,7 +1136,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength", ...CLAIMED_BODY_FIELDS] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?, modelVersion?, harnessVersion?, environment?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
       invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
@@ -1102,6 +1147,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
+    // #3612: this write's claimed runtime triple (see claimedFromBody) —
+    // computed once so the request digest and the recorded stamp agree.
+    const claimed = claimedFromBody(data, pinnedSessionEnvironment(store, roomId, item.id, caller));
     // #3546: two transitions on a delivered item belong to its reviewer,
     // not its owner — verify (delivered -> done) and the changes_requested
     // send-back (delivered -> in_progress). Each carries its own gate
@@ -1151,7 +1199,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
-          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }));
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery, ...claimed }));
       if (verdict === "replay") return json(res, 200, item);
       if (verdict === "conflict") reject(409, "work_claim_conflict",
         `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
@@ -1257,7 +1305,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
-        delivery: data.delivery, policy,
+        delivery: data.delivery, policy, ...claimed,
         jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
         requestId: data.requestId, now: nowMs,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
@@ -1288,7 +1336,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis", ...CLAIMED_BODY_FIELDS] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?, modelVersion?, harnessVersion?, environment?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
@@ -1299,7 +1347,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // reassign round preconditions), not a review of the current basis.
       let reviewed;
       try {
-        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs });
+        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs,
+          ...claimedFromBody(data, pinnedSessionEnvironment(store, roomId, item.id, caller)) });
       } catch (error) {
         if (error instanceof ClaimError && error.code === "work_claim_conflict") {
           reject(409, error.code, `${error.message} — re-read the claim and retry with its current basis.`);
@@ -1314,12 +1363,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
       return json(res, 200, duplicate ? item : reviewed);
     }
-    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
+    if (!shape(data, { optional: ["note", ...CLAIMED_BODY_FIELDS] })) invalidInput(reject, "{note?, modelVersion?, harnessVersion?, environment?} or {verdict, summary, url?}");
     if (!mayAttestWorkClaims(access)) refuseAttest();
     requireEventBudget();
     const note = text("note", data.note, { multiline: true });
     const item = load(claimIdOf(reject, workClaimId));
-    const attested = runPure(reject, () => attestWork(item, caller, { note, now: nowMs }));
+    const attested = runPure(reject, () => attestWork(item, caller, { note, now: nowMs,
+      ...claimedFromBody(data, pinnedSessionEnvironment(store, roomId, item.id, caller)) }));
     if (attested.history !== item.history) {
       // A new attestation: one history entry, and at most one room event per
       // claim per 60 s for review notes.
