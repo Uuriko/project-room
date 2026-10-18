@@ -20,6 +20,7 @@ import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, is
 import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
+import { DECISION_RECORD_RETENTION_DAYS } from "./audit-retention.mjs";
 import { ServiceError } from "./store.mjs";
 import {
   ACTIONS,
@@ -34,7 +35,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.7.0",
+  version: "1.8.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
@@ -49,6 +50,8 @@ export const RETENTION_POLICY = Object.freeze({
     + "reports, operator unpublish records, bounty payment journal "
     + "entries, and "
     + "the deactivated account tombstone are retained under legal hold; "
+    + "decision records (verdicts, receipts, settlements, and their underlying "
+    + "events) are retained under legal hold for at least 4 years; "
     + "room history already shared with other members is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
     + "blocks deletion until ownership is transferred.",
@@ -81,6 +84,11 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
     Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
     Object.freeze({ category: "bounty_journal", reason: "bounty_journal entries are the room's tamper-evident payment ledger (#3550): every entry is one leg of a two-account movement, hash-chained to the account's other entries and cited by counterparties' signed receipts. Deleting one account's legs would orphan the counterparty legs, break the hash chain and the conservation audit, and void those receipts. Entries stay in place, attributed only to the deactivated account tombstone — profile scrubbed, credentials and memberships purged — like the retained audit rows." }),
+    // #3614 (accountability R-3): the explicit retention class for decision
+    // records. retentionDays is the class floor, declared once in
+    // server/audit-retention.mjs (DECISION_RECORD_RETENTION_DAYS) so the
+    // policy text and the audit-event classifier cannot drift apart.
+    Object.freeze({ category: "decision_records", retentionDays: DECISION_RECORD_RETENTION_DAYS, legalHold: true, reason: "Decision records — verdicts (bounty_records outcomes, public_work_reviews), receipts (public_work_receipts), settlements, and their underlying events — are retained under legal hold for at least 4 years (1460 days), matching the strictest live employment-decision regime (CA/IL 4y). They are room-owned decision history, not personal data: account deletion anonymizes the person (profile scrubbed to the deactivated tombstone, credentials and memberships purged) and keeps the decision. The audit-event classifier (server/audit-retention.mjs) applies the same 1460-day floor, so a decision-bearing event cannot classify below it at any severity." }),
   ]),
 });
 
@@ -127,6 +135,29 @@ const countJournalLegs = (store, accountId) => {
   return total;
 };
 const JOURNAL_LANE_CHUNK = 90;
+
+// #3614: decision records attributable to the account for the deletion
+// plan's disclosure count. bounty_records is the one decision table with
+// an honest account attribution: its party lanes (poster, claimant,
+// verifier, dispute decider) are room member ids, and member_accounts maps
+// the account to its member id per room — the same join the journal count
+// uses. Receipts (public_work_receipts.identity_id is an agent identity,
+// not an account or member lane) and reviews (public_work_reviews carries
+// no actor column) have no account join the schema supports, so they are
+// covered by the decision_records class declaration in RETENTION_POLICY —
+// they are room-owned, no purge path exists for them — and are not
+// fabricated into this count.
+const countDecisionRecords = (store, accountId) => {
+  const db = store.db;
+  if (!tableExists(db, "bounty_records")) return 0;
+  let total = 0;
+  for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
+    total += db.prepare(`SELECT count(*) AS n FROM bounty_records WHERE room_id=?
+      AND (poster=? OR claimant=? OR verifier=? OR dispute_decider=?)`)
+      .get(roomId, memberId, memberId, memberId, memberId)?.n ?? 0;
+  }
+  return total;
+};
 
 const countMemberIssuedInvites = (store, accountId) => {
   const db = store.db;
@@ -514,6 +545,20 @@ export function inventoryFromStore(store, accountId, rooms = null) {
       legalHold: true,
       legalHoldReason: "Bounty payment journal entries are the room's tamper-evident payment ledger: each entry is one leg of a two-account movement, hash-chained per account and cited by counterparties' signed receipts. Deleting them would orphan counterparty legs and break the chain, so they are retained, attributed only to the deactivated account tombstone.",
     },
+    // #3614 (accountability R-3): decision records are RETAINED under
+    // legal hold at the >=4-year class declared in RETENTION_POLICY
+    // (category "decision_records"), never purged. The person is
+    // anonymized by the existing purge steps (profile scrubbed to the
+    // deactivated tombstone, credentials/memberships purged); the decision
+    // stays. The count covers the account-attributable bounty_records
+    // rows (see countDecisionRecords); receipts, reviews, and room events
+    // are room-owned records under the same class with no account-keyed
+    // rows to count.
+    decision_records: {
+      itemCount: countDecisionRecords(store, accountId),
+      legalHold: true,
+      legalHoldReason: "Decision records (verdicts, receipts, settlements, and their underlying events) are retained under legal hold for at least 4 years (1460 days, accountability R-3): they are the room's decision history, which counterparties and auditors rely on. Account deletion anonymizes the person — profile scrubbed, credentials and memberships purged — and keeps the decision, attributed only to the deactivated account tombstone.",
+    },
     // SEC-04: handoff packets, SLA alerts, and channel journals carry private
     // thread content and metadata keyed by account.
     derived_inbox: {
@@ -760,6 +805,12 @@ const EXECUTORS = {
   // executeAccountDeletion never runs a purge step for it. Do not re-add a
   // delete here: removing one account's journal legs orphans its
   // counterparties' legs and breaks the journal hash chain.
+  // #3614: decision_records likewise deliberately has NO executor — it is
+  // retained under legal hold at the >=4-year decision-record class, so
+  // executeAccountDeletion never runs a purge step for it. Do not add a
+  // delete here: verdicts, receipts, and settlements are the room's
+  // decision history; the deletion anonymizes the person through the
+  // profile/membership/credential steps and keeps the decision.
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
