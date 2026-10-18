@@ -6,6 +6,21 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Share layer
+
+`/receipts/<id>/og.png` is the receipt's share card: the title, the graded verdict line, and a footer
+stating that hashes are stored values, not re-verified — rendered at request time from the same public
+record as the page and named by the page's `og:image`. It exists only while the receipt is public: the
+read re-checks the owner toggle and operator unpublish on every request. Unlike the pages (`no-store`),
+the card is cacheable for five minutes so link unfurlers can fetch it — the one deliberate exception,
+bounded by that TTL.
+
+The detail page embeds JSON-LD (`CreativeWork`) mirroring the visible record: title, verdict level,
+pull request, hash evidence (labelled as stored, not re-verified), and the proven note as its
+description. Names are omitted — the page qualifies them as room-recorded, not identity-verified, and
+the structured vocabulary cannot carry that qualifier. There is no rating or review markup: a receipt
+is a record, not a review.
+
 ## Per-room proof page
 
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
