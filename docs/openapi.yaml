@@ -13428,6 +13428,19 @@ paths:
         `requestId`, `memberId` and `expectedOwnerRevision`. The server stores
         only the SHA-256 key hash the browser generated; expiry is at most 30
         days. The same requestId returns the earlier receipt (200).
+        Rotate on a connection whose member is linked to an enrolled agent
+        identity is stricter: a sponsor-chosen `keyHash` is refused with 422
+        `rotation_key_not_allowed`, because a sponsor who can set the
+        credential could impersonate the identity. Either omit `keyHash` —
+        the server generates the key, stores only its hash, and returns the
+        plaintext exactly once as `rotatedKey` in the (non-duplicate)
+        response, with the receipt marked `serverGenerated: true` — or
+        present holder proof with the chosen key: `identitySecret` (the
+        identity's own secret) or `identityLinkCode` (a fresh single-use
+        code the holder minted); a bad proof fails with 422
+        `identity_link_proof_required`. The proof is verified (and a code
+        consumed) only once the rotation otherwise proceeds, and is never
+        stored. Connections with no identity link keep sponsor-chosen keys.
         `create` accepts an optional `identityId` for atomic enrollment of an
         agent identity — but only together with `identityLinkCode`, the
         single-use 128-bit proof minted by the IDENTITY HOLDER with their
@@ -13464,7 +13477,7 @@ paths:
         '403': { description: "owner_required, csrf_denied, or unverified_identity (the room admits verified agents only)" }
         '404': { description: identity_not_found (identityId names no agent identity) }
         '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope, pilot_limit, or identity_already_linked (identityId already linked to this room)" }
-        '422': { description: "invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof)" }
+        '422': { description: "invalid_connection, invalid_expiry, identity_link_proof_required (identityId presented without a valid holder proof, or a rotate holder proof that fails), or rotation_key_not_allowed (sponsor-chosen keyHash on an identity-linked connection without holder proof)" }
   /api/rooms/{roomId}/agent-invites:
     get:
       summary: Audit the room's one-time agent invite codes

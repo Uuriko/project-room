@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
@@ -127,7 +127,7 @@ export class AgentConnections {
   }
   validate(details, { historyReplay = false } = {}) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
-    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId, identityLinkCode } = details;
+    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId, identityLinkCode, identitySecret } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
     // RC-2026-09-24-201: optional identityId made enrollment atomic — the
     // membership, credential AND identity link landed in one transaction, so
@@ -146,13 +146,30 @@ export class AgentConnections {
     const createFields = [...common, "displayName", "access", "keyHash", "expiresAt",
       ...(agentType !== undefined ? ["agentType"] : []),
       ...(identityId !== undefined ? ["identityId", ...(!historyReplay ? ["identityLinkCode"] : [])] : [])];
+    // FIX-C5 (P5): rotate's keyHash is OPTIONAL — on an identity-linked
+    // connection a sponsor-chosen key is refused in apply() unless the
+    // holder takes part, and omitting keyHash asks the server to generate
+    // the key. The holder-proof fields (identityLinkCode, identitySecret)
+    // are rotate-only, and like create's raw link code they are stripped
+    // before the request is persisted, so replay neither needs nor sees
+    // them. Conditional inclusion keeps the canonical field order of
+    // pre-FIX-C5 rotate requests byte-identical for history replay.
+    const rotateFields = [...common, "expectedGeneration", "expectedMemberRevision",
+      ...(keyHash !== undefined ? ["keyHash"] : []), "expiresAt",
+      ...(identityLinkCode !== undefined ? ["identityLinkCode"] : []),
+      ...(identitySecret !== undefined ? ["identitySecret"] : [])];
     const fields = action === "create" ? createFields
-      : [...common, "expectedGeneration", "expectedMemberRevision", ...(action === "rotate" ? ["keyHash", "expiresAt"] : [])];
+      : action === "rotate" ? rotateFields
+        : [...common, "expectedGeneration", "expectedMemberRevision"];
     const IDENTITY_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
     if (!["create", "rotate", "disconnect"].includes(action) || Object.keys(details).some(k => !fields.includes(k))
       || !validId(requestId) || !validId(memberId) || !integer(expectedOwnerRevision)
       || (action !== "create" && (!integer(expectedGeneration) || expectedGeneration < 1 || !integer(expectedMemberRevision)))
-      || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
+      || (action === "create" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
+      || (action === "rotate" && (!integer(expiresAt)
+        || (keyHash !== undefined && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash)))
+        || (identityLinkCode !== undefined && typeof identityLinkCode !== "string")
+        || (identitySecret !== undefined && typeof identitySecret !== "string")))
       || (action === "create" && identityId !== undefined && (typeof identityId !== "string" || !IDENTITY_ID_RE.test(identityId)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
         || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
@@ -177,8 +194,9 @@ export class AgentConnections {
     // request (hash-only storage for secrets, like every key hash here).
     // Stripping also keeps the idempotency fingerprint code-independent: a
     // retry with the same requestId replays the earlier receipt instead of
-    // burning a fresh code.
-    const { identityLinkCode, ...persisted } = request;
+    // burning a fresh code. FIX-C5: rotate's holder-proof fields (link code
+    // / identity secret) get exactly the same treatment.
+    const { identityLinkCode, identitySecret, ...persisted } = request;
     const requestJSON = JSON.stringify(persisted), fingerprint = hash(requestJSON);
     return this.store.transaction(() => {
       const auth = this.owner(token, roomId, binding);
@@ -204,10 +222,41 @@ export class AgentConnections {
           || existingMember?.revision !== expectedMemberRevision) fail(409, "connection_changed", "This connection changed; refresh first");
       if (action === "rotate" && existingMember?.active === false) fail(409, "connection_changed", "This membership ended; create a new connection");
       if (action !== "disconnect" && this.db.prepare("SELECT count(*) n FROM agent_connection_operations WHERE room_id=?").get(roomId).n >= 1000) fail(409, "pilot_limit", "Connection history limit reached");
+      // FIX-C5 (HUNT-ADVERSARY P5, Jill's ruling): a connection whose
+      // member is bound to an enrolled identity (identity_links row) may
+      // NOT be rotated onto a sponsor-chosen key — a sponsor who can set
+      // the credential can impersonate the identity, breaking
+      // non-repudiation. Two lawful shapes remain: the holder takes part
+      // (their identity secret, or a fresh single-use link code verified
+      // and consumed here — after every staleness/limit check above, so a
+      // doomed request never burns a code), or the server generates the
+      // key and returns the plaintext exactly once (never persisted,
+      // never in the receipt; a duplicate replay cannot recover it —
+      // rotate again under a new requestId). Connections with no
+      // identity link keep owner-chosen keys unchanged: that is
+      // provisioning of an owner-created agent, not rotation of an
+      // enrolled identity. Proof fields on an unlinked rotation, or
+      // alongside a server-generated one, are ignored and never consumed.
+      let credentialHash = keyHash, rotatedKey = null;
+      if (action === "rotate") {
+        const linkedIdentityId = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+          .get(roomId, memberId)?.identityId ?? null;
+        if (!linkedIdentityId && keyHash === undefined) fail(422, "invalid_connection", "Choose a name, access and expiry");
+        if (linkedIdentityId && keyHash !== undefined) {
+          if (identityLinkCode !== undefined) this.store.identities.consumeLinkCode(linkedIdentityId, identityLinkCode);
+          else if (identitySecret !== undefined) {
+            try { this.store.identities.authenticateIdentitySecret(linkedIdentityId, identitySecret); }
+            catch { fail(422, "identity_link_proof_required", "Present the identity secret or an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)"); }
+          } else fail(422, "rotation_key_not_allowed", "This connection is linked to an enrolled identity, so the sponsor cannot choose its key. Omit keyHash to have the server generate a new key, or present holder proof (the identity secret or a fresh identity link code).");
+        } else if (linkedIdentityId) {
+          rotatedKey = randomBytes(32).toString("base64url");
+          credentialHash = hash(rotatedKey);
+        }
+      }
       if (action !== "disconnect") {
         if (this.db.prepare("SELECT count(*) n FROM credentials WHERE room_id=?").get(roomId).n >= 5000) fail(409, "pilot_limit", "Credential retention limit reached");
         for (const [table, column] of [["credentials", "hash"], ["account_credentials", "hash"], ["account_session_slots", "hash"], ["membership_invitations", "token_hash"], ["share_links", "token_hash"]]) {
-          if (this.db.prepare(`SELECT 1 FROM ${table} WHERE ${column}=?`).get(keyHash)) fail(409, "token_conflict", "Generate a new key");
+          if (this.db.prepare(`SELECT 1 FROM ${table} WHERE ${column}=?`).get(credentialHash)) fail(409, "token_conflict", "Generate a new key");
         }
       }
       let membership = null;
@@ -227,7 +276,7 @@ export class AgentConnections {
       if (membership) now = Date.parse(membership.event.at);
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
-      if (action !== "disconnect") this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)").run(keyHash, roomId, memberId, expiresAt);
+      if (action !== "disconnect") this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)").run(credentialHash, roomId, memberId, expiresAt);
       // RC-2026-09-24-201: atomic identity link. The same transaction that
       // creates the membership and credential also writes identity_links,
       // so the new agent can use bonds/peer-DMs immediately — no second
@@ -259,7 +308,7 @@ export class AgentConnections {
         this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND member_id=?").run(roomId, memberId);
       }
       const row = { room_id: roomId, member_id: memberId, generation: (before?.generation ?? 0) + 1,
-        status: action === "disconnect" ? "disconnected" : "issued", credential_hash: keyHash ?? before.credential_hash, expires_at: expiresAt ?? before.expires_at,
+        status: action === "disconnect" ? "disconnected" : "issued", credential_hash: credentialHash ?? before.credential_hash, expires_at: expiresAt ?? before.expires_at,
         sponsor_account_id: auth.account.id, sponsor_member_id: auth.member.id, sponsor_auth_epoch: auth.account.authEpoch,
         sponsor_member_revision: auth.member.revision, member_revision: member.revision, created_at: before?.created_at ?? now, updated_at: now };
       if (before) this.db.prepare(`UPDATE agent_connections SET ${Object.keys(row).filter(k => !["room_id", "member_id", "created_at"].includes(k)).map(k => k + "=?").join(",")} WHERE room_id=? AND member_id=?`)
@@ -268,6 +317,12 @@ export class AgentConnections {
       const receipt = { version: 1, action, requestId, roomId, memberId, generation: row.generation, status: row.status,
         expiresAt: row.expires_at, at: now, membershipEventId: membership?.event.id ?? null, membershipSequence: membership?.sequence ?? null,
         ...(request.identityId ? { identityId: request.identityId } : {}),
+        // FIX-C5: a server-generated rotation is marked on the receipt so
+        // history verification can tell "the journal cannot re-derive this
+        // hash" (by design — the plaintext was returned once and never
+        // stored) apart from a missing binding. The key itself is never
+        // in the receipt.
+        ...(rotatedKey ? { serverGenerated: true } : {}),
         // RC-2026-09-24-210: auditable unlink — the immutable operations
         // history records which identity a disconnect unlinked (null when
         // the connection carried no link).
@@ -281,7 +336,11 @@ export class AgentConnections {
           label: String(request.displayName || "Add agent").trim().slice(0, 80) || "Add agent"
         });
       }
-      return { receipt, connection: this.view(row), duplicate: false, ...(mcpToken ? { mcpToken } : {}) };
+      return { receipt, connection: this.view(row), duplicate: false, ...(mcpToken ? { mcpToken } : {}),
+        // FIX-C5: the server-generated key, returned exactly once (this
+        // response only — the duplicate-replay path above returns the
+        // receipt without it).
+        ...(rotatedKey ? { rotatedKey } : {}) };
     });
   }
   verify() {
@@ -384,7 +443,7 @@ export class AgentConnections {
           // optional identityId echo; the key set is exact either way.
           // RC-2026-09-24-210: disconnect receipts may carry the optional
           // unlinkedIdentityId echo (auditable unlink).
-          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
+          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : []), ...(receipt.serverGenerated !== undefined ? ["serverGenerated"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
           || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
@@ -393,7 +452,14 @@ export class AgentConnections {
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
           || credential.parent_hash !== null || credential.account_id !== null || credential.account_auth_epoch !== null || credential.expires_at !== state.expires_at
-          || (request.action !== "disconnect" && (request.keyHash !== state.credential_hash || request.expiresAt !== state.expires_at))
+          // FIX-C5: a server-generated rotation persists no keyHash — the
+          // plaintext was returned once and never stored, so the journal
+          // cannot re-derive the hash. The binding is then the marker
+          // consistency below (serverGenerated ⟺ a keyless rotate) plus
+          // the state↔credentials↔connection cross-checks around this one,
+          // which still pin the hash from three directions.
+          || (request.action !== "disconnect" && ((request.keyHash !== undefined && request.keyHash !== state.credential_hash) || request.expiresAt !== state.expires_at))
+          || (receipt.serverGenerated === true) !== (request.action === "rotate" && request.keyHash === undefined)
           || (request.action === "disconnect" && (credential.revoked !== 1 || state.credential_hash !== previous.credential_hash))) invalid();
         if (request.action === "rotate" || request.action === "disconnect" && receipt.membershipEventId === null) {
           if (receipt.membershipEventId !== null || receipt.membershipSequence !== null || state.member_revision !== request.expectedMemberRevision) invalid();
