@@ -50,6 +50,7 @@
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { findSecretInFields, secretDetectedMessage, SECRET_DETECTED_CODE } from "./secret-write-scan.mjs"; // W10/B2: scan-on-write.
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -1253,6 +1254,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   }
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  // W10 (bright line B2): scan-on-write for the delivery surface of this
+  // kernel — the finish note (it lands in claim history) and every string
+  // leaf of the delivery bundle (artifact ref, check commands, criteria,
+  // evidence refs). This kernel is the shared layer under the HTTP/MCP
+  // routes and the public-work finish, so the refusal fires before any
+  // registry or receipt persists the content. The error names the field
+  // and the credential shape only, never any part of the matched value.
+  {
+    const hit = findSecretInFields({ ...(note != null ? { note } : {}), ...(delivery != null ? { delivery } : {}) });
+    if (hit) fail(SECRET_DETECTED_CODE, secretDetectedMessage(hit.field, hit.label));
+  }
   const released = state === "unclaimed";
   // Provenance is work-level, like dependsOn: it survives release and the
   // done transition freezes the final values onto the receipt. It applies on
@@ -1446,6 +1458,11 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   check(REVIEW_VERDICTS.includes(verdict), `verdict must be one of ${REVIEW_VERDICTS.join(", ")}`);
   check(typeof summary === "string" && summary.length > 0 && summary.length <= 2000, "summary must be 1..2000 characters");
+  // W10 (B2): review summaries are captured delivery-record text too — same scan as updateWork.
+  {
+    const hit = findSecretInFields({ summary });
+    if (hit) fail(SECRET_DETECTED_CODE, secretDetectedMessage(hit.field, hit.label));
+  }
   let reviewUrl = null;
   if (url !== undefined && url !== null) {
     check(typeof url === "string" && url.length > 0 && url.length <= 300, "url must be at most 300 characters");

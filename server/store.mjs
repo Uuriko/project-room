@@ -23,6 +23,7 @@ import { ServiceError } from "./service-error.mjs";
 import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
+import { findSecretInFields, secretDetectedMessage, SECRET_DETECTED_CODE } from "./secret-write-scan.mjs"; // W10/B2: scan-on-write.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
@@ -874,6 +875,25 @@ export function validateCommand(command) {
   }
   if (command.type === T.SESSION_STOPPED && !isTerminalSession(command.data.status)) {
     fail(422, "invalid_command", "Stopped session status must be done or failed");
+  }
+  // W10 (bright line B2): scan-on-write. Message bodies (posted, edited,
+  // peer DM) and the room-surface delivery texts (work.completed,
+  // work.handoff_recorded, verification.recorded — every string leaf, so
+  // summaries, next actions and segments are all covered) are refused at
+  // this shared command gate, before RoomStore.command opens its
+  // transaction: a credential-shaped string is never persisted to the
+  // event log. The refusal names the field and the shape only — never any
+  // part of the matched value. See server/secret-write-scan.mjs for the
+  // pattern provenance (a high-confidence subset of the CI detector).
+  const SECRET_SCANNED_FIELDS = {
+    [T.MESSAGE_POSTED]: ["body"], [T.MESSAGE_EDITED]: ["body"], [T.DM_POSTED]: ["body"],
+    [T.WORK_COMPLETED]: null, [T.WORK_HANDOFF_RECORDED]: null, [T.VERIFICATION_RECORDED]: null,
+  };
+  if (Object.hasOwn(SECRET_SCANNED_FIELDS, command.type)) {
+    const names = SECRET_SCANNED_FIELDS[command.type];
+    const fields = names === null ? command.data : Object.fromEntries(names.map(name => [name, command.data[name]]));
+    const hit = findSecretInFields(fields);
+    if (hit) fail(422, SECRET_DETECTED_CODE, secretDetectedMessage(hit.field, hit.label));
   }
 }
 
