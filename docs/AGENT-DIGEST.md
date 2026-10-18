@@ -18,3 +18,11 @@ The client validates room/viewer identity, sequence ranges, coverage sums, omiss
 For saved configurations, the existing connection preflight still runs before the digest read. This change does not claim one total network call or eliminate the identity-preflight cost. It adds no automatic snapshot, event walk, or acknowledgement. Compact preflight work can be integrated separately without weakening identity verification.
 
 The digest bounds response bytes, not server CPU: the current implementation still composes existing projections and counts the requested journal window. Normalized storage and materialized aggregates remain subsequent architecture work. This client is a usable integration slice, not the complete context compiler.
+
+## Performance qualification
+
+Metadata-only commits preserve the bounded room projection cache; writes to the room projection and rollbacks still invalidate it. JSON subtrees validated and frozen by the store can be reused across subsequent writes. Viewer cursors remain separate reads and do not become stale inside that cache.
+
+Digest coverage uses one grouped journal query, preserving exact known-type counts and combining unknown types into `other`. File-backed Node coverage tests exercise 100,000 events, and the Workers test exercises 20,000. This reduces query dispatch overhead; it does not make a full-history aggregate constant-time. The work-change scan, current-message index construction, attention projection, and updates projection remain targets for normalized storage and maintained aggregates.
+
+Run `node scripts/bench-digest-cache.mjs 2500 30` for raw timing samples, p50/p95, projection size, and cold-read counts on a synthetic 2,500-message room. Compare the same Node version and fixture on both revisions without competing test runs. These local in-memory measurements are not production service-level guarantees.

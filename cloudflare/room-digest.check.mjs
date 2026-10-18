@@ -6,12 +6,12 @@ import { Miniflare } from "miniflare";
 import { validRoomDigest } from "../client/room-digest.mjs";
 
 test("Workers SQLite serves the same bounded, authenticated digest contract", async () => {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL("./http-worker.test-fixture.mjs", import.meta.url))],
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL("./room-digest.test-fixture.mjs", import.meta.url))],
     bundle: true, write: false, format: "esm", platform: "neutral", external: ["node:*", "cloudflare:*"] });
   const origin = "https://room.example.test";
   const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: "2026-07-30", compatibilityFlags: ["nodejs_compat"],
-    durableObjects: { ROOM: { className: "HttpTestRoom", useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
+    durableObjects: { ROOM: { className: "DigestTestRoom", useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
   const call = (path, token) => mf.dispatchFetch(origin + path, {
     headers: { Host: "room.example.test", "CF-Connecting-IP": "192.0.2.1", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
   });
@@ -29,5 +29,12 @@ test("Workers SQLite serves the same bounded, authenticated digest contract", as
     const quiet = await call(`/api/rooms/commons/digest?since=${digest.next}`, ownerKey);
     assert.equal(quiet.status, 200);
     assert.equal((await quiet.json()).coverage.eventsInWindow, 0);
+    const window = await (await call("/__test-digest-journal")).json();
+    const largeResponse = await call(`/api/rooms/commons/digest?since=${window.since}`, ownerKey);
+    assert.equal(largeResponse.status, 200, await largeResponse.clone().text());
+    const large = await largeResponse.json();
+    assert.ok(validRoomDigest(large, { roomId: "commons", memberId: "owner", since: window.since }));
+    assert.equal(large.coverage.eventsInWindow, 20000);
+    assert.deepEqual(large.coverage.byType, { "message.posted": 5000, "room.policy_set": 5000, other: 10000 });
   } finally { await mf.dispose(); }
 });

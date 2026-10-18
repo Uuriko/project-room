@@ -5267,24 +5267,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const effectiveSince = floor ? Math.max(since, floor.sequence - 1) : since;
       const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, viewerId)?.sequence ?? 0;
       const context = buildRoomContext({ state: room.state, sequence: through, viewerId, caughtUp, now: this.now() });
-      // Window counts without GROUP BY: a sort inside a query_only read
-      // transaction spills to a temp b-tree this runtime refuses at scale
-      // (verified at 20,000 rows), while per-type COUNT(*) rides the
-      // events_room_type index. Types outside the EVENT_TYPES vocabulary
-      // land in `other`, so the counts still sum exactly to the window total.
+      // Group the journal window once; retain exact known-type coverage and
+      // coalesce future event types into the same `other` compatibility bucket.
+      // File-backed Node and Workers read-only transactions are parity-tested.
+      const knownTypes = new Set(Object.values(T));
       const byType = {};
-      let counted = 0;
-      const countType = this.db.prepare(
-        "SELECT COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')=?"
-      );
-      for (const type of Object.values(T)) {
-        const { count } = countType.get(roomId, effectiveSince, through, type);
-        if (count > 0) { byType[type] = count; counted += count; }
+      for (const row of this.db.prepare(
+        "SELECT json_extract(body,'$.type') AS type, COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=? GROUP BY json_extract(body,'$.type')"
+      ).all(roomId, effectiveSince, through)) {
+        const type = knownTypes.has(row.type) ? row.type : "other";
+        byType[type] = (byType[type] ?? 0) + row.count;
       }
-      const eventsInWindow = this.db.prepare(
-        "SELECT COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=?"
-      ).get(roomId, effectiveSince, through).count;
-      if (eventsInWindow > counted) byType.other = eventsInWindow - counted;
       // Changed work: one descending pass over the window's work_claim.updated
       // rows; the first sighting of a claim is its latest change. The distinct
       // total is exact from the same pass.
