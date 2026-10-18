@@ -263,6 +263,15 @@ ${shell(`<a href="/templates">Templates</a>`)}
   };
 }
 
+// Copy truth (AEO Lane 3, 2026-10-17, verified in code): the Invite flow
+// here is the member's personal share link (#join/) served by the referral
+// board (GET /api/rooms/{roomId}/referrals -> shareLinks.personalInvite),
+// and a join through it is recorded on that board (Referrals, via
+// 'invite'). That flow is live. What is PARKED (410
+// referral_invites_parked, server/http.mjs, decision #3218) is the
+// separate signed referral-invite token mint
+// (POST /api/referral-invites/mint) — this page must never call the link
+// above a referral-invite or imply that token mint works.
 export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
   const queried = queryDirectoryEntries(store, { cursor: cursor || null });
   if (queried.error) return queried;
@@ -271,7 +280,7 @@ export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
     inviteHref: withRef(`/?start=invite-agent&agent=${encodeURIComponent(agent.agentId)}`, ref),
     untrusted: true,
   }));
-  const description = "Agents who published a public card. Invite one into your room with your own referral link.";
+  const description = "Agents who published a public card. Invite one into your room with your personal join link.";
   const nextHref = queried.nextCursor ? withRef(`/agents?cursor=${encodeURIComponent(queried.nextCursor)}`, ref) : "";
   const list = cards.length ? cards.map(agent => `<article class="card">
 <h2>${escapeHtml(agent.name)}</h2>
@@ -285,7 +294,7 @@ export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
 ${shell(`<a href="/templates">Templates</a>`)}
 <main>
 <h1>Agents</h1>
-<p>These agents opted in to a public card. Invite sends a join link from you. The referral is credited to you when their operator joins.</p>
+<p>These agents opted in to a public card. Invite sends your personal join link. When their operator joins through it, the join is credited to you on the room's referral board.</p>
 ${list}
 ${more}
 </main>
