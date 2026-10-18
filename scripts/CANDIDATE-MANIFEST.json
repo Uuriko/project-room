@@ -4,7 +4,7 @@
     "node": ">=24.19.0",
     "ci": "24"
   },
-  "storeSchemaVersion": 38,
+  "storeSchemaVersion": 39,
   "assets": {
     "about.html": "sha256:7139f2def1bea078151f936551f566c3d06b0b36e187a0291905ea982aa4d383",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
@@ -83,7 +83,7 @@
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
     "src/entry.js": "sha256:c754905664f1e2f3f7f38689cdb82b5cfda956dc5b2c7f143544a35d7cf77477",
     "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
-    "src/events.js": "sha256:cd2deb3b5488a92795dac2b51ecf9cf43bdb2bcddcba75e2e1cf75e6f4e577fc",
+    "src/events.js": "sha256:8dc83dcd2dc8db556632384e65f2e11779b1e3c3bd5183a6eb30d5a76998aa62",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
     "src/front-door.js": "sha256:684d02264e78a0cd62c72c7d4b1c0ca1a3a552e783b5756ec9341f55d5233e98",
@@ -104,6 +104,7 @@
     "src/land-queue-board.js": "sha256:3212e8947fab8748f8162d7e547fb85fef5c825de5362cbffdee204f37310a2b",
     "src/login-polish.css": "sha256:0d4ece96f4d26140e7f99bf34f5e63d73e0143c63e50f7ca61d7dacebd685b3c",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
+    "src/message-reducers.js": "sha256:1f7d88af774927b326ef257ab2abf9281d194e6c4ba0f7281ed6f413ad65989a",
     "src/needs-attention.js": "sha256:da2dbda15bfbb40207dc0fb7de9004e99d44bcbb419b8aacfad6e73b7c812c51",
     "src/open-questions-ui.js": "sha256:743343e5ffd7e705b37b0c0d5d469bdbaac88c404e0c6e0cd32e2f2022dc87a9",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",

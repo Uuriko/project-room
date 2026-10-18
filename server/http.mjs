@@ -4261,7 +4261,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full");
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4277,11 +4277,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const nextState = { ...snapshot.state,
             messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
-          if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
-            omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
         return json(res, 200, snapshot);
       }

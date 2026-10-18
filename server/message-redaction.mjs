@@ -135,7 +135,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
   try {
-    db.prepare(`UPDATE messages SET body=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
+    db.prepare(`UPDATE messages SET body=NULL, reducer_extras_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
     if (isRoomArchived(state)) {
       db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
     }

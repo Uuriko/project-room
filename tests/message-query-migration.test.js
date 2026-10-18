@@ -61,3 +61,22 @@ test('assistant requests remain visible and controllable when their source leave
  assert.deepEqual(assistant.list('commons',authorize),before);
  assert.equal(apply({action:'pause',runId:'archived-run',expectedRevision:0}).result.status,'paused');
 });
+
+
+test('indexed seek preserves page boundaries across retained and archived records',t=>{
+ const f=setup(t);
+ for(let i=0;i<140;i++)f.post(`seek-${i}`,`Record ${i}.`);
+ f.command('message.pinned',{messageId:'seek-4'});
+ const before=[...f.repo().records()].map(m=>m.id);
+ for(const archived of [false,true]) {
+  if(archived){f.certify();f.s.archiveMessages('commons',{keepNewest:3,dryRun:false});}
+  for(const index of [0,4,5,127,137,139]) {
+   assert.deepEqual([...f.repo().records({afterId:before[index]})].map(m=>m.id),before.slice(index+1));
+   assert.deepEqual([...f.repo().records({afterId:before[index],descending:true})].map(m=>m.id),before.slice(0,index).reverse());
+  }
+  assert.throws(()=>[...f.repo().records({afterId:'missing'})],/Unknown message cursor/);
+ }
+ // Seeking beyond an older malformed record must not load/decode that record.
+ f.s.db.prepare("UPDATE messages SET record_json='invalid' WHERE message_id='seek-1'").run();
+ assert.deepEqual([...f.repo().records({afterId:'seek-137'})].map(m=>m.id),['seek-138','seek-139']);
+});

@@ -10,7 +10,13 @@ export function messageRepository(store, roomId, state = store.room(roomId).stat
   const live = messageReadIndex(state.messages);
   const marker = state.messagesArchive ? archiveMarker(store.db, roomId) : null;
   const queries = messageQueries(store, roomId, state, marker);
-  if (!marker) return Object.freeze({ ...live, ...queries });
+  if (!marker) return Object.freeze({ ...live, ...queries,
+    getMany(ids) {
+      const found = new Map();
+      for (const id of ids) { const record = live.get(id); if (record) found.set(id,record); }
+      return found;
+    }
+  });
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = [roomId, marker.throughSeq, marker.retainedJson];
   // Request-scoped derived reply sets avoid one history scan per inbox item.

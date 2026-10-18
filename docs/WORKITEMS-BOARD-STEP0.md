@@ -316,3 +316,11 @@ at characterization, council re-convenes with the census; the sync stays
 (named, costed) rather than a forced fit" — is **triggered** by §4.1,
 §4.5, and §4.6 (with §4.2–4.4 as supporting orphans). Tracking: #3221
 item 3. Slices after step 0 do not start until the council re-convenes.
+
+### Message-domain extraction (2026-10-18)
+
+`src/message-reducers.js` now owns the existing message reducers' work-item
+references: proposal context, evidence immutability checks, and receipt text
+withdrawal on delete/redaction. These moved from `src/events.js`; field fates and
+board synchronization semantics are unchanged. The reference-site inventory adds
+this module. This extraction does not complete the work-item/board migration.

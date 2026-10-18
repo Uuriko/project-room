@@ -28,7 +28,10 @@ working set's IDs instead of enumerating every normalized history row.
 In this mode, an authorized reference to an archived message restores that record
 and its archived ancestors for the existing reducer, allowing edits and replies.
 Reducer permissions and revisions still apply; failed commands roll restoration
-back. Historical restoration currently replays the log and can be expensive.
+back. Schema 39 stores bounded reducer edit history separately from serving
+records. Restoring an upgraded entity reads that record and the working set
+sequence metadata; it does not replay unrelated events. Legacy records with
+missing history recover through journal replay and upgrade on their next mutation.
 Default mode retains the earlier archived-message refusal contract.
 
 ## Qualification and remaining boundaries
@@ -45,8 +48,8 @@ The conversation slice does not establish parity for every legacy consumer of
 qualify digest, attention, search, snapshots, exports and work/evidence consumers
 against normalized history, including old unread DMs and restored dependencies.
 This carrier does not remove other growing projection branches or eliminate the
-existing reducer/serialization path. It does not make historical edit restoration
-bounded. No production environment switch is added.
+existing reducer/serialization path. Legacy recovery and full reverse migration
+still replay history. No production environment switch is added.
 
 Reverse migration is `store.rehydrateAllProjections()` with rolling compaction
 turned off. Back up and qualify replay/export before operational use. Turning the
@@ -102,3 +105,37 @@ with an implicit full-history hydration: that would recreate the original blob
 in memory and hide which operations remain unbounded. The writer and placement
 stages above remain outstanding; this checkpoint does not enable rolling mode
 by default.
+
+## Schema 39 entity restoration
+
+`messages.reducer_extras_json` stores only the reducer's bounded `editHistory`.
+Current-record repositories and public feeds do not expose this field. New writes
+and archival populate it; existing archived rows migrate lazily. Both message
+redaction and account deletion clear it. Schema 39 fences older writers, including
+already-open schema 38 connections, before accepting this additional history copy.
+
+Restoration validates the stored current body and history shape and falls back to
+the journal for missing or malformed legacy data. Restoration and the command
+share a transaction, so a refused edit cannot leave a partially restored entity.
+Reverse migration rehydrates the projection on schema 39; it does not downgrade
+the SQLite schema or authorize a schema 38 binary to write it.
+
+## Reader boundaries after the schema 39 checkpoint
+
+| Boundary | Storage behavior | Remaining cost or constraint |
+| --- | --- | --- |
+| Repository point/batch reads | Live working set plus explicitly archived rows | No request-spanning authorization cache |
+| Public feed | Indexed cursor seek and paged archive/live merge | May inspect hidden records to find a visible page |
+| Recent browser snapshot | Recent visible records, metadata-only count, batched pin lookup | Exact omitted count still scans metadata |
+| Explicit full snapshot/export | Full requested history or journal | Intentionally unbounded compatibility operation |
+| Thread/search | Existing archive-aware thread/search selectors | Result size depends on requested thread/search |
+| Open questions | Retained working set | `closeKeepSet` retains open questions, required ancestors and closers |
+| Work/reply-request reducer dependencies | Retained references plus explicit command restoration | Independent aggregate writers are not implemented |
+| Recovery/parity/reverse migration | Explicit journal replay | Administrative, not ordinary message-edit cost |
+| Redaction/account deletion | Live projection, archive rows, journal and snapshots | Must clear reducer extras as well as serving records |
+| Browser selectors | Snapshot and conversation contracts | Full initial compatibility reads still carry all requested history |
+
+The message command service admits/restores referenced entities; the extracted
+pure reducer owns message mutations and shared receipt-withdrawal semantics.
+Neither extraction changes the public permission model. Batched ancestry
+restoration serializes once and legacy chains replay at most once per command.

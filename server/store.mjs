@@ -1,3 +1,4 @@
+import { prepareMessageCommand, assertMessageCommandReferences } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -27,7 +28,7 @@ import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
-  applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
+  applyEvent, replayEvents, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
@@ -47,7 +48,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { captureMessageCertification, advanceMessageCertification, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { captureMessageCertification, advanceMessageCertification, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
@@ -707,12 +708,6 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
-// Commands that name an existing message, and which field names it.
-const ARCHIVED_REF_FIELDS = Object.freeze({
-  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
-  [T.POLL_VOTED]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
-  [T.MESSAGE_POSTED]: "replyToId"
-});
 
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
@@ -2020,6 +2015,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // null until the budgeted replay fills them; never scan history on open.
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
         this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
+      }
+      // v39 keeps bounded reducer history off the room projection. Old rows
+      // remain null until backfill or archive; opening never replays history.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='reducer_extras_json'").get()) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN reducer_extras_json TEXT");
       }
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
@@ -3542,18 +3542,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     ensureDefaultChannelState(state);
     if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
     const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
-    for (const row of rows) {
-      if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
-      state = applyEvent(state, JSON.parse(row.body));
-      sequence = row.sequence;
-    }
+    state = replayEvents(state, (function* () {
+      for (const row of rows) {
+        if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
+        yield JSON.parse(row.body);
+        sequence = row.sequence;
+      }
+    })());
     if (sequence !== through) throw new Error("Event sequence does not reach the room projection");
     return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.
   initialize(events) {
     return this.transaction(() => {
-      const state = events.reduce(applyEvent, emptyRoomState());
+      const state = replayEvents(emptyRoomState(), events);
       const stored = compact(state);
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
@@ -4634,7 +4636,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
     return { ...room, state: { ...room.state, members } };
   }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -4649,6 +4651,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
+      let messages = room.state.messages, pins = room.state.pins, messagesWindow;
+      if (messageLimit !== null || room.state.messagesArchive) {
+        const repository = messageRepository(this, roomId, room.state);
+        if (messageLimit !== null) {
+          const floor = this.historyFloor(roomId, auth.member.id);
+          const visible = message => messageInHistory(message, floor)
+            && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
+          messages = repository.recent(messageLimit, visible);
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
+          pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
+        } else {
+          // Explicit legacy full-snapshot contract. Recent and conversation reads
+          // stay bounded; full export-compatible reads explicitly request history.
+          messages = [...repository.records()];
+        }
+      }
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       // Preserve the same committed tail and its activity-dependent selectors.
       // Message bodies already travel in the projection; the complete audit
@@ -4658,7 +4678,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || /^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(event.type)
         || event.data?.workItemId !== undefined) : events;
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 
@@ -5053,7 +5073,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return e;
       });
       let state;
-      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      try { state = compact(replayEvents(emptyRoomState(), events)); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
@@ -5789,30 +5809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       let room = this.room(roomId);
       refuseArchivedWrite(room.state);
-      // The author or the Room owner can still delete an archived message: bring
-      // that one message back into the projection (it stays retained) and let the
-      // normal delete and redaction run. Anyone else falls through to the
-      // archived-message refusal below, which confirms nothing to a non-party.
-      if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
-        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId);
-        if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
-            && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
-      }
-      // Normalized-tail mode loads only the referenced archived record and its
-      // ancestor chain for the existing reducer. Visibility is checked before
-      // restoration; permissions and revision checks remain in applyEvent.
-      if (this.messageProjectionWindow !== null) {
-        let reference = command.data?.[ARCHIVED_REF_FIELDS[command.type]];
-        const seen = new Set();
-        while (typeof reference === "string" && reference && !seen.has(reference)) {
-          seen.add(reference);
-          const archived = archivedMessageRow(this.db, roomId, reference);
-          if (!archived || archived.to_member_id && archived.author_id !== auth.member.id && archived.to_member_id !== auth.member.id) break;
-          if (!restoreArchivedMessage(this, roomId, reference)) break;
-          room = this.room(roomId);
-          reference = archived.reply_to_id;
-        }
-      }
+      room = prepareMessageCommand(this, roomId, room, command, auth.member.id);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
@@ -5882,36 +5879,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
-      // Archived messages are not in the projection, so the reducer cannot change
-      // them or thread under them. Refuse with a clear error. A DM the actor is
-      // not a party to reads like an unknown id, so nothing about it is confirmed.
-      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
-      if (archivedRef) {
-        const refId = command.data?.[archivedRef];
-        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
-          const archivedRow = archivedMessageRow(this.db, roomId, refId);
-          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
-          // An archived message can still hold a pin (older archives did not retain pins).
-          // Unpinning is allowed for anyone who may see the message and refused, like a
-          // live DM, for a non-party; the reducer cannot check it without the message.
-          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
-          if (archivedRow && stillPinned) {
-            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
-          } else if (party) {
-            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
-          }
-        }
-      }
-      // A new post cannot reuse the id of an archived message: the reducer only
-      // sees the projection, so it would otherwise accept a second message under
-      // that id. Same refusal as a live duplicate; it reads the same for a DM.
-      if (command.type === T.MESSAGE_POSTED) {
-        const newId = command.data?.messageId || command.id;
-        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
-            && archivedMessageRow(this.db, roomId, newId)) {
-          fail(409, "command_rejected", "Message already exists");
-        }
-      }
+      assertMessageCommandReferences(this, roomId, room.state, command, auth.member.id);
       // A vote on a DM poll is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
       if (command.type === T.POLL_VOTED && typeof command.data?.messageId === "string") {

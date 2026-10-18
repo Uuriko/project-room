@@ -196,3 +196,96 @@ test('selected work discussion survives unrelated archived history without widen
  assert.deepEqual(f.store.workContext(f.owner,'commons','selected',{includeSource:true}),context);
  assert.equal(JSON.stringify(before).includes('Unrelated settled text.'),false);
 });
+
+test('archived edits restore indexed reducer history without replaying unrelated events',async t=>{
+ const {messageRepository}=await import('../server/message-repository.mjs');
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ f.post('old-edit','First wording.');
+ f.command('message.edited',{messageId:'old-edit',body:'Second wording.',expectedMessageRevision:0});
+ const original=f.store.room('commons').state.messages.find(m=>m.id==='old-edit');
+ for(let i=0;i<10;i++)f.post(`settled-${i}`,'Settled history.');
+ f.certify();f.store.archiveMessages('commons',{keepNewest:2,dryRun:false});
+ assert.equal(messageRepository(f.store,'commons').get('old-edit').editHistory,undefined,'reader never exposes reducer history');
+ f.store.messageProjectionWindow=2;
+ const replay=f.store._replayRoom;f.store._replayRoom=()=>{throw new Error('full replay forbidden');};
+ f.command('message.edited',{messageId:'old-edit',body:'Third wording.',expectedMessageRevision:1});
+ const current=f.store.room('commons').state.messages.find(m=>m.id==='old-edit');
+ assert.deepEqual(current.editHistory.slice(0,-1),original.editHistory);
+ assert.equal(current.editHistory.at(-1).body,'Second wording.');
+ f.store._replayRoom=replay;
+ f.command('message.deleted',{messageId:'old-edit',expectedMessageRevision:2});
+ const extras=f.store.db.prepare('SELECT reducer_extras_json FROM messages WHERE room_id=? AND message_id=?').get('commons','old-edit').reducer_extras_json;
+ assert.equal(String(extras).includes('wording'),false,'delete purges reducer-only historical text');
+ f.reopen();assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+test('legacy archived rows without reducer extras use journal recovery and upgrade on mutation',t=>{
+ const f=setup(t);f.post('legacy-entity','Old wording.');f.post('last-entity','Last.');f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});
+ f.store.db.prepare('UPDATE messages SET reducer_extras_json=NULL WHERE message_id=?').run('legacy-entity');
+ f.store.messageProjectionWindow=2;
+ let replays=0;const replay=f.store._replayRoom.bind(f.store);f.store._replayRoom=(...args)=>{replays++;return replay(...args);};
+ f.command('message.edited',{messageId:'legacy-entity',body:'Current wording.',expectedMessageRevision:0});
+ assert.equal(replays,1);
+ assert.equal(JSON.parse(f.store.db.prepare('SELECT reducer_extras_json FROM messages WHERE message_id=?').get('legacy-entity').reducer_extras_json).editHistory[0].body,'Old wording.');
+});
+
+
+test('public feed, squad channels and receipt deduplication survive archival and reopen', async t => {
+ const { createSquad, getSquad } = await import('../server/squads.mjs');
+ const { postReceiptCard } = await import('../server/receipt-cards.mjs');
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ f.post('channel','Public channel.');f.post('private','Hidden private wording.',{toMemberId:'owner'});
+ const item={id:'closed-item',title:'Finished task',state:'done',deliveryMode:'result',owner:'owner'};
+ f.store.transaction(()=>postReceiptCard(f.store,'commons',item,Date.now()));
+ for(let i=0;i<5;i++)f.post(`tail-${i}`,`Tail ${i}.`);
+ const {publicCode}=f.store.publicFace.enable('commons','owner');
+ const read=()=>{
+   const face=f.store.publicFace.faceByCode(publicCode);
+   const {fetchedAt:_at,...feed}=f.store.publicFace.feedByCode(publicCode,{limit:2});
+   const {fetchedAt:_next,...next}=f.store.publicFace.feedByCode(publicCode,{after:feed.next,limit:2});
+   return {messages:face.messages,feed,next};
+ };
+ const before=read();f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});
+ assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='channel'),false);
+ assert.deepEqual(read(),before);
+ assert.throws(()=>f.store.publicFace.feedByCode(publicCode,{after:'private'}),e=>e.code==='invalid_feed_cursor');
+ const squad=createSquad(f.store,f.owner,'commons',{name:'archived-channel',goal:'Ship',memberIds:[],channelMessageId:'channel'});
+ assert.equal(getSquad(f.store,f.owner,'commons',squad.squad.id).squad.channel,'channel');
+ const head=f.store.headSequence('commons');
+ assert.equal(f.store.transaction(()=>postReceiptCard(f.store,'commons',item,Date.now())),null);
+ assert.equal(f.store.headSequence('commons'),head);
+ f.reopen();assert.deepEqual(read(),before);
+ assert.equal(JSON.stringify(before).includes('Hidden private wording'),false);
+});
+
+
+test('work and decision commands resolve archived source entities without room replay',t=>{
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ f.post('work-source','Use this as the work brief.');f.post('decision-source','Use the pilot design.');
+ f.post('private-source','Private rationale.',{toMemberId:'owner'});f.post('tail','Settled tail.');
+ f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});f.store.messageProjectionWindow=2;
+ const replay=f.store._replayRoom;f.store._replayRoom=()=>{throw new Error('Unrelated history replayed');};
+ assert.throws(()=>f.command('decision.recorded',{sourceMessageId:'private-source',statement:'Do not publish.'}),/public room message/);
+ assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='private-source'),false,'refusal rolls restoration back');
+ f.command('decision.recorded',{sourceMessageId:'decision-source',statement:'Use the pilot design.'});
+ f.command('work.proposed',{workItemId:'from-history',title:'Build pilot',definitionOfDone:'Working pilot',accountableMemberId:'owner',verifierMemberId:'owner',humanDecisionMakerId:'owner',sourceMessageId:'work-source'});
+ assert.equal(f.store.room('commons').state.workItems['from-history'].sourceMessageId,'work-source');
+ f.store._replayRoom=replay;f.certify();assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+
+test('a deep archived reply restores its ancestor chain with one projection write',t=>{
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ for(let i=0;i<8;i++)f.post(`chain-${i}`,`Settled note ${i}.`,i?{replyToId:`chain-${i-1}`} : {});
+ f.post('chain-tail','Unrelated tail.');f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});
+ assert.equal(f.store.room('commons').state.messages.length,1);
+ f.store.messageProjectionWindow=8;
+ const replay=f.store._replayRoom;f.store._replayRoom=()=>{throw new Error('Unrelated history replayed');};
+ const prepare=f.store.db.prepare.bind(f.store.db);let restores=0;
+ f.store.db.prepare=sql=>{if(/^UPDATE rooms SET projection=\? WHERE id=\?$/.test(sql))restores++;return prepare(sql);};
+ f.post('deep-reply','Continuing the thread.',{replyToId:'chain-7'});
+ f.store.db.prepare=prepare;f.store._replayRoom=replay;
+ assert.equal(restores,1,'ancestor restoration serializes the working set once');
+ assert.equal(f.store.room('commons').state.messages.filter(m=>m.id.startsWith('chain-')).length,9);
+ assert.equal(f.store.checkMessagesParity().ok,true);
+});

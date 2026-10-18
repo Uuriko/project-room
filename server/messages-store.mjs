@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS messages (
   reactions_json TEXT,
   pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
   record_json TEXT,
+  reducer_extras_json TEXT,
   PRIMARY KEY (room_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id, seq);
@@ -147,8 +148,8 @@ function statementFor(db) {
   if (hit) return hit;
   hit = db.prepare(`INSERT INTO messages (
       room_id, message_id, seq, channel_id, thread_root_id, reply_to_id, to_member_id, work_item_id,
-      author_id, body, created_at, edited_at, deleted_at, reactions_json, pinned, record_json
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      author_id, body, created_at, edited_at, deleted_at, reactions_json, pinned, record_json, reducer_extras_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(room_id, message_id) DO UPDATE SET
       seq = MIN(messages.seq, excluded.seq),
       channel_id = excluded.channel_id,
@@ -163,7 +164,8 @@ function statementFor(db) {
       deleted_at = excluded.deleted_at,
       reactions_json = excluded.reactions_json,
       pinned = excluded.pinned,
-      record_json = excluded.record_json`);
+      record_json = excluded.record_json,
+      reducer_extras_json = excluded.reducer_extras_json`);
   statements.set(db, hit);
   return hit;
 }
@@ -182,6 +184,10 @@ function storedBody(message) {
 
 // Complete API record, never prior edit wording. The projection remains the
 // authority during migration; null legacy records wait for budgeted replay.
+function reducerExtras(message) {
+  return message.editHistory === undefined ? {} : { editHistory: message.editHistory };
+}
+
 function currentRecord(message) {
   const { editHistory: _history, ...record } = message;
   return { ...record, body: storedBody(message) };
@@ -228,7 +234,8 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
       textOrNull(message.deletedAt),
       reactions,
       pinned.has(message.id) ? 1 : 0,
-      JSON.stringify(currentRecord(message))
+      JSON.stringify(currentRecord(message)),
+      JSON.stringify(reducerExtras(message))
     );
     written += 1;
   }
@@ -267,13 +274,13 @@ export function advanceMessageCertification(db, certificate, { sequence, event, 
     const message = messages.find(entry => entry?.id === id);
     const row = db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=?").get(roomId, id);
     if (!message || !row) return false;
-    let record, reactions;
-    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
+    let record, reactions, extras;
+    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
     catch { return false; }
     const expectedSequence = event.type === "message.posted" ? sequence : certificate.positions.get(id);
     if (expectedSequence == null || row.seq !== expectedSequence
       || row.thread_root_id !== threadRootId(messages, message)
-      || !isDeepStrictEqual(record, currentRecord(message)) || row.author_id !== message.authorId
+      || !isDeepStrictEqual(record, currentRecord(message)) || !isDeepStrictEqual(extras, reducerExtras(message)) || row.author_id !== message.authorId
       || row.body !== storedBody(message) || row.channel_id !== textOrNull(message.channelId)
       || row.reply_to_id !== textOrNull(message.replyToId) || row.to_member_id !== textOrNull(message.toMemberId)
       || row.work_item_id !== textOrNull(message.workItemId) || row.created_at !== message.createdAt
@@ -339,7 +346,8 @@ export function resyncRoomMessageRows(db, roomId, state) {
       textOrNull(message.deletedAt),
       reactions,
       pinned.has(message.id) ? 1 : 0,
-      JSON.stringify(currentRecord(message))
+      JSON.stringify(currentRecord(message)),
+      JSON.stringify(reducerExtras(message))
     );
     written += 1;
   }
@@ -901,10 +909,11 @@ function certifyMessagesParity(store) {
   const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
   for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
-    let record, reactions;
-    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
+    let record, reactions, extras;
+    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
     catch { /* invalid records fail parity */ }
     if (!message || !isDeepStrictEqual(record, currentRecord(message))
+      || (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message)))
       || row.seq !== sequences.get(message.id)
       || row.author_id !== message.authorId || row.body !== storedBody(message)
       || row.channel_id !== textOrNull(message.channelId)
@@ -1001,6 +1010,10 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
     }
     if (dryRun) return result;
+    // Fill reducer-only history for pre-v39 rows at the migration boundary.
+    // These bytes are never returned by current-message repository reads.
+    const extras = db.prepare('UPDATE messages SET reducer_extras_json=? WHERE room_id=? AND message_id=?');
+    for (const message of moving) extras.run(JSON.stringify(reducerExtras(message)), roomId, message.id);
     const next = { ...state, messages: inProjection.filter(message => !movingIds.has(message.id)) };
     // The marker must never claim a message that is still in the projection.
     const overlaps = db.prepare(`SELECT 1 FROM messages WHERE room_id=? AND seq<=?
@@ -1063,18 +1076,67 @@ export function restoreArchivedMessages(store, roomId) {
 // true when the message was restored. Runs inside the caller's command
 // transaction, so a delete the reducer then refuses rolls this back too.
 export function restoreArchivedMessage(store, roomId, messageId) {
-  const db = store.db;
-  const marker = archiveMarker(db, roomId);
-  if (!archivedMessageRow(db, roomId, messageId, marker)) return false;
-  const state = store.room(roomId).state;
-  if ((state.messages ?? []).some(message => message.id === messageId)) return false;
-  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
-  const original = (store._replayRoom(roomId, head.sequence).state.messages ?? []).find(message => message.id === messageId);
-  if (!original) throw new Error("Archived message could not be restored from the event log");
-  const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
-  const messages = [...(state.messages ?? []), original].sort((a, b) => (seqs.get(a.id) ?? Infinity) - (seqs.get(b.id) ?? Infinity));
-  const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq, count: Math.max(0, marker.count - 1), retainedIds: [...marker.retainedIds, messageId] } };
-  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
+  const marker = archiveMarker(store.db, roomId);
+  const row = archivedMessageRow(store.db, roomId, messageId, marker);
+  return restoreArchivedRows(store, roomId, marker, row ? [row] : []);
+}
+
+// Resolve only the visible referenced ancestry, then materialize it once. This
+// shares the command transaction; a refusal rolls the entire restoration back.
+export function restoreArchivedReference(store, roomId, messageId, actorId) {
+  if (typeof messageId !== 'string' || !messageId) return false;
+  const marker = archiveMarker(store.db, roomId), rows = [], seen = new Set();
+  let reference = messageId;
+  while (typeof reference === 'string' && reference && !seen.has(reference)) {
+    seen.add(reference);
+    const row = archivedMessageRow(store.db, roomId, reference, marker);
+    if (!row || row.to_member_id && row.author_id !== actorId && row.to_member_id !== actorId) break;
+    rows.push(row);
+    reference = row.reply_to_id;
+  }
+  return restoreArchivedRows(store, roomId, marker, rows);
+}
+
+function restoreArchivedRows(store, roomId, marker, rows) {
+  if (!rows.length) return false;
+  const db = store.db, room = store.room(roomId), state = room.state;
+  const live = new Set((state.messages ?? []).map(message=>message.id));
+  const missing = rows.filter(row=>!live.has(row.message_id));
+  if (!missing.length) return false;
+  let replayed;
+  const restored = missing.map(row=>{
+    const messageId = row.message_id;
+    // One indexed provenance check per entity, including channel-copy IDs.
+    const source = db.prepare('SELECT body FROM events WHERE room_id=? AND sequence=?').get(roomId, row.seq);
+    let posting;
+    try { posting = JSON.parse(source?.body); } catch { /* Refuse below. */ }
+    if (posting?.type !== POSTED || !affectedMessageIds(posting).includes(messageId)) {
+      throw new Error('Archived message could not be restored from the event log');
+    }
+    let original;
+    if (typeof row.record_json === 'string' && typeof row.reducer_extras_json === 'string') {
+      try {
+        const record = JSON.parse(row.record_json), extras = JSON.parse(row.reducer_extras_json);
+        if (record?.id === messageId && record.body === row.body && extras && typeof extras === 'object'
+          && !Array.isArray(extras) && Object.keys(extras).every(key => key === 'editHistory')
+          && (!Object.hasOwn(extras,'editHistory') || Array.isArray(extras.editHistory))) original = { ...record, ...extras };
+      } catch { /* Legacy or damaged entity state is rebuilt from the scrubbed journal. */ }
+    }
+    if (!original) {
+      // A chain containing multiple legacy rows still replays only once.
+      replayed ??= new Map((store._replayRoom(roomId, room.sequence).state.messages ?? []).map(message=>[message.id,message]));
+      original = replayed.get(messageId);
+    }
+    if (!original) throw new Error('Archived message could not be restored from the event log');
+    return original;
+  });
+  const restoredIds = restored.map(message=>message.id);
+  const ids = JSON.stringify([...live, ...restoredIds]);
+  const seqs = new Map(db.prepare('SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))').all(roomId, ids).map(row=>[row.message_id,row.seq]));
+  const messages = [...(state.messages ?? []), ...restored].sort((a,b)=>(seqs.get(a.id) ?? Infinity)-(seqs.get(b.id) ?? Infinity));
+  const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq,
+    count: Math.max(0, marker.count-restored.length), retainedIds: [...marker.retainedIds,...restoredIds] } };
+  db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(storedProjection(db,roomId,next,{enabled:store.bodiesAtRest}),roomId);
   store._projectionCache?.clear?.();
   return true;
 }

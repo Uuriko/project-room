@@ -10,6 +10,8 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  paths.add('server/message-command-service.mjs');
+  paths.add('src/message-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
   paths.add('client/work-preparation.mjs'); // Restored from #908 revert: MCP work-preparation helper (imported by client/mcp-stdio.mjs)
   paths.add('client/host-result.mjs'); paths.add('client/host-subprocess.mjs'); paths.add('client/host-verification.mjs');

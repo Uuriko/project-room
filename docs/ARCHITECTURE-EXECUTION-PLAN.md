@@ -134,3 +134,69 @@ retention-dependent selectors. Author-time aggregation and reply-audit graph
 construction still perform explicit history scans; paging limits temporary
 memory but does not make their total work constant. Message writers still use
 the existing reducer and projection serializer. Rolling mode remains opt-in.
+
+### Executed schema 39 and message-domain checkpoint
+
+- Schema 39 stores bounded reducer edit history beside normalized message records.
+  Ordinary archived edits read one entity and its indexed posting provenance;
+  legacy rows fall back to one replay and upgrade on mutation. Old writers are
+  fenced, including previously opened schema 38 connections. Redaction and
+  account deletion clear the additional history field.
+- Archived ancestor chains restore in one projection write. Work proposals,
+  decisions, completion evidence and claim progress can resolve their referenced
+  entities in rolling mode. The existing reducer still checks authority and
+  revisions, and a refusal rolls restoration back.
+- Message admission now lives in `server/message-command-service.mjs`.
+  Message/poll/pin/redaction reducers moved from `src/events.js` into
+  `src/message-reducers.js`, with explicit shared guards at composition. This
+  removes 354 lines from the central reducer without replacing its replay rules.
+- Public-face and squad reads use the repository. Stable receipt cards deduplicate
+  against archived records. Public feed pages seek by indexed sequence and ID
+  rather than decoding every previous page.
+- Recent browser snapshots query across the archive boundary, preserve visible
+  older pins, and count omitted messages using body-free metadata. Explicit full
+  snapshots retain their historical full-read contract; they remain expensive.
+- Runtime packaging and browser asset declarations include the extracted modules.
+  Cold package tests are part of qualification, not just checkout tests.
+
+Focused evidence: 112 integration tests passed; 117 reducer/domain tests passed;
+10 browser edit/delete/pin tests passed; 5 Workers checks passed; 43 cold-package
+and manifest tests passed; 59 batched-restoration/message tests passed. Runs
+cover overlapping tests and must not be added into a unique-test total. Broad
+suite qualification and its platform limitations are recorded with the checkpoint.
+
+The reproducible `scripts/benchmark-message-boundaries.mjs` compares rolled-back
+edits at an identical head with alternating modes and two warmups. At 1,000
+messages, the first local run measured 0.53 ms median for entity restoration and
+71.9 ms for legacy replay (12 samples per mode). Both use an eight-message working
+set. This is in-memory SQLite on macOS, excludes rollback time and does not
+predict production latency. The entity path used 25 prepared statements and zero
+room replays in that run. Later batching changes require refreshed measurements.
+
+**Still unfinished:** canonical entity-only writes, removal of message projection
+serialization, independent work/attempt/artifact aggregates, durable scheduling,
+room placement and the complete human/agent experience. Rolling mode stays
+opt-in. Extracting reducer code is a structural step, not the writer cutover.
+
+### Immediate writer-cutover contract
+
+1. Keep the extracted domain reducer as the single source of message semantics.
+   Introduce a transaction-scoped entity context supplying referenced messages,
+   ancestry and affected receipt bindings; do not synthesize a full history array.
+2. Have domain application return touched message IDs and shared metadata changes.
+   Persist each touched entity, the event, receipt and effects in the same existing
+   transaction. Preserve the ordering of authority and idempotency checks.
+3. Compare this path against the existing reducer for posts, edits, replies, polls,
+   pinning, deletion, receipt withdrawal and rejected commands on fixed fixtures.
+4. Cut the projection carrier over only after every cross-domain reference and
+   reverse migration passes. Remove restoration/dual-write paths at that point.
+5. Then split work/attempt/artifact state using the same explicit boundaries;
+   avoid moving the full room object behind a differently named interface.
+
+### Replay and qualification follow-through
+
+Recovery/initialization/import replay now owns journal bookkeeping for the fold,
+avoiding quadratic copies of accumulated event IDs and log entries. Domain state
+still uses the same reducers and input immutability remains tested. See
+[MESSAGE-DOMAIN-CHECKPOINT.md](MESSAGE-DOMAIN-CHECKPOINT.md) for the final measurements,
+verification evidence and explicit remaining work.
