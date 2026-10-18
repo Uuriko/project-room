@@ -227,6 +227,27 @@ export class AccountClient {
     }
     return value;
   }
+  // COMP-DEEP #1 (CD-01): the human-door verdict inbox read (Lane C's
+  // sectioned read, Contract V). Session-checked like ownerOverview(): the
+  // request rides this account session, and the shape is validated loosely
+  // — sections + totals objects — so a server superset (extra sections or
+  // totals) renders instead of breaking the account home.
+  async verdictInbox() {
+    const session = this.currentSession("loading the verdict inbox", { authenticated: true }), generation = this.generation;
+    let value;
+    try { value = await this.request("/api/verdict-inbox", { session }); }
+    catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+    if (!this.owns(generation, session)) return null;
+    if (!value || typeof value !== "object" || !value.sections || typeof value.sections !== "object"
+      || !value.totals || typeof value.totals !== "object") {
+      throw new Error("Verdict inbox could not be confirmed");
+    }
+    return value;
+  }
   async logout() {
     const session = this.currentSession("signing out");
     const generation = ++this.generation;

@@ -552,6 +552,15 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #connection-details > summary { cursor: pointer; min-height: 28px; padding-block: .3rem; font-size: .75rem; }
 #connection-explanation { position: absolute; z-index: 15; top: 100%; right: 1rem; margin: .25rem 0 0; width: min(26rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); box-shadow: var(--shadow); line-height: 1.5; overflow-wrap: anywhere; }
 #people-hint:empty { display: none; }
+/* COMP-DEEP #1 (CD-01): verdict inbox on the account home — sectioned,
+   server-ordered rows beside the cockpit; existing tokens only. */
+.verdict-filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+.verdict-filter[aria-pressed="true"] { border-color: var(--accent, #d97706); }
+.verdict-section { margin: .75rem 0; }
+.verdict-section h4 { margin: 0 0 .35rem; font-size: .95rem; display: flex; align-items: center; gap: .5rem; }
+.verdict-row { padding: .45rem 0; border-top: 1px solid var(--line); }
+.verdict-row header a { font-weight: 600; }
+.verdict-row .form-hint { margin: .15rem 0 0; }
 /* #662: owner "needs your attention" card. */
 .needs-attention { margin: 0 1rem .5rem; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
 .needs-attention[hidden] { display: none; }
