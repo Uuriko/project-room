@@ -48,6 +48,17 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+//
+// Claim fencing (#3545): every claim round carries a monotonic
+// claimGeneration (starts 0; bumped on claim, reassign, release and
+// sweep-release). The write verbs accept expectedClaimGeneration — the
+// generation the caller read — and refuse a mismatch with
+// work_claim_conflict, so a holder from a stale round cannot land writes
+// even when its identity matches the current holder (the same agent
+// re-claiming is the case owner identity alone cannot discriminate). The
+// machine also enforces the lease it issues: updateWork refuses non-release
+// verbs on a lapsed lease with claim_lease_lapsed, instead of relying on
+// the routes layer's per-request sweep to have run first.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
@@ -826,6 +837,7 @@ export const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
+  if (value.claimGeneration !== undefined && value.claimGeneration !== null) check(Number.isSafeInteger(value.claimGeneration) && value.claimGeneration >= 0, "claimGeneration must be a non-negative integer");
   if (value.claimedAt !== undefined && value.claimedAt !== null) check(typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "claimedAt must be an ISO timestamp");
   if (value.leaseStartAt !== undefined && value.leaseStartAt !== null) check(typeof value.leaseStartAt === "string" && Number.isFinite(Date.parse(value.leaseStartAt)), "leaseStartAt must be an ISO timestamp");
   if (value.leaseExpiresAt !== undefined && value.leaseExpiresAt !== null) check(typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)), "leaseExpiresAt must be an ISO timestamp");
@@ -863,6 +875,7 @@ export const workOf = value => {
     readingAcks,
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
+    claimGeneration: claimGenerationOf(value),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
@@ -891,6 +904,22 @@ export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
+// The claim-round fencing token (#3545). Rows written before fencing carry
+// no generation and read as round 0.
+export const claimGenerationOf = value =>
+  (Number.isSafeInteger(value?.claimGeneration) && value.claimGeneration >= 0 ? value.claimGeneration : 0);
+// Fencing check shared by the write verbs: when the caller presents the
+// generation it read, it must still be the current round. A mismatch is the
+// same work_claim_conflict the claimedAt+historyLength binding raises.
+// Absent (undefined) keeps the pre-fencing call contract unchanged.
+const checkClaimGeneration = (item, expectedClaimGeneration) => {
+  if (expectedClaimGeneration === undefined) return;
+  check(Number.isSafeInteger(expectedClaimGeneration) && expectedClaimGeneration >= 0,
+    "expectedClaimGeneration must be a non-negative integer");
+  if (claimGenerationOf(item) !== expectedClaimGeneration) {
+    fail("work_claim_conflict", "The claim changed since it was read — stale claim generation");
+  }
+};
 const withHistory = (work, atMs, agentId, action, note) => {
   const full = [...work.history, stamp(atMs, agentId, action, note)];
   const dropped = Math.max(0, full.length - MAX_CLAIM_HISTORY);
@@ -1009,6 +1038,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+    claimGeneration: 0,
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
@@ -1054,6 +1084,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+    claimGeneration: item.claimGeneration + 1, // a claim opens a new round (#3545)
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
@@ -1114,7 +1145,7 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
 // reset (outcome cleared) and the poller re-reads it — without the reset
 // the stale outcome would veto every future poll of the reopened PR.
 // A same-round duplicate stays a byte-identical no-op.
-export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
+export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
   const parsed = parsePullRequestUrl(pullRequest);
@@ -1129,6 +1160,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   const settledLink = item.pullRequests.find(pull => pull.url === parsed.url) ?? null;
   // A recorded outcome is stale only when it provably predates the current
   // claim round (recorded before this round's claimedAt — the poller always
@@ -1187,7 +1219,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, expectedClaimGeneration, now, authority = false, pauseForRelease = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
@@ -1261,6 +1293,21 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
     evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
   };
+  // #3545 fencing, checked after every field validation above (invalid
+  // input keeps its precedence — invariant failed-updatework-no-mutation)
+  // and after the requestId replay, so an already-landed update's retry
+  // still replays: a caller presenting the generation it read must still
+  // be in that round — owner identity alone cannot tell a stale round
+  // from the current one when the same agent re-claimed.
+  checkClaimGeneration(item, expectedClaimGeneration);
+  // #3545 lease enforcement: the machine refuses non-release verbs on a
+  // lapsed lease itself, not only when a sweep happened to run first.
+  // Release (state -> unclaimed) stays allowed — it is how a lapsed claim
+  // is given up — and releaseWork's internal pause step (pauseForRelease,
+  // never set by route layers) precedes exactly such a release.
+  if (state !== "unclaimed" && pauseForRelease !== true && isLeaseExpired(item, atMs)) {
+    fail("claim_lease_lapsed", "The current claim lease has lapsed — claim it again instead");
+  }
   // Finish step: validate the bundle against the item's contract and freeze
   // it (with its digest) onto the item. A fresh delivery clears any earlier
   // verification fact — the new bundle awaits a new verdict.
@@ -1323,6 +1370,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   }
   if (released) verification = null;
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
+    claimGeneration: released ? item.claimGeneration + 1 : item.claimGeneration, // a release ends the round (#3545)
     owner: released ? null : item.owner,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
@@ -1367,16 +1415,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
 // re-claims, which keep the previous round's claimedAt. Claims held
 // in_progress/blocked are routed through the internal pause transition
 // first (W2); both steps are stamped in history.
-export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, note, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
   check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   let current = item;
   if (current.state === "in_progress" || current.state === "blocked") {
-    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority, pauseForRelease: true });
   }
   return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
 }
@@ -1556,7 +1605,7 @@ export function notePullMerged(work, mergedSha, now) {
 //    send-back produces — with the delivery retained as the round's
 //    record and no verdict standing (verification clears with the
 //    reviews). The new owner re-finishes and a reviewer verifies.
-export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
+export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
@@ -1571,6 +1620,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
       fail("work_claim_conflict", "The claim changed since it was read");
     }
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no
@@ -1590,7 +1640,9 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     : item.state === "delivered"
       ? { state: "in_progress", verification: null }
       : {};
-  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+  return withHistory({ ...item, ...claim, ...round, owner: target,
+    claimGeneration: item.claimGeneration + 1, // a handover opens the new owner's round (#3545)
+    attestations: Object.freeze([]), reviews: Object.freeze([]) },
     atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
@@ -1624,6 +1676,7 @@ export function releaseExpired(items, now) {
     // verification, ci, and the delivery generation.
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
       delivery: null, verification: null, deliveryGeneration: 0,
+      claimGeneration: item.claimGeneration + 1, // the sweep ends the round (#3545)
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

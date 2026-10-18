@@ -436,9 +436,15 @@ const ROUTE_WEAKENINGS = {
   // P4/P5: drop the stale-basis 409 on plain note/state updates — stale
   // retries then apply silently, clobbering newer rounds, and every
   // stale-basis property must fail.
+  // #3545 composed the claimedAt/history guard with the claimGeneration
+  // fencing disjunct into one refusal; weakening the claimedAt/history
+  // disjunct is the same guard removal for the P4/P5 bases (which carry
+  // expectedClaimedAt + expectedHistoryLength, not the generation).
   p4: [
-    [`      if (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength) {`,
-     `      if (false && (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength)) {`],
+    [`    if ((Object.hasOwn(data, "expectedClaimedAt")
+        && (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength))`,
+     `    if ((false && Object.hasOwn(data, "expectedClaimedAt")
+        && (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength))`],
   ],
 };
 

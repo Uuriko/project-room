@@ -5825,6 +5825,10 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    expectedClaimGeneration:
+                      type: integer
+                      minimum: 0
+                      description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read. When present, the update is refused 409 work_claim_conflict if the claim round changed, including a release + re-claim by the same agent, which claimedAt + history length cannot always discriminate.
                     requestId:
                       type: string
                       minLength: 1
@@ -5850,6 +5854,10 @@ paths:
                       minimum: 0
                       description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. For 200 retained entries and 3 omitted entries, send 203. Detects concurrent changes and same-millisecond reclaim
                       example: 203
+                    expectedClaimGeneration:
+                      type: integer
+                      minimum: 0
+                      description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict
       responses:
         '200':
           description: The updated item
@@ -6073,6 +6081,10 @@ paths:
                   type: integer
                   minimum: 0
                   description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
+                expectedClaimGeneration:
+                  type: integer
+                  minimum: 0
+                  description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
       responses:
@@ -6198,6 +6210,7 @@ paths:
                 note: { type: string }
                 expectedClaimedAt: { type: [string, "null"] }
                 expectedHistoryLength: { type: integer, minimum: 0 }
+                expectedClaimGeneration: { type: integer, minimum: 0, description: 'Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict' }
       responses:
         '200':
           description: The reassigned item
@@ -17729,6 +17742,7 @@ components:
         title: { type: string }
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
         owner: { type: [string, 'null'] }
+        claimGeneration: { type: integer, minimum: 0, description: 'Claim-round fencing token (#3545): starts 0, bumped on claim, reassign, release and sweep-release. Present it as expectedClaimGeneration on writes to bind them to the round read.' }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }
