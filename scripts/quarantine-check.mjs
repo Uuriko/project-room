@@ -11,13 +11,22 @@
  *      with justification in the reason field.
  *   2. quarantined_at is older than 14 days AND the entry has no owner —
  *      an ownerless flake that lingers forever defeats the quarantine.
+ *   3. the entry's test file does not exist (F-28, under #3673) — a
+ *      renamed-away test otherwise leaves a dead entry that passes every
+ *      other check while running nothing.
  *
  * Additional sanity checks: malformed entries, unparseable dates,
  * quarantined_at in the future, repair_by beyond the 14-day cap.
  *
+ * Zero-count canary (F-28): an empty list must not pass vacuously. On
+ * every run the existence predicate is exercised against a synthetic
+ * dead entry (must be rejected) and against this run's own quarantine
+ * file (must be accepted); if the predicate cannot fail, the gate fails
+ * itself and says so.
+ *
  * Dependency-free: uses only node builtins.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -57,6 +66,39 @@ if (!data || !Array.isArray(data.quarantined)) {
   usageError(`${jsonPath} must contain {"quarantined": [...]}`);
 }
 
+// F-28 existence check: entry.test is "file" or "file > test name"; the
+// file part must exist relative to the repo root (the parent of the
+// directory holding the quarantine file).
+const repoRoot = path.dirname(path.dirname(path.resolve(jsonPath)));
+
+function entryTestFile(entry) {
+  if (typeof entry?.test !== "string") return null;
+  const file = entry.test.split(" > ")[0].trim();
+  return file.length > 0 ? file : null;
+}
+
+function testFileExists(entry) {
+  const file = entryTestFile(entry);
+  return file !== null && existsSync(path.join(repoRoot, file));
+}
+
+// Zero-count canary: prove the existence predicate can fail (dead entry
+// rejected) and can pass (this run's own quarantine file, named as a
+// pseudo-entry, is accepted). Runs on every invocation, empty list or
+// not, so the gate never passes vacuously (F-28 / battery-gamma C-L8).
+{
+  const deadEntry = { test: "tests/__quarantine_canary_missing__.test.js" };
+  const liveEntry = { test: path.relative(repoRoot, path.resolve(jsonPath)) };
+  if (testFileExists(deadEntry) || !testFileExists(liveEntry)) {
+    console.error(
+      "quarantine-check: CANARY FAILURE — the existence predicate did not behave " +
+      "(dead entry must be rejected, the quarantine file itself must be accepted). " +
+      "The gate would pass vacuously; failing itself instead.",
+    );
+    process.exit(1);
+  }
+}
+
 const now = new Date();
 const violations = [];
 
@@ -71,6 +113,10 @@ data.quarantined.forEach((entry, idx) => {
   }
   if (typeof entry.test !== "string" || !entry.test.trim()) {
     problems.push('missing/empty "test" (file or "file > test name")');
+  } else if (!testFileExists(entry)) {
+    problems.push(
+      `test file "${entryTestFile(entry)}" does not exist — dead entry (test renamed or removed?)`,
+    );
   }
   if (typeof entry.reason !== "string" || !entry.reason.trim()) {
     problems.push('missing/empty "reason" (failure signature)');
@@ -115,6 +161,9 @@ data.quarantined.forEach((entry, idx) => {
 if (violations.length === 0) {
   console.log(
     `quarantine-check: OK — ${data.quarantined.length} quarantined test(s), all within contract`,
+  );
+  console.log(
+    "quarantine-check: canary OK — existence predicate rejected a synthetic dead entry and accepted a live file (zero-count canary, F-28)",
   );
   process.exit(0);
 }
