@@ -200,7 +200,7 @@ function snapshotForRun(run, repo) {
 }
 
 function nextDeploySnapshot(run, repo) {
-  const runs = gh(["api", `repos/${repo}/actions/workflows/deploy-prod.yml/runs?event=workflow_dispatch&per_page=25`], { json: true }).workflow_runs
+  const runs = gh(["api", `repos/${repo}/actions/workflows/deploy-prod.yml/runs?${new URLSearchParams({ event: "workflow_dispatch", per_page: 25 })}`], { json: true }).workflow_runs
     .filter((r) => r.created_at > run.created_at && r.id !== run.id)
     .sort((x, y) => (x.created_at < y.created_at ? -1 : 1));
   for (const candidate of runs) {
