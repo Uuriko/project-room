@@ -71,3 +71,34 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
 | `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+
+### Pinned target and Room production lease
+
+`deploy-prod` checks live revision against the selected gate SHA via
+`ROOM_SMOKE_EXPECTED_SHA`. Advancing main does not change that target or trigger
+recovery merely for age. Scheduled, unpinned live smoke still reports deployment
+lag against main. Broken discovery and a live revision different from the target
+remain failures.
+
+The workflow also claims the existing `muse-room/ROLE-DEPLOYER` before its first
+snapshot/upload. `ROOM_RECEIPT_TOKEN` is now required for that operation; an unset
+secret or insufficient existing permission stops before any production mutation.
+This change does not create credentials, grant permissions, or configure secrets.
+Release the manual landing lease through its current holder before dispatching;
+the workflow will not take over even a lease held by the same credential.
+
+The claim note binds SHA, Actions run ID and attempt. The helper checks that
+exact generation before each upload and recovery, and releases using the current
+claim timestamp and lifetime history count only after verified smoke/recovery or
+a failure before snapshot. Actions' production concurrency remains enabled across
+all jobs. A cancelled or uncertain mutation keeps its claim for operator review;
+no automated sweep/steal is performed. The two-hour claim exceeds the deploy
+job's forty-minute bound. `deploy-lease-RUN-ATTEMPT` stores the exact non-secret
+write inputs and generation, including an uncertain release. Replaying an acquire
+can recover only the same run's stamped note; replaying release recognizes its
+own completed release without touching a newer holder.
+
+This protects workflow mutations and coordinates with agents honoring the Room
+claim. It cannot prevent an operator bypassing the workflow and calling a cloud
+API directly. A required merge-boundary check is a separate change; current
+merge freezes remain in force until their owner releases them.

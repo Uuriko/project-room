@@ -25,14 +25,14 @@ name: deploy-prod
 # canonical Worker (`wrangler deploy --env production --keep-vars`), then the
 # public entry (`wrangler deploy --keep-vars`), smoke, and recover only to
 # prior code meeting a known schema floor. Lower/unknown schemas require roll-forward. A receipt goes
-# to muse-room when the ROOM_RECEIPT_TOKEN secret exists.
+# to muse-room. ROOM_RECEIPT_TOKEN must already hold the needed claim/write permissions.
 #
 # Actions secrets (names only, never values in git):
 #   CLOUDFLARE_API_TOKEN         required. Workers scripts/routes edit on the account.
 #   ROOM_AGENT_CARD_SIGNING_KEY  required. The build signs the agent card and fails
 #                                closed without it (docs/AGENT-CARD-CUSTODY.md).
 #   CLOUDFLARE_ACCOUNT_ID        optional when the token sees exactly one account.
-#   ROOM_RECEIPT_TOKEN           optional. Room bearer token used to post the receipt.
+#   ROOM_RECEIPT_TOKEN           required. Existing Room credential for ROLE-DEPLOYER and receipts.
 on:
   workflow_dispatch:
     inputs:
@@ -222,6 +222,11 @@ jobs:
           version: 10
       - run: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
       - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Claim Room production mutation lease
+        id: lease
+        env:
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: node scripts/deploy-room-lease.mjs acquire "$RUNNER_TEMP/deploy-lease.json"
       - name: Record exact live versions and code schemas before upload
         id: pre
         run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
@@ -230,6 +235,10 @@ jobs:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
           path: ${{ runner.temp }}/pre-deploy.json
           retention-days: 90
+      - name: Verify Room lease before upload
+        env:
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: node scripts/deploy-room-lease.mjs assert "$RUNNER_TEMP/deploy-lease.json"
       - name: Deploy canonical Worker (project-room)
         id: prod
         working-directory: cloudflare
@@ -241,6 +250,10 @@ jobs:
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-prod.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new prod version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Verify Room lease before entry upload
+        env:
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: node scripts/deploy-room-lease.mjs assert "$RUNNER_TEMP/deploy-lease.json"
       - name: Deploy public entry Worker (project-room-staging)
         id: entry
         working-directory: cloudflare
@@ -269,6 +282,7 @@ jobs:
             node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
+        id: live_smoke
         shell: bash
         env:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
@@ -281,7 +295,10 @@ jobs:
         env:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
-        run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: |
+          node scripts/deploy-room-lease.mjs assert "$RUNNER_TEMP/deploy-lease.json"
+          node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && steps.pre.outcome == 'success'
         with:
@@ -289,6 +306,18 @@ jobs:
           path: |
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
+          retention-days: 90
+      - name: Release Room lease after verified smoke or recovery
+        if: always() && !cancelled() && steps.lease.outcome == 'success' && (steps.live_smoke.outcome == 'success' || steps.rollback.outcome == 'success' || steps.pre.outcome != 'success')
+        env:
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: node scripts/deploy-room-lease.mjs release "$RUNNER_TEMP/deploy-lease.json"
+      - name: Preserve production lease evidence
+        if: always() && steps.lease.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deploy-lease-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deploy-lease.json
           retention-days: 90
       - name: Receipt to muse-room
         if: always() && steps.pre.outcome == 'success'
