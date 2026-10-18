@@ -163,9 +163,20 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
-      const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-      if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
-      if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
+      const shapes = definitions.map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
+      // work_claim_history is the purely additive spill sidecar (W3): an
+      // older database carries the claim pair without it and read-only
+      // startup never creates it, so its absence is the pre-spill state,
+      // not damage — a present sidecar is shape-verified, an absent one is
+      // tolerated (the wake-queue side-table pattern). The claim pair
+      // itself stays all-or-nothing: both absent is the pre-claims state
+      // allowAbsent exists for; exactly one absent, or any shape drift
+      // anywhere, is operator reconciliation.
+      const core = shapes.filter(shape => shape.name !== "work_claim_history");
+      const sidecar = shapes.filter(shape => shape.name === "work_claim_history");
+      if (sidecar.some(shape => shape.actual !== undefined && normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
+      if (allowAbsent && core.every(shape => shape.actual === undefined)) return false;
+      if (core.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
       return true;
     },
     get(roomId, id) {

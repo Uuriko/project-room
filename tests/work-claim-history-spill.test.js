@@ -37,10 +37,6 @@ function setup(db) {
   return registry;
 }
 
-function memoryRegistry() {
-  return setup(new DatabaseSync(":memory:"));
-}
-
 // Append `count` note stamps (note-<from> .. note-<from+count-1>) with
 // strictly increasing timestamps. With setEach the item is persisted
 // after every stamp (the ordinary writer pattern); without it the
