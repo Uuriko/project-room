@@ -6023,6 +6023,7 @@ paths:
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
+                criterionOutcomes: { type: array, description: "Per-criterion outcomes (#3613): one {criterionId, verdict pass|fail} per criterion of the claim's acceptanceCriteria, citing the derived c1.. ids in list order. Required when verdict is approve and the claim carries acceptanceCriteria; validated whenever supplied.", items: { type: object, properties: { criterionId: { type: string }, verdict: { type: string, enum: [pass, fail] } } } }
       responses:
         '200':
           description: The updated item with the review or note recorded; identical latest retries return the existing record
@@ -15960,6 +15961,22 @@ paths:
                   enum:
                     - "PASS"
                     - "FAIL"
+                criterionOutcomes:
+                  type: "array"
+                  description: "Required when the offer carries acceptance criteria (#3613): one {criterionId, verdict} per pinned criterion, citing the derived criterion ids on the offer/task. An aggregate verdict without them is refused."
+                  items:
+                    type: "object"
+                    additionalProperties: false
+                    required:
+                      - "criterionId"
+                      - "verdict"
+                    properties:
+                      criterionId:
+                        type: "string"
+                      verdict:
+                        enum:
+                          - "pass"
+                          - "fail"
   /api/rooms/{roomId}/public-work/results:
     get:
       operationId: "listPublicWorkResults"
@@ -16938,6 +16955,21 @@ components:
                 at:
                   type: "string"
                   format: "date-time"
+                criterionOutcomes:
+                  type: "array"
+                  description: "The verifier's per-criterion outcomes (#3613), one per pinned criterion, when the verdict cited them."
+                  items:
+                    type: "object"
+                    required:
+                      - "criterionId"
+                      - "verdict"
+                    properties:
+                      criterionId:
+                        type: "string"
+                      verdict:
+                        enum:
+                          - "pass"
+                          - "fail"
                 current:
                   type: "boolean"
                   description: "Still satisfies current standing and policy. FAIL is never a current PASS."
@@ -17004,6 +17036,19 @@ components:
               items:
                 type: "string"
                 maxLength: 1000
+            criteria:
+              type: "array"
+              description: "The acceptance criteria with their derived addressable ids (#3613)."
+              items:
+                type: "object"
+                required:
+                  - "criterionId"
+                  - "criterion"
+                properties:
+                  criterionId:
+                    type: "string"
+                  criterion:
+                    type: "string"
             exclusions:
               type: "array"
               maxItems: 20
@@ -17159,6 +17204,19 @@ components:
           type: "array"
           items:
             type: "string"
+        criteria:
+          type: "array"
+          description: "The acceptance criteria with their derived addressable ids (#3613): the criterion at position i has criterionId c(i+1); the termsVersion pins the list, so the ids are pinned with it. Verification verdicts cite these ids."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "criterion"
+            properties:
+              criterionId:
+                type: "string"
+              criterion:
+                type: "string"
         files:
           type: "array"
           items:
@@ -17296,6 +17354,49 @@ components:
         createdAt:
           type: "string"
           format: "date-time"
+        period:
+          type: "object"
+          description: "Period of use (#3613): the claim round's claimedAt through the submission instant (submittedAt, equal to createdAt). Present on receipts minted after the field landed."
+          required:
+            - "claimedAt"
+            - "submittedAt"
+          properties:
+            claimedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
+            submittedAt:
+              type: "string"
+              format: "date-time"
+        criteria:
+          type: "array"
+          description: "On an accepted (verified) receipt whose verdict cited criteria: the pinned criteria the outcomes cite, with their derived ids (#3613)."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "criterion"
+            properties:
+              criterionId:
+                type: "string"
+              criterion:
+                type: "string"
+        criterionOutcomes:
+          type: "array"
+          description: "On an accepted (verified) receipt whose verdict cited criteria: the verifier's per-criterion outcomes, one per pinned criterion (#3613)."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "verdict"
+            properties:
+              criterionId:
+                type: "string"
+              verdict:
+                enum:
+                  - "pass"
+                  - "fail"
     PublicWorkOutcome:
       type: "object"
       required:
@@ -17778,6 +17879,14 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              criterionOutcomes:
+                type: array
+                description: "The reviewer's per-criterion outcomes (#3613), one per criterion of the claim's acceptanceCriteria, citing the derived c1.. criterion ids. Required on an approve verdict when the claim carries acceptanceCriteria."
+                items:
+                  type: object
+                  properties:
+                    criterionId: { type: string }
+                    verdict: { type: string, enum: [pass, fail] }
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.

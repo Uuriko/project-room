@@ -9,6 +9,8 @@ import { PublicWorkReviews, publicWorkReviewsSchema } from '../server/public-wor
 
 // Real persisted offers, identities, public claim kernel and immutable receipts.
 // Registration/HTTP/workerd owners separately qualify bootstrap and transport.
+// #3613 migration: verify inputs cite the fixture offer's single criterion
+// (c1) in criterionOutcomes — a verdict without them no longer records.
 function fixture(t, mode = 'human', linked = false) {
   const dir = mkdtempSync(join(tmpdir(), 'public-review-')), file = join(dir, 'room.sqlite');
   let store = new RoomStore(file);
@@ -109,14 +111,14 @@ test('mixed acceptance requires real authorized exact-current PASS and survives 
   assert.throws(() => f.service().verify('commons', 'owner', id, f.input('fake-owner-pass', 0, { verdict: 'PASS' })), code('review_forbidden'));
   assert.equal(f.service().inspect('commons', 'reviewer', id).authority.canVerify, true);
   assert.throws(() => f.service().results('commons', 'reviewer'), code('owner_only'));
-  f.service().verify('commons', 'reviewer', id, f.input('agent-pass', 0, { verdict: 'PASS' }));
+  f.service().verify('commons', 'reviewer', id, f.input('agent-pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   f.reopen(); assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, true);
   f.alter(state => { state.members.reviewer.revision += 1; state.members.reviewer.permissions = ['read']; });
   assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, false);
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('stale-agent-pass', 1, { decision: 'accepted' })), code('review_pass_required'));
   f.alter(state => { state.members.reviewer.revision += 1; state.members.reviewer.permissions = ['read', 'verify']; });
   assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, false);
-  f.service().verify('commons', 'reviewer', id, f.input('fresh-agent-pass', 1, { verdict: 'PASS' }));
+  f.service().verify('commons', 'reviewer', id, f.input('fresh-agent-pass', 1, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   assert.equal(f.service().decide('commons', 'owner', id, f.input('human-accept', 2, { decision: 'accepted' })).review.state, 'accepted');
 });
 
@@ -124,7 +126,7 @@ test('agent approval requires actual PASS and current human-required policies pr
   const f = fixture(t, 'agent'), id = f.receipt.receiptId;
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('owner-agent', 0, { decision: 'accepted' })), code('review_forbidden'));
   assert.throws(() => f.service().decide('commons', 'reviewer', id, f.input('agent-no-pass', 0, { decision: 'accepted' })), code('review_pass_required'));
-  f.service().verify('commons', 'reviewer', id, f.input('agent-pass', 0, { verdict: 'PASS' }));
+  f.service().verify('commons', 'reviewer', id, f.input('agent-pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   f.alter(state => { state.room.policy = { requireOwnerDecision: true }; });
   assert.throws(() => f.service().decide('commons', 'reviewer', id, f.input('new-human-policy', 1, { decision: 'accepted' })), code('review_forbidden'));
   f.alter(state => { state.room.policy = { requireOwnerDecision: false }; });
@@ -157,7 +159,7 @@ test('completed review replay returns the recorded outcome after standing, archi
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('fresh-after-archive', 1, { decision: 'rejected' })), code('room_archived'));
 
   const linked = fixture(t, 'human_with_agent_review', true), linkedId = linked.receipt.receiptId;
-  const passArgs = linked.input('replayable-pass', 0, { verdict: 'PASS' });
+  const passArgs = linked.input('replayable-pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] });
   const passed = linked.service().verify('commons', 'reviewer', linkedId, passArgs);
   linked.alter(state => { state.workItems['linked-work'].state = 'superseded'; });
   assert.deepEqual(linked.service().verify('commons', 'reviewer', linkedId, passArgs), passed);
@@ -170,7 +172,7 @@ test('outside producer sees only own sanitized feedback without membership or pr
   const before = f.store.db.prepare('SELECT count(*) AS n FROM public_work_review_requests').get().n;
   assert.equal(f.service().contributorReview(f.producer.secret, id).review.state, 'pending');
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_review_requests').get().n, before);
-  f.service().verify('commons', 'reviewer', id, f.input('agent-fail', 0, { verdict: 'FAIL', reason: 'Private review evidence' }));
+  f.service().verify('commons', 'reviewer', id, f.input('agent-fail', 0, { verdict: 'FAIL', reason: 'Private review evidence', criterionOutcomes: [{ criterionId: 'c1', verdict: 'fail' }] }));
   f.service().decide('commons', 'owner', id, f.input('feedback', 1, { decision: 'revision_requested', reason: 'Please fix the missing test' }));
   const own = f.service().contributorReview(f.producer.secret, id);
   assert.equal(own.review.reason, 'Please fix the missing test'); assert.equal(own.review.verificationVerdict, 'FAIL');
@@ -182,12 +184,12 @@ test('outside producer sees only own sanitized feedback without membership or pr
 
 test('linked-work evidence revision and designated verifier gates invalidate earlier PASS', t => {
   const f = fixture(t, 'human_with_agent_review', true), id = f.receipt.receiptId;
-  f.service().verify('commons', 'reviewer', id, f.input('first-pass', 0, { verdict: 'PASS' }));
+  f.service().verify('commons', 'reviewer', id, f.input('first-pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, true);
   f.store.command(f.store.issueAccessKey('commons', 'owner'), 'commons', { id: 'accept-linked', type: 'work.accepted', data: { workItemId: 'linked-work', expectedRevision: 0 } });
   assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, false);
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('old-work-pass', 1, { decision: 'accepted' })), code('review_pass_required'));
-  f.service().verify('commons', 'reviewer', id, f.input('new-work-pass', 1, { verdict: 'PASS' }));
+  f.service().verify('commons', 'reviewer', id, f.input('new-work-pass', 1, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   f.alter(state => { state.workItems['linked-work'].verifierMemberId = 'owner'; });
   assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('wrong-designated', 2, { verdict: 'PASS' })), code('review_forbidden'));
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('changed-designated', 2, { decision: 'accepted' })), code('review_pass_required'));
@@ -196,7 +198,7 @@ test('linked-work evidence revision and designated verifier gates invalidate ear
 
 test('review action namespace cannot alias verification journal and invalid input never burns a request', t => {
   const f = fixture(t, 'agent'), id = f.receipt.receiptId;
-  const args = f.input('same-id', 0, { verdict: 'PASS' });
+  const args = f.input('same-id', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] });
   f.service().verify('commons', 'reviewer', id, args);
   assert.throws(() => f.service().decide('commons', 'reviewer', id, f.input('same-id', 1, { decision: 'accepted' })), code('request_id_reused'));
   assert.throws(() => f.service().decide('commons', 'reviewer', id, f.input('fixable', 1, { decision: 'accepted', unexpected: true })), code('invalid_public_review'));
@@ -229,7 +231,7 @@ test('journal failure rolls back review revision and exact request remains retry
 test('Human-mode independent verification records human evidence without implying an AI check', t => {
   const f = fixture(t, 'human', 'human'), id = f.receipt.receiptId;
   assert.equal(f.service().inspect('commons', 'owner', id).authority.acceptReady, false);
-  const verified = f.service().verify('commons', 'reviewer', id, f.input('human-check', 0, { verdict: 'PASS' }));
+  const verified = f.service().verify('commons', 'reviewer', id, f.input('human-check', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   assert.equal(verified.review.verification.reviewerKind, 'human');
   assert.equal(Object.hasOwn(verified.review, 'agentReview'), false);
   assert.equal(f.service().decide('commons', 'owner', id, f.input('human-decision', 1, { decision: 'accepted' })).review.state, 'accepted');

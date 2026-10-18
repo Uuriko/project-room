@@ -446,7 +446,7 @@ export async function seedRecoveryCoverage(f) {
   const publicArtifact = f.store.publicWorkClaims.artifact(publicFinished.receipt.receiptId);
   const publicReviewTuple = { taskId: publicFinished.receipt.taskId, expectedTermsVersion: publicFinished.receipt.termsVersion,
     generation: publicFinished.receipt.generation, artifactSha256: publicFinished.receipt.artifact.sha256, reason: "Reviewed captured public bytes" };
-  const publicVerifyInput = { ...publicReviewTuple, requestId: "public-recovery-verify", expectedReviewRevision: 0, verdict: "PASS" };
+  const publicVerifyInput = { ...publicReviewTuple, requestId: "public-recovery-verify", expectedReviewRevision: 0, verdict: "PASS", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] };
   const publicVerified = f.store.publicWorkReviews.verify("commons", "reply-reviewer", publicFinished.receipt.receiptId, publicVerifyInput);
   const publicReviewInput = { ...publicReviewTuple, requestId: "public-recovery-accept", expectedReviewRevision: 1, decision: "accepted" };
   const publicReviewed = f.store.publicWorkReviews.decide("commons", "owner", publicFinished.receipt.receiptId, publicReviewInput);

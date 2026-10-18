@@ -73,7 +73,7 @@ test('finish with an incomplete or duplicated attestation is refused before any 
 test('verify PASS executes artifact integrity; acceptance stamps the receipt verified', t => {
   const f = fixture(t, { attestation: [{ criterion: 'Correct result', status: 'met' }] });
   const id = f.receipt.receiptId;
-  const passed = f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS' }));
+  const passed = f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   assert.deepEqual(passed.review.verification.executedChecks.map(entry => entry.name), ['artifact_integrity']);
   f.service().decide('commons', 'owner', id, f.input('accept', 1, { decision: 'accepted' }));
   const stamped = f.store.publicWorkClaims.receipt(id);
@@ -92,9 +92,9 @@ test('tampered stored bytes block a PASS with artifact_integrity_failed; a FAIL 
   const f = fixture(t);
   const id = f.receipt.receiptId;
   f.store.db.prepare('UPDATE public_work_receipts SET artifact_text=? WHERE receipt_id=?').run('tampered bytes', id);
-  assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS' })),
+  assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] })),
     code('artifact_integrity_failed'));
-  const failed = f.service().verify('commons', 'reviewer', id, f.input('fail', 0, { verdict: 'FAIL' }));
+  const failed = f.service().verify('commons', 'reviewer', id, f.input('fail', 0, { verdict: 'FAIL', criterionOutcomes: [{ criterionId: 'c1', verdict: 'fail' }] }));
   assert.equal(failed.review.verification.verdict, 'FAIL');
   assert.equal(failed.review.verification.executedChecks, undefined);
   assert.equal(f.store.publicWorkClaims.receipt(id).state, 'submitted');

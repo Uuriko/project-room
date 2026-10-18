@@ -5,6 +5,9 @@
 // corresponding deception reproduced. Shapes follow
 // tests/work-claim-verified-state.test.js and
 // tests/public-work-verified-state.test.js.
+// #3613 migration: the canary claims carry acceptanceCriteria, so approve
+// verdicts now cite the derived criterion (c1) in criterionOutcomes; the
+// canary assertions themselves (coverage/binding/CI legs) are unchanged.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -43,7 +46,7 @@ test("canary: not_met mapping never earns criteria_coverage pass", () => {
     { state: "delivered", delivery: { artifact: { kind: "text", ref: "room://artifacts/x", sha256: SHA_A },
       checks: [{ name: "unit", result: "pass" }],
       criteria: [{ criterion: "tests green", status: "not_met" }] } });
-  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "form complete" });
+  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "form complete", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   assert.throws(() => updateWork(reviewed, "sage", { state: "done", reviewedBy: "sage", authority: true }),
     e => e.code === "delivery_check_failed");
 });
@@ -56,14 +59,14 @@ test("canary: na needs an evidenceRef that resolves to the delivery", () => {
     { state: "delivered", delivery: { artifact: { kind: "text", ref: "room://artifacts/x", sha256: SHA_A },
       checks: [{ name: "unit", result: "pass" }],
       criteria: [{ criterion: "tests green", status: "na", evidenceRef: "sha256:" + "0".repeat(64) }] } });
-  const reviewedPhantom = recordReview(phantom, "sage", { verdict: "approve", summary: "mapped" });
+  const reviewedPhantom = recordReview(phantom, "sage", { verdict: "approve", summary: "mapped", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   assert.throws(() => updateWork(reviewedPhantom, "sage", { state: "done", reviewedBy: "sage", authority: true }),
     e => e.code === "delivery_check_failed");
   const backed = updateWork(reviewedItem(), "quill",
     { state: "delivered", delivery: { artifact: { kind: "text", ref: "room://artifacts/x", sha256: SHA_A },
       checks: [{ name: "unit", result: "pass" }],
       criteria: [{ criterion: "tests green", status: "na", evidenceRef: "sha256:" + SHA_A }] } });
-  const reviewedBacked = recordReview(backed, "sage", { verdict: "approve", summary: "na — the artifact shows why" });
+  const reviewedBacked = recordReview(backed, "sage", { verdict: "approve", summary: "na — the artifact shows why", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   const done = updateWork(reviewedBacked, "sage", { state: "done", reviewedBy: "sage", authority: true });
   assert.equal(done.verification.executedChecks.find(e => e.name === "criteria_coverage")?.result, "pass");
 });
@@ -72,7 +75,7 @@ test("canary: na needs an evidenceRef that resolves to the delivery", () => {
 // was recorded against; a re-delivery stales it like a CI head move does.
 test("canary: approval of bundle A does not verify re-delivered bundle B", () => {
   let item = updateWork(reviewedItem(), "quill", { state: "delivered", delivery: goodBundle });
-  item = recordReview(item, "sage", { verdict: "approve", summary: "A verified" });
+  item = recordReview(item, "sage", { verdict: "approve", summary: "A verified", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   item = updateWork(item, "quill", { state: "in_progress" });              // send-back
   item = updateWork(item, "quill", { state: "delivered", delivery: junkBundle });
   assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), false);
@@ -89,7 +92,7 @@ test("canary: approval of bundle A does not verify re-delivered bundle B", () =>
 // the strongest binding compatible with them: in-flight approvals die
 // with the first replacement, exactly like delivery-bound ones.)
 test("canary: pre-delivery approval never survives a delivery replacement", () => {
-  let item = recordReview(reviewedItem(), "sage", { verdict: "approve", summary: "reviewed in flight" });
+  let item = recordReview(reviewedItem(), "sage", { verdict: "approve", summary: "reviewed in flight", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle });
   assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), true);
   item = updateWork(item, "quill", { state: "in_progress" });              // send-back
@@ -105,10 +108,10 @@ test("canary: pre-delivery approval never survives a delivery replacement", () =
 test("canary: ci_settlement never cites a head settled against another delivery", () => {
   let item = recordCi(reviewedItem(), { state: "success", headSha: HEAD1, url: null }).item;
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle });
-  item = recordReview(item, "sage", { verdict: "approve", summary: "ok" });
+  item = recordReview(item, "sage", { verdict: "approve", summary: "ok", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   item = updateWork(item, "quill", { state: "in_progress" });
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle2 });
-  item = recordReview(item, "sage", { verdict: "approve", summary: "fresh look at the new bundle" });
+  item = recordReview(item, "sage", { verdict: "approve", summary: "fresh look at the new bundle", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   const done = updateWork(item, "sage", { state: "done", reviewedBy: "sage", authority: true });
   assert.equal(done.verification.executedChecks.some(e => e.name === "ci_settlement" && e.result === "pass"), false);
 });
@@ -119,12 +122,12 @@ test("canary: ci_settlement never cites a head settled against another delivery"
 test("canary: release clears the CI record for the next round", () => {
   let item = recordCi(reviewedItem(), { state: "success", headSha: HEAD1, url: null }).item;
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle });
-  item = recordReview(item, "sage", { verdict: "approve", summary: "ok" });
+  item = recordReview(item, "sage", { verdict: "approve", summary: "ok", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   item = updateWork(item, "quill", { state: "unclaimed" });
   assert.equal(item.ci, null);
   item = start(item);
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle2 });
-  item = recordReview(item, "sage", { verdict: "approve", summary: "fresh round, fresh look" });
+  item = recordReview(item, "sage", { verdict: "approve", summary: "fresh round, fresh look", criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   const done = updateWork(item, "sage", { state: "done", reviewedBy: "sage", authority: true });
   assert.equal(done.verification.executedChecks.some(e => e.name === "ci_settlement"), false);
 });

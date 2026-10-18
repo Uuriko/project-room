@@ -50,6 +50,7 @@
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { criterionOutcomesAgainst } from "./criteria.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -551,6 +552,24 @@ const currentReviewBasis = (review, item) => {
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
+// A stored review's per-criterion outcomes (#3613): shape only — the
+// coverage check against the claim's pinned criteria runs in recordReview,
+// where the item is in hand. Ids are the derived c1.. ids of
+// server/criteria.mjs; verdicts are pass|fail, one entry per criterion.
+const reviewCriterionOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(Array.isArray(value) && value.length > 0 && value.length <= 64, "review criterionOutcomes must hold 1..64 entries");
+  const seen = new Set();
+  return Object.freeze(value.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each criterion outcome must be an object");
+    check(typeof entry.criterionId === "string" && entry.criterionId.length > 0 && entry.criterionId.length <= 64,
+      "each criterion outcome criterionId must be 1..64 characters");
+    check(!seen.has(entry.criterionId), `review criterionOutcomes cites criterion "${entry.criterionId}" more than once`);
+    seen.add(entry.criterionId);
+    check(["pass", "fail"].includes(entry.verdict), `criterion "${entry.criterionId}" verdict must be pass or fail`);
+    return Object.freeze({ criterionId: entry.criterionId, verdict: entry.verdict });
+  }));
+};
 const reviewRecordOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
@@ -559,7 +578,9 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  const criterionOutcomes = reviewCriterionOutcomesOf(value.criterionOutcomes);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
+    ...(criterionOutcomes ? { criterionOutcomes } : {}),
     ...(basis ? { basis } : {}) });
 };
 const reviewsOf = value => {
@@ -1440,12 +1461,22 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis, criterionOutcomes } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   check(REVIEW_VERDICTS.includes(verdict), `verdict must be one of ${REVIEW_VERDICTS.join(", ")}`);
   check(typeof summary === "string" && summary.length > 0 && summary.length <= 2000, "summary must be 1..2000 characters");
+  // #3613: per-criterion outcomes mirror the public-work shape — against
+  // the claim's pinned acceptanceCriteria, citing the derived criterion
+  // ids. An approve verdict on a criteria-bearing claim must cite every
+  // criterion (the verdict that counts toward reviewed completion carries
+  // the criteria-level record); any other verdict may carry outcomes, and
+  // supplied outcomes are always fully validated. Claims without criteria
+  // accept none.
+  const claimCriteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  const outcomes = verdict === "approve" && claimCriteria.length > 0 || criterionOutcomes !== undefined
+    ? criterionOutcomesAgainst(criterionOutcomes, claimCriteria, check) : null;
   let reviewUrl = null;
   if (url !== undefined && url !== null) {
     check(typeof url === "string" && url.length > 0 && url.length <= 300, "url must be at most 300 characters");
@@ -1474,7 +1505,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
       fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
     }
   }
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl
+    && JSON.stringify(prior.criterionOutcomes ?? null) === JSON.stringify(outcomes)) {
     // A true replay on the still-current basis changes nothing.
     if (currentReviewBasis(prior, item)) return Object.freeze(item);
     // The prior basis is stale (or the record predates bases). Only a
@@ -1492,7 +1524,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at,
+    ...(outcomes ? { criterionOutcomes: outcomes } : {}), basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
