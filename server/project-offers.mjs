@@ -37,6 +37,16 @@ CREATE INDEX IF NOT EXISTS project_offers_room_created
 CREATE INDEX IF NOT EXISTS project_offers_published_id
   ON project_offers(offer_id) WHERE status='published';`;
 
+// ESCROW-GUARDS (HUNT state-machine F3): terms.deadline was validated at
+// create and never read again — an offer could be published, listed and
+// bound after its own submission window had closed. The doors that put an
+// offer into the world refuse once the deadline has passed: publish here,
+// public-work enable in public-work-claims.mjs (same error code). Reads and
+// owner cleanup (withdraw) are deliberately not gated, and bindings made
+// inside the window are unaffected.
+const offerDeadlinePassed = (terms, now) => terms?.deadline != null
+  && Number.isFinite(Date.parse(terms.deadline)) && Date.parse(terms.deadline) <= now;
+
 function termsOf(value) {
   shape(value, ['kind', 'title', 'summary', 'acceptanceCriteria', 'reward', 'approvalPolicy'], ['exclusions', 'repositoryUrl', 'submissionUrl', 'deadline']);
   check(['task', 'project'].includes(value.kind), 'kind must be task or project');
@@ -159,9 +169,11 @@ export class ProjectOffers {
       if (row.status !== (action === 'publish' ? 'draft' : 'published')) fail(409, 'invalid_offer_status', 'Offer cannot make this transition');
       if (action === 'publish') {
         const terms = JSON.parse(row.terms);
+        if (offerDeadlinePassed(terms, this.store.now()))
+          fail(409, 'offer_deadline_passed', `This offer's deadline (${terms.deadline}) has passed; it can no longer be published`);
         check(Boolean(terms.repositoryUrl || terms.submissionUrl), 'Publishing requires a public repository or submission URL');
         const links = JSON.parse(row.private_links);
-        validateReview(this.requireOwner(roomId, actorId), JSON.parse(row.terms), links);
+        validateReview(this.requireOwner(roomId, actorId), terms, links);
       }
       this.db.prepare('UPDATE project_offers SET status=?, revision=revision+1, updated_at=? WHERE offer_id=?').run(action === 'publish' ? 'published' : 'withdrawn', this.store.now(), offerId);
       return this.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId), true);

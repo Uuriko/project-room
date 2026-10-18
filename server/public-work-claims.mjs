@@ -396,6 +396,14 @@ export class PublicWorkClaims {
         if (!row) fail(404, 'offer_not_found', 'Offer not found');
         if (row.revision !== input.expectedRevision || row.version !== input.expectedTermsVersion) fail(409, 'stale_offer', 'Offer changed; read it again');
         const offer = this.store.projectOffers.read(offerId);
+        // ESCROW-GUARDS: enable is the bind door — it puts the offer to work
+        // and, for paid offers, funds its escrow below — so it refuses once
+        // the offer's submission deadline has passed (the project-offers
+        // publish door refuses with the same code). Without this, a
+        // past-deadline offer could be bound and funded while every claim
+        // against it refuses via the #3707 claim-door check.
+        if (offer.deadline != null && Number.isFinite(Date.parse(offer.deadline)) && Date.parse(offer.deadline) <= this.store.now())
+          fail(409, 'offer_deadline_passed', `This offer's deadline (${offer.deadline}) has passed; it can no longer be enabled for public work`);
         const rewardMillis = publicWorkRewardMillis(offer);
         if (rewardMillis === undefined || !offer.repositoryUrl) fail(422, 'public_work_not_eligible', 'Public claims require an unpaid or work_trade credit offer with a repository URL');
         if (this.db.prepare('SELECT 1 FROM public_work_tasks WHERE offer_id=?').get(offerId)) fail(409, 'public_work_already_enabled', 'Public claims already enabled');

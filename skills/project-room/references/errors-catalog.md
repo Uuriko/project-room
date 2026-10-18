@@ -798,6 +798,7 @@ response's own `hint`/`next` when it names something more specific.
 | `nothing_to_request` | 409 | Already held: ${member.permissions.join(", ") ;; "read/chat access"} | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `number_ban` | internal | JSON numbers are forbidden in signed bodies — use decimal strings | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `oauth_busy` | 429 | Too many pending OAuth flows; try again shortly | wait | Wait for the Retry-After interval; retry the exact same request. |
+| `offer_deadline_passed` | 409 | This offer's deadline (${deadline}) has passed; it can no longer be published / enabled for public work | no | Do not retry this offer — its submission deadline (terms.deadline) has passed. Create a new offer with a future deadline instead. |
 | `offer_exists` | 409 | Offer ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_limit` | 409 | This room has reached its offer limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_not_found` | 404 | Offer not found | re-list | Re-list the resource and use a current id. Do not guess ids. |

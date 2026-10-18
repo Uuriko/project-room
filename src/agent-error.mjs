@@ -432,6 +432,7 @@ const AX_NAMED_RECOVERIES = {
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
   not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
   nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
+  offer_deadline_passed: ["This offer's submission deadline has passed — it can no longer be published or enabled for public work.", "Create a new offer with a future deadline instead — offer terms cannot be edited in place."],
   password_already_set: ["This account already has a password. Change it instead of setting a new one.", "Change the existing password instead."],
   password_changed: ["The password changed. Retry with the current password.", "Retry with the current password."],
   peer_not_found: ["That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.", "Run get_room_context and address a linked room member."],
