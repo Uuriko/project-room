@@ -354,16 +354,52 @@ export function claimReviewForm(item) {
 // Operation identity for the board's lifecycle POSTs (#3829): an update
 // carrying a requestId records its outcome server-side, and the identical
 // retry replays that outcome instead of applying twice. The id is derived
-// from the operation itself — claim, delivery round, actor — so a retry of
-// the same click re-sends the same id, while a new round (a re-delivery
-// advances deliveryGeneration, #3684) or a different actor is a new
-// operation with a new id. Sanitized to the route's requestId shape.
+// from the operation itself — claim, claim round, delivery generation,
+// actor — so a retry of the same click re-sends the same id, while a new
+// round or a different actor is a new operation with a new id. Sanitized
+// to the route's requestId shape.
 const requestIdPart = value => String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40);
-export function verifyRequestId(item, memberId) {
-  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+// The claim round an operation key binds is named by the board's own
+// concurrency idiom: the round's claimedAt plus the claim's lifetime
+// history length (list pages carry the newest entries plus a
+// historyOmitted count; release / append-PR / reassign already bind the
+// same total). deliveryGeneration alone is NOT a round identity:
+// release→reclaim resets it to 0 while the kernel preserves the recorded
+// request outcomes (#3867), so a generation-only key re-derives the
+// released round's key — an identical payload then silently replays the
+// old outcome and a changed one conflicts. The claim id also carries a
+// short digest of its full unsanitized form, so two ids that sanitize or
+// truncate to the same prefix keep distinct keys.
+const claimIdDigest = value => {
+  let hash = 0x811c9dc5;
+  const text = String(value ?? "");
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+};
+// The basis preconditions binding a submission to the round the board
+// displayed: the route rejects the update work_claim_conflict when the
+// claim has moved since the read. Empty when the item carries no round
+// (no claimedAt), so callers spread it unconditionally.
+export function claimRoundBasis(item) {
+  if (!item || typeof item.claimedAt !== "string" || !item.claimedAt) return {};
+  return { expectedClaimedAt: item.claimedAt,
+    expectedHistoryLength: (item.history?.length ?? 0) + (Number(item.historyOmitted) || 0) };
 }
-const deliverRequestId = (item, memberId) =>
-  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+const roundRequestId = (operation, item, memberId) => [
+  operation,
+  `${requestIdPart(item?.id).slice(0, 24)}-${claimIdDigest(item?.id)}`,
+  String(item?.deliveryGeneration ?? 0),
+  requestIdPart(item?.claimedAt ?? "noround"),
+  String((item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0)),
+  requestIdPart(memberId).slice(0, 24),
+].join("-");
+export function verifyRequestId(item, memberId) {
+  return roundRequestId("verify", item, memberId);
+}
+const deliverRequestId = (item, memberId) => roundRequestId("deliver", item, memberId);
 
 // The reviewer's verify as a pure body, so the requestId wiring is
 // unit-testable at this boundary (the newItemCreateBody precedent). Before
@@ -371,7 +407,7 @@ const deliverRequestId = (item, memberId) =>
 // a lost response could only be retried as a brand-new update against a
 // claim that was already done.
 export function claimVerifyBody(item, memberId) {
-  return { state: "done", requestId: verifyRequestId(item, memberId) };
+  return { state: "done", requestId: verifyRequestId(item, memberId), ...claimRoundBasis(item) };
 }
 
 const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
@@ -388,7 +424,7 @@ const CRITERION_STATUS_KEYS = { met: "board.deliver.criterion.met", not_met: "bo
 // reference, and the stored bundle itself on a re-delivery, so reusing a
 // valid bundle is one submit. Labels come from the strings catalog, like
 // claimReviewForm; criterion texts are claim data, escaped as values.
-export function claimDeliverForm(item) {
+export function claimDeliverForm(item, { finish = false } = {}) {
   const id = escapeHtml(item.id);
   const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests
     : (item.pullRequest?.url ? [item.pullRequest] : []);
@@ -404,7 +440,7 @@ export function claimDeliverForm(item) {
   const option = (value, selected, label) => ["<option value=\"", value, "\"",
     selected ? " selected" : "", ">", label, "</option>"].join("");
   const parts = [
-    `<form class="board-new" data-claim-deliver="${id}">`,
+    `<form class="board-new" data-claim-deliver="${id}"${finish ? ` data-claim-finish="done"` : ""}>`,
     "<span class=\"form-hint\">", uiText("board.deliver.legend"), "</span>",
     "<label>", uiText("board.deliver.artifact.kind"),
     ` <input name="artifactKind" required maxlength="64" autocomplete="off" value="${escapeHtml(kind)}">`, "</label>",
@@ -436,14 +472,14 @@ export function claimDeliverForm(item) {
   return parts.join("");
 }
 
-// The deliver POST body, composed from the form's fields — pure, so the
+// The delivery bundle, composed from the form's fields — pure, so the
 // bundle wiring is unit-testable at this boundary. It mirrors the kernel's
 // shape bounds (deliveryOf / requireBundleComplete in work-claims.mjs) and
 // returns null when the fields cannot form a bundle the kernel accepts,
 // so the board refuses locally with the reason instead of posting a
 // refusal. Policy refusals the kernel owns (a failing check, say) still
 // surface from the server, which names them.
-export function claimDeliverBody(item, data, memberId) {
+function deliveryBundleFromForm(item, data) {
   const field = name => String(data?.get(name) ?? "").trim();
   const kind = field("artifactKind"), ref = field("artifactRef");
   const sha256 = field("artifactSha256").replace(/^sha256:/, "");
@@ -466,9 +502,49 @@ export function claimDeliverBody(item, data, memberId) {
     if (!Object.hasOwn(CRITERION_STATUS_KEYS, status)) return null;
     criteria.push({ criterion: wanted[index], status });
   }
-  return { state: "delivered",
-    delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
-    requestId: deliverRequestId(item, memberId) };
+  return { artifact: { kind, ref, sha256 }, checks, criteria };
+}
+
+// The deliver POST body: the composed bundle plus the operation identity
+// and the displayed round's basis preconditions, so a stale first
+// submission is rejected as a conflict instead of landing against a round
+// the holder never saw.
+export function claimDeliverBody(item, data, memberId) {
+  const delivery = deliveryBundleFromForm(item, data);
+  if (!delivery) return null;
+  return { state: "delivered", delivery, requestId: deliverRequestId(item, memberId), ...claimRoundBasis(item) };
+}
+
+// The self-attested finish (collapse) twin of claimDeliverBody: same
+// bundle, same operation identity, same round basis — only the target
+// state differs. A criteria-bearing claim under a self-attested policy
+// finishes through this body, because the kernel requires the bundle
+// whenever acceptance criteria exist, whatever the policy.
+export function claimFinishBody(item, data, memberId) {
+  const delivery = deliveryBundleFromForm(item, data);
+  if (!delivery) return null;
+  return { state: "done", delivery, requestId: deliverRequestId(item, memberId), ...claimRoundBasis(item) };
+}
+
+// Response-loss reconciliation for a delivery submission: true only when
+// the refreshed claim is the SAME round the form was built from
+// (claimedAt + owner unchanged) and now carries THIS submission's bundle
+// in a delivered-or-later state. Anything else leaves the outcome
+// unconfirmed — the board says so instead of assuming the POST landed
+// (or did not) from the response alone.
+export function deliveryLanded(current, submitted) {
+  if (!current || !submitted?.delivery) return false;
+  if (current.state !== "delivered" && current.state !== "done") return false;
+  if (current.claimedAt !== submitted.claimedAt || current.owner !== submitted.owner) return false;
+  const delivery = current.delivery, bundle = submitted.delivery;
+  if (!delivery) return false;
+  if (delivery.artifact?.kind !== bundle.artifact?.kind
+    || delivery.artifact?.ref !== bundle.artifact?.ref
+    || delivery.artifact?.sha256 !== bundle.artifact?.sha256) return false;
+  const sameRows = (rows, wanted, keys) => Array.isArray(rows) && rows.length === wanted.length
+    && wanted.every((entry, index) => keys.every(key => rows[index]?.[key] === entry[key]));
+  return sameRows(delivery.checks, bundle.checks, ["name", "result"])
+    && sameRows(delivery.criteria, bundle.criteria, ["criterion", "status"]);
 }
 
 // One anchor literal for both record targets, so the board's link shape
@@ -643,10 +719,14 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     // delivery bundle, and the reviewer verifies from there — so the card
     // offers the step the policy actually accepts. The step is the deliver
     // form, not a bare button: a first finish without the bundle is
-    // refused delivery_incomplete, so the form composes it.
+    // refused delivery_incomplete, so the form composes it. A
+    // criteria-bearing claim under a self-attested policy takes the same
+    // form in its finish variant for the same reason — the kernel
+    // requires the bundle whenever criteria exist, whatever the policy;
+    // only a criteria-free self-attested claim keeps the bare Done.
     const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
-    if (policy === "self_attested") actions.push(button("done", "Done", "primary"));
-    else actions.push(claimDeliverForm(item));
+    if (policy === "self_attested" && !(item.acceptanceCriteria?.length)) actions.push(button("done", "Done", "primary"));
+    else actions.push(claimDeliverForm(item, { finish: policy === "self_attested" }));
   }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
@@ -1053,7 +1133,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
     else if (action === "close" || action === "cancel") flyButton(button, () => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
     else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
-    else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
+    else if (action === "done") {
+      const item = items.find(entry => entry.id === id);
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done", ...claimRoundBasis(item) } }), focus);
+    }
     // The reviewed-policy lifecycle from the card: the holder's finish is
     // the deliver form's submit (below); the reviewer's verify is this
     // update to done, gated server-side by their recorded approval. The
@@ -1085,10 +1168,10 @@ export function installWorkBoard({ client, getState, getSession }) {
   });
   // Same in-flight treatment for form submits (BU-02): disable the submit
   // button with aria-busy; restore it only if the node survives the repaint.
-  function flySubmit(form, run, focus) {
+  function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }
@@ -1146,12 +1229,25 @@ export function installWorkBoard({ client, getState, getSession }) {
       const viewer = viewerOf(getState(), getSession());
       const item = items.find(entry => entry.id === id);
       if (!item || item.owner !== viewer.id || item.state !== "in_progress") return;
-      const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
+      const finish = deliver.dataset.claimFinish === "done";
+      const body = finish ? claimFinishBody(item, new FormData(deliver), viewer.id)
+        : claimDeliverBody(item, new FormData(deliver), viewer.id);
       if (!body) { note(uiText("board.deliver.invalid")); return; }
       const title = item.title || id;
+      // State-confirmed success, like verify: after any outcome the board
+      // reloads, and success is reported only when the refreshed claim
+      // shows THIS round carrying THIS bundle — a lost response is
+      // recovered by the readback, and an unlanded write is reported
+      // unconfirmed instead of assumed either way.
+      const submitted = { claimedAt: item.claimedAt, owner: viewer.id, delivery: body.delivery };
+      const confirmed = finish ? `Done '${title}'` : uiText("board.action.outcome.deliver", { title });
+      const reconcile = error => deliveryLanded(items.find(entry => entry.id === id), submitted)
+        ? confirmed
+        : error?.message || uiText("board.action.deliver.unconfirmed", { title });
       flySubmit(deliver,
         () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
-        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) });
+        { id, key: `deliver:${id}`, status: confirmed, pending: uiText("board.action.pending.deliver", { title }) },
+        reconcile, uiText("board.action.deliver.unconfirmed", { title }));
       return;
     }
     const review = event.target.closest("[data-claim-review]");

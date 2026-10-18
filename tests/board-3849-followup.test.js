@@ -82,7 +82,12 @@ test("(a) verifyRequestId is stable for one verify operation and bound to its ro
 
 test("(a) the board's verify body carries the requestId the retry contract expects", () => {
   const item = claim("wc_a", { state: "delivered", deliveryGeneration: 1 });
-  assert.deepEqual(claimVerifyBody(item, "rev-1"), { state: "done", requestId: verifyRequestId(item, "rev-1") });
+  // BOARD-ROUND-FENCING: the body also carries the displayed round's basis
+  // preconditions (expectedClaimedAt / expectedHistoryLength), like the
+  // release / reassign posts — the fixture's round is claimedAt T0 with an
+  // empty history.
+  assert.deepEqual(claimVerifyBody(item, "rev-1"), { state: "done", requestId: verifyRequestId(item, "rev-1"),
+    expectedClaimedAt: T0, expectedHistoryLength: 0 });
 });
 
 test("(a) a verify carrying the board's requestId records its outcome; the identical retry replays it", () => {
