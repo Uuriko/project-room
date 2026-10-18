@@ -32,6 +32,13 @@ import { createRoomServer } from "../server/http.mjs";
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
+// The 10 tools the packet names for the member lean default profile.
+const LEAN_10 = [
+  "room_needs_me", "room_read_messages", "room_post_message",
+  "room_read_request", "room_respond_to_request", "room_check_access",
+  "room_join", "wake_pause", "room_search_actions", "room_run_action",
+];
+
 // The 18 essential tools the packet names for the member core profile.
 const CORE_18 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
@@ -133,12 +140,18 @@ test("outside identity gets the packet's seven public-work tools plus four join 
   assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member default profile is the packet's lean 10 tools plus the 4 join readers; core is explicit", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  // Packet: "default tools/list is the lean profile (10 tools plus the 4
+  // public join readers, so about 14 total)".
+  assert.equal(names.length, 14, `lean default must be 14 tools, got ${names.length}`);
+  assert.deepEqual(names.slice(0, 10), LEAN_10);
+  assert.deepEqual(names.slice(10), JOIN_READERS);
+  // The packet's core set is still served, one explicit profile away.
+  const coreNames = await toolsList({ profile: "core" }, memberSecret);
+  assert.equal(coreNames.length, 22, `core profile must be 22 tools, got ${coreNames.length}`);
+  assert.deepEqual(coreNames.slice(0, 18), CORE_18);
+  assert.deepEqual(coreNames.slice(18), JOIN_READERS);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {

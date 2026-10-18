@@ -34,7 +34,8 @@ export function renderMcpServerCardJson({
   version,
   protocolVersions,
   websiteUrl,
-  repositoryUrl
+  repositoryUrl,
+  catalog
 }) {
   if (typeof MCP_SERVER_CARD_DESCRIPTION !== "string"
     || MCP_SERVER_CARD_DESCRIPTION.length < 1
@@ -75,6 +76,11 @@ export function renderMcpServerCardJson({
     },
     cacheScope: MCP_DISCOVERY_CACHE_SCOPE,
     ttlMs: MCP_DISCOVERY_TTL_MS,
+    // Rev-skip (PERF-10X L5 iii): deployed revision + per-tier catalog
+    // digests. A stored digest that still matches means the catalog an
+    // agent already holds is current — skip the tools/list fetch (the
+    // tools/list { since_rev, since_digest } call answers not_modified).
+    ...(catalog ? { catalog } : {}),
     tools: {
       public: projectTools(publicTools),
       enrolled: projectTools(enrolledTools)

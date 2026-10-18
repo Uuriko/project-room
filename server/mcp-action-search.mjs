@@ -2,8 +2,13 @@
 // reach the long tail without loading the whole catalog into the model.
 //
 // room_search_actions finds hosted tools by words in their name and
-// description and returns each match's exact inputSchema, so an agent can
-// call it directly. room_run_action calls one of those tools by name for
+// description. Detail levels keep the answer priced for the question
+// (PERF-10X L5 / research-c §3.1): "name" returns names only, "summary"
+// (the default) adds a one-line description, the REST route and the
+// read-only flag, and "full" adds each match's exact inputSchema, so an
+// agent can call it directly. Schemas ride in structuredContent only —
+// the text block renders names and summaries, never a second copy of a
+// schema. room_run_action calls one of those tools by name for
 // clients that only let the model use listed tools. It re-enters the same
 // tools/call path, so argument checks, scopes, autonomy tiers, spend and
 // receipts are exactly what a direct call gets. Neither tool grants anything.
@@ -19,15 +24,21 @@ export const ACTION_META_TOOL_NAMES = Object.freeze([SEARCH_ACTIONS_TOOL, RUN_AC
 const MAX_RESULTS = 10;
 const DEFAULT_RESULTS = 5;
 
+// Search detail levels: how much of each match the caller pays for.
+// "name" < "summary" (default) < "full" (adds the exact inputSchema).
+export const SEARCH_DETAIL_LEVELS = Object.freeze(["name", "summary", "full"]);
+export const DEFAULT_SEARCH_DETAIL = "summary";
+
 export const actionMetaToolDefs = Object.freeze([
   {
     name: SEARCH_ACTIONS_TOOL,
-    description: "Find a Room action that isn't in this short list. Pass query (plain words, for example \"close board claim\" or \"upload file\"). Returns up to limit matches with each tool's exact inputSchema and its REST route when there is one. Call a match directly, or through room_run_action. Read only; grants nothing.",
+    description: "Find a Room action that isn't in this short list. Pass query (plain words, for example \"close board claim\" or \"upload file\"). Detail levels: \"name\" returns names only, \"summary\" (default) adds a one-line description and REST route, \"full\" adds each match's exact inputSchema. Call a match directly, or through room_run_action. Read only; grants nothing.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", minLength: 1, maxLength: 200 },
-        limit: { type: "integer", minimum: 1, maximum: MAX_RESULTS }
+        limit: { type: "integer", minimum: 1, maximum: MAX_RESULTS },
+        detail: { type: "string", enum: [...SEARCH_DETAIL_LEVELS], default: DEFAULT_SEARCH_DETAIL }
       },
       required: ["query"],
       additionalProperties: false
@@ -51,8 +62,9 @@ export const actionMetaToolDefs = Object.freeze([
   }
 ]);
 
-// The lean default under discussion: read, post, needs-me, answer a formal
-// request, access, join, stop wakes, plus search and run for everything else.
+// The lean default (PERF-10X, 2026-10-16 decision: lean-as-default): read,
+// post, needs-me, answer a formal request, access, join, stop wakes, plus
+// search and run for everything else.
 export const LEAN_MCP_TOOLS = Object.freeze([
   "room_needs_me",
   "room_read_messages",
@@ -82,8 +94,9 @@ function firstSentence(text) {
 
 export function validSearchActionsArgs(args) {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return false;
-  if (!Object.keys(args).every(key => key === "query" || key === "limit")) return false;
+  if (!Object.keys(args).every(key => key === "query" || key === "limit" || key === "detail")) return false;
   if (typeof args.query !== "string" || args.query.trim().length === 0 || args.query.length > 200) return false;
+  if (args.detail !== undefined && !SEARCH_DETAIL_LEVELS.includes(args.detail)) return false;
   return args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= MAX_RESULTS;
 }
 
@@ -96,7 +109,7 @@ export function validRunActionArgs(args) {
 
 // Name words count three times as much as description words; ties keep
 // catalog order, so the result is deterministic.
-export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, tools = hostedMcpToolDefs } = {}) {
+export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, detail = DEFAULT_SEARCH_DETAIL, tools = hostedMcpToolDefs } = {}) {
   const terms = [...new Set(words(query))];
   const visible = agent ? tools.filter(tool => capabilityVisibleTo(agent, tool)) : tools;
   const scored = [];
@@ -112,21 +125,38 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
     if (score > 0) scored.push({ score, index, tool });
   });
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
-  const matches = scored.slice(0, limit).map(({ tool }) => ({
-    name: tool.name,
-    summary: firstSentence(tool.description),
-    readOnly: tool.annotations?.readOnlyHint === true,
-    rest: restRouteOf(tool),
-    inputSchema: tool.inputSchema
-  }));
+  const matches = scored.slice(0, limit).map(({ tool }) => {
+    if (detail === "name") return { name: tool.name };
+    const match = {
+      name: tool.name,
+      summary: firstSentence(tool.description),
+      readOnly: tool.annotations?.readOnlyHint === true,
+      rest: restRouteOf(tool)
+    };
+    return detail === "full" ? { ...match, inputSchema: tool.inputSchema } : match;
+  });
   return {
     query,
+    detail,
     matches,
     totalMatches: scored.length,
     next: matches.length === 0
       ? "No match. Try other words, or list everything with tools/list profile=full."
-      : "Call a match directly with its inputSchema, or use room_run_action { name, arguments }."
+      : detail === "full"
+        ? "Call a match directly with its inputSchema, or use room_run_action { name, arguments }."
+        : "Call a match through room_run_action { name, arguments }, or re-run with detail=\"full\" for its exact inputSchema."
   };
+}
+
+// The text block for a search result: names and summaries only, at every
+// detail level. Schemas (detail="full") ride in structuredContent alone —
+// rendering the JSON value as text too would put every schema on the wire
+// twice, which is what made one search cost more than the lean catalog.
+export function searchActionsText(result) {
+  const lines = result.matches.map(match => match.summary
+    ? `${match.name} — ${match.summary}${match.rest ? ` (${match.rest})` : ""}`
+    : match.name);
+  return [...lines, result.next].join("\n");
 }
 
 export function isRunnableAction(name) {

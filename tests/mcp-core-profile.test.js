@@ -13,6 +13,7 @@ import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
   CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
@@ -51,7 +52,7 @@ function namesOf(body) {
   return body.result.tools.map(tool => tool.name);
 }
 
-test("default tools/list is the short core profile and every listed name is legal", async t => {
+test("default tools/list is the lean profile and every listed name is legal; core is one explicit profile away", async t => {
   const { origin, store, rooms } = await serve(t);
   const ada = store.identities.create("Ada");
   const carol = store.identities.create("Carol");
@@ -62,16 +63,15 @@ test("default tools/list is the short core profile and every listed name is lega
   const listed = await rpc(origin, "tools/list", undefined, ada.secret);
   const body = await listed.json();
   const names = namesOf(body);
-  assert.equal(body.result.profile, "core");
-  assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
-  // Core still names bond_propose; the rest of the bond lifecycle is
-  // advertised from the conversation focus (see the focus test below).
+  // Lean-as-default (PERF-10X): the default list is the lean front door.
+  assert.equal(body.result.profile, "lean");
+  assert.deepEqual(names, [...LEAN_MCP_TOOLS, ...JOIN_TOOLS]);
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
   assert.equal(body.result.tools.every(tool => tool.aliases === undefined), true);
   assert.equal(body.result.tools.find(tool => tool.name === "room_needs_me").description, CORE_MCP_BLURBS.room_needs_me);
-  // The core blurb must match the read contract: oldest first from `after`
+  // The lean blurb must match the read contract: oldest first from `after`
   // (default 0), not "recent". A cold agent trusting "recent" reads the room's
   // first page and misses the current conversation.
   const readMessages = body.result.tools.find(tool => tool.name === "room_read_messages");
@@ -79,14 +79,25 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.match(readMessages.description, /oldest first/);
   assert.doesNotMatch(readMessages.description, /\brecent\b/i);
   assert.equal(readMessages.inputSchema.properties.after.default, 0);
-  const coreBytes = Buffer.byteLength(JSON.stringify(body));
-  const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
+  const leanBytes = Buffer.byteLength(JSON.stringify(body));
+  console.log(`lean (default) tools/list JSON-RPC bytes=${leanBytes}`);
+
+  // The core profile is unchanged, one explicit argument away.
+  const coreListed = await rpc(origin, "tools/list", { profile: "core" }, ada.secret);
+  const coreBody = await coreListed.json();
+  assert.equal(coreBody.result.profile, "core");
+  assert.deepEqual(namesOf(coreBody), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  // Core still names bond_propose; the rest of the bond lifecycle is
+  // advertised from the conversation focus (see the focus test below).
+  const coreBytes = Buffer.byteLength(JSON.stringify(coreBody));
+  const coreResultBytes = Buffer.byteLength(JSON.stringify(coreBody.result));
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
   // QA7-04 added the latest flag to room_read_messages' schema: the core
   // profile stays small for cold agents, with headroom for one more flag.
   assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
+  assert.ok(leanBytes < coreBytes, "the lean default is smaller than core");
 
-  const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
+  const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "core" }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
@@ -305,7 +316,12 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const initial = await invoke(pointer.tool, pointer.arguments);
   const stale = initial.value.responseActions.find(action => action.arguments.responseOutcome === "answered");
   assert.ok(advertised.has(stale.tool), "the discovered response must also be advertised");
-  await invoke("room_reply", { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." });
+  // room_reply is not in the lean default: the fresh client finds it with
+  // the advertised search tool and calls it through the advertised
+  // room_run_action — the lean escape hatch this default is built on.
+  const found = await invoke("room_search_actions", { query: "reply message", detail: "full" });
+  assert.ok(found.value.matches.some(match => match.name === "room_reply"), "search finds room_reply from the lean default");
+  await invoke("room_run_action", { name: "room_reply", arguments: { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." } });
   assert.equal(store.room(room.roomId).state.replyRequests["core-question"].status, "open", "ordinary chat does not answer the formal request");
   const refused = await invoke(stale.tool, { ...stale.arguments, requestId: "core-stale-answer", body: "Stale answer" });
   assert.equal(refused.body.result.isError, true);
@@ -366,7 +382,8 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
   const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   assert.equal(defaultAgain.result.focus, undefined);
-  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.equal(defaultAgain.result.profile, "lean", "focus does not stick: the default after a focus call is lean again");
+  assert.deepEqual(namesOf(defaultAgain), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS]);
   const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   assert.equal(full.result.focus, undefined);
   assert.ok(namesOf(full).includes("room_propose_work"));

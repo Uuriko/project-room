@@ -151,7 +151,16 @@ test("inbox discovery finds older open requests outside its DM window through ex
   assert.equal(selectedResponse.status, 200); assert.equal((await selectedResponse.json()).request.status, "open");
   const rpc = async (method, params) => (await post(origin, "/room/mcp", { jsonrpc: "2.0", id: "discovery", method, params }, friendSecret)).json();
   const catalog = await rpc("tools/list", {});
-  assert.ok(catalog.result.tools.some(tool => tool.name === discovery.nextRead.tool));
+  // Lean-as-default: the pointed-to tool need not be in the short default
+  // list, but it must be reachable from it — listed, or found by the
+  // advertised room_search_actions that the lean list carries.
+  if (!catalog.result.tools.some(tool => tool.name === discovery.nextRead.tool)) {
+    assert.ok(catalog.result.tools.some(tool => tool.name === "room_search_actions"),
+      "the lean default advertises room_search_actions as the way to find the pointed-to tool");
+    const found = await rpc("tools/call", { name: "room_search_actions", arguments: { query: "list requests", detail: "full" } });
+    assert.ok(found.result.structuredContent.matches.some(match => match.name === discovery.nextRead.tool),
+      `search finds ${discovery.nextRead.tool}`);
+  }
   const mcpInbox = (await rpc("tools/call", { name: "room_read_inbox", arguments: { roomId, limit: 1 } })).result.structuredContent;
   const pointer = mcpInbox.next.find(step => step.action === "list-open-requests").nextRead;
   const mcpList = await rpc("tools/call", { name: pointer.tool, arguments: pointer.arguments });

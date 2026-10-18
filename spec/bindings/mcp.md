@@ -70,4 +70,4 @@ No hosted tool proposes or decides a collab approval. Clients use the HTTP route
 
 `server/mcp-hosted-tools.mjs` checks that its tool list matches `HOSTED_ROOM_MCP_TOOLS` at load. A name in this stub that is dropped from that list is a broken citation, which `tests/spec-links.test.js` does not catch by itself: this stub cites modules, and the module list is the registry.
 
-Default `tools/list` is the core profile, not every name above. `profile=full` returns the full list. Source: `src/room-mcp-join.js`.
+Default `tools/list` is the lean profile, not every name above. `profile=core` returns the compact core set; `profile=full` returns the full list. Source: `src/room-mcp-join.js`.

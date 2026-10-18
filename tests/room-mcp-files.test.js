@@ -183,7 +183,14 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
     grantedBy: created.ownerMemberId ?? owner.identityId, capCents: "100000", perTxCapCents: "10000", nowMs: Date.now(),
   });
   const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
-  assert.equal(names.includes("room_commit_file"), true);
+  // Lean-as-default: room_commit_file is not in the short default list,
+  // but the core profile still lists it and the lean default's advertised
+  // search finds it — the uploader flow stays discoverable end to end.
+  const coreNames = (await (await rpc(origin, "tools/list", { profile: "core" }, owner.secret)).json()).result.tools.map(tool => tool.name);
+  assert.equal(coreNames.includes("room_commit_file"), true);
+  assert.equal(names.includes("room_search_actions"), true);
+  const found = await call(origin, "room_search_actions", { query: "commit file", detail: "full" }, owner.secret);
+  assert.ok(found.value.matches.some(match => match.name === "room_commit_file"), "search finds room_commit_file from the lean default");
   const posted = await call(origin, "room_post_message", {
     roomId: created.roomId, id: "chat-1", messageId: "msg-1", body: "file lands here"
   }, owner.secret);

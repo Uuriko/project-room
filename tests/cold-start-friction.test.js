@@ -13,6 +13,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
 import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../server/agent-discovery.mjs";
 import { EVENT_TYPES as T, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -68,8 +69,13 @@ test("authenticated MCP reports field reasons and serves replyToId", async t => 
   const call = (name, args) => mcp(rpc("tools/call", { name, arguments: args }), { authorization: `Bearer ${identity.secret}` });
 
   const listed = await mcp(rpc("tools/list"), { authorization: `Bearer ${identity.secret}` });
-  assert.equal(listed.result.profile, "core");
-  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length + 4);
+  // Lean-as-default: the no-argument list is the lean profile; core is
+  // still served explicitly at its old size.
+  assert.equal(listed.result.profile, "lean");
+  assert.equal(listed.result.tools.length, LEAN_MCP_TOOLS.length + 4);
+  const coreListed = await mcp(rpc("tools/list", { profile: "core" }), { authorization: `Bearer ${identity.secret}` });
+  assert.equal(coreListed.result.profile, "core");
+  assert.equal(coreListed.result.tools.length, CORE_MCP_TOOLS.length + 4);
   assert.ok(listed.result.tools.every(tool => MCP_TOOL_NAME_RE.test(tool.name)));
   const full = await mcp(rpc("tools/list", { profile: "full" }), { authorization: `Bearer ${identity.secret}` });
   assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);

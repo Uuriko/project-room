@@ -11,7 +11,7 @@ import {
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
-import { livePublicMcpTools } from "./mcp-discovery.mjs";
+import { livePublicMcpTools, catalogRevSummary, catalogDigestFor, recordCatalogList, recordCatalogSkip } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
@@ -70,17 +70,18 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const negotiated = MCP_SUPPORTED_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_VERSION;
     // MCP lets a server answer with another version it supports. Say so in
     // _meta instead of swapping the client's version silently (#1529).
-    const versionNote = negotiated === params.protocolVersion ? {} : { _meta: { protocolVersionSubstituted: {
+    const catalog = catalogRevSummary({ stats: true });
+    const versionNote = negotiated === params.protocolVersion ? {} : { protocolVersionSubstituted: {
       requested: params.protocolVersion, negotiated, supported: [...MCP_SUPPORTED_VERSIONS],
-      hint: "This server does not support the requested protocol version. Continue with the negotiated version, or disconnect." } } };
+      hint: "This server does not support the requested protocol version. Continue with the negotiated version, or disconnect." } };
     return {
       jsonrpc: "2.0", id: requestId,
       result: {
-        ...versionNote,
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
-        instructions: "Public discovery MCP without Authorization. Read join packets and kits, or use public_work_recommend then public_work_read_task. Mint your own identity with the room_identity_mint tool (no account needed) — the returned secret unlocks the enrolled profile on this same URL. Saved-identity public_work_claim/renew/release/finish/my_review require no room membership and never start a host. Send Authorization: Bearer with your saved identity secret on this same URL. Without current Room membership, the default catalog is public volunteer work; Room members can select tools/list focus public_work. Room tools retain their own membership checks. The core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: `Public discovery MCP without Authorization. Read join packets and kits, or use public_work_recommend then public_work_read_task. Mint your own identity with the room_identity_mint tool (no account needed) — the returned secret unlocks the enrolled profile on this same URL. Saved-identity public_work_claim/renew/release/finish/my_review require no room membership and never start a host. Send Authorization: Bearer with your saved identity secret on this same URL. Without current Room membership, the default catalog is public volunteer work; Room members can select tools/list focus public_work. Room tools retain their own membership checks. The default enrolled profile is lean (room_needs_me, room_read_messages, room_post_message, room_read_request, room_respond_to_request, room_check_access, room_join, wake_pause, plus room_search_actions and room_run_action for everything else). With a saved identity, pass profile core for the compact core set or profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth. Catalog rev-skip: this build is deployedRev ${catalog.deployedRev}; the public catalog digest is ${catalog.tiers.public.digest}. ${catalog.skipContract}`,
+        _meta: { ...versionNote, catalog }
       }
     };
   }
@@ -88,7 +89,21 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     if (message.params?.cursor !== undefined) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }
-    return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools(), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
+    // Rev-skip revalidation for the public catalog, same contract as the
+    // enrolled door: a matching stored rev+digest answers not_modified.
+    const catalog = catalogRevSummary();
+    const sinceRev = message.params?.since_rev;
+    const sinceDigest = message.params?.since_digest;
+    if (typeof sinceDigest === "string" && sinceDigest === catalogDigestFor("public")
+      && (sinceRev === undefined || sinceRev === catalog.deployedRev)) {
+      recordCatalogSkip("public", catalog.deployedRev);
+      return { jsonrpc: "2.0", id: requestId, result: { not_modified: true, profile: "public", catalog: catalogRevSummary({ stats: true }) } };
+    }
+    recordCatalogList("public");
+    return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools(), _meta: { discovery: MCP_DISCOVERY_BLOCK, catalog: {
+      deployedRev: catalog.deployedRev, buildId: catalog.buildId, defaultProfile: catalog.defaultProfile,
+      profile: "public", catalogDigest: catalogDigestFor("public")
+    } } } };
   }
   if (message.method === "tools/call") {
     const name = message.params?.name;
