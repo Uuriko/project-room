@@ -14,11 +14,11 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
   boardClaimId, boardClaimForWorkItem, planWorkItemBoardBackfill,
-  diffRoomWorkItems, sameClaimRow,
+  diffRoomWorkItems, sameClaimRow, roomEvents, WORK_ITEM_BOARD_EVENT_SQL,
 } from "../server/work-item-board.mjs";
 import { availableWorkInRoom } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { updateWork } from "../server/work-claims.mjs";
+import { updateWork, recordReview } from "../server/work-claims.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const T0 = "2026-10-01T00:00:00.000Z";
@@ -263,6 +263,45 @@ test("plan: board-native fields survive reconciliation; diverged rows are report
   assert.equal(boardDonePlan.diverged.length, 1);
   assert.equal(boardDonePlan.diverged[0].class, "board_native");
   assert.equal(boardDonePlan.rows.has("task-a"), false);
+});
+
+test("mapping preserves board review authority, round identity and linked PR outcomes", () => {
+  const work = item({ state: "working", claim: liveClaimFields() });
+  const original = boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW });
+  const basis = { version: 1, owner: "worker", claimedAt: original.claimedAt,
+    revision: null, headSha: null, deliveryDigest: "a".repeat(64), deliveryGeneration: 2 };
+  const review = { memberId: "verifier", verdict: "approve", summary: "checked", url: null, at: at(4 * H), basis };
+  const attestation = { memberId: "verifier", at: review.at, note: "checked", basis };
+  const pull = { url: "https://github.com/Uuriko/project-room/pull/123", repo: "Uuriko/project-room", number: 123,
+    outcome: "merged", syncedAt: at(5 * H), nextPollAt: null, etag: "etag",
+    rateLimitedUntil: null, pollBackoffMs: null, ciCursor: null, ciStatus: null };
+  const existing = { ...original, reviews: [review], attestations: [attestation],
+    claimRound: 7, pullRequests: [pull] };
+  const mapped = boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW, existing });
+  assert.deepEqual(mapped.reviews, [review]);
+  assert.deepEqual(mapped.attestations, [attestation]);
+  assert.equal(mapped.claimRound, 7);
+  assert.deepEqual(mapped.pullRequests, [pull]);
+  assert.deepEqual(boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW, existing: mapped }), mapped);
+});
+
+test("plan never rewinds a board delivery or its send-back while the work projection lags", () => {
+  const work = item({ state: "working", claim: liveClaimFields(), verifierMemberId: "owner" });
+  let row = boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW });
+  row = updateWork(row, "worker", { state: "delivered", now: NOW, delivery: {
+    artifact: { kind: "text", ref: "room://artifacts/1", sha256: "a".repeat(64) },
+    checks: [{ name: "unit", result: "pass" }], criteria: [],
+  } });
+  const assertProtected = current => {
+    const plan = planWorkItemBoardBackfill({ items: [work], events: [],
+      existing: new Map([[work.id, current]]), nowMs: NOW + 1000 });
+    assert.equal(plan.rows.has(work.id), false, "work projection cannot overwrite a board execution");
+    assert.equal(plan.diverged[0]?.class, "board_native");
+  };
+  assertProtected(row);
+  row = recordReview(row, "owner", { verdict: "changes_requested", summary: "revise", now: NOW + 1 });
+  row = updateWork(row, "owner", { state: "in_progress", authority: true, now: NOW + 2 });
+  assertProtected(row);
 });
 
 test("plan: re-planning over its own output is a fixed point (idempotency)", () => {
@@ -604,4 +643,49 @@ test("sync: the mirror's caps and occupied-successor refusal still roll commands
     }),
     error => error.code === "work_claim_conflict");
   assert.ok(!f.item("task-cap-a").handoff); // rolled back (no handoff recorded)
+});
+
+test("work fact read uses the type index and excludes unrelated conversation events", t => {
+  const f = fixture(t);
+  driveLifecycle(f);
+  f.send(f.ownerKey, "unrelated-message", "message.posted", { messageId: "unrelated", body: "unrelated conversation" });
+  const all = f.store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all("commons").map(row => JSON.parse(row.body));
+  const facts = roomEvents(f.store, "commons");
+  assert.ok(facts.length < all.length);
+  assert.ok(facts.every(event => event.data?.workItemId));
+  const state = f.store.room("commons").state;
+  const existing = new Map(f.store.workClaims.list("commons").map(row => [row.id, row]));
+  const args = { items: Object.values(state.workItems), existing, nowMs: Date.now() };
+  assert.deepEqual(planWorkItemBoardBackfill({ ...args, events: facts }),
+    planWorkItemBoardBackfill({ ...args, events: all }));
+  const plan = f.store.db.prepare(`EXPLAIN QUERY PLAN ${WORK_ITEM_BOARD_EVENT_SQL}`).all("commons");
+  assert.ok(plan.some(row => row.detail.includes("events_room_type")), JSON.stringify(plan));
+});
+
+test("delivery and review survive a work command, restart and another board transition", t => {
+  const f = fixture(t);
+  f.send(f.ownerKey, "propose-boundary", "work.proposed", {
+    workItemId: "boundary", title: "Boundary", definitionOfDone: "A reviewed result",
+    mode: "read", accountableMemberId: "worker", verifierMemberId: "owner",
+  });
+  f.mutate(f.workerKey, "accept-boundary", "work.accepted", "boundary");
+  f.mutate(f.workerKey, "start-boundary", "work.started", "boundary");
+  const now = Date.now();
+  let board = f.store.workClaims.get("commons", "boundary");
+  board = updateWork(board, "worker", { state: "delivered", now, delivery: {
+    artifact: { kind: "text", ref: "room://artifacts/boundary", sha256: "b".repeat(64) },
+    checks: [{ name: "unit", result: "pass" }], criteria: [],
+  } });
+  board = recordReview(board, "owner", { verdict: "changes_requested", summary: "Revise this result", now: now + 1 });
+  f.store.workClaims.set("commons", board);
+  f.mutate(f.workerKey, "block-boundary", "work.blocked", "boundary", { reason: "Needs revision", nextAction: "Revise" });
+  assert.deepEqual(f.store.workClaims.get("commons", "boundary"), board);
+  f.reopen();
+  assert.deepEqual(f.store.workClaims.get("commons", "boundary"), board);
+  const resumed = updateWork(f.store.workClaims.get("commons", "boundary"), "owner", {
+    state: "in_progress", authority: true, requestId: "boundary-sendback", now: now + 2,
+  });
+  assert.equal(resumed.verification.state, "changes_requested");
+  assert.deepEqual(resumed.delivery, board.delivery);
+  assert.deepEqual(resumed.reviews, board.reviews);
 });

@@ -20,7 +20,7 @@ const stated = (path, pattern) => {
   return match ? Number(match[1]) : undefined;
 };
 
-expect("README.md status line (\"Schema N.\")", stated("README.md", /^Live app: .*\bSchema (\d+)\.$/m));
+expect("README.md status line (checkout schema)", stated("README.md", /^Live app: .*\bSchema (\d+)(?:\.| in this checkout; deployment is unchanged\.)$/m));
 expect("docs/CURRENT-ROOM.md map row (\"| Schema | N |\")", stated("docs/CURRENT-ROOM.md", /^\| Schema \| (\d+) \|$/m));
 expect("docs/SERVICE.md status sentence (\"Current schema is N\")", stated("docs/SERVICE.md", /\bCurrent schema is (\d+)\b/));
 expect("docs/SERVICE.md storage bullet (\"schema version N\")", stated("docs/SERVICE.md", /^- SQLite WAL, .*\bschema version (\d+)\b/m));
