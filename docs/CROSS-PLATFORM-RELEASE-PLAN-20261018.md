@@ -272,6 +272,13 @@ explicit; unresolved external gates listed; source/merge/deploy claims released.
   and https://developer.apple.com/documentation/usernotifications/sending-web-push-notifications-in-web-apps-and-browsers
   inform capability detection, permission timing and explicit physical-device gaps.
 
+## User clarification: signing deferred
+
+John explicitly deferred Developer ID on 2026-10-18. Continue local Mac builds,
+native acceptance, packaging preparation and web/mobile release. Public signed Mac
+distribution is deliberately deferred; it is not a blocker for these other lanes.
+Do not request certificate setup again during this campaign.
+
 ## Immediate execution queue
 
 1. Collect in-flight full/affected/lint outcomes and compare exact known failures.
