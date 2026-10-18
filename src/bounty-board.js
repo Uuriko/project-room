@@ -7,7 +7,7 @@
 //   GET  /api/rooms/{roomId}/bounties                      list
 //   POST /api/rooms/{roomId}/bounties                      create (proposed)
 //   POST /api/rooms/{roomId}/bounties/{id}/fund            lock escrow
-//   POST /api/rooms/{roomId}/bounties/{id}/accept         release escrow
+//   POST /api/rooms/{roomId}/bounties/{id}/accept         accept work (opens the challenge window)
 //   POST /api/rooms/{roomId}/bounties/{id}/reject         refund poster
 //   GET  /api/rooms/{roomId}/credits/balances/{identity}   own balances
 //   GET  /api/rooms/{roomId}/credits/history/{identity}    own receipts
@@ -57,6 +57,55 @@ export function bountyStateLabel(state) {
 
 const TERMINAL_STATES = new Set(["paid", "refunded", "cancelled"]);
 
+// Money math mirrors server/bounty-escrow.mjs exactly (millis-backed): the
+// payout sweep keeps a 1% room-pool fee floored to the milli, and a dispute
+// bond is exactly 25% of the bounty ceiled to the milli. The panel quotes
+// these figures to both parties, so they are computed from the rules the
+// server settles by — never rounded for display first.
+export function payoutSplit(amount) {
+  const millis = Math.round((typeof amount === "number" && Number.isFinite(amount) ? amount : 0) * 1000);
+  const feeMillis = Math.floor(millis / 100);
+  return { fee: feeMillis / 1000, net: (millis - feeMillis) / 1000 };
+}
+
+export function disputeBondCredits(amount) {
+  const millis = Math.round((typeof amount === "number" && Number.isFinite(amount) ? amount : 0) * 1000);
+  return Math.ceil(millis * 0.25) / 1000;
+}
+
+// The pay sentence an acceptance actually produces (acceptWork in
+// server/bounty-escrow.mjs): the amount moves to the worker's Attributed
+// bucket at once, the challenge window runs to challengeEnds, and the keeper
+// pays the worker — net of the pool fee — when the window closes, unless a
+// dispute opens first. Returns "" when the payload carries no window to name.
+export function bountyPaySentence(item) {
+  if (!item?.challengeWhen) return "";
+  const { fee, net } = payoutSplit(item.amount);
+  if (fee > 0) return `the worker is paid ${formatCredits(net)} credits on ${item.challengeWhen} unless disputed (${formatCredits(item.amount)}-credit award, less the room pool's 1% payout fee)`;
+  return `the worker is paid ${formatCredits(item.amount)} credits on ${item.challengeWhen} unless disputed`;
+}
+
+// The money-window note for an accepted (or approved) card, shown to both
+// parties: when the money moves, what can still change it, and where a
+// dispute opens. A dispute needs a decider named on the bounty (its dispute
+// decider, else its verifier — the server refuses to seat one otherwise),
+// written grounds, and a bond of exactly 25%; it opens through the room's
+// bounty tools, not this panel, and the copy says so rather than implying a
+// control that does not exist here.
+export function bountyWindowLine(item) {
+  if (!item || (item.state !== "accepted" && item.state !== "approved")) return "";
+  if (item.state === "approved") {
+    return "The challenge window has closed. The payout lands in the next settlement sweep, less the room pool's 1% fee.";
+  }
+  const pay = bountyPaySentence(item);
+  if (!pay) return "";
+  const decider = item.disputeDecider || item.verifier;
+  const dispute = decider
+    ? `A dispute can still be opened until ${item.challengeWhen} by anyone except the worker — it needs written grounds and a bond of exactly 25% of the bounty (${formatCredits(disputeBondCredits(item.amount))} credits), and the decider named on this bounty rules on it. Disputes open through the room's bounty tools (an agent in this room, or the API); this panel has no dispute button yet.`
+    : "No dispute decider was named on this bounty, so no dispute can open against it.";
+  return `Not paid yet — ${pay}. ${dispute}`;
+}
+
 // Only web-safe evidence links render as anchors; anything else is text.
 export function safeEvidenceUrl(value) {
   if (typeof value !== "string") return "";
@@ -86,6 +135,9 @@ function normalizeBounty(row, self) {
     approvalMode: typeof row?.approvalMode === "string" ? row.approvalMode : "",
     deadline: typeof row?.deadline === "string" ? row.deadline : "",
     dueWhen: formatBountyWhen(row?.deadline),
+    challengeEnds: typeof row?.challengeEnds === "string" ? row.challengeEnds : "",
+    challengeWhen: formatBountyWhen(row?.challengeEnds),
+    disputeDecider: typeof row?.disputeDecider === "string" ? row.disputeDecider : "",
     evidence: evidence ? {
       summary: typeof evidence.summary === "string" ? evidence.summary : "",
       evidenceUrl: safeEvidenceUrl(evidence.evidenceUrl),
@@ -191,7 +243,12 @@ export function bountyBalanceHtml(model) {
     `<span>Locked in escrow ${escapeHtml(formatCredits(b.locked))}</span>` +
     `<span>Attributed ${escapeHtml(formatCredits(b.attributed))}</span>` +
     `<span>Approved ${escapeHtml(formatCredits(b.approved))}</span>` +
-    `<span>Total ${escapeHtml(formatCredits(b.total))}</span></div>`;
+    `<span>Total ${escapeHtml(formatCredits(b.total))}</span></div>` +
+    // The buckets, in the plain terms offers.html's settlement passage sets
+    // as the copy standard: without this, an accepted amount silently leaves
+    // the poster's strip and appears in the worker's Attributed bucket with
+    // no screen anywhere saying what that means (HUNT-HUMAN H-4).
+    `<p class="form-hint">Payable is yours to spend. Locked in escrow is held against open bounties and bonds, and comes back on a refund. When work is accepted, its amount leaves the poster's balances and shows in the worker's Attributed bucket — accepted, but not paid until the challenge window closes, and disputable until then. Approved has cleared its window and pays out in the next settlement sweep, less the room pool's 1% fee. Credits are units on this room's ledger, not cash; there is no cash-out.</p>`;
 }
 
 function reviewHtml(item) {
@@ -205,7 +262,12 @@ function reviewHtml(item) {
     : `<p class="bounty-delivery"><strong>Delivery:</strong> (no evidence recorded)</p>`;
   return `<div class="bounty-review">${evidence}` +
     (criteria ? `<ul class="bounty-rubric">${criteria}</ul>` : "") +
-    `<div class="bounty-actions"><button class="button primary" type="button" data-bounty-action="accept" data-bounty-id="${escapeHtml(item.bountyId)}">Accept &amp; release escrow</button></div>` +
+    // The truth at the moment of commitment (HUNT-HUMAN H-1): accepting
+    // releases nothing — it opens the challenge window (24h under 1 credit,
+    // else 72h; server/bounty-escrow.mjs challenge-window constants), and
+    // the worker is paid when it closes unless a dispute opens.
+    `<p class="form-hint">Accepting does not pay the worker now. It starts a ${item.amount < 1 ? "24-hour" : "72-hour"} challenge window, and the worker is paid when it closes, unless a dispute opens.</p>` +
+    `<div class="bounty-actions"><button class="button primary" type="button" data-bounty-action="accept" data-bounty-id="${escapeHtml(item.bountyId)}">Accept work</button></div>` +
     `<label class="field">Reason to reject <input type="text" data-reject-reason="${escapeHtml(item.bountyId)}" maxlength="500"></label>` +
     `<div class="bounty-actions"><button class="button secondary" type="button" data-bounty-action="reject" data-bounty-id="${escapeHtml(item.bountyId)}">Reject &amp; refund me</button></div></div>`;
 }
@@ -222,11 +284,14 @@ export function bountyListHtml(model) {
     const fund = item.canFund
       ? `<div class="bounty-actions"><button class="button secondary" type="button" data-bounty-action="fund" data-bounty-id="${escapeHtml(item.bountyId)}">Fund escrow</button></div>`
       : "";
+    const windowNote = bountyWindowLine(item);
     return `<article class="bounty-row" data-bounty-row="${escapeHtml(item.bountyId)}">` +
       `<div class="bounty-row-head"><span class="bounty-title">${escapeHtml(item.title)}</span>` +
       `<span class="land-badge">${escapeHtml(item.stateLabel)}</span>` +
       `<span class="bounty-amount">${escapeHtml(formatCredits(item.amount))} credits</span></div>` +
-      `<p class="form-hint">${meta.join(" · ")}</p>${fund}${item.canReview ? reviewHtml(item) : ""}</article>`;
+      `<p class="form-hint">${meta.join(" · ")}</p>` +
+      (windowNote ? `<p class="form-hint">${escapeHtml(windowNote)}</p>` : "") +
+      `${fund}${item.canReview ? reviewHtml(item) : ""}</article>`;
   }).join("");
   return `<div class="bounty-list">${rows}</div>`;
 }
@@ -422,10 +487,16 @@ export function installBountyBoard({ client, getSession }) {
         // movement receipt. Re-render from it so the receipt highlights.
         const receipt = lastModel?.receipts.find(r => r.bountyId === bountyId && (r.kind === "attribute" || r.kind === "payout"));
         highlightReceiptId = receipt?.receiptId ?? null;
+        // The status names the window the click actually opened (H-1): the
+        // reloaded row carries challengeEnds, so the pay sentence is the
+        // same one the card now renders.
+        const acceptedItem = lastModel?.items.find(row => row.bountyId === bountyId);
+        const pay = acceptedItem ? bountyPaySentence(acceptedItem) : "";
+        const payText = pay ? ` ${pay.charAt(0).toUpperCase()}${pay.slice(1)}.` : "";
         if (receipt) {
           render(lastModel);
-          setStatus(`Accepted “${item.title}”. Receipt ${receipt.receiptId} is in your receipts below.`);
-        } else setStatus(`Accepted “${item.title}”.`);
+          setStatus(`Accepted “${item.title}”.${payText} Receipt ${receipt.receiptId} is in your receipts below.`);
+        } else setStatus(`Accepted “${item.title}”.${payText}`);
       }
     } else if (action === "reject") {
       const reason = host.querySelector(`[data-reject-reason="${CSS.escape(bountyId)}"]`)?.value?.trim();
