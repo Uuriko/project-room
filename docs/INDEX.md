@@ -54,7 +54,7 @@ The machine relay is a separate Worker in [../relay/README.md](../relay/README.m
 
 ## Self-host
 
-[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md).
+[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md). Rollback compatibility receipts — the committed pair evidence `rollback-prod` requires before it will run — are in [deploy/rollback-compatibility/README.md](deploy/rollback-compatibility/README.md).
 
 ## Security
 

@@ -44,9 +44,9 @@ holds those receipts and their qualification evidence.
 
 | File | Pair | State |
 |---|---|---|
-| `ee97df61-to-77df0e0b.json` | current prod `ee97df613…` → `77df0e0b7…` | **Issued, format-valid.** Evidence: `evidence-ee97df61-to-77df0e0b.md` + `boot-ee97df61-to-77df0e0b.json`. Valid while production remains on the `ee97df61` deployment recorded there. |
-| `evidence-d7f723ad-to-ee97df61.md` | freeze pair `d7f723ad…` → `ee97df61…` | Evidence complete and passing; **receipt not yet issuable** — the forward version ids do not exist until that head is deployed (named gap, in the evidence file). |
-| `evidence-470d546a-to-ee97df61.md` + `boot-470d546a-to-ee97df61.json` | declared-head pair `470d546a…` → `ee97df61…` | Evidence complete and passing (incl. the patrol_blocks variant; one restore-path limitation named in the evidence). **Receipt not yet issuable** — the forward version ids are created by that head's deploy-prod run; completion is the one generator command in `470d546a-to-ee97df61.GAP.md`. |
+| `ee97df61-to-77df0e0b.json` | current prod `ee97df613…` → `77df0e0b7…` | **Issued, format-valid.** Evidence: [evidence-ee97df61-to-77df0e0b.md](evidence-ee97df61-to-77df0e0b.md) + `boot-ee97df61-to-77df0e0b.json`. Valid while production remains on the `ee97df61` deployment recorded there. |
+| [evidence-d7f723ad-to-ee97df61.md](evidence-d7f723ad-to-ee97df61.md) | freeze pair `d7f723ad…` → `ee97df61…` | Evidence complete and passing; **receipt not yet issuable** — the forward version ids do not exist until that head is deployed (named gap, in the evidence file). |
+| [evidence-470d546a-to-ee97df61.md](evidence-470d546a-to-ee97df61.md) + `boot-470d546a-to-ee97df61.json` | declared-head pair `470d546a…` → `ee97df61…` | Evidence complete and passing (incl. the patrol_blocks variant; one restore-path limitation named in the evidence). **Receipt not yet issuable** — the forward version ids are created by that head's deploy-prod run; completion is the one generator command in [470d546a-to-ee97df61.GAP.md](470d546a-to-ee97df61.GAP.md). |
 
 ## Regenerating for the final frozen head (one command, post-deploy)
 
