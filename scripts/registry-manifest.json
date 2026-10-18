@@ -1,0 +1,1339 @@
+{
+  "about": "Registry of registries (F-26, under #3673). Every registry-shaped artefact in this repo is either a row here, an artefact or closure check of a row, a gate row, or a named as-read exception below. Enforced by scripts/registry-manifest-check.mjs (meta-census + per-family closure), wired into scripts/check.mjs and pinned by tests/registry-manifest.test.js. Seeded from atlas-8 R1-R33 plus battery-gamma's five additions (A1-A5) and two post-atlas rows found by this lane's census (A6-A8); every row re-verified at the seed base below.",
+  "asRead": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "reason": "Claude plugin marketplace listing for the bundled plugin; distribution config"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug.yml",
+      "reason": "GitHub issue-form config; platform config, not a product registry"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature.yml",
+      "reason": "GitHub issue-form config; platform config, not a product registry"
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "reason": "Dependabot update config; platform config, not a product registry"
+    },
+    {
+      "path": "cloudflare/scoped-wake-review.check.mjs",
+      "reason": "A member check of R23 (pinned in cloudflare/package.json); 'scoped' is the wake-review feature word"
+    },
+    {
+      "path": "docs/ROOM-KITS-CATALOG.md",
+      "reason": "Human-facing catalog document for room kits; prose, not an enumerated code registry"
+    },
+    {
+      "path": "docs/examples/next-actions.example.json",
+      "reason": "Documentation example payload; illustrative, enumerates nothing"
+    },
+    {
+      "path": "docs/legal/subprocessors.json",
+      "reason": "Legal disclosure data (subprocessor list for compliance pages); not a code registry"
+    },
+    {
+      "path": "manifest.webmanifest",
+      "reason": "PWA web-app manifest (browser install config); names no enumerated set, not a registry"
+    },
+    {
+      "path": "perf/BASELINE-local.md",
+      "reason": "PERF programme local baseline notes; local tooling, not a CI registry"
+    },
+    {
+      "path": "perf/baseline.js",
+      "reason": "PERF programme local baseline data; local tooling, not a CI registry"
+    },
+    {
+      "path": "perf/local-baseline.js",
+      "reason": "PERF programme local baseline data; local tooling, not a CI registry"
+    },
+    {
+      "path": "plugins/project-room/.claude-plugin/plugin.json",
+      "reason": "Plugin package manifest; distribution config"
+    },
+    {
+      "path": "plugins/project-room/.mcp.json",
+      "reason": "Plugin MCP server config; distribution config"
+    },
+    {
+      "path": "relay/package.json",
+      "reason": "Relay subpackage manifest; its test/browser membership lives in relay.yml, not in a durations registry"
+    },
+    {
+      "path": "scripts/clean-main-baseline.mjs",
+      "reason": "Branch-vs-main failure comparison tool; 'baseline' is the clean-main comparison, not a registry"
+    },
+    {
+      "path": "scripts/inbox-quarantine-review-check.mjs",
+      "reason": "Browser check for the inbox quarantine feature, not the test-quarantine registry R21"
+    },
+    {
+      "path": "scripts/pinned-messages-browser-check.mjs",
+      "reason": "Browser check for the pinned-messages product feature; 'pinned' is the feature word"
+    },
+    {
+      "path": "scripts/quarantine-review-coverage.mjs",
+      "reason": "Checker/report tooling for the inbox quarantine feature, not the test-quarantine registry R21"
+    },
+    {
+      "path": "scripts/review-scope-check.mjs",
+      "reason": "Checker script run by the review-mechanical gate; a gate artefact, not a registry"
+    },
+    {
+      "path": "scripts/shadow-quarantine-report.mjs",
+      "reason": "Precision report tool for the spam auto-quarantine product feature (shadow would-be-hold records), not the test-quarantine registry R21 - found by this lane's seed census"
+    },
+    {
+      "path": "server/agent-key-registry.mjs",
+      "reason": "Runtime key store module backed by a database table; 'registry' is the product domain word, not a static registration artefact"
+    },
+    {
+      "path": "server/agent-plugin-manifest.mjs",
+      "reason": "Builds the served agent plug-in manifest at runtime (generator feature); the artefact it builds is served data, not a committed registry"
+    },
+    {
+      "path": "server/claim-scopes.mjs",
+      "reason": "Product feature module (claim scope definitions evaluated at runtime), not a static registration list - battery-gamma false-positive class"
+    },
+    {
+      "path": "server/pins.mjs",
+      "reason": "Product feature module (message pins), not a registration list - battery-gamma false-positive class, removed on the record there"
+    },
+    {
+      "path": "server/quarantine-review-coverage.mjs",
+      "reason": "Inbox quarantine product feature (review coverage), not the test-quarantine registry R21"
+    },
+    {
+      "path": "server/quarantine-thread-splits.mjs",
+      "reason": "Inbox quarantine product feature (thread splits), not the test-quarantine registry R21"
+    },
+    {
+      "path": "server/spam-quarantine-journal.mjs",
+      "reason": "Spam quarantine product feature (journal), not the test-quarantine registry R21"
+    },
+    {
+      "path": "src/inbox-quarantine-ui.js",
+      "reason": "Inbox quarantine product UI, not the test-quarantine registry R21"
+    },
+    {
+      "path": "strings/en.json",
+      "reason": "String-table data twin of strings/en.js (atlas-6 A10); content data governed by R16's harness, not a registry itself"
+    },
+    {
+      "path": "tools/receipt-verifier/fixtures/conformance.json",
+      "reason": "Conformance fixture for the receipt-verifier tool; test data, enumerates no live set"
+    }
+  ],
+  "gates": [
+    {
+      "artefacts": [
+        ".github/workflows/test.yml"
+      ],
+      "canary": "Shard-receipt aggregators fail closed on missing/stale/partial receipts; contract bundle is scripts/check.mjs (now including the registry-manifest gate, R0)",
+      "id": "test.yml",
+      "lastFailure": "Receipt download scoping broke single-shard re-runs (fixed; recorded in workflow comments, atlas-8 R20)",
+      "name": "Main aggregator: changes, contract, visual-refresh-guard, lint, unit shards, browser shards, cloudflare, coverage, test"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/schema-gate.yml"
+      ],
+      "canary": "The repo's clearest must-fail fixture: documented negative control, the gate must FAIL on pre-#793 code (scripts/schema-gate/README.md)",
+      "id": "schema-gate.yml",
+      "lastFailure": "The README negative control is the inventory's model last-failure record (battery-gamma C-L14)",
+      "name": "Bounty-escrow partial-migration schema gate"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/invariants.yml"
+      ],
+      "canary": "Suite emits per-invariant JSONL results per SHA; no zero-count canary in-tree (F-28 exposure, recorded)",
+      "id": "invariants.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18; header notes required-promotion is a separate undone lane",
+      "name": "Named never-break product invariants"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/staging.yml"
+      ],
+      "canary": "Cold-start probe validates the 40-hex sourceRevision shape, not just status",
+      "id": "staging.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18; workflow header states it is explicitly not a required check",
+      "name": "Staging deploy + cold-start probe"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/deploy-prod.yml"
+      ],
+      "canary": "Gate job refuses unless test and schema-gate push runs on that exact SHA concluded success",
+      "id": "deploy-prod.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Production deploy (dispatch, exact-SHA gated)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/rollback-prod.yml"
+      ],
+      "canary": "Preflight, execute, readback and smoke steps inside the workflow",
+      "id": "rollback-prod.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Production rollback (dispatch, version ids)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/deploy-drift.yml"
+      ],
+      "canary": "none in-tree (detection only; a failed scheduled run pages nobody in-tree)",
+      "id": "deploy-drift.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Hourly production-vs-main drift alarm"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/pin-gate.yml"
+      ],
+      "canary": "tests/ci-action-pinning.test.js including substring-bypass cases; duplicated in the contract gate",
+      "id": "pin-gate.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Workflow action SHA pin gate (R29)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/pr-diff-size.yml"
+      ],
+      "canary": "none in-tree (advisory-shaped)",
+      "id": "pr-diff-size.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "PR diff size budget"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/zero-bug-gates.yml"
+      ],
+      "canary": "none in-tree; note the diff-scoped secret scan vs the full-tree scan in scripts/check.mjs are two overlapping gates with different scopes (atlas-8 A6)",
+      "id": "zero-bug-gates.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "SAST, diff secret scan, dependency existence"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/zero-bug-quarantine.yml"
+      ],
+      "canary": "Zero-count canary added by the F-28 fix: the checker rejects a synthetic dead entry through its own existence predicate on every run",
+      "id": "zero-bug-quarantine.yml",
+      "lastFailure": "2026-10-16: passed vacuously on the empty set (battery-gamma C-L8, F-28)",
+      "name": "Quarantine contract gate (R21) + non-blocking quarantined run"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/review-mechanical.yml"
+      ],
+      "canary": "none in-tree (not a merge gate)",
+      "id": "review-mechanical.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Mechanical review signals + scope check (report-producing)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/qa2-agent-eval.yml"
+      ],
+      "canary": "A3 baseline is bidirectional: entries that start passing fail until removed",
+      "id": "qa2-agent-eval.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18; hand-sync between scripts/ci-changes.mjs patterns and this workflow is a named seam (atlas-8 A7)",
+      "name": "QA2 agent journeys, authz matrix, abuse guards, MCP conformance (A3)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/qa3-gates.yml"
+      ],
+      "canary": "none in-tree; PR leg is path-filtered, the schedule leg covers the class",
+      "id": "qa3-gates.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "QA3 authz/content-trust/SSE/public-scan + board-growth budgets"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/qa2-fuzz.yml"
+      ],
+      "canary": "Fuzzers are self-canarying: the seed corpus runs in npm test",
+      "id": "qa2-fuzz.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "QA2 fuzz (daily)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/mime-fuzz.yml"
+      ],
+      "canary": "Seed corpus runs in npm test; nightly is the class-covering leg",
+      "id": "mime-fuzz.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "MIME parser fuzz (PR-filtered + nightly)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/machine.yml"
+      ],
+      "canary": "none in-tree (subtree scope equals subtree class)",
+      "id": "machine.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "machine/ subtree tests + build check"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/relay.yml"
+      ],
+      "canary": "none in-tree (subtree scope equals subtree class)",
+      "id": "relay.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "relay/ workerd tests + wrangler dry-run"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/live-smoke.yml"
+      ],
+      "canary": "none in-tree (post-merge detection)",
+      "id": "live-smoke.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Production live smoke (6-hourly)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/onboarding-probe.yml"
+      ],
+      "canary": "Explicit gate-vs-baseline step against A4 - the only scheduled gate with a named must-not-regress fixture at the atlas pin",
+      "id": "onboarding-probe.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Onboarding probe vs frozen baseline (weekly + dispatch)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/soak-test.yml"
+      ],
+      "canary": "none in-tree (detection)",
+      "id": "soak-test.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Weekly soak + crash recovery"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/answer-engine-check.yml"
+      ],
+      "canary": "none in-tree (informational)",
+      "id": "answer-engine-check.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Weekly answer-engine check against A6 prompts"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/listing-check.yml"
+      ],
+      "canary": "none in-tree (informational); R26 rows are shape-checked at PR time by the registry-manifest gate",
+      "id": "listing-check.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Weekly directory listing check (R26 live leg)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/snippet-adoption.yml"
+      ],
+      "canary": "none in-tree (informational)",
+      "id": "snippet-adoption.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Weekly snippet adoption tracking"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/stall-probe.yml"
+      ],
+      "canary": "none in-tree (tool, not a gate)",
+      "id": "stall-probe.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Stall probe tool (dispatch only)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/visual-baselines.yml"
+      ],
+      "canary": "Paired with test.yml:visual-refresh-guard - the marker reaching main is the canary condition (R31)",
+      "id": "visual-baselines.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Visual baseline capture tool (dispatch only; never commits to main)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/mcp-registry-publish.yml"
+      ],
+      "canary": "Re-runs server-json-check with --against-registry at publish (R25)",
+      "id": "mcp-registry-publish.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "MCP Registry publish (tag/main/dispatch)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/room-github-door.yml"
+      ],
+      "canary": "none in-tree (automation, not a gate)",
+      "id": "room-github-door.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "GitHub-to-room bridge automation"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/room-work-sync.yml"
+      ],
+      "canary": "none in-tree (automation, not a gate)",
+      "id": "room-work-sync.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "PR-closed work sync automation (pull_request_target)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/trace-entry.yml"
+      ],
+      "canary": "none in-tree (automation; merges its own PR only when green)",
+      "id": "trace-entry.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Trace PR build + auto-merge automation (pull_request_target)"
+    },
+    {
+      "artefacts": [
+        ".github/workflows/auto-revert.yml"
+      ],
+      "canary": "none in-tree (automation, not a gate); not in atlas-8's 33-workflow inventory - the tree has 31 workflows at seed, counted mechanically by the registry-manifest gate",
+      "id": "auto-revert.yml",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Auto-revert automation"
+    }
+  ],
+  "metaCensus": {
+    "contentHeuristic": "JSON files with at least 10 string leaves",
+    "exceptions": [
+      {
+        "prefix": "tests/",
+        "reason": "Tests are the closers: test files, fixtures and in-test censuses are checks, not registries. Registry artefacts that live under tests/ are named in rows above (R21, R24, A2, R27's snapshot) and covered by those rows"
+      },
+      {
+        "prefix": "archive/",
+        "reason": "Historical archive; excluded from the census walk entirely"
+      },
+      {
+        "reason": "npm lockfile: generated dependency resolution, not a registry",
+        "suffix": "package-lock.json"
+      },
+      {
+        "path": "cloudflare/pnpm-lock.yaml",
+        "reason": "pnpm lockfile: generated dependency resolution, not a registry"
+      },
+      {
+        "prefix": ".github/workflows/",
+        "reason": "Workflows are gates, not registries: every workflow file must appear in the gates section above, which the check enforces as its own diff"
+      }
+    ],
+    "filenameTokens": [
+      "allowlist",
+      "catalog",
+      "census",
+      "manifest",
+      "pin",
+      "pinned",
+      "pins",
+      "registry",
+      "baseline",
+      "scope",
+      "scopes",
+      "exclusions",
+      "snapshot",
+      "durations",
+      "quarantine",
+      "thresholds",
+      "listings",
+      "listing"
+    ]
+  },
+  "registries": [
+    {
+      "artefacts": [
+        "scripts/registry-manifest.json",
+        "scripts/registry-manifest-check.mjs",
+        "tests/registry-manifest.test.js"
+      ],
+      "canary": "tests/registry-manifest.test.js removes a fixture registry row from a manifest copy and requires the check to fail; false-positive canaries (a plain feature module, a non-registry JSON) must pass",
+      "closureChecks": [
+        "tests/registry-manifest.test.js",
+        "scripts/check.mjs"
+      ],
+      "closureStatus": "closed (self-registered: this row is the F-4 registration of the manifest and its gate)",
+      "derivedOrHand": "hand-seeded, census-checked",
+      "enumerates": "Every registry in this repo, its closure gate, and every gate workflow",
+      "family": "meta",
+      "id": "R0",
+      "lastFailure": "none recorded in-tree as of 2026-10-18 (born with this manifest)",
+      "name": "Registry-of-registries manifest (this file)",
+      "sourceOfTruth": "This file, derived by the meta-census in scripts/registry-manifest-check.mjs"
+    },
+    {
+      "artefacts": [
+        "scripts/runtime-package.mjs"
+      ],
+      "canary": "tests/runtime-package.test.js import-closure test: every module in the server import closure must be allowlisted",
+      "closureChecks": [
+        "tests/runtime-package.test.js",
+        "tests/asset-packaging.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "hand",
+      "enumerates": "Every file in the exact-commit Node runtime package, its public assets and generated agent pages",
+      "family": "packaging",
+      "id": "R1",
+      "lastFailure": "Self-documented in-file trap: a file allowlisted but never registered in optional failed packaging opaquely (atlas-8 R1)",
+      "name": "Runtime package allowlist",
+      "sourceOfTruth": "scripts/runtime-package.mjs (allowed required/optional sets, publicAssets, generatedAgentPages)"
+    },
+    {
+      "artefacts": [
+        "scripts/candidate-runtime-fixture.mjs"
+      ],
+      "canary": "Fixture canary in tests/registry-manifest.test.js (family-check unit fixtures): a paths.add naming a missing file and a duplicated add both fail",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "tests/runtime-package.test.js"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN: no diff existed; this manifest's family check now fails on stale or duplicate paths.add rows)",
+      "derivedOrHand": "hand",
+      "enumerates": "Working-tree files a candidate package needs beyond HEAD's runtime package (paths.add lines)",
+      "family": "packaging",
+      "id": "R2",
+      "lastFailure": "Long tail of one-line adds each annotated with the PR that broke without it (atlas-8 R2, scar ledger)",
+      "name": "Candidate runtime fixture",
+      "sourceOfTruth": "scripts/candidate-runtime-fixture.mjs"
+    },
+    {
+      "artefacts": [
+        "server/public-assets.mjs"
+      ],
+      "canary": "tests/asset-packaging.test.js sorted-equality against R1's copy",
+      "closureChecks": [
+        "tests/asset-packaging.test.js",
+        "tests/public-asset-content-types.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "hand",
+      "enumerates": "Assets the Node server serves plus template assets the Cloudflare builder packages",
+      "family": "assets",
+      "id": "R3",
+      "lastFailure": "Duplication with R1 was the standing risk; drift is pinned by the equality test (battery-gamma section 2, R3)",
+      "name": "Public asset paths",
+      "sourceOfTruth": "server/public-assets.mjs (publicAssetPaths, templateAssetPaths)"
+    },
+    {
+      "artefacts": [
+        "cloudflare/build-assets.mjs",
+        "cloudflare/edge-public.mjs"
+      ],
+      "canary": "cloudflare job bundle validation in test.yml:cloudflare",
+      "closureChecks": [
+        "cloudflare/edge-public.check.mjs"
+      ],
+      "closureStatus": "derived",
+      "derivedOrHand": "derived",
+      "enumerates": "What Wrangler uploads and what the edge isolate answers without touching the DO",
+      "family": "assets",
+      "id": "R4",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Cloudflare packaged/edge assets",
+      "sourceOfTruth": "Derived from R3 at build time, plus two hand rows (/install.sh, templates)"
+    },
+    {
+      "artefacts": [
+        "server/routes/table.mjs"
+      ],
+      "canary": "Route-table parity, permission-declared and acceptance tests (atlas-8 R5)",
+      "closureChecks": [
+        "tests/route-table-parity.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "hand (code)",
+      "enumerates": "Extracted routes: method, path, auth, id",
+      "family": "routes",
+      "id": "R5",
+      "lastFailure": "Double-served rows (in table AND legacy) are a named drift class in scripts/route-contract-census.mjs (atlas-8 R5)",
+      "name": "Declarative route table",
+      "sourceOfTruth": "server/routes/table.mjs (ROUTES); the router consumes it"
+    },
+    {
+      "artefacts": [
+        "scripts/routes-legacy-allowlist.json",
+        "scripts/routes-inventory.mjs"
+      ],
+      "canary": "openapi-gen --check diffs the generated inventory against the baseline in the contract gate",
+      "closureChecks": [
+        "scripts/openapi-gen.mjs"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "derived-then-frozen",
+      "enumerates": "Routes still served outside R5 by the legacy chain (baseline + routes rows, shrink-only)",
+      "family": "routes",
+      "id": "R6",
+      "lastFailure": "Extractor blindness is registry blindness: a legacy route the text extractor cannot see is absent from both the allowlist and its check (atlas-8 R6)",
+      "name": "Legacy routes allowlist",
+      "sourceOfTruth": "Generated by scripts/routes-inventory.mjs walking legacy handlers, then frozen as baseline"
+    },
+    {
+      "artefacts": [
+        "scripts/route-contract-census.mjs",
+        "scripts/route-contract-exemptions.json"
+      ],
+      "canary": "tests/route-contract-coverage.test.js: new routes fail until documented or classified; stale entries fail too",
+      "closureChecks": [
+        "tests/route-contract-coverage.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "derived once, then hand",
+      "enumerates": "Classification of record: every served (method, template) is documented, in spec, or exempted with class and reason",
+      "family": "routes",
+      "id": "R7",
+      "lastFailure": "The census at birth found gate-invisible, double-served, method-not-in-docs and head-without-get escapes (atlas-8 R7)",
+      "name": "Route contract census + exemptions",
+      "sourceOfTruth": "Census derived mechanically 2026-10-13; exemptions hand-maintained afterwards"
+    },
+    {
+      "artefacts": [
+        "docs/openapi.yaml",
+        "scripts/openapi-gen.mjs"
+      ],
+      "canary": "openapi-gen --check in the contract gate; the gate also fails if the legacy chain ever empties",
+      "closureChecks": [
+        "scripts/openapi-gen.mjs",
+        "scripts/check.mjs"
+      ],
+      "closureStatus": "closed (one-way: doc subset of served; served subset of doc is R7's job)",
+      "derivedOrHand": "hand",
+      "enumerates": "Every documented operation; each must be a row in R5 or R6",
+      "family": "routes",
+      "id": "R8",
+      "lastFailure": "Documented-but-unserved and served-but-undocumented both occurred pre-gate (atlas-8 R8)",
+      "name": "OpenAPI document + gate",
+      "sourceOfTruth": "docs/openapi.yaml (hand-written); gate checks doc is a subset of served"
+    },
+    {
+      "artefacts": [
+        "server/discoverability.mjs"
+      ],
+      "canary": "tests/openapi-served-coverage.test.js: every served /api template must be inventoried here or match an R10 exclusion",
+      "closureChecks": [
+        "tests/discoverability.test.js",
+        "tests/openapi-served-coverage.test.js",
+        "tests/mcp-openapi-drift.test.js"
+      ],
+      "closureStatus": "closed (via join with R7 census + served-coverage test)",
+      "derivedOrHand": "hand",
+      "enumerates": "Source table for generated GET /openapi.json: path, methods, auth, operationId per route",
+      "family": "routes",
+      "id": "R9",
+      "lastFailure": "A served route never added to the table was invisible to the method pin (atlas-8 R9); the join that closes it was verified by battery-gamma section 3",
+      "name": "Discoverability routes (served OpenAPI source)",
+      "sourceOfTruth": "server/discoverability.mjs (DISCOVERABILITY_ROUTES), hand-maintained table"
+    },
+    {
+      "artefacts": [
+        "scripts/openapi-served-exclusions.json"
+      ],
+      "canary": "tests/openapi-served-coverage.test.js asserts reason strings and fails on stale exclusions (line 109)",
+      "closureChecks": [
+        "tests/openapi-served-coverage.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "hand",
+      "enumerates": "Prefixes the served spec legitimately omits, each with a reason",
+      "family": "routes",
+      "id": "R10",
+      "lastFailure": "none recorded in-tree as of 2026-10-18 (atlas-8 understated this row; corrected by battery-gamma C-L13)",
+      "name": "OpenAPI served-spec exclusions",
+      "sourceOfTruth": "scripts/openapi-served-exclusions.json"
+    },
+    {
+      "artefacts": [
+        "scripts/open-routes.mjs"
+      ],
+      "canary": "open-routes --check in the contract gate: every open route must be named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md",
+      "closureChecks": [
+        "scripts/open-routes.mjs",
+        "tests/open-routes.test.js"
+      ],
+      "closureStatus": "derived + closed",
+      "derivedOrHand": "derived",
+      "enumerates": "Every credential-free route (derived from docs/openapi.yaml security: [])",
+      "family": "routes",
+      "id": "R11",
+      "lastFailure": "Source-of-truth inversion stands: openness is read from the hand-written doc, not the handler (atlas-8 R11)",
+      "name": "Open-route inventory",
+      "sourceOfTruth": "Derived from R8's document"
+    },
+    {
+      "artefacts": [
+        "src/agent-error.mjs",
+        "skills/project-room/references/errors-catalog.md",
+        "plugins/project-room/skills/project-room/references/errors-catalog.md"
+      ],
+      "canary": "tests/errors-catalog-drift.test.js pins shipped == registry == catalog for migrated entries",
+      "closureChecks": [
+        "tests/errors-catalog-drift.test.js"
+      ],
+      "closureStatus": "closed (partial: migrated subset only; the unmigrated legacy cascade in the same file can diverge silently)",
+      "derivedOrHand": "hand, migrating",
+      "enumerates": "Error codes: status/reason/hint/next plus the catalog HTTP/Retry/Recovery row",
+      "family": "errors",
+      "id": "R12",
+      "lastFailure": "Partial-scope gate by design (atlas-8 R12); the partial scope is named here, not hidden",
+      "name": "Error-code registry + catalog",
+      "sourceOfTruth": "src/agent-error.mjs (ERROR_REGISTRY); new codes must be born there"
+    },
+    {
+      "artefacts": [
+        "server/purge-registry.mjs"
+      ],
+      "canary": "Fixture canaries in tests/registry-manifest.test.js (family-check unit fixtures): a keyed DDL table with no purge row and no named exception fails; a stale exception (table gone) fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "tests/operator-purge.test.js",
+        "tests/backup-table-parity.test.js"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN, a predicted next escape: this manifest's family check diffs every keyed DDL table against PURGE_TABLES plus the named exceptions below)",
+      "derivedOrHand": "hand",
+      "enumerates": "Every application table carrying a room/identity/account key: delete vs retain (with reason), key columns, parent-via links (194 rows at seed: 182 delete, 12 retain)",
+      "exceptions": [
+        {
+          "reason": "as-read: heartbeat poll activity marker (agent_id, room_id, last_polled_at) in server/agent-heartbeats.mjs; ephemeral liveness state, no purge row at seed. Named under #3673, not silently omitted",
+          "table": "agent_wake_room_activity"
+        },
+        {
+          "reason": "as-read: analytics pipeline event store in server/analytics/schema.mjs (event names governed by A5); append-only telemetry, no purge row at seed. Named under #3673",
+          "table": "analytics_events"
+        },
+        {
+          "reason": "as-read: analytics ingestion cursor (room_id, last_seq) in server/analytics/schema.mjs; pipeline state, no purge row at seed. Named under #3673",
+          "table": "analytics_room_cursor"
+        },
+        {
+          "reason": "as-read: claim-bond shadow ledger in server/analytics/claim-bond-shadow.mjs (room_id nullable); shadow/analytics family, no purge row at seed. Named under #3673",
+          "table": "claim_bond_shadow"
+        },
+        {
+          "reason": "as-read: claim reputation signals in server/claim-reputation.mjs (room_id nullable); derived signal state, no purge row at seed. Named under #3673",
+          "table": "claim_reputation_signals"
+        },
+        {
+          "reason": "as-read: integrity patrol state in server/patrol.mjs (per-room claim tracking for the operator watchdog); system state, not room content, no purge row at seed. Named under #3673",
+          "table": "patrol_claims"
+        },
+        {
+          "reason": "as-read: integrity patrol cursor in server/patrol.mjs; system state, no purge row at seed. Named under #3673",
+          "table": "patrol_cursor"
+        },
+        {
+          "reason": "as-read: integrity patrol findings in server/patrol.mjs; operator evidence store, no purge row at seed. Named under #3673",
+          "table": "patrol_findings"
+        },
+        {
+          "reason": "as-read: integrity patrol message index in server/patrol.mjs (hashes, not bodies); system state, no purge row at seed. Named under #3673",
+          "table": "patrol_messages"
+        }
+      ],
+      "family": "tables",
+      "id": "R13",
+      "lastFailure": "A new table with a room key that nobody adds here is retained by omission: purge silently leaves its rows (atlas-8 R13). No test derived the keyed-table set before this manifest",
+      "name": "Purge registry",
+      "sourceOfTruth": "server/purge-registry.mjs (PURGE_TABLES)"
+    },
+    {
+      "artefacts": [
+        "server/writer-fence.mjs"
+      ],
+      "canary": "Fixture canaries in tests/registry-manifest.test.js: a DDL table absent from both fence sets fails. Note: open PR #3836 adds a complementary fence/purge/applicationTables closure test; when it lands, add its test file here",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "tests/writer-fence.test.js",
+        "tests/writer-fence-property.test.js",
+        "tests/writer-fence-unfenced.test.js"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN, the predicted next escape: this manifest's family check diffs every DDL table in server/ against applicationTables union lazyAdditiveTables; zero missing at seed)",
+      "derivedOrHand": "hand",
+      "enumerates": "Which tables old writers may write: versioned lineages v6-v38, STORE_SCHEMA_VERSION, unfencedAdditiveTables",
+      "family": "tables",
+      "id": "R14",
+      "lastFailure": "Documented near-miss in-file: fencing private_inbox_reads would have bricked rollback; two lineages once reused v28 and had to be converged at v34 (atlas-8 R14)",
+      "name": "Writer fence (schema-version table lineages)",
+      "sourceOfTruth": "server/writer-fence.mjs (applicationTables, lazyAdditiveTables, unfencedAdditiveTables, fenceDefinitions)"
+    },
+    {
+      "artefacts": [
+        "server/writer-fence.mjs",
+        "server/recovery.mjs"
+      ],
+      "canary": "auditRecovery runs inside every backup verify and recovery test",
+      "closureChecks": [
+        "tests/recovery.test.js",
+        "tests/recovery-audit-sweep.test.js"
+      ],
+      "closureStatus": "derived + closed",
+      "derivedOrHand": "mixed",
+      "enumerates": "Every table a healthy store may/must contain: required subset of tables subset of required union lazy",
+      "family": "tables",
+      "id": "R15",
+      "lastFailure": "Retired tables remain present in upgraded DBs and must be allowlisted forever or every old store fails audit (atlas-8 R15)",
+      "name": "Application-table set (recovery audit)",
+      "sourceOfTruth": "Derived from R14's fence module plus the lazy list; enforced by server/recovery.mjs auditRecovery"
+    },
+    {
+      "artefacts": [
+        "strings/i18n-scope.json",
+        "strings/i18n-baseline.json",
+        "scripts/i18n-harness.mjs"
+      ],
+      "canary": "The harness pins its own scope against git ls-files, not against the manifest itself (atlas-8 R16)",
+      "closureChecks": [
+        "scripts/i18n-harness.mjs"
+      ],
+      "closureStatus": "closed (strongest anti-self-reference design in the repo)",
+      "derivedOrHand": "generated-then-pinned",
+      "enumerates": "Which files the i18n ratchet scans for untranslated strings, and per-file violation counts",
+      "family": "i18n",
+      "id": "R16",
+      "lastFailure": "Base-relativity: the ratchet compares against the PR base tree, so identical head code can pass or fail by base (atlas-8 section 2, Class I)",
+      "name": "i18n scan scope + violation baseline",
+      "sourceOfTruth": "Self-generated by scripts/i18n-harness.mjs --baseline, then pinned; scope independently pinned against git ls-files"
+    },
+    {
+      "artefacts": [
+        "coverage-thresholds.json",
+        "scripts/coverage-thresholds.mjs"
+      ],
+      "canary": "tests/coverage-thresholds.test.js includes the boundary case (95.59 fails); family-check fixtures in tests/registry-manifest.test.js fail on an unlisted code directory",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "scripts/coverage-thresholds.mjs",
+        "tests/coverage-thresholds.test.js"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN: the gate checked the 3 values but nothing checked the set; this manifest's family check diffs top-level code directories against the rows plus the named exceptions below)",
+      "derivedOrHand": "hand",
+      "enumerates": "Per-directory line-coverage ratchets (3 rows at seed: machine, server, src)",
+      "exceptions": [
+        {
+          "reason": "as-read: desktop bridge subtree (12 code files at seed); no coverage-thresholds row at seed. Named under #3673",
+          "table": "bridge"
+        },
+        {
+          "reason": "as-read: CLI subtree (11 code files at seed); exercised via unit tests, no line-coverage ratchet row at seed. Named under #3673",
+          "table": "cli"
+        },
+        {
+          "reason": "as-read: browser client subtree (40 code files at seed); gated by browser checks, no line-coverage ratchet row at seed - the exact gap atlas-8 R17 named. Named under #3673",
+          "table": "client"
+        },
+        {
+          "reason": "as-read: Worker subtree (64 code files at seed); gated by the cloudflare job's own check suite (R23), no line-coverage ratchet row at seed. Named under #3673",
+          "table": "cloudflare"
+        },
+        {
+          "reason": "as-read: relay subtree (21 code files at seed); gated by relay.yml, no line-coverage ratchet row at seed. Named under #3673",
+          "table": "relay"
+        },
+        {
+          "reason": "as-read: tooling subtree (396 code files at seed); the gates themselves, not shipped runtime; no ratchet row by design of the coverage gate's scope. Named under #3673",
+          "table": "scripts"
+        }
+      ],
+      "family": "coverage",
+      "id": "R17",
+      "lastFailure": "Name-vs-scope gap: called a per-module map, it is per top-level directory; a new directory joined no row and got no ratchet (atlas-8 R17)",
+      "name": "Coverage thresholds",
+      "sourceOfTruth": "coverage-thresholds.json (modules map), hand-set at measured levels"
+    },
+    {
+      "artefacts": [
+        "scripts/unit-ci-durations.json",
+        "scripts/refresh-unit-ci-durations.mjs",
+        "scripts/unit-shards.mjs"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: a duration key for a deleted test file fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "tests/unit-durations-refresh.test.js",
+        "tests/unit-shards.test.js"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN: this manifest's family check fails on duration keys naming files the unit discovery no longer finds, and prints the unmeasured count against the ceiling below; the 3 stale keys found at seed were removed in the seeding PR)",
+      "derivedOrHand": "measured/hand hybrid",
+      "enumerates": "Per-test-file hosted-CI durations driving shard balancing (1185 measured entries at seed)",
+      "family": "ci-durations",
+      "id": "R18",
+      "lastFailure": "Staleness was silent: unmeasured files got a median-floored 5000ms estimate, so a stale table degraded balance and never failed; the refresh workflow cited in scripts/unit-shards.mjs does not exist (F-34, atlas-8 R18)",
+      "name": "Unit CI durations",
+      "sourceOfTruth": "Measured on hosted CI; refreshed by scripts/refresh-unit-ci-durations.mjs from shard receipts",
+      "unmeasuredAtSeed": 167,
+      "unmeasuredCeiling": 200
+    },
+    {
+      "artefacts": [
+        "scripts/browser-ci-durations.json",
+        "package.json"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: a browser check added to test:browser without a durations row (or vice versa) fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "scripts/browser-shards-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN, no refresh script exists: this manifest's family check diffs the durations key set against the test:browser file set exactly; equal at seed, 142 = 142)",
+      "derivedOrHand": "measured (stale-dated)",
+      "enumerates": "Per-file browser-check durations for 6-way browser sharding (142 entries at seed)",
+      "family": "ci-durations",
+      "id": "R19",
+      "lastFailure": "No failure recorded; the risk was silent staleness with no refresh path at all (atlas-8 R19)",
+      "name": "Browser CI durations",
+      "sourceOfTruth": "Measured once (2026-10-06 runs, in-file note), hand-committed; the membership set is package.json test:browser"
+    },
+    {
+      "artefacts": [
+        "scripts/unit-shards.mjs",
+        "scripts/browser-shards.mjs",
+        "scripts/unit-ci.mjs",
+        "scripts/browser-ci.mjs",
+        "scripts/unit-shards-check.mjs",
+        "scripts/browser-shards-check.mjs"
+      ],
+      "canary": "Aggregator jobs fail closed on missing, stale or partial receipts; the plan hash ties receipts to the run",
+      "closureChecks": [
+        "scripts/unit-shards-check.mjs",
+        "scripts/browser-shards-check.mjs"
+      ],
+      "closureStatus": "derived + closed (the model closure design in the repo)",
+      "derivedOrHand": "derived",
+      "enumerates": "Which test files run in which shard; receipts prove all shards of this run ran",
+      "family": "ci-shards",
+      "id": "R20",
+      "lastFailure": "Scoping receipt download to the aggregator's own attempt broke single-shard re-runs; fixed by pattern download across attempts (atlas-8 R20)",
+      "name": "Shard plans + receipts",
+      "sourceOfTruth": "Derived: Node test discovery enumerates membership; durations only weight it"
+    },
+    {
+      "artefacts": [
+        "tests/quarantine.json",
+        "scripts/quarantine-check.mjs",
+        "docs/FLAKY-QUARANTINE.md",
+        "scripts/run-quarantined-tests.mjs"
+      ],
+      "canary": "Zero-count canary (F-28): on every run the checker validates a synthetic dead entry through the same existence predicate and fails itself if the fixture is not rejected; tests/quarantine-check.test.js pins dead-entry failure on fixture files",
+      "closureChecks": [
+        "scripts/quarantine-check.mjs",
+        "tests/quarantine-check.test.js"
+      ],
+      "closureStatus": "closed (was vacuous at seed: the F-28 fix in the seeding PR adds an existence check per entry and a zero-count canary to scripts/quarantine-check.mjs)",
+      "derivedOrHand": "hand",
+      "enumerates": "Flaky tests excluded from the main suite, each with reason, owner, quarantined_at, repair_by (empty at seed)",
+      "family": "quarantine",
+      "id": "R21",
+      "lastFailure": "2026-10-16: gate passed vacuously on the empty set and never existence-checked entries - a renamed test would have left a dead entry that runs nothing (battery-gamma C-L8, F-28)",
+      "name": "Test quarantine list",
+      "sourceOfTruth": "tests/quarantine.json"
+    },
+    {
+      "artefacts": [
+        "scripts/untested-modules-lint.mjs"
+      ],
+      "canary": "The lint fails on any new untested module or stale grandfather row in the lint job",
+      "closureChecks": [
+        "scripts/untested-modules-lint.mjs"
+      ],
+      "closureStatus": "derived scan + closed list",
+      "derivedOrHand": "derived scan + hand exceptions",
+      "enumerates": "Server modules with zero test references (GRANDFATHERED, 9 at atlas pin; the list may only shrink)",
+      "family": "test-coverage",
+      "id": "R22",
+      "lastFailure": "In-file escape confession (M-57): the old substring scan falsely counted modules as tested; the precise import-specifier scan replaced it (atlas-8 R22). The mention-vs-import weakness is F-33, owned by its own charter",
+      "name": "Untested-modules grandfather list",
+      "sourceOfTruth": "Scan derived by walking server/; grandfather list hand"
+    },
+    {
+      "artefacts": [
+        "cloudflare/package.json"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: a check file on disk missing from the pins (or a pin naming no file) fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN with a live escape: at seed 35 checks on disk, 32 pinned; the seeding PR wires the 3 orphans - code-drops, restore-fk-order, room-export - into the test script (the F-27 fix shape) and this family check diffs disk against pins exactly)",
+      "derivedOrHand": "hand",
+      "enumerates": "Which cloudflare/*.check.mjs files actually execute (test + test:browser scripts)",
+      "family": "cloudflare",
+      "id": "R23",
+      "lastFailure": "The 3 orphan checks executed nowhere, including restore-fk-order.check.mjs, the regression guard for the #3324 KV-restore FK failure (atlas-8 section 5-A1, F-27)",
+      "name": "Cloudflare check pins",
+      "sourceOfTruth": "cloudflare/package.json scripts"
+    },
+    {
+      "artefacts": [
+        "tests/workitems-board-step0-census.test.js",
+        "tests/workitems-migration-census.test.js",
+        "tests/backup-table-parity.test.js"
+      ],
+      "canary": "Each census test is its own canary (deepEqual against the live walk)",
+      "closureChecks": [
+        "tests/workitems-board-step0-census.test.js",
+        "tests/workitems-migration-census.test.js",
+        "tests/backup-table-parity.test.js"
+      ],
+      "closureStatus": "closed (per island; this manifest is the first enumeration of the class as a set)",
+      "derivedOrHand": "hand pin vs derived walk",
+      "enumerates": "Frozen inventories a migration depends on, each pinning a hand literal against a live mechanical walk inside one test",
+      "family": "censuses",
+      "id": "R24",
+      "lastFailure": "tests/backup-table-parity.test.js header records its birth defect: dropping all messages rows passed 31 backup tests before the pin existed (atlas-8 R24)",
+      "name": "Census pins inside tests (the *-census class)",
+      "sourceOfTruth": "The named census test files (exemplars of the class)"
+    },
+    {
+      "artefacts": [
+        "server.json",
+        "scripts/server-json-check.mjs"
+      ],
+      "canary": "server-json-check runs in the contract gate; the publish workflow re-runs it with --against-registry at tag push",
+      "closureChecks": [
+        "scripts/server-json-check.mjs"
+      ],
+      "closureStatus": "closed (partial: per-PR check is field shape; version-vs-registry equality runs only at publish)",
+      "derivedOrHand": "hand",
+      "enumerates": "MCP Registry listing: name, version, packages",
+      "family": "listings",
+      "id": "R25",
+      "lastFailure": "Version drift vs package.json/tag is checked only at publish time (atlas-8 R25)",
+      "name": "MCP Registry listing manifest (server.json)",
+      "sourceOfTruth": "server.json (hand)"
+    },
+    {
+      "artefacts": [
+        "scripts/listings.json",
+        "scripts/listing-check.mjs",
+        "docs/LISTINGS.md"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: a row missing a field or duplicating an id fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "scripts/listing-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN at PR time - the checker ran weekly only: this manifest's family check now validates every row's full field set, unique ids and parseable urls at PR time; the weekly live check remains the listing-check workflow)",
+      "derivedOrHand": "hand",
+      "enumerates": "Directory and answer-engine listings of the product (20 rows at seed, each with id, title, kind, group, url, expect, update, owner)",
+      "family": "listings",
+      "id": "R26",
+      "lastFailure": "A listing could be wrong for up to a week of merges; informational by design (atlas-8 R26)",
+      "name": "Directory listings",
+      "sourceOfTruth": "scripts/listings.json (rows)"
+    },
+    {
+      "artefacts": [
+        "src/mcp-tool-registry.js",
+        "server/capabilities.mjs",
+        "scripts/build-capabilities.mjs",
+        "scripts/mcp-catalog-snapshot.mjs",
+        "tests/fixtures/mcp-catalog.snapshot.json"
+      ],
+      "canary": "Import-time throw on name/order drift plus the catalog snapshot contract test (battery-gamma section 2, R27)",
+      "closureChecks": [
+        "tests/mcp-catalog-contract.test.js"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "mixed",
+      "enumerates": "Which MCP tools exist and their profiles (lean/focus/full); capabilities file is build-generated",
+      "family": "mcp",
+      "id": "R27",
+      "lastFailure": "Generated-at-build registries are only as fresh as the last build (atlas-8 R27)",
+      "name": "MCP tool catalog",
+      "sourceOfTruth": "src/mcp-tool-registry.js (hand registry); server/capabilities.mjs generated at build"
+    },
+    {
+      "artefacts": [
+        "scripts/CANDIDATE-MANIFEST.json",
+        "scripts/candidate-manifest.mjs"
+      ],
+      "canary": "tests/candidate-manifest.test.js rebuilds the manifest from the real tree and requires zero drift (repair: node scripts/candidate-manifest.mjs --write)",
+      "closureChecks": [
+        "tests/candidate-manifest.test.js",
+        "scripts/registry-manifest-check.mjs"
+      ],
+      "closureStatus": "closed (was HAND-OPEN at the atlas pin; closed since by the real-tree zero-drift test, tests/candidate-manifest.test.js - verified at seed. This manifest's family check additionally cross-pins storeSchemaVersion against R14's STORE_SCHEMA_VERSION)",
+      "derivedOrHand": "mixed (generated, committed)",
+      "enumerates": "Deploy candidate contract: runtime, store schema version, asset/deployment/package hashes",
+      "family": "deploy",
+      "id": "R28",
+      "lastFailure": "Before the zero-drift test (#3902), 17 pins were stale undetectably, including deployment:cloudflare/room.mjs (tests/candidate-manifest.test.js header)",
+      "name": "Deploy candidate manifest",
+      "sourceOfTruth": "Generated deterministically by scripts/candidate-manifest.mjs from the tree; committed frozen"
+    },
+    {
+      "artefacts": [
+        "scripts/check-workflow-pins.mjs"
+      ],
+      "canary": "Checked twice: pin-gate workflow and the contract gate (scripts/check.mjs); tests/ci-action-pinning.test.js includes substring-bypass cases",
+      "closureChecks": [
+        "scripts/check-workflow-pins.mjs",
+        "tests/ci-action-pinning.test.js"
+      ],
+      "closureStatus": "derived + closed",
+      "derivedOrHand": "derived",
+      "enumerates": "Every actions/* ref in all workflows must be a full SHA",
+      "family": "ci",
+      "id": "R29",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Workflow action SHA pins",
+      "sourceOfTruth": "Derived by parsing the workflows"
+    },
+    {
+      "artefacts": [
+        "scripts/design-tokens-baseline.json",
+        "scripts/sync-design-tokens-css.mjs",
+        "src/design-tokens.js"
+      ],
+      "canary": "sync-design-tokens-css --check plus contrast in the contract gate and token lint in the lint job",
+      "closureChecks": [
+        "scripts/sync-design-tokens-css.mjs"
+      ],
+      "closureStatus": "derived + closed",
+      "derivedOrHand": "mixed",
+      "enumerates": "Design-token values; CSS blocks and the baseline are generated/pinned from the JS source",
+      "family": "design",
+      "id": "R30",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Design tokens baseline",
+      "sourceOfTruth": "src/design-tokens.js (source); CSS + baseline derived/pinned"
+    },
+    {
+      "artefacts": [
+        "scripts/visual-regression-baselines/join-consent.png",
+        "scripts/visual-regression-baselines/join-error.png",
+        "scripts/visual-regression-baselines/login-auth-panel.png",
+        "scripts/visual-regression-baselines/message-list.png",
+        "scripts/visual-regression-baselines/room-view.png",
+        "scripts/visual-regression-browser-check.mjs",
+        "scripts/visual-regression-helper.mjs"
+      ],
+      "canary": "test.yml:visual-refresh-guard fails if the refresh marker ever reaches main (the marker would flip every run into silent re-baseline mode)",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN: this manifest's family check diffs the on-disk PNG set against the capture names referenced by the visual scripts, with the one named exception below)",
+      "derivedOrHand": "hand (captured artefacts)",
+      "enumerates": "Golden screenshots for the visual gate (5 at seed), plus the .refresh-requested marker protocol",
+      "exceptions": [
+        {
+          "reason": "as-read: runtime-generated self-test baseline in scripts/visual-regression-browser-check.mjs; written and removed by the check itself, never committed as a PNG",
+          "table": "detector-selftest"
+        }
+      ],
+      "family": "visual",
+      "id": "R31",
+      "lastFailure": "No failure recorded; the guard exists because the failure mode is silent green (atlas-8 R31)",
+      "name": "Visual regression baselines",
+      "sourceOfTruth": "Captured artefacts in scripts/visual-regression-baselines/; capture names live in the visual check scripts"
+    },
+    {
+      "artefacts": [
+        "scripts/journey-coverage.mjs",
+        "docs/JOURNEY-COVERAGE-MAP.md",
+        "scripts/check-wiki.mjs",
+        "scripts/wiki-build.mjs",
+        "scripts/skills-sync-check.mjs"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: removing a wiring reference from a check.mjs copy fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "scripts/journey-coverage.mjs",
+        "scripts/check-wiki.mjs",
+        "scripts/skills-sync-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN, consistency not completeness: this manifest's family check now fails if any of the three checker scripts stops being wired into scripts/check.mjs / scripts/lint.mjs or an artefact disappears; the skills sub-family is exact-copy closed by skills-sync-check)",
+      "derivedOrHand": "hand",
+      "enumerates": "User journeys covered by browser checks; wiki planes; skill copies in sync with sources",
+      "family": "docs-and-skills",
+      "id": "R32",
+      "lastFailure": "Each check verified its map agrees with itself; none derived the journey set from routes (atlas-8 R32)",
+      "name": "Journey / wiki / skills registries",
+      "sourceOfTruth": "Hand maps, checked for internal consistency (journey + wiki via scripts/check.mjs, skills via scripts/lint.mjs)"
+    },
+    {
+      "artefacts": [
+        "server/session-adapter/pinned-herdr.json",
+        "deploy/project-room.service",
+        "deploy/project-room-backup.service",
+        "deploy/project-room-backup.timer",
+        "deploy/Caddyfile",
+        "scripts/procedures-index.mjs",
+        "server/procedures-index.mjs"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: a deploy/*.service file not named in this row fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs"
+      ],
+      "closureStatus": "closure-checked (was HAND-OPEN - the least-verified family in the repo, deploy units had no CI execution at all: this manifest's family check diffs the deploy/ unit set on disk against this row's artefacts, so a new unit file is a registration event)",
+      "derivedOrHand": "hand",
+      "enumerates": "Pinned external session bridge; pilot deploy units; baked procedure index",
+      "family": "deploy",
+      "id": "R33",
+      "lastFailure": "none recorded in-tree as of 2026-10-18; the absence of any CI execution for the pilot units is the recorded gap (atlas-8 R33)",
+      "name": "Deploy-side registries (herdr pin, pilot units, procedures index)",
+      "sourceOfTruth": "Hand pins in the named artefacts"
+    },
+    {
+      "artefacts": [
+        "scripts/route-parity-baseline.json",
+        "scripts/route-parity-notes.mjs"
+      ],
+      "canary": "scripts/route-parity-notes.mjs fails if a baselined row gains a note (stale) and fails unbaselined rows lacking notes",
+      "closureChecks": [
+        "scripts/route-parity-notes.mjs"
+      ],
+      "closureStatus": "closed (shrink-only)",
+      "derivedOrHand": "hand (shrink-only)",
+      "enumerates": "Route-table rows grandfathered out of the TST-08 parity-note rule",
+      "family": "routes",
+      "id": "A1",
+      "lastFailure": "Missed by atlas-8 R1-R33 entirely; found by battery-gamma's meta-census (section 2.2) - the demonstration that the census works",
+      "name": "Route-parity baseline (battery-gamma addition)",
+      "sourceOfTruth": "scripts/route-parity-baseline.json"
+    },
+    {
+      "artefacts": [
+        "tests/fixtures/route-permission-baseline.json",
+        "tests/route-permission-declared.test.js"
+      ],
+      "canary": "tests/route-permission-declared.test.js diffs the live undeclared set against the baseline in both directions",
+      "closureChecks": [
+        "tests/route-permission-declared.test.js"
+      ],
+      "closureStatus": "closed (shrink-only)",
+      "derivedOrHand": "hand (shrink-only)",
+      "enumerates": "Operations grandfathered out of the x-room-permission declaration rule (frozen 2026-10-06, may only shrink)",
+      "family": "routes",
+      "id": "A2",
+      "lastFailure": "Missed by atlas-8 R1-R33; found by battery-gamma's meta-census (section 2.2)",
+      "name": "Route-permission baseline (battery-gamma addition)",
+      "sourceOfTruth": "tests/fixtures/route-permission-baseline.json"
+    },
+    {
+      "artefacts": [
+        "scripts/qa2/baselines/mcp-conformance-baseline.yml",
+        "scripts/qa2/mcp-conformance.mjs"
+      ],
+      "canary": "The baseline's own header contract, enforced by scripts/qa2/mcp-conformance.mjs in the qa2-agent-eval gate",
+      "closureChecks": [
+        "scripts/qa2/mcp-conformance.mjs"
+      ],
+      "closureStatus": "closed (bidirectional, self-describing: any new failure fails CI, any entry that starts passing fails CI until removed)",
+      "derivedOrHand": "hand",
+      "enumerates": "MCP conformance scenarios classed not-applicable",
+      "family": "mcp",
+      "id": "A3",
+      "lastFailure": "Missed by atlas-8 R1-R33 as a registry (its gate was inventoried, its baseline file was not); found by battery-gamma's meta-census (section 2.2)",
+      "name": "QA2 MCP-conformance baseline (battery-gamma addition)",
+      "sourceOfTruth": "scripts/qa2/baselines/mcp-conformance-baseline.yml"
+    },
+    {
+      "artefacts": [
+        "docs/onboarding-probe/baseline.json",
+        "scripts/onboarding-probe/gate.mjs",
+        "tests/onboarding-probe-gate.test.js"
+      ],
+      "canary": "tests/onboarding-probe-gate.test.js plus the probe workflow's gate-vs-baseline step",
+      "closureChecks": [
+        "scripts/onboarding-probe/gate.mjs",
+        "tests/onboarding-probe-gate.test.js"
+      ],
+      "closureStatus": "closed (as a gate fixture; the baseline's own freshness is unchecked - named here)",
+      "derivedOrHand": "hand (frozen)",
+      "enumerates": "Frozen production-measurement allowances the onboarding probe gates against",
+      "family": "probes",
+      "id": "A4",
+      "lastFailure": "A placeholder allowance (ready.medianMs 1000, admittedly not measured) from 2026-10-01 still gates at seed (battery-gamma section 2.2)",
+      "name": "Onboarding-probe baseline (battery-gamma addition)",
+      "sourceOfTruth": "docs/onboarding-probe/baseline.json (dated 2026-10-01)"
+    },
+    {
+      "artefacts": [
+        "server/analytics/catalog.mjs",
+        "tests/analytics-catalog.test.js"
+      ],
+      "canary": "tests/analytics-catalog.test.js (example/contract level; a full emit-site diff is future work under #3673)",
+      "closureChecks": [
+        "tests/analytics-catalog.test.js"
+      ],
+      "closureStatus": "example-checked (contract test exists; no throw-site-to-catalog closure diff found - the named gap, recorded under #3673 rather than hidden)",
+      "derivedOrHand": "hand",
+      "enumerates": "Growth-event catalog: names, versions, props and actor kinds are closed (file header)",
+      "family": "analytics",
+      "id": "A5",
+      "lastFailure": "Missed by atlas-8 R1-R33; found by battery-gamma's meta-census (section 2.2)",
+      "name": "Analytics event catalog (battery-gamma addition)",
+      "sourceOfTruth": "server/analytics/catalog.mjs"
+    },
+    {
+      "artefacts": [
+        "scripts/answer-engine-prompts.json",
+        "scripts/answer-engine-check.mjs"
+      ],
+      "canary": "none in-tree (detection-tier, weekly); recorded as the row's canary gap under F-28",
+      "closureChecks": [
+        "scripts/answer-engine-check.mjs"
+      ],
+      "closureStatus": "example-checked (consumed by the weekly answer-engine-check workflow; no closure against the served discovery surface - named gap)",
+      "derivedOrHand": "hand",
+      "enumerates": "Prompt/host/path set the weekly answer-engine check grades against (56 string leaves at seed)",
+      "family": "listings",
+      "id": "A6",
+      "lastFailure": "Missed by atlas-8 R1-R33 (minor: detection-tier, not PR-tier); found by battery-gamma's meta-census (section 2.2)",
+      "name": "Answer-engine prompt set (battery-gamma minor addition)",
+      "sourceOfTruth": "scripts/answer-engine-prompts.json"
+    },
+    {
+      "artefacts": [
+        "github-app/manifest.json",
+        "scripts/github-app-check.mjs"
+      ],
+      "canary": "github-app-check runs in the contract gate (VL-2a alignment)",
+      "closureChecks": [
+        "scripts/github-app-check.mjs",
+        "scripts/check.mjs"
+      ],
+      "closureStatus": "closed",
+      "derivedOrHand": "hand",
+      "enumerates": "GitHub App registration manifest, kept aligned with the shared core",
+      "family": "integrations",
+      "id": "A7",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "GitHub App manifest (post-atlas, found by this lane's census)",
+      "sourceOfTruth": "github-app/manifest.json"
+    },
+    {
+      "artefacts": [
+        ".github/secret-scan-allowlist.txt",
+        "scripts/secret-scan-diff.mjs",
+        "scripts/secret-scan-check.mjs"
+      ],
+      "canary": "Family-check fixtures in tests/registry-manifest.test.js: an active allowlist line without a reason fails",
+      "closureChecks": [
+        "scripts/registry-manifest-check.mjs",
+        "scripts/secret-scan-diff.mjs"
+      ],
+      "closureStatus": "closure-checked (this manifest's family check enforces the file's own header contract: any active entry without a # reason fails)",
+      "derivedOrHand": "hand",
+      "enumerates": "Path-glob exemptions for the secret-scan diff gate; every entry must carry a reason after # (zero active entries at seed)",
+      "family": "security",
+      "id": "A8",
+      "lastFailure": "none recorded in-tree as of 2026-10-18",
+      "name": "Secret-scan path allowlist (post-atlas, found by this lane's census)",
+      "sourceOfTruth": ".github/secret-scan-allowlist.txt"
+    }
+  ],
+  "seedBase": "cef1c096485db09699931287437d26abfaf473a6",
+  "seedDate": "2026-10-18",
+  "version": 1
+}

@@ -72,6 +72,13 @@ if (contrast.status !== 0) process.exit(contrast.status || 1);
 // The app stylesheet's token blocks are generated from src/design-tokens.js.
 const tokensCss = spawnSync(process.execPath, ["scripts/sync-design-tokens-css.mjs", "--check"], { stdio: "inherit" });
 if (tokensCss.status !== 0) process.exit(tokensCss.status || 1);
+// Registry-of-registries gate (F-26 + F-28, #3673): every registry-shaped
+// artefact is registered in scripts/registry-manifest.json, and the
+// HAND-OPEN registry families (purge, writer-fence, cloudflare pins,
+// durations, listings, visual baselines, deploy units, ...) still close
+// against the live sets they enumerate.
+const registryManifest = spawnSync(process.execPath, ["scripts/registry-manifest-check.mjs"], { stdio: "inherit" });
+if (registryManifest.status !== 0) process.exit(registryManifest.status || 1);
 // CI runs the root suite in the dedicated unit job; local check runs it here.
 if (process.env.CI) {
   console.log("check: skipping node --test in CI (covered by test jobs)");
