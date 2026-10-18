@@ -277,6 +277,16 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
       || !$("#share-note-preview").value;
   }
+  function syncKitVisibility() {
+    // #3794: while a create result is shown it owns the dialog's URL.
+    // The growth kit otherwise stays on screen beside it, still
+    // presenting the older referral link as "Your invite link" — and
+    // that visible field is the one people copy, so a Member invite
+    // silently joined people as guests. Hide the kit until the result
+    // clears (Create another, cancel, expiry), then restore it.
+    const kit = $("#growth-kit");
+    if (kit) kit.hidden = Boolean(currentLink);
+  }
   function clearResult(message = "") {
     const heldFocus = $("#share-link-result").contains(document.activeElement);
     copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
@@ -285,6 +295,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
+    syncKitVisibility();
     status(message); updateCopyControls();
     if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
   }
@@ -557,6 +568,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
+      syncKitVisibility();
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
       expiryTimer.unref?.();
       updateCopyControls();
