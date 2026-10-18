@@ -88,7 +88,7 @@ import { listPins, setPin } from "./pins.mjs";
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
-import { receiptOgFields } from "./receipt-share.mjs";
+import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -2070,7 +2070,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
-      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/og\.png$/.exec(url.pathname);
+      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
@@ -2084,11 +2084,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!PUBLIC_RECEIPT_ID.test(receiptCard[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptCard[1]);
           if (!receipt) reject(404, "not_found", "Not found");
-          // The OG card is the one deliberate exception to no-store: a share
-          // card only travels if unfurlers may cache it. The TTL is minutes,
-          // the read above re-checks the owner toggle on every origin fetch,
-          // and the card restates the receipt's own public verdict line.
+          // The share images are the one deliberate exception to no-store:
+          // a share card or embedded badge only travels if unfurlers and
+          // image proxies may cache it. The TTL is minutes, the read above
+          // re-checks the owner toggle on every origin fetch, and both
+          // images restate the receipt's own public verdict line.
           res.setHeader("Cache-Control", "public, max-age=300");
+          if (receiptCard[2] === "badge.svg") {
+            const svg = Buffer.from(receiptBadgeSvg(receipt));
+            res.writeHead(200, { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Length": svg.length });
+            return res.end(req.method === "HEAD" ? undefined : svg);
+          }
           const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);
@@ -2193,8 +2199,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
+      const proofOg = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof\/og\.png$/.exec(url.pathname);
       const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
-        || url.pathname === "/agents" || templateDetail || roomPage || proofPage;
+        || url.pathname === "/agents" || templateDetail || roomPage || proofPage || proofOg;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
@@ -2227,6 +2234,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
           if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");
+        }
+        if (proofOg) {
+          // The proof page's share card, gated by the same view: a room
+          // that is not publicly listed or has receipts off gets no card.
+          // Same bounded cache exception as the receipt card.
+          const proof = roomProofView(store, proofOg[1]);
+          if (!proof || proof.error) reject(404, "not_found", "Not found");
+          const counts = proof.document.counts;
+          const png = Buffer.from(await renderOgPng({
+            title: `${proof.document.title} — proof of work`,
+            subtitle: counts.total
+              ? `${counts.total} published ${counts.total === 1 ? "result" : "results"} · ${counts.serverVerifiedMerges} server-verified ${counts.serverVerifiedMerges === 1 ? "merge" : "merges"}`
+              : "No published results yet",
+            badges: [
+              `${counts.roomRecordedCompletions} room-recorded ${counts.roomRecordedCompletions === 1 ? "completion" : "completions"}`,
+              `${counts.artifactHashRecorded} artifact-hash ${counts.artifactHashRecorded === 1 ? "record" : "records"}`,
+            ],
+            footer: "Project Room proof · hashes are stored values, not re-verified",
+          }));
+          res.setHeader("Cache-Control", "public, max-age=300");
+          res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+          return res.end(req.method === "HEAD" ? undefined : png);
         }
         if (proofPage) {
           const proof = roomProofView(store, proofPage[1], { cursor: url.searchParams.get("cursor") });
