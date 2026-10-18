@@ -576,9 +576,19 @@ function directoryCounts(store, agentId, identityId) {
     }
   }
   let receiptCount = 0;
-  for (const row of store.db.prepare("SELECT agents_json, humans_json FROM public_receipts").all()) {
-    const named = [...parseJson(row.agents_json, []), ...parseJson(row.humans_json, [])];
-    if (named.includes(agentId) || (identityId && named.includes(identityId)) || named.some(name => names.has(name))) receiptCount += 1;
+  // Count in SQL, not by materialising every receipt row in JS: this runs
+  // on the receipt write path (per directory card of the writer's
+  // identity), so a whole-corpus scan per write made the write cost grow
+  // with the corpus — measured 1.7s per card sync at 200k receipts
+  // (HUNT-SCALE-SPIKE bench1b). json_valid keeps the old parse-tolerant
+  // semantics for a malformed row: it simply never matches.
+  const wanted = [...new Set([agentId, identityId, ...names].filter(name => typeof name === "string" && name))];
+  if (wanted.length) {
+    const list = JSON.stringify(wanted);
+    const row = store.db.prepare(`SELECT COUNT(*) AS n FROM public_receipts
+      WHERE (json_valid(agents_json) AND EXISTS (SELECT 1 FROM json_each(agents_json) WHERE value IN (SELECT value FROM json_each(?))))
+         OR (json_valid(humans_json) AND EXISTS (SELECT 1 FROM json_each(humans_json) WHERE value IN (SELECT value FROM json_each(?))))`).get(list, list);
+    receiptCount = row?.n ?? 0;
   }
   return { roomCount, receiptCount };
 }
@@ -774,7 +784,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
     .all(...filter.params, ...afterParams, limit + 1);
-  const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
+  const page = receiptsWithOutcomes(store, rows.slice(0, limit));
   const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
   return { receipts: page, nextCursor };
 }
@@ -845,12 +855,16 @@ export function publicWorkReceiptOutcome(store, receiptId) {
     const row = store.db.prepare("SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?").get(receiptId);
     if (row) record = parseJson(row.receipt_json, null);
   } catch { record = null; }
-  if (!record || typeof record !== "object") return null;
   let saved = null;
   try {
     const row = store.db.prepare("SELECT state_json FROM public_work_reviews WHERE receipt_id=?").get(receiptId);
     if (row) saved = parseJson(row.state_json, null);
   } catch { saved = null; } // a store predating the reviews table has no outcome to compose
+  return composeWorkOutcome(record, saved);
+}
+
+function composeWorkOutcome(record, saved) {
+  if (!record || typeof record !== "object") return null;
   const verification = saved?.verification && typeof saved.verification === "object" ? saved.verification : null;
   const decision = saved?.decision && typeof saved.decision === "object" ? saved.decision : null;
   // No review row, no review block: an unreviewed receipt's faces stay
@@ -879,6 +893,40 @@ function receiptWithOutcome(store, row) {
   if (!outcome) return out;
   const { review, ...fields } = outcome;
   return { ...out, ...fields, ...(review ? { review } : {}) };
+}
+
+// receiptWithOutcome costs two point queries per public-work row. List
+// surfaces (the full collect, a room's proof rows, a receipts page) call
+// it per row, so a list over N public-work receipts issued 2N statements —
+// measured 40,002 prepares for one front-door collect at 50k receipts
+// (HUNT-SCALE-SPIKE bench1). This batches the same two lookups into two
+// json_each queries for the whole row set; output is unchanged. If the
+// batch read fails, fall back to the per-row path rather than dropping
+// outcomes.
+function receiptsWithOutcomes(store, rows) {
+  const work = rows.filter(row => row.source === "public-work");
+  if (!work.length) return rows.map(row => receiptWithOutcome(store, row));
+  const ids = JSON.stringify(work.map(row => row.id));
+  const records = new Map();
+  try {
+    for (const row of store.db.prepare("SELECT receipt_id, receipt_json FROM public_work_receipts WHERE receipt_id IN (SELECT value FROM json_each(?))").all(ids)) {
+      records.set(row.receipt_id, parseJson(row.receipt_json, null));
+    }
+  } catch { return rows.map(row => receiptWithOutcome(store, row)); }
+  const savedById = new Map();
+  try {
+    for (const row of store.db.prepare("SELECT receipt_id, state_json FROM public_work_reviews WHERE receipt_id IN (SELECT value FROM json_each(?))").all(ids)) {
+      savedById.set(row.receipt_id, parseJson(row.state_json, null));
+    }
+  } catch { /* a store predating the reviews table has no outcomes to compose */ }
+  return rows.map(row => {
+    if (row.source !== "public-work") return rowToPublic(row);
+    const out = rowToPublic(row);
+    const outcome = composeWorkOutcome(records.get(row.id) ?? null, savedById.get(row.id) ?? null);
+    if (!outcome) return out;
+    const { review, ...fields } = outcome;
+    return { ...out, ...fields, ...(review ? { review } : {}) };
+  });
 }
 
 // Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
@@ -1056,8 +1104,30 @@ export function publicLotReceiptById(store, id) {
 }
 
 export function collectPublicReceipts(store) {
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all()
-    .map(row => receiptWithOutcome(store, row));
+  const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all();
+  return receiptsWithOutcomes(store, rows);
+}
+
+// The front door's counters without the collect: counting every public
+// receipt used to materialise the whole corpus (and compose every
+// public-work outcome) per request — measured 4.2s and 40k statements at
+// 50k receipts (HUNT-SCALE-SPIKE bench1). Same visibility predicates as
+// queryPublicReceipts, so the counters describe exactly the set the
+// /receipts list serves. pull_request/merged_at are stored null when
+// absent (never ""), so IS NOT NULL matches the composed rows'
+// truthiness check the hero used.
+export function publicReceiptCounters(store) {
+  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
+  const where = `WHERE ${visibility.join(" AND ")}`;
+  const counts = store.db.prepare(`SELECT COUNT(*) AS total,
+    COALESCE(SUM(CASE WHEN pull_request IS NOT NULL AND merged_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS verified
+    FROM public_receipts ${where}`).get();
+  const latestRow = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT 1`).get();
+  return {
+    receiptsIssued: counts?.total ?? 0,
+    resultsVerified: counts?.verified ?? 0,
+    latest: latestRow ? receiptWithOutcome(store, latestRow) : null,
+  };
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
@@ -1124,9 +1194,10 @@ export function proofLevelOf(receipt) {
 // receipts toggle is the receipts-live wrapper's job, like every other
 // public receipt read.
 export function roomProofRows(store, slug) {
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
+  const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
     WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
-    ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
+    ORDER BY at DESC, id ASC`).all(slug, slug);
+  return receiptsWithOutcomes(store, rows);
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row

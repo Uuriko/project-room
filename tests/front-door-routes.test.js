@@ -76,3 +76,22 @@ test("frontDoorFacts: counters computed from the receipts; HEAD passes the head 
   assert.deepEqual(calls.json.body.latestReceipt.agents, ["agent-a"]);
   assert.deepEqual(calls.json.body.latestReceipt.humans, ["human-b"]);
 });
+
+test("frontDoorFacts: owner-private room's receipts stay out of the counters and latest", t => {
+  const store = openStore(t);
+  seedReceipt(store, { id: `pwr_${"a".repeat(64)}`, title: "Older verified work", at: "2026-10-01T00:00:00.000Z", merged: true });
+  seedReceipt(store, { id: `pwr_${"b".repeat(64)}`, title: "Visible work", at: "2026-10-05T00:00:00.000Z", merged: false });
+  // A newer, merged receipt in a room whose owner turned public receipts
+  // off must not count, and must not become latestReceipt.
+  store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES (?, 'Hidden work', 'work-claim', 'beta-room', 'beta-room', 'Beta', '["agent-x"]', '[]',
+      'https://github.com/Uuriko/project-room/pull/9', '2026-10-09T00:00:00.000Z', '{}', '2026-10-09T00:00:00.000Z', 'https://room.trydemigod.com/?start=room')`)
+    .run(`pwr_${"c".repeat(64)}`);
+  store.db.prepare(`INSERT INTO room_directory_settings (room_id, discoverable, updated_at, public_receipts)
+    VALUES ('beta-room', 1, 1760000000, 0)`).run();
+  const calls = callFacts(store);
+  assert.equal(calls.json.body.counters.receiptsIssued, 2);
+  assert.equal(calls.json.body.counters.resultsVerified, 1, "the hidden room's merged receipt does not count as verified");
+  assert.equal(calls.json.body.latestReceipt.title, "Visible work", "latest skips the newer receipt the owner hid");
+});

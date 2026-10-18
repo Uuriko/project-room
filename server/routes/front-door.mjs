@@ -6,18 +6,19 @@
 // Route-table rows (batch RT): the OpenAPI route gate forbids new
 // legacy-chain registrations (the legacy allowlist only shrinks), so
 // the route lives here, not inline in server/http.mjs.
-import { collectPublicReceipts } from "../receipts-live.mjs";
+import { collectPublicReceiptCounters } from "../receipts-live.mjs";
 
 export function frontDoorFacts(ctx) {
   ctx.rate(`receipts:${ctx.remoteAddress}`, 120);
   ctx.res.setHeader("Cache-Control", "no-store");
-  const receipts = collectPublicReceipts(ctx.store);
-  const latest = receipts[0] ?? null;
+  // Counters + latest only: collecting every receipt to count them made
+  // this public feed cost the whole corpus per request (HUNT-SCALE-SPIKE).
+  const { receiptsIssued, resultsVerified, latest } = collectPublicReceiptCounters(ctx.store);
   return ctx.json(ctx.res, 200, {
     schema: "project-room-front-door/1",
     counters: {
-      resultsVerified: receipts.filter(r => r.mergedAt && r.pullRequest).length,
-      receiptsIssued: receipts.length,
+      resultsVerified,
+      receiptsIssued,
       workAvailableNow: ctx.store.publicWorkClaims.list({ limit: 1 }).claimableCount ?? 0,
     },
     latestReceipt: latest ? { id: latest.id, title: latest.title, agents: latest.agents ?? [], humans: latest.humans ?? [], at: latest.at, mergedAt: latest.mergedAt ?? null, pullRequest: latest.pullRequest ?? null } : null,
