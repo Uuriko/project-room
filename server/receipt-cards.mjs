@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // ACT-1a: append a room event without a member credential, and post the in-room
 // receipt card for a done board claim. Public receipts stay the opt-in PRM/GR1
 // path. This module does not import the work-claim or guide modules.
@@ -68,7 +69,7 @@ export function postReceiptCard(store, roomId, item, atMs) {
   const closedBy = (closer?.displayName || closer?.id || author.displayName || author.id);
   const pull = item.pullRequest?.url;
   const messageId = stableEventId("rc", `${roomId}\0${claimId}`);
-  if (room.state.messages?.some(message => message.id === messageId)) return null;
+  if (messageRepository(store, roomId, room.state).get(messageId)) return null;
   return appendRoomEvent(store, roomId, {
     id: messageId,
     type: "message.posted",

@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
@@ -39,7 +40,7 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
-import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
+import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -4041,7 +4042,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // A since_join reader also loses messages and events from before their
       // join (server/history-visibility.mjs). null for everyone else.
       const historyFloor = store.historyFloor(roomId, viewerId);
-      const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
+      const historyMessages = historyFloor ? messageRepository(store, roomId) : null;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
@@ -4309,7 +4310,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full");
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4325,11 +4326,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const nextState = { ...snapshot.state,
             messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
-          if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
-            omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
         return json(res, 200, snapshot);
       }
@@ -4463,9 +4462,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // re-resolve each hit against the projection and drop targeted DMs
         // the viewer is not a party to. Fail closed when a hit cannot be resolved.
         if (result.messages?.length) {
-          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          const byId = messageRepository(store, roomId);
           result.messages = result.messages.filter(hit => {
-            const message = byId.get(hit.id) ?? store.archivedMessage(roomId, hit.id);
+            const message = byId.get(hit.id);
             return message ? dmMessageVisible(message) : false;
           });
         }
@@ -4486,7 +4485,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // count recomputed) — otherwise the pin would leak the DM's body,
         // existence, and count. Fail closed when a pin cannot be resolved.
         const stripHiddenPinTargets = value => {
-          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          const byId = messageRepository(store, roomId);
           const pins = (value.pins ?? []).filter(pin => {
             const message = byId.get(pin.messageId);
             return message ? dmMessageVisible(message) : false;
