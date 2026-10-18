@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomAgentClient } from "./room-agent.mjs";
+import { setTimeout as pause } from "node:timers/promises";
 
 // The caller selects a private local file and one configured host. This is not
 // a watcher or permission to run arbitrary room messages. SQLite serializes
@@ -20,6 +21,48 @@ export function openRequestJournal(filename) {
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
+}
+
+// The stream is only a wake hint. Re-read compact request metadata, never
+// conversation bodies, and advance to that read's horizon to coalesce bursts.
+// This independent control path keeps a busy host responsive without model
+// calls or extra heartbeat writes. The normal heartbeat remains the fallback.
+async function watchRunningRequest({ client, request, cursor, signal, abort }) {
+  if (!Number.isSafeInteger(cursor)) return;
+  let retryMs = 1000;
+  while (!signal.aborted) {
+    try {
+      const started = Date.now();
+      const { changed } = await client.waitForChange(cursor, { signal, timeoutMs: 30000 });
+      if (!changed) {
+        if (signal.aborted) return;
+        // A normal long-poll timeout reconnects immediately; an early EOF
+        // backs off rather than spinning on an unavailable stream.
+        if (Date.now() - started < 1000) {
+          await pause(retryMs, undefined, { signal });
+          retryMs = Math.min(retryMs * 2, 30000);
+        } else retryMs = 1000;
+        continue;
+      }
+      const current = await client.replyRequests({ status: "open", signal });
+      const fresh = current.requests.find(item => item.id === request.id);
+      if (!fresh || fresh.status !== "open" || fresh.revision !== request.revision
+        || fresh.contextEventId !== request.contextEventId || fresh.openingEventId !== request.openingEventId) {
+        abort(new Error("Request changed, paused or closed; inspect the original attempt"));
+        return;
+      }
+      if (!Number.isSafeInteger(current.evaluatedThrough) || current.evaluatedThrough <= cursor) return;
+      cursor = current.evaluatedThrough;
+      retryMs = 1000;
+      // Bound repeated reads in a busy room; the first control is immediate.
+      await pause(250, undefined, { signal });
+    } catch (error) {
+      if (!signal.aborted && [401, 403].includes(error?.status)) abort(error);
+      if (signal.aborted) return;
+      await pause(retryMs, undefined, { signal }).catch(() => {});
+      retryMs = Math.min(retryMs * 2, 30000);
+    }
+  }
 }
 
 // execute receives no connection secret: only the selected conversation and
@@ -88,6 +131,11 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
+  const control = new AbortController();
+  const controlSignal = AbortSignal.any([controller.signal, control.signal]);
+  const watching = watchRunningRequest({ client, request: context.request, cursor: context.evaluatedThrough,
+    signal: controlSignal, abort: error => controller.abort(error) });
+  const stopWatching = async () => { control.abort(); await watching; };
   let heartbeat = null;
   const timer = setInterval(() => {
     if (heartbeat) return;
@@ -110,6 +158,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
         origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
         requestMessageId, requestId: id, attemptId, roomCreatedEventId: context.roomCreatedEventId,
         openingEventId: context.request.openingEventId, ...basis }) });
+    await stopWatching();
     controller.signal.throwIfAborted();
     const body = hostReplyBody(result);
     const response = { requestId: id, responseToRequestId: requestMessageId,
@@ -121,12 +170,14 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId });
     return { ...delivered, hostExecuted: true };
   } catch (error) {
+    await stopWatching();
     clearInterval(timer); await heartbeat;
     const saved = db.prepare("SELECT response FROM request_runs WHERE id=?").get(id)?.response;
     const state = saved && ![409, 422].includes(error?.status) ? "result_ready" : "needs_attention";
     await report(attemptId, state, {}, AbortSignal.timeout(5000)).catch(() => {});
     throw error;
   } finally {
+    await stopWatching();
     clearInterval(timer); signal?.removeEventListener("abort", abort);
   }
 }
