@@ -164,9 +164,10 @@ writes are refused; the raw refusal counts must remain visible.
 | Linux isolated host | Not run on supported OS for this candidate | Publish the reviewed branch as a draft PR and run existing Ubuntu CI, which provisions Bubblewrap; no protection bypass |
 | Physical interruption | Open | A coordinated real Mac sleep/wake and in-flight redirect trial; process restart alone is not equivalent |
 | Large-room growth | Open | Qualify and select bounded/entity or bodies-at-rest mode against the same workload; retain the failed inline-capacity result |
-| Production release | Not authorized by this exercise | Exact-candidate green gates, release review and explicit deployment authorization |
+| Production release | Standing authorization granted by John on 2026-10-18; qualification remains open | Exact-candidate green gates, release review and coordinated deployment |
 
 A draft PR description with the complete benchmark table is prepared locally at
 `/tmp/work-integration-pr-body.md`. No branch publication, public-main merge or
-production deploy was performed. The current-session publishing restriction must
-be resolved before using remote CI; local checks cannot certify the Linux boundary.
+production deploy was performed at the original qualification checkpoint. John removed
+the current-session publishing restriction on 2026-10-18; publish this candidate for
+remote CI next. Local checks cannot certify the Linux boundary.
