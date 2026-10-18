@@ -3282,7 +3282,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // per-request alarm gate) only ever do redundant work on a
         // false positive, never miss a real write.
         if (anyWrite) this._writesSeen = (this._writesSeen ?? 0) + 1;
-        if (roomsWrite) invalidate();
+        if (roomsWrite) {
+          // PERF-BUILDS P0-3: count rooms writes separately so
+          // transaction() can tell whether a commit touched rooms at
+          // all (see the cache-clear gate there).
+          this._roomsWritesSeen = (this._roomsWritesSeen ?? 0) + 1;
+          invalidate();
+        }
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
         if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
@@ -3295,7 +3301,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec = sql => {
         const result = exec(sql);
         if (typeof sql === "string" && ANY_WRITE.test(sql)) this._writesSeen = (this._writesSeen ?? 0) + 1;
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
+        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) {
+          this._roomsWritesSeen = (this._roomsWritesSeen ?? 0) + 1;
+          invalidate();
+        }
         return result;
       };
     }
@@ -3347,6 +3356,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
     this._armProjectionWatch();
+    // PERF-BUILDS P0-3: rooms writes inside this transaction, counted by
+    // the projection watch. The commit below clears the projection cache
+    // only when the count moved — a commit that wrote only other tables
+    // (heartbeats, cursors, claim rows, webhook bookkeeping) cannot have
+    // changed any room's projection, so a warm room stays warm.
+    const roomsWritesAtEntry = this._roomsWritesSeen ?? 0;
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
@@ -3364,7 +3379,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (boundary) {
       const pending = frames.pop();
-      this._projectionCache?.clear();
+      // PERF-BUILDS P0-3: clear only on a rooms write (see above). The
+      // watch already dropped the cache when a watched rooms write ran;
+      // this commit-time clear remains for the promotion invariant —
+      // pending candidates must publish into a cache that holds no
+      // pre-transaction parse of a rewritten room — and it now fires
+      // exactly when a rooms write makes that possible. The rollback
+      // path (catch above) still drops the cache unconditionally.
+      if ((this._roomsWritesSeen ?? 0) !== roomsWritesAtEntry) this._projectionCache?.clear();
       if (!outermost) {
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
