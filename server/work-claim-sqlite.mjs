@@ -66,16 +66,42 @@ const parse = text => {
 
 export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
-  // Prepare lazily: RoomStore constructs services before its atomic schema migration.
+  // Prepare lazily, once per SQL string, for the life of this registry
+  // (PERF2-BOARD step 1): every call used to pay a fresh db.prepare, so the
+  // board's per-task claim read cost one prepare per task, fleet-wide.
+  // RoomStore constructs services before its atomic schema migration, so
+  // nothing prepares at construction time — the first call prepares, and a
+  // failed prepare is never cached (the next call retries, exactly as an
+  // uncached prepare would). Invalidation needs no code here:
+  // - Schema changes: node:sqlite re-prepares a statement internally when
+  //   the schema moves under it, and the DurableDatabase facade is
+  //   stateless (it re-execs per call), so a cached statement never serves
+  //   a stale schema. Pinned by tests/work-claim-sqlite.test.js.
+  // - Store reopen: a reopened store builds a new registry against its new
+  //   handle; no statement outlives its database.
+  // - Transaction boundaries: SQLite statements are connection-level, not
+  //   transaction-scoped; a statement prepared outside a transaction runs
+  //   inside one unchanged.
+  // The cache is bounded by this module's fixed SQL set (seven strings).
+  const prepared = new Map();
+  const prepare = sql => {
+    let stmt = prepared.get(sql);
+    if (stmt === undefined) {
+      stmt = db.prepare(sql);
+      prepared.set(sql, stmt);
+    }
+    return stmt;
+  };
   const statement = sql => ({
-    get: (...args) => db.prepare(sql).get(...args),
-    all: (...args) => db.prepare(sql).all(...args),
-    run: (...args) => db.prepare(sql).run(...args),
+    get: (...args) => prepare(sql).get(...args),
+    all: (...args) => prepare(sql).all(...args),
+    run: (...args) => prepare(sql).run(...args),
   });
   const selectOne = statement("SELECT item_json FROM work_claims WHERE room_id=? AND claim_id=?");
   const selectRoom = statement("SELECT item_json FROM work_claims WHERE room_id=? ORDER BY rowid ASC");
   const upsert = statement(`INSERT INTO work_claims (room_id, claim_id, item_json, updated_at) VALUES (?, ?, ?, ?)
     ON CONFLICT(room_id, claim_id) DO UPDATE SET item_json=excluded.item_json, updated_at=excluded.updated_at`);
+  const remove = statement("DELETE FROM work_claims WHERE room_id=? AND claim_id=?");
   const selectConfig = statement("SELECT config_json FROM work_claim_config WHERE room_id=?");
   const upsertConfig = statement(`INSERT INTO work_claim_config (room_id, config_json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`);
@@ -90,7 +116,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
-      const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
+      const shapes = definitions.map(sql => ({ sql, actual: prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
       if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
       if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
       return true;
@@ -122,7 +148,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
         const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
         upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
       }
-      db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+      remove.run(roomId, id);
       if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {
