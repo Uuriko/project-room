@@ -528,6 +528,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
     };
   }
+  // #3949: the one credential-less replay rotation (R305-1) for this
+  // redemption was already spent — the earlier replay delivered a fresh
+  // identity secret, and only presenting that secret can replay now. A
+  // further credential-less rotation would retire the delivered secret.
+  if (reasonCode === "invite_replay_rotation_used") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This redemption's credential-less secret rotation has already been used: a fresh identity secret was delivered by an earlier replay, and only that secret can replay this redemption now. Replay again presenting the current identity secret — or ask the inviter who sponsored this invite to mint a fresh invite code, or to remove and re-invite this member, then redeem the new code to receive a new identity secret.",
+      next: [path("/api/agent-invites/redeem"),
+        command("Replay again presenting the current identity secret delivered by the earlier replay — or ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry the credential-less replay — its one rotation is spent.")]
+    };
+  }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
