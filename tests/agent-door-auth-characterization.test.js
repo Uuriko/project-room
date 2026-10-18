@@ -8,12 +8,17 @@
 // same PR that changes the behaviour.
 //
 // Pinned today:
-// - server/http.mjs bearer() has NO oat_ alternative: a well-formed OAuth
-//   access token (oat_ + 43 base64url chars), whether freshly minted by
-//   server/oauth-provider.mjs or fabricated, is rejected at the format gate
-//   with 401 unauthenticated / "Invalid Authorization header" — it never
-//   reaches store.authenticate on room routes, the stream route, or
-//   /api/session in room mode.
+// - server/http.mjs bearer() originally had NO oat_ alternative: a
+//   well-formed OAuth access token was rejected at the format gate with
+//   401 "Invalid Authorization header". Stage 1 Lane B changed that pin:
+//   bearer() now accepts the minted oat_ shape, room routes verify it
+//   against the server's OAuth provider (an unknown token — including one
+//   minted by a standalone provider, as below — is 401 "Session or key
+//   expired or revoked"), and the scope classification gates the route.
+//   Malformed oat_-ish shapes still die at the format gate. The
+//   direct-authenticate surfaces (/api/session room mode, /api/web/fetch)
+//   still reject even a valid oat_ via store.authenticate (pinned in
+//   tests/agent-door-auth-rest.test.js with server-minted tokens).
 // - /api/session in account mode (a ?room= parameter selects it) rejects ANY
 //   Authorization header with 403 access_denied before the bearer is parsed.
 // - REST failure shapes: 401 unauthenticated (distinct messages for the
@@ -138,12 +143,10 @@ async function serve(t) {
 
 const READ = "/api/rooms/commons/updates";
 
-test("REST bearer format gate: oat_ and other malformed shapes are 401 at the gate", async t => {
+test("REST bearer format gate: malformed shapes are 401 at the gate; well-formed oat_ is 401 at provider verification", async t => {
   const { request } = await serve(t);
   const minted = mintOat();
   const formatGate = [
-    ["freshly minted oat_ token", minted],
-    ["fabricated oat_ shape", "oat_" + "A".repeat(43)],
     ["oat_ too short (42)", "oat_" + "A".repeat(42)],
     ["oat_ too long (44)", "oat_" + "A".repeat(44)],
     ["oat_ bad charset", "oat_" + "A".repeat(42) + "!"],
@@ -161,6 +164,12 @@ test("REST bearer format gate: oat_ and other malformed shapes are 401 at the ga
   // Shapes that PASS the format gate fail later, with different messages —
   // the distinction is how a later lane can tell gate from lookup failures.
   const lookups = [
+    // Stage 1 Lane B: well-formed oat_ shapes pass the format gate and are
+    // verified against the server's provider; this server does not know
+    // either token (one minted standalone, one fabricated), so both get
+    // the provider-verification 401 — the same message as an unknown key.
+    ["freshly minted oat_ token (unknown to this server)", minted, "Session or key expired or revoked"],
+    ["fabricated oat_ shape", "oat_" + "A".repeat(43), "Session or key expired or revoked"],
     ["unknown plain room key (43 chars)", "A".repeat(43), "Session or key expired or revoked"],
     ["unknown identity secret", "pri_" + "A".repeat(43), "Unknown identity or no access to this room"],
     ["unknown rak_ key", "rak_" + "A".repeat(43), "Unknown, revoked, or expired API key"],
@@ -272,24 +281,33 @@ test("REST 403 access_denied shapes: non-member account session, and an account 
   assert.equal(onRoomRoute.body.error.message, "Session or key expired or revoked");
 });
 
-test("direct-authenticate sites: stream and /api/session reject oat_ today", async t => {
+test("direct-authenticate sites: stream and /api/session still reject oat_ (stage 1 pins)", async t => {
   const f = await serve(t);
   const oat = mintOat();
 
+  // Stage 1 Lane B pins: the stream and the room root go through
+  // roomCredentials, which verifies the oat_ token against the server's
+  // provider — this standalone-minted token is unknown there, so both are
+  // 401 at verification (a server-valid token instead meets the scope
+  // gate: both routes are CLOSED to OAuth, pinned in the Lane B suite).
   const stream = await f.request("/api/rooms/commons/stream", { token: oat });
   assert.equal(stream.status, 401);
   assert.equal(stream.body.error.code, "unauthenticated");
-  assert.equal(stream.body.error.message, "Invalid Authorization header");
+  assert.equal(stream.body.error.message, "Session or key expired or revoked");
 
   const roomRoot = await f.request("/api/rooms/commons", { token: oat });
   assert.equal(roomRoot.status, 401);
   assert.equal(roomRoot.body.error.code, "unauthenticated");
-  assert.equal(roomRoot.body.error.message, "Invalid Authorization header");
+  assert.equal(roomRoot.body.error.message, "Session or key expired or revoked");
 
+  // /api/session room mode calls store.authenticate directly, and the
+  // store does not know oat_: the token passes the format gate and fails
+  // as an unknown credential — the direct-authenticate surface stays
+  // closed even for a server-valid token (Lane B suite pins that case).
   const sessionRoomMode = await f.request("/api/session", { token: oat });
   assert.equal(sessionRoomMode.status, 401);
   assert.equal(sessionRoomMode.body.error.code, "unauthenticated");
-  assert.equal(sessionRoomMode.body.error.message, "Invalid Authorization header");
+  assert.equal(sessionRoomMode.body.error.message, "Sign in with an active room key or agent identity secret");
 
   // With ?room= the route is in account mode: the 403 fires for any bearer,
   // oat_ included, before the format gate would have run.

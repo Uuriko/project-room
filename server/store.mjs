@@ -4012,6 +4012,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
   }
+  // AGENT-DOOR-AUTH stage 1: bind an OAuth-granted account to its room
+  // member. The OAuth provider (server/oauth-provider.mjs) is the only token
+  // authority — it has already verified the access token and proved the
+  // grant's account id; this method proves only MEMBERSHIP, reusing the exact
+  // tail of authenticateAccountSession above (member_accounts lookup ->
+  // active human member -> verifyInvitedMembership). The HTTP layer wraps
+  // this in the oauth auth shape (credentialScope/kind "oauth", plus the
+  // grant's client id and scopes). Deliberately NOT a session: no session
+  // binding, no CSRF token, no credential row. Scopes only ever restrict
+  // what this member could already do, and membership loss or account
+  // deactivation cuts OAuth access on the next request through the same
+  // checks the account-session path uses.
+  authenticateOAuthAccount(accountId, roomId) {
+    if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
+    const accountRow = this.db.prepare("SELECT active, revision, auth_epoch FROM accounts WHERE id=?").get(accountId);
+    if (!accountRow || accountRow.active !== 1) fail(401, "unauthenticated", "Session or key expired or revoked");
+    const binding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
+    if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
+    const member = this.roomAuthority(roomId).members[binding.member_id];
+    if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
+    this.verifyInvitedMembership(roomId, member);
+    return {
+      account: { id: accountId, active: true, revision: accountRow.revision, authEpoch: accountRow.auth_epoch },
+      member, roomId
+    };
+  }
   accountRooms(token, binding, { after = null } = {}) {
     if (after !== null && !validId(after)) fail(422, "invalid_room", "Invalid room continuation");
     // Pure read: a write transaction here would fail on a read-only or

@@ -317,6 +317,95 @@ function defaultAssetLoader(assetRoot) {
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
+// AGENT-DOOR-AUTH stage 1 (Lane B): the OAuth scope classification for
+// room-scoped REST routes — the ONE place an `oat_` access token's route
+// access is decided. Each entry ties a (method, route template) pair to the
+// scopes from server/oauth-provider.mjs semantics:
+//   rooms:read  list and read rooms the user belongs to
+//   chat:read   read messages
+//   chat:write  post messages
+//   work:read   read work items
+//   work:write  accept and complete work
+// A route whose response discloses several classes inseparably requires ALL
+// scopes covering what it discloses. `scopes: null` (and any room route with
+// no entry at all — default-deny) is CLOSED to OAuth credentials: no OAuth
+// scope speaks for it. Only routes whose handlers act on the bound
+// auth.member (never re-authenticating the raw token inside the store) are
+// open; token-downstream handlers stay closed because store.authenticate
+// deliberately does not learn oat_ (that is what keeps the direct
+// store.authenticate surfaces — stream internals, /api/session room mode,
+// /api/web/fetch — fail-closed for OAuth tokens).
+export const OAUTH_ROUTE_SCOPES = Object.freeze([
+  // rooms:read — room/member metadata reads that act on auth.member only.
+  { method: "GET", template: "/api/rooms/{roomId}/agents/overview", scopes: ["rooms:read"] }, // fleet read model built from auth
+  { method: "GET", template: "/api/rooms/{roomId}/members/{memberId}/card", scopes: ["rooms:read"] }, // one member's directory card
+  { method: "GET", template: "/api/rooms/{roomId}/verification-policy", scopes: ["rooms:read"] }, // room join-policy flag only
+  // chat:read / chat:write — DM consent pairs are the caller's own chat
+  // metadata; typing is a chat presence write. Neither touches the raw token.
+  { method: "GET", template: "/api/rooms/{roomId}/dm-consents", scopes: ["chat:read"] },
+  { method: "POST", template: "/api/rooms/{roomId}/dm-consents", scopes: ["chat:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/dm-consents/{memberId}/decide", scopes: ["chat:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/dm-consents/block", scopes: ["chat:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/dm-consents/revoke", scopes: ["chat:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/dm-consents/unblock", scopes: ["chat:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/typing", scopes: ["chat:write"] },
+  // Multi-class bundles: room metadata + pinned message bodies (chat) +
+  // open work in one inseparable payload — ALL three read scopes required.
+  { method: "GET", template: "/api/rooms/{roomId}/activation-pack", scopes: ["rooms:read", "chat:read", "work:read"] },
+  { method: "GET", template: "/api/rooms/{roomId}/orient", scopes: ["rooms:read", "chat:read", "work:read"] },
+  // work:read / work:write — the route-table work-claims family, whose
+  // handlers act on auth.member and reauthorize through roomAuth.
+  { method: "GET", template: "/api/rooms/{roomId}/work-claims-read", scopes: ["work:read"] },
+  { method: "GET", template: "/api/rooms/{roomId}/work-claims/retention", scopes: ["work:read"] },
+  { method: "GET", template: "/api/rooms/{roomId}/work-claims/{claimId}/provenance", scopes: ["work:read"] },
+  { method: "POST", template: "/api/rooms/{roomId}/work-claims/{claimId}/premise-invalid", scopes: ["work:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/work-claims/{claimId}/close", scopes: ["work:write"] },
+  { method: "POST", template: "/api/rooms/{roomId}/work-claims/{claimId}/cancel", scopes: ["work:write"] },
+  // The caller's own ready-work wake preference (work-wants family).
+  { method: "GET", template: "/api/rooms/{roomId}/members/me/wants-work", scopes: ["work:read"] },
+  { method: "PUT", template: "/api/rooms/{roomId}/members/me/wants-work", scopes: ["work:write"] },
+  { method: "DELETE", template: "/api/rooms/{roomId}/members/me/wants-work", scopes: ["work:write"] },
+  // CLOSED, named explicitly because they are the core read family: the
+  // snapshot classifies cleanly by view (default/full view -> chat:read,
+  // ?view=work -> work:read), but its handler — like events, conversation,
+  // search, commands and the stream — re-authenticates the raw token inside
+  // the store, so honouring OAuth here would require teaching
+  // store.authenticate the oat_ shape and opening the direct-authenticate
+  // surfaces with it. Closed instead; no widening.
+  { method: "GET", template: "/api/rooms/{roomId}", scopes: null }, // snapshot, default/full view (chat class)
+  { method: "GET", template: "/api/rooms/{roomId}", view: "work", scopes: null }, // snapshot, ?view=work (work class)
+  { method: "GET", template: "/api/rooms/{roomId}/stream", scopes: null },
+  { method: "GET", template: "/api/rooms/{roomId}/events", scopes: null },
+  { method: "POST", template: "/api/rooms/{roomId}/commands", scopes: null },
+  // CLOSED money/bond families: no OAuth scope speaks for money movement.
+  { method: "GET", template: "/api/rooms/{roomId}/bonds", scopes: null },
+  { method: "GET", template: "/api/rooms/{roomId}/peer-dms", scopes: null },
+]);
+// Resolve a request to its required OAuth scopes: a frozen scope array for
+// an open route, or null when the route is CLOSED to OAuth credentials
+// (explicit entry or default-deny). HEAD classifies as GET (the room
+// handlers serve HEAD through the GET path). When several templates match,
+// the one with the most literal segments wins (members/me beats members/{}).
+export function oauthRouteRequirement(method, url) {
+  const verb = method === "HEAD" ? "GET" : method;
+  const segments = url.pathname.split("/").filter(Boolean);
+  let best = null;
+  for (const entry of OAUTH_ROUTE_SCOPES) {
+    if (entry.method !== verb) continue;
+    if (entry.view !== undefined && url.searchParams.get("view") !== entry.view) continue;
+    if (entry.view === undefined && entry.template === "/api/rooms/{roomId}" && url.searchParams.has("view")) continue;
+    const parts = entry.template.split("/").filter(Boolean);
+    if (parts.length !== segments.length) continue;
+    let literals = 0, matches = true;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].startsWith("{")) continue;
+      if (parts[i] !== segments[i]) { matches = false; break; }
+      literals++;
+    }
+    if (matches && (!best || literals > best.literals)) best = { literals, scopes: entry.scopes };
+  }
+  return best ? best.scopes : null;
+}
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
@@ -755,7 +844,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // keyId form (shorter) never verifies and reads as 401 downstream.
     // QA 2026-10-03 (P1-3): RFC 7235 — the auth scheme is case-insensitive,
     // so "bearer"/"BEARER" must work like "Bearer". Token shape unchanged.
-    const match = /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
+    const match = /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128}|oat_[A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -764,13 +853,48 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // the identity holds an active per-room grant, so route handlers keep
   // their own authorization and a delegate only passes gates that name the
   // delegate flag explicitly.
+  // AGENT-DOOR-AUTH stage 1: OAuth scope gate. Runs at credential selection
+  // (roomCredentials is the one funnel every room route passes through,
+  // including families like next-actions that never call roomAuth), before
+  // membership binding; it discloses nothing but the route's own required
+  // scope, which is public provider semantics. Grant matching mirrors the
+  // provider's rule: exact, or a `prefix:*` wildcard.
+  function enforceOAuthRouteScope(req, url, grantedScopes) {
+    const required = oauthRouteRequirement(req.method, url);
+    if (!required) reject(403, "insufficient_scope", "OAuth credentials are not accepted for this route");
+    for (const scope of required) {
+      const granted = grantedScopes.some(candidate => candidate === scope || (candidate.endsWith(":*") && scope.startsWith(candidate.slice(0, -1))));
+      if (!granted) reject(403, "insufficient_scope", `OAuth token lacks the ${scope} scope`);
+    }
+  }
   function roomAuth(selected, roomId, fence) {
-    return selected.mode === "account"
-      ? store.authenticateAccountSession(selected.token, roomId, fence)
-      : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+    if (selected.mode === "account") return store.authenticateAccountSession(selected.token, roomId, fence);
+    if (selected.mode === "oauth") {
+      // The provider is the only token authority: roomCredentials verified
+      // the token and stashed the grant; re-verify here so a roomAuth call
+      // that did not pass through roomCredentials still fails closed. The
+      // store then proves membership only. No session binding, no CSRF
+      // token — an OAuth grant is not a session.
+      const grant = selected.oauthGrant ?? oauthProvider.verifyAccessToken(selected.token);
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      const bound = store.authenticateOAuthAccount(grant.userId, roomId);
+      return { ...bound, credentialHash: rateHash(selected.token), credentialScope: "oauth", kind: "oauth",
+        oauthClientId: grant.clientId, oauthScopes: grant.scopes, expiresAt: null, csrf: null, sessionBinding: null };
+    }
+    return store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
   }
   function roomCredentials(req, url) {
     const bearerToken = bearer(req);
+    if (bearerToken && bearerToken.startsWith("oat_")) {
+      // OAuth access token (bearer-only; no cookie form exists or is added).
+      // Unknown/expired/revoked/deactivated-account tokens all verify as
+      // null and fail with the same 401 shape as any other bad credential.
+      const grant = oauthProvider.verifyAccessToken(bearerToken);
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      const selected = { token: bearerToken, bearer: true, mode: "oauth", oauthGrant: grant };
+      enforceOAuthRouteScope(req, url, grant.scopes);
+      return selected;
+    }
     if (bearerToken) return { token: bearerToken, bearer: true, mode: "room" };
     const requested = req.headers["x-project-room-auth"] ?? url.searchParams.get("auth") ?? "room";
     if (!["room", "account"].includes(requested)) reject(422, "invalid_auth_mode", "Invalid Room authentication mode");
@@ -3909,7 +4033,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = roomAuth(selected, roomId, fence);
-      if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+      // AGENT-DOOR-AUTH: oauth admitted here only because roomCredentials
+      // already scope-gated the route (closed funnel routes never reach
+      // this line with an oauth credential).
+      if (selected.bearer && auth.credentialScope !== "room" && auth.credentialScope !== "oauth") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) {
