@@ -60,6 +60,12 @@ const wikiBuild = spawnSync(process.execPath, ["scripts/wiki-build.mjs", "--chec
 if (wikiBuild.status !== 0) process.exit(wikiBuild.status || 1);
 const workflowPins = spawnSync(process.execPath, ["scripts/check-workflow-pins.mjs"], { stdio: "inherit" });
 if (workflowPins.status !== 0) process.exit(workflowPins.status ?? 1);
+// Cloudflare check registry closure (F-27): every cloudflare/*.check.mjs on
+// disk must be wired into cloudflare/package.json's run scripts. The guard
+// is a zero-dependency node:test file, so it runs here in the contract job
+// as well as in the cloudflare job's own `npm test` (where it is listed).
+const cfCheckManifest = spawnSync(process.execPath, ["--test", "cloudflare/check-manifest.check.mjs"], { stdio: "inherit" });
+if (cfCheckManifest.status !== 0) process.exit(cfCheckManifest.status ?? 1);
 const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
 if (docLinks.status !== 0) process.exit(docLinks.status || 1);
 // VL-2a: the GitHub App manifest stays aligned with the shared core.

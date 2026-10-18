@@ -13,6 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +23,12 @@ import { event, EVENT_TYPES as T } from "../src/events.js";
 import { exportNdjsonStream } from "../server/room-export.mjs";
 import { writeKvBackup } from "./room-backup.mjs";
 
-const source = process.env.ROOM_SOURCE_ROOT || process.cwd();
+// Repo root is this file's parent directory, not the caller's cwd: the
+// canonical run surface is `npm test` inside cloudflare/ (F-27 wiring), and
+// a cwd-derived root resolved the fixture against cloudflare/cloudflare/
+// and failed there while passing from the repo root. ROOM_SOURCE_ROOT
+// still overrides for out-of-tree runs.
+const source = process.env.ROOM_SOURCE_ROOT || fileURLToPath(new URL("..", import.meta.url));
 const require = createRequire(join(source, "cloudflare/package.json"));
 const { Miniflare } = require("miniflare");
 const { build } = require("esbuild");
