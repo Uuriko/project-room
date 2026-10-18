@@ -321,10 +321,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (escrowRoute === "submit" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["evidenceUrl", "summary"],
-      optional: ["evidenceKind", "checksClaimed", "producerId", "idempotencyKey"] }))
-      invalidInput(reject, "{evidenceUrl, summary, evidenceKind?, checksClaimed?, producerId?, idempotencyKey?}");
+      optional: ["evidenceKind", "checksClaimed", "producerId", "idempotencyKey", "modelVersion", "harnessVersion", "environment", "claimedModelVersion", "claimedHarnessVersion", "claimedEnvironment"] }))
+      invalidInput(reject, "{evidenceUrl, summary, evidenceKind?, checksClaimed?, producerId?, idempotencyKey?, modelVersion?, harnessVersion?, environment?}");
     return idem(payload, "bounty.submit", 200, () => {
       const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
+        modelVersion: payload.modelVersion, harnessVersion: payload.harnessVersion, environment: payload.environment,
+        claimedModelVersion: payload.claimedModelVersion, claimedHarnessVersion: payload.claimedHarnessVersion, claimedEnvironment: payload.claimedEnvironment,
         evidence: { evidenceUrl: payload.evidenceUrl, evidenceKind: payload.evidenceKind ?? null,
           summary: payload.summary, checksClaimed: payload.checksClaimed ?? [], producerId: payload.producerId ?? null } });
       return { roomId, bounty, receipt };
@@ -332,11 +334,13 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "accept" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["verifierAttestation"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{verifierAttestation, idempotencyKey?}");
+    if (!shape(payload, { required: ["verifierAttestation"], optional: ["idempotencyKey", "modelVersion", "harnessVersion", "environment", "claimedModelVersion", "claimedHarnessVersion", "claimedEnvironment"] }))
+      invalidInput(reject, "{verifierAttestation, idempotencyKey?, modelVersion?, harnessVersion?, environment?}");
     return idem(payload, "bounty.accept", 200, () => {
       const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
-        { acceptor: caller, verifierAttestation: payload.verifierAttestation, actor });
+        { acceptor: caller, verifierAttestation: payload.verifierAttestation, actor,
+          modelVersion: payload.modelVersion, harnessVersion: payload.harnessVersion, environment: payload.environment,
+          claimedModelVersion: payload.claimedModelVersion, claimedHarnessVersion: payload.claimedHarnessVersion, claimedEnvironment: payload.claimedEnvironment });
       return { roomId, bounty, approval, attribution, receipt };
     });
   }

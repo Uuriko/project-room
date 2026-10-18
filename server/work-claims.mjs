@@ -50,6 +50,7 @@
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { buildProvenance, provenanceOf as recordsProvenanceOf, sessionInstanceIdFor } from "./records-provenance.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -417,8 +418,10 @@ const verificationOf = value => {
     check(typeof value.jev.score === "number" && Number.isFinite(value.jev.score), "verification jev score must be a number");
     jev = Object.freeze({ verdict: value.jev.verdict, score: value.jev.score });
   }
+  const provenance = storedProvenanceOf(value.provenance);
   return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
-    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}) });
+    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}),
+    ...(provenance ? { provenance } : {}) });
 };
 // A delivery as stored on the item: the validated bundle plus the stamp the
 // finish transition froze onto it (digest + who delivered + when).
@@ -431,7 +434,12 @@ const storedDeliveryOf = value => {
     "delivery deliveredBy must be 1..128 characters");
   check(typeof value.deliveredAt === "string" && Number.isFinite(Date.parse(value.deliveredAt)),
     "delivery deliveredAt must be an ISO timestamp");
-  return Object.freeze({ ...bundle, digest: value.digest, deliveredBy: value.deliveredBy, deliveredAt: value.deliveredAt });
+  // #3612: the delivery's provenance stamp is NOT part of the bundle
+  // digest (deliveryDigest covers exactly {artifact, checks, criteria});
+  // it rides beside the digest like deliveredBy/deliveredAt.
+  const provenance = storedProvenanceOf(value.provenance);
+  return Object.freeze({ ...bundle, digest: value.digest, deliveredBy: value.deliveredBy, deliveredAt: value.deliveredAt,
+    ...(provenance ? { provenance } : {}) });
 };
 const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
@@ -551,6 +559,32 @@ const currentReviewBasis = (review, item) => {
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
+// #3612 (R-1/R-9): consequential-record provenance on board claims.
+// A stored stamp round-trips through this validator; a malformed stamp
+// fails closed like every other bound field on the record.
+const storedProvenanceOf = value => {
+  if (value === undefined || value === null) return null;
+  try { return recordsProvenanceOf(value); } catch (error) { check(false, error.message); }
+};
+// Build the stamp for a record written by `agent` in this claim round.
+// FACTS are server-derived here in the kernel: the session instance is
+// the claim round (claim id + acting member + claimedAt + the delivery
+// digest acted on), and the authorizing principal is the member who
+// created the claim (its creation history stamp) — the human who
+// authorized the work — never caller-supplied. The model/harness/
+// environment triple is the acting runtime's own report, carried under
+// claimed* names as a claim pinned at write time (the route pins the
+// work session's declared environment into claimedEnvironment when the
+// session record holds one, instead of leaving it floating).
+const claimProvenanceFor = (item, agent, claimed = {}) => {
+  try {
+    return buildProvenance({
+      sessionInstanceId: sessionInstanceIdFor("board-claim", [item.id, agent, item.claimedAt, item.delivery?.digest ?? ""]),
+      authorizingPrincipalId: creatorOf(item),
+      claimed,
+    });
+  } catch (error) { check(false, error.message); }
+};
 const reviewRecordOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
@@ -559,8 +593,9 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  const provenance = storedProvenanceOf(value.provenance);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
-    ...(basis ? { basis } : {}) });
+    ...(basis ? { basis } : {}), ...(provenance ? { provenance } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -575,7 +610,9 @@ const attestationOf = value => {
   // SEC-2: note attestations record the claim round and revision they were
   // made against, so a repeat note from the same reviewer is deduplicated.
   const basis = reviewBasisOf(value.basis);
-  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
+  const provenance = storedProvenanceOf(value.provenance);
+  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}),
+    ...(provenance ? { provenance } : {}) });
 };
 
 // W012 required reading: read-acknowledgments are a per-agent map of
@@ -629,8 +666,8 @@ const canonicalPayload = value => {
 // The digest binding a requestId to the update it carried: every field
 // updateWork can apply, and nothing else (now/requestId itself excluded —
 // a retry is stamped later and re-uses the id by definition).
-export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery } = {}) =>
-  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }), "utf8").digest("hex");
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) =>
+  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, claimedModelVersion, claimedHarnessVersion, claimedEnvironment }), "utf8").digest("hex");
 // The bundle digest frozen at finish: sha256 over exactly the bundle's
 // content fields, so the verify step can prove the bundle it checks is the
 // bundle that was delivered (any later mutation of the stored row fails
@@ -1187,8 +1224,12 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // #3612: the acting runtime's caller-reported claims for this write.
+  // They enter the request digest too: a retry that changes its reported
+  // model is a different update, not a replay of the recorded stamp.
+  const claimed = { claimedModelVersion, claimedHarnessVersion, claimedEnvironment };
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1196,7 +1237,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // carrying a different update is refused, never silently swallowed.
   const key = requestId === undefined ? undefined : requestIdOf(requestId);
   const digest = key === undefined ? undefined
-    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, claimedModelVersion, claimedHarnessVersion, claimedEnvironment });
   if (key !== undefined) {
     const verdict = requestReplayVerdict(item.requestOutcomes, key, digest);
     if (verdict === "replay") return item;
@@ -1271,7 +1312,10 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
       required: (item.acceptanceCriteria?.length ?? 0) > 0 || effectivePolicy !== "self_attested",
     });
     deliveredItem = bundle
-      ? { ...item, delivery: Object.freeze({ ...bundle, digest: deliveryDigest(bundle), deliveredBy: agent, deliveredAt: isoOf(atMs) }),
+      ? { ...item, delivery: Object.freeze({ ...bundle, digest: deliveryDigest(bundle), deliveredBy: agent, deliveredAt: isoOf(atMs),
+          // #3612: submission provenance — server-derived instance +
+          // principal, caller's model/harness/environment claims pinned.
+          provenance: claimProvenanceFor(item, agent, claimed) }),
         // #3684: every frozen delivery advances the round's generation —
         // approvals bound to an earlier generation's delivery go stale.
         deliveryGeneration: (item.deliveryGeneration ?? 0) + 1 }
@@ -1312,12 +1356,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
       state: effectivePolicy === "self_attested" ? "self_attested" : "verified",
       by: reviewedBy ?? agent, at: isoOf(atMs), basis: reviewBasisFor(deliveredItem),
       executedChecks, ...(jevRecord ? { jev: jevRecord } : {}),
+      // #3612: verdict provenance — the verifying session's instance and
+      // the claim's authorizing principal (server-derived), plus the
+      // verifier runtime's claimed model/harness/environment.
+      provenance: claimProvenanceFor(deliveredItem, agent, claimed),
     });
   } else if (state === "in_progress" && item.state === "delivered") {
     // changes_requested: the delivery stays as the record of what was
     // handed over; the verification fact records who sent it back.
     verification = Object.freeze({ state: "changes_requested", by: agent, at: isoOf(atMs),
-      basis: reviewBasisFor(item), executedChecks: Object.freeze([]) });
+      basis: reviewBasisFor(item), executedChecks: Object.freeze([]),
+      provenance: claimProvenanceFor(item, agent, claimed) });
   } else if (finishing) {
     verification = null;
   }
@@ -1412,7 +1461,7 @@ export function creatorOf(work) {
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
 // Refused on unclaimed work (nothing to review) and on done work (immutable).
-export function attestWork(work, agentId, { note, now } = {}) {
+export function attestWork(work, agentId, { note, now, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
@@ -1420,14 +1469,19 @@ export function attestWork(work, agentId, { note, now } = {}) {
   const explicit = item.reviews.some(entry => entry.memberId === agent);
   if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
   const basis = reviewBasisFor(item);
+  // #3612: every attestation carries its provenance stamp (see
+  // claimProvenanceFor): the reviewer's session instance in this claim
+  // round and the claim's authorizing principal are server-derived; the
+  // reviewer's model/harness/environment are pinned claims.
+  const provenance = claimProvenanceFor(item, agent, { claimedModelVersion, claimedHarnessVersion, claimedEnvironment });
   // SEC-2: one attestation per reviewer per claim round and revision. A
   // repeat note on the same basis replaces the recorded note in place: no
   // history entry, so the route appends no room event for it.
   if (!explicit && prior && sameBasis(prior.basis, basis)) {
-    const replaced = Object.freeze({ memberId: agent, at: prior.at, note: note ?? null, basis });
+    const replaced = Object.freeze({ memberId: agent, at: prior.at, note: note ?? null, basis, provenance });
     return Object.freeze({ ...item, attestations: Object.freeze(item.attestations.map(entry => (entry.memberId === agent ? replaced : entry))) });
   }
-  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null, basis });
+  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null, basis, provenance });
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
     attestation,
@@ -1440,7 +1494,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
@@ -1492,11 +1546,14 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  // #3612: the review record (and the approve attestation it mints) carry
+  // the reviewer's provenance stamp — see claimProvenanceFor.
+  const provenance = claimProvenanceFor(item, agent, { claimedModelVersion, claimedHarnessVersion, claimedEnvironment });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item), provenance });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
-    ...(verdict === "approve" ? [Object.freeze({ memberId: agent, at, note: summary.slice(0, 512) })] : []),
+    ...(verdict === "approve" ? [Object.freeze({ memberId: agent, at, note: summary.slice(0, 512), provenance })] : []),
   ]);
   return withHistory({ ...item, reviews, attestations }, atMs, agent, "reviewed", summary.slice(0, 512));
 }

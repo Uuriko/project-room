@@ -5,6 +5,7 @@ import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { buildProvenance, claimedProvenanceFromInput, sessionInstanceIdFor } from './records-provenance.mjs';
 
 // Private review is a separate fact. Submission bytes, leases and work
 // gates are never changed here. Two deliberate exceptions, both inside
@@ -70,7 +71,12 @@ export class PublicWorkReviews {
         accountableMemberId: work.accountableMemberId, verifierMemberId: work.verifierMemberId,
         humanDecisionMakerId: work.humanDecisionMakerId, independentVerificationRequired: work.independentVerificationRequired,
         ownerDecisionRequired: work.ownerDecisionRequired, state: work.state } : null });
-    return { roomId, actorId, state, actor, receipt, offer, work, policy, fingerprint, task: { repositoryRef: row.repository_ref, files: JSON.parse(row.files_json) } };
+    // #3612: the authorizing principal for this record, joined at read/
+    // write time from the stored offer row (its owner authorized the
+    // work), falling back to the room owner. Server-derived fact.
+    return { roomId, actorId, state, actor, receipt, offer, work, policy, fingerprint,
+      authorizingPrincipalId: offerRow?.owner_id ?? state.room.ownerId ?? null,
+      task: { repositoryRef: row.repository_ref, files: JSON.parse(row.files_json) } };
   }
   selfReviewer(scope, actorId) {
     return actorId === scope.receipt.identityId || scope.state.members[actorId]?.identityId === scope.receipt.identityId || Boolean(this.db.prepare('SELECT 1 FROM identity_links WHERE room_id=? AND member_id=? AND identity_id=?')
@@ -177,6 +183,9 @@ export class PublicWorkReviews {
     // #3683: as at finish, the label requires a passed check — a failed
     // criteria_coverage on record must not read as a system endorsement.
     receipt.verification = receipt.executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : (receipt.verification ?? 'hash_only');
+    // #3612: the verified successor stamp keeps its pinned public shape
+    // ({by, at, reviewRevision, passVerdict}); the deciding session's
+    // provenance lives on the review's decision record itself.
     receipt.verified = { by: review.decision.actorId, at: review.decision.at,
       reviewRevision: review.revision, passVerdict: review.verification?.verdict ?? null };
     this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
@@ -186,7 +195,11 @@ export class PublicWorkReviews {
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
     const keys = ['requestId', 'expectedReviewRevision', 'taskId', 'expectedTermsVersion', 'generation', 'artifactSha256', 'reason', action === 'decide' ? 'decision' : 'verdict'];
-    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key)), 'Unexpected or missing review fields');
+    // #3612: optional caller-reported runtime claims (model/harness/
+    // environment) may ride a verdict; they are pinned onto the recorded
+    // verification/decision under claimed* names, never as facts.
+    const optionalKeys = ['modelVersion', 'harnessVersion', 'environment', 'claimedModelVersion', 'claimedHarnessVersion', 'claimedEnvironment'];
+    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key) || optionalKeys.includes(key)), 'Unexpected or missing review fields');
     check(validId(input.requestId) && validId(input.taskId) && Number.isSafeInteger(input.expectedReviewRevision) && input.expectedReviewRevision >= 0
       && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 && Number.isSafeInteger(input.generation) && input.generation > 0
       && typeof input.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(input.artifactSha256), 'Invalid review binding');
@@ -218,6 +231,19 @@ export class PublicWorkReviews {
       if (current.revision !== input.expectedReviewRevision) fail(409, 'stale_review', 'Review changed; inspect it again');
       if (['accepted', 'rejected'].includes(current.state)) fail(409, 'review_final', 'Review decision is final');
       const at = new Date(this.store.now()).toISOString();
+      // #3612 (R-1/R-9): provenance for this verdict record. The instance
+      // is server-derived from the authenticated reviewer + the exact
+      // submission fingerprint + this review revision; the principal is
+      // the scope's joined offer owner. Model/harness/environment are the
+      // reviewer's caller-reported claims, pinned under claimed* names.
+      let provenance;
+      try {
+        provenance = buildProvenance({
+          sessionInstanceId: sessionInstanceIdFor('public-work-review', [receiptId, actorId, scope.fingerprint, current.revision + 1, action]),
+          authorizingPrincipalId: scope.authorizingPrincipalId,
+          claimed: claimedProvenanceFromInput(input),
+        });
+      } catch (error) { fail(422, 'invalid_public_review', error.message); }
       if (action === 'verify') {
         // #3547 executed evidence: a PASS is recorded only after the
         // platform re-hashes the stored submission bytes itself and finds
@@ -232,11 +258,11 @@ export class PublicWorkReviews {
             fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
           executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
         }
-        current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
+        current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint, provenance,
           ...(executedChecks ? { executedChecks } : {}) };
       } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
-        current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
+        current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at, provenance };
       }
       current.revision += 1;
       this.db.prepare('INSERT INTO public_work_reviews VALUES (?,?,?,?) ON CONFLICT(receipt_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json')
