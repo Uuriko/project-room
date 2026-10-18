@@ -137,6 +137,122 @@ test("C3: the access-request approval path binds without a code (decide exemptio
     "the approval path minted and consumed no link code");
 });
 
+// ATLAS-SECURITY-2 S2-1: at the original C3 head, link() ran
+// closePendingAccessRequests BEFORE requireLinkHolderProof, so a
+// merely PENDING request — which the link call itself flipped to
+// 'approved' as a side effect — satisfied the gate, with permissions
+// bounded only by what the linker held, never by what the holder
+// asked for. The gate must evaluate proof against the record as it
+// stood on entry, and a request-based exemption covers only the
+// permissions that request asked for.
+function setupWithRequests(t) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-link-proof-s2-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  store.db.exec(accessRequestSchema);
+  const requests = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
+  });
+  const ownerToken = store.issueAccessKey("commons", "owner");
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  return { store, requests, ownerToken };
+}
+
+const requestRow = (store, requestId) => store.db.prepare(
+  "SELECT status, decided_by AS decidedBy, decision_note AS decisionNote FROM access_requests WHERE request_id=?")
+  .get(requestId);
+
+test("S2-1: a merely pending access request does not satisfy the holder-proof gate", async t => {
+  const { store, requests, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Pending Agent");
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "Pending Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_s2_pending"
+  }, agent.secret);
+  assert.equal(requestRow(store, "ar_s2_pending").status, "pending");
+  // The ATLAS-SECURITY-2 repro: direct link, no code, permissions the
+  // holder never asked for. Pre-fix this succeeded and the request row
+  // afterwards read 'approved … linked directly'.
+  assert.throws(
+    () => store.identities.link(ownerToken, "commons",
+      { identityId: agent.identityId, permissions: ["steer"] }),
+    proofRequired);
+  assert.deepEqual(linkRows(store, agent.identityId), [], "no link row was written");
+  assert.equal(store.room("commons").state.members[agent.identityId], undefined, "no member was created");
+  const row = requestRow(store, "ar_s2_pending");
+  assert.equal(row.status, "pending", "the refused link must not manufacture an approval");
+  assert.equal(row.decidedBy, null);
+});
+
+test("S2-1: an approved request exempts only the permissions it asked for", async t => {
+  const { store, requests, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Scoped Agent");
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "Scoped Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_s2_scoped"
+  }, agent.secret);
+  const decided = requests.decide(ownerToken, "commons", "ar_s2_scoped", { decision: "approve" });
+  assert.equal(decided.status, "approved");
+  store.identities.unlink(ownerToken, "commons", agent.identityId);
+  // Re-link within the approved scope: the standing approval is the proof.
+  assert.doesNotThrow(() => store.identities.link(ownerToken, "commons",
+    { identityId: agent.identityId, permissions: ["accept_work"] }));
+  store.identities.unlink(ownerToken, "commons", agent.identityId);
+  // Re-link beyond the approved scope: the request never asked for
+  // 'steer', so the exemption does not cover it — a holder code is
+  // required for the broader grant.
+  assert.throws(
+    () => store.identities.link(ownerToken, "commons",
+      { identityId: agent.identityId, permissions: ["steer"] }),
+    proofRequired);
+  assert.deepEqual(linkRows(store, agent.identityId), [], "the over-broad re-link wrote nothing");
+});
+
+test("S2-1: decide() may still grant more than was requested (decider sovereignty)", async t => {
+  const { store, requests, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Sovereign Grant Agent");
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "Sovereign Grant Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_s2_sovereign"
+  }, agent.secret);
+  // The decider is present in this very call and is sovereign (see
+  // decide(): "the owner chooses the final permissions"). The
+  // requestedPermissions bound governs LATER direct links that lean on
+  // the standing approved row, not the decision's own link.
+  const decided = requests.decide(ownerToken, "commons", "ar_s2_sovereign",
+    { decision: "approve", permissions: ["accept_work", "steer"] });
+  assert.equal(decided.status, "approved");
+  assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "steer"]);
+  assert.deepEqual(linkRows(store, agent.identityId), [{ roomId: "commons" }]);
+});
+
+test("S2-1: a holder code proves a broader grant while a request is pending", async t => {
+  const { store, requests, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Code Over Pending Agent");
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "Code Over Pending Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_s2_code"
+  }, agent.secret);
+  // A holder-minted code is unbounded proof: it binds with permissions
+  // broader than the pending request asked for, and only then does
+  // closePendingAccessRequests clear the owner's queue.
+  const code = mintHolderLinkCode(store, agent, "commons");
+  const linked = store.identities.link(ownerToken, "commons",
+    { identityId: agent.identityId, permissions: ["steer"], identityLinkCode: code });
+  assert.equal(linked.memberId, agent.identityId);
+  assert.deepEqual(store.room("commons").state.members[agent.identityId].permissions, ["steer"]);
+  assert.equal(requestRow(store, "ar_s2_code").status, "approved",
+    "a successful code-proven link still closes the pending request");
+});
+
 test("C3: the HTTP route carries identityLinkCode and enforces the gate", async t => {
   const { store, ownerCommons } = setup(t);
   const server = createRoomServer({ store });

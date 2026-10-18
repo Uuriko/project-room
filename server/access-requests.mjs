@@ -743,6 +743,12 @@ export class AccessRequests {
         displayName: row.display_name,
         permissions: grants,
         settleAccessRequests: false,
+        // S2-1: name the request this link executes, so link()'s
+        // holder-proof gate treats it as the decision's own act
+        // (decider present and sovereign) rather than a later direct
+        // link leaning on the standing approved row, which is bounded
+        // by what the request asked for.
+        decidedRequestId: requestId,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
       // Journal the completed referral in the same transaction, after the

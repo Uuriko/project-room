@@ -16,6 +16,7 @@ import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
+import { permissionRequestContents } from "./member-permission-requests.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -665,7 +666,17 @@ export class AgentIdentities {
   // (filing was secret-proven under #2912), or the caller presents a
   // holder-minted link code in identityLinkCode, consumed at the commit
   // point (see requireLinkHolderProof).
-  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, identityLinkCode, settleAccessRequests = true }, expectedSessionBinding = null) {
+  // ATLAS-SECURITY-2 S2-1: the proof is evaluated BEFORE
+  // closePendingAccessRequests settles anything, against the record as
+  // it stood on entry — a pending request this call would flip to
+  // 'approved' as a side effect is not proof. A request-based exemption
+  // also covers only the permissions that request asked for; a broader
+  // grant needs a holder code. decidedRequestId is an internal option
+  // set only by AccessRequests.decide() when it drives the link for the
+  // request it just approved (the decider is present and sovereign in
+  // that call, so its grant is not request-bounded); it is never
+  // accepted from the identity-links route whitelist.
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, identityLinkCode, settleAccessRequests = true, decidedRequestId = null }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
@@ -732,10 +743,10 @@ export class AgentIdentities {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
             data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
+        this.requireLinkHolderProof(roomId, identityId, identityLinkCode, { permissions, decidedRequestId });
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
-        this.requireLinkHolderProof(roomId, identityId, identityLinkCode);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       const memberName = displayName?.trim() || identity.displayName;
@@ -759,10 +770,10 @@ export class AgentIdentities {
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
         data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
+      this.requireLinkHolderProof(roomId, identityId, identityLinkCode, { permissions, decidedRequestId });
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);
-      this.requireLinkHolderProof(roomId, identityId, identityLinkCode);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
   }
@@ -781,18 +792,72 @@ export class AgentIdentities {
       "SELECT 1 FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'").get(roomId, identityId));
   }
 
-  // The direct-link gate, called at link()'s commit point: without an
-  // approved access request on record, binding the identity requires
-  // consuming a link code the HOLDER minted for this room (C2's
-  // primitive). Every validation before this point keeps its own error,
-  // and a failed consume throws inside the link transaction, so the
-  // whole link rolls back and a code is burned only by a link that
-  // actually commits. Codes pre-named to a sponsor account never redeem
-  // here: link() acts for a room member, not an enrolling account, so it
-  // cannot present the named sponsor — such codes fail closed with the
-  // same opaque 422 identity_link_proof_required as any proof failure.
-  requireLinkHolderProof(roomId, identityId, identityLinkCode) {
-    if (this.hasApprovedAccessRequest(roomId, identityId)) return;
+  // True when requestId names an access request for exactly this
+  // (room, identity) pair that is already recorded 'approved'. Used for
+  // the link decide() drives for its own approval: decide() flips the
+  // row inside the same transaction before calling link(), so the
+  // approval this call relies on predates the link itself — unlike a
+  // pending row closePendingAccessRequests would settle as a side
+  // effect (S2-1).
+  isDecidedAccessRequest(requestId, roomId, identityId) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return false;
+    const row = this.db.prepare(
+      "SELECT room_id AS roomId, identity_id AS identityId, status FROM access_requests WHERE request_id=?").get(requestId);
+    return Boolean(row) && row.roomId === roomId && row.identityId === identityId && row.status === "approved";
+  }
+
+  // The permissions holder consent on record actually covers: the
+  // union of requestedPermissions across approved JOIN requests for
+  // the (room, identity) pair. Returns null when no approved request
+  // is on record at all (the caller then falls through to the link
+  // code). Permission-upgrade rows are not join consent and never
+  // widen the set; a row whose stored contents no longer parse is
+  // skipped, which only ever narrows the bound (fail closed).
+  approvedAccessRequestPermissions(roomId, identityId) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return null;
+    const rows = this.db.prepare(
+      "SELECT requested_permissions, status FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'"
+    ).all(roomId, identityId);
+    if (!rows.length) return null;
+    const covered = new Set();
+    for (const row of rows) {
+      let contents;
+      try { contents = permissionRequestContents(row); } catch { continue; }
+      if (contents.upgrade) continue;
+      for (const permission of contents.permissions) covered.add(permission);
+    }
+    return covered;
+  }
+
+  // The direct-link gate, evaluated inside link() BEFORE
+  // closePendingAccessRequests settles any pending rows, so the record
+  // it reads is the record as it stood on entry (ATLAS-SECURITY-2
+  // S2-1: previously the settle ran first and a merely pending request
+  // manufactured its own exemption, with grants bounded only by what
+  // the linker held). Three proofs, in order:
+  // (1) decidedRequestId — this link IS an access-request approval
+  //     being executed by its decider (AccessRequests.decide); the
+  //     approval is on record and the decider's grant is sovereign,
+  //     so no requestedPermissions bound applies.
+  // (2) An approved access request on record — holder consent for
+  //     this binding, covering only the permissions the request(s)
+  //     asked for; a broader grant falls through to (3) and fails
+  //     with the same opaque 422 if no code proves it instead.
+  // (3) A link code the HOLDER minted for this room (C2's primitive),
+  //     consumed at the commit point: a failed consume throws inside
+  //     the link transaction, so the whole link rolls back and a code
+  //     is burned only by a link that actually commits. Codes
+  //     pre-named to a sponsor account never redeem here: link() acts
+  //     for a room member, not an enrolling account, so it cannot
+  //     present the named sponsor — such codes fail closed with the
+  //     same opaque 422 identity_link_proof_required as any proof
+  //     failure.
+  requireLinkHolderProof(roomId, identityId, identityLinkCode, { permissions = [], decidedRequestId = null } = {}) {
+    if (decidedRequestId !== null && this.isDecidedAccessRequest(decidedRequestId, roomId, identityId)) return;
+    const covered = this.approvedAccessRequestPermissions(roomId, identityId);
+    if (covered !== null && permissions.every(permission => covered.has(permission))) return;
     this.consumeLinkCode(identityId, identityLinkCode, { roomId });
   }
 
