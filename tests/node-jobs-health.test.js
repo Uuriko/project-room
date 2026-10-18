@@ -45,12 +45,13 @@ test("scheduler jobHealth lists every registry job and records runs", async t =>
   assert.equal(JSON.stringify(after).match(/token|secret|password/i), null);
 });
 
-test("node scheduler retention job rotates to the next table on each tick", async t => {
+test("node scheduler retention job drains every disposable log table on each tick", async t => {
   const store = storeFor(t);
   let clock = Date.now();
   const day = 86400000;
-  // One expired row in each disposable log table. Retention prunes exactly
-  // one table per tick, rotating through RETENTION_TABLES.
+  // One expired row in each disposable log table. Retention drains every
+  // age-ruled table on every tick (HUNT-SOAK S-4) — no rotation, no table
+  // waiting for a later tick.
   store.db.prepare("INSERT INTO web_fetch_log(request_id,room_id,member_id,credential_hash,host,cache_status,bytes,tags_json,created_at) VALUES('fetch-old','commons','owner',NULL,'example.com','hit',2,'[]',?)")
     .run(clock - 35 * day);
   store.db.prepare("INSERT INTO web_research_log(request_id,room_id,member_id,credential_hash,question_hash,sources_json,evidence_count,plan_only,created_at) VALUES('research-old','commons','owner',NULL,'hash','[]',0,1,?)")
@@ -64,18 +65,13 @@ test("node scheduler retention job rotates to the next table on each tick", asyn
     return outcome.result;
   };
   const first = await retentionRun();
-  assert.equal(first.table, "web_fetch_log");
-  assert.equal(first.deleted, 1);
+  assert.deepEqual(first.tables, ["web_fetch_log", "web_research_log"]);
+  assert.equal(first.deleted, 2);
   assert.equal(count("web_fetch_log"), 0);
-  assert.equal(count("web_research_log"), 1, "the second table waits for the next tick");
+  assert.equal(count("web_research_log"), 0, "the second table drains on the same tick");
   clock += HOUR_MS;
   const second = await retentionRun();
-  assert.equal(second.table, "web_research_log", "the rotated index survives to the next tick");
-  assert.equal(second.deleted, 1);
-  assert.equal(count("web_research_log"), 0);
-  clock += HOUR_MS;
-  const third = await retentionRun();
-  assert.equal(third.table, "web_fetch_log", "the rotation wraps around");
+  assert.equal(second.deleted, 0, "a drained table stays drained");
 });
 
 function landQueueRow(store, at) {

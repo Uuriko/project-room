@@ -146,6 +146,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
   paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
   paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
+  paths.add('server/retention-registry.mjs'); // retention disposition registry (imported by server/retention-run.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)

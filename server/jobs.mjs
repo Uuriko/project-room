@@ -6,7 +6,7 @@ import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
 import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
-import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
+import { runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
@@ -224,19 +224,39 @@ function integrityFailure(error) {
 }
 
 async function runNodeRetention(store, ctx) {
-  const tableIndex = ctx.retentionIndex ?? 0;
+  // Every age-ruled table drains every tick, looping batches until the
+  // table is empty or the job deadline passes (retention-run.mjs). The
+  // companion prunes share the same budget: each is called with a larger
+  // batch and re-called while it reports a full batch, so a backlog in
+  // any of them drains across one tick's budget instead of at a fixed
+  // per-tick rate (HUNT-SOAK S-4).
+  const deadline = ctx.deadline ?? Infinity;
   const receipt = runLiveStoreRetention({
     store, env: ctx.env, now: new Date(ctx.now?.() ?? Date.now()).toISOString(),
-    tableIndex, deadline: ctx.deadline
+    deadline
   });
-  ctx.retentionIndex = (tableIndex + 1) % RETENTION_TABLES.length;
   let webhookDeliveries = { deleted: 0 };
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
   try {
-    webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
-    oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
-    abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
+    let webhooks = store.agentPlugin.pruneWebhookDeliveries();
+    webhookDeliveries = { deleted: webhooks.deleted };
+    while (webhooks.moreMayRemain && Date.now() < deadline) {
+      webhooks = store.agentPlugin.pruneWebhookDeliveries();
+      webhookDeliveries.deleted += webhooks.deleted;
+    }
+    let oauth = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 500 });
+    oauthProvider = { pruned: oauth.pruned };
+    while (oauth.pruned >= 500 && Date.now() < deadline) {
+      oauth = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 500 });
+      oauthProvider.pruned += oauth.pruned;
+    }
+    let abuse = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 500 });
+    abuseRateBuckets = { pruned: abuse.pruned };
+    while (abuse.pruned >= 500 && Date.now() < deadline) {
+      abuse = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 500 });
+      abuseRateBuckets.pruned += abuse.pruned;
+    }
   } catch { /* a room that has never stored these caches has no table */ }
   return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
 }
@@ -783,11 +803,10 @@ export function startNodeScheduler({
         lastGrade: null, consecutiveNoProgressExhaustions: 0 });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
-  // store progress on it across ticks (runNodeRetention advances
-  // retentionIndex so each tick prunes the next table). It must therefore be
-  // passed to jobs as-is — a fresh spread copy per tick silently discarded
-  // the rotated retentionIndex and every tick pruned table index 0 again.
-  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0 };
+  // store progress on it across ticks. It must therefore be passed to jobs
+  // as-is — a fresh spread copy per tick silently discarded any progress a
+  // job stored on it.
+  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick };
   let timer = null;
   let running = false;
   async function runOnce() {
