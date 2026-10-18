@@ -14,9 +14,15 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { bountyEscrowSchema } from "../server/bounty-escrow.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { ownerOverview } from "../server/owner-overview.mjs";
+import { spendAllowanceReport } from "../server/spend-allowance.mjs";
+import { foldSessionEvents } from "../server/usage-summary.mjs";
+import { BountyEscrow } from "../server/bounty-escrow.mjs";
+import { createReceiptSigner, generateReceiptKeyPair, verifyBountyReceipt } from "../server/bounty-receipts.mjs";
+import { agentHeartbeatSchema } from "../server/agent-heartbeats.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { createWork, claimWork } from "../server/work-claims.mjs";
+import { claimIdle } from "../server/agent-fleet.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const DAY = 24 * 3600 * 1000;
@@ -313,4 +319,251 @@ test("window parameter is validated", async t => {
   const ok = await getOverview(f, f.owner.headers, "?window=24h");
   assert.equal(ok.status, 200);
   assert.equal(ok.body.window.key, "24h");
+});
+
+// --- Slice 2 (#3343): Money + Roster ---------------------------------------
+
+function seedAgentMember(f, roomId, memberId = "agent", displayName = "Worker") {
+  const key = roomId === "room-a" ? f.keys.a : f.keys.b;
+  f.send(key, roomId, T.MEMBER_ADDED, { memberId, displayName, kind: "agent",
+    permissions: ["accept_work", "complete_work", "write_external"], accountableHumanId: "owner" });
+  setTier(f.store.db, roomId, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  return f.store.issueAccessKey(roomId, memberId);
+}
+
+function proposeAndAccept(f, roomId, agentKey, workItemId, title) {
+  const key = roomId === "room-a" ? f.keys.a : f.keys.b;
+  f.send(key, roomId, T.WORK_PROPOSED, { workItemId, title, definitionOfDone: "done",
+    accountableMemberId: "agent", mode: "read", independentVerificationRequired: false,
+    ownerDecisionRequired: false });
+  const revision = () => f.store.room(roomId).state.workItems[workItemId].revision;
+  f.send(agentKey, roomId, T.WORK_ACCEPTED, { workItemId, expectedRevision: revision() });
+  return revision;
+}
+
+function runSession(f, roomId, agentKey, workItemId, revision, body) {
+  return f.store.mutateWorkSession(agentKey, roomId,
+    { requestId: randomUUID(), workItemId, expectedRevision: revision(), action: "set_status", ...body });
+}
+
+test("slice2-1: Panel C matches spendAllowanceReport exactly (golden comparison)", async t => {
+  const f = await setup(t, { serve: true });
+  const agentKey = seedAgentMember(f, "room-a");
+  f.send(f.keys.a, "room-a", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 10000, periodDays: 30 });
+  const revision = proposeAndAccept(f, "room-a", agentKey, "w-panel", "Panel run");
+  runSession(f, "room-a", agentKey, "w-panel", revision, { status: "processing", budget: { maxSpendCents: 6120 } });
+
+  const golden = spendAllowanceReport(f.store.room("room-a").state, Date.now());
+  assert.equal(golden.committedCents, 6120);
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const room = body.money.cents.rooms.find(entry => entry.roomId === "room-a");
+  assert.ok(room, "room-a Panel C entry exists");
+  assert.equal(room.allowanceCents, golden.allowance.allowanceCents);
+  assert.equal(room.spentCents, golden.spentCents);
+  assert.equal(room.reservedCents, golden.reservedCents);
+  assert.equal(room.heldCents, golden.heldCents);
+  assert.equal(room.committedCents, golden.committedCents);
+  assert.equal(room.headroomCents, golden.headroomCents);
+  assert.equal(room.overCents, golden.overCents);
+  assert.equal(room.burnFraction, 6120 / 10000);
+  assert.equal(body.money.cents.source, "agent-reported");
+  // The attribution fold agrees with foldSessionEvents on the same events.
+  const rows = f.store.db.prepare(
+    `SELECT json_extract(body,'$.type') AS type, json_extract(body,'$.data.workItemId') AS workItemId,
+            json_extract(body,'$.data.spendCents') AS spendCents, json_extract(body,'$.data.budgetEnforced') AS budgetEnforced
+     FROM events WHERE room_id='room-a' AND json_extract(body,'$.type') IN ('session.started','session.status_changed','session.stopped')
+     ORDER BY sequence`).all();
+  const folded = foldSessionEvents(rows);
+  assert.equal(body.money.cents.totals.reportedCents, folded.spend.reportedCents);
+  assert.equal(body.money.cents.totals.unreportedAttempts, folded.spend.sessionsUnreported);
+});
+
+test("slice2-2: Panel R locked total equals the escrow-ledger sum; no field mixes the panels", async t => {
+  const f = await setup(t, { serve: true });
+  const nowIso = new Date().toISOString();
+  f.store.db.prepare(`INSERT INTO bounty_records (bounty_id, room_id, title, criteria, amount_millis, poster, state,
+    state_changed_ms, deadline_ms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run("bnty-funded", "room-a", "Funded work", "Ship it", 4000, "owner", "funded", Date.now(), Date.now() + 30 * DAY, nowIso, nowIso);
+  seedDispute(f, "room-a", { bountyId: "bnty-disputed", disputeId: "disp-r", title: "Disputed work",
+    amountMillis: 2500, openedMs: Date.now() - DAY });
+
+  const ledgerSum = f.store.db.prepare(
+    `SELECT COALESCE(SUM(amount_millis),0) AS total FROM bounty_records
+     WHERE room_id='room-a' AND state IN ('funded','claimed','submitted','accepted','disputed')`).get().total;
+  assert.equal(ledgerSum, 6500);
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const room = body.money.credits.rooms.find(entry => entry.roomId === "room-a");
+  assert.equal(room.lockedMillis, ledgerSum);
+  assert.equal(room.disputedMillis, 2500);
+  assert.deepEqual(room.byGroup.funded, { count: 1, amountMillis: 4000 });
+  assert.deepEqual(room.byGroup["in-review"], { count: 1, amountMillis: 2500 });
+  assert.equal(body.money.credits.totals.lockedMillis, 6500);
+  assert.equal(body.money.credits.unit, "milli-credits");
+  assert.equal(body.money.cents.unit, "cents");
+  const walk = (value, path) => {
+    if (Array.isArray(value)) return value.forEach((entry, i) => walk(entry, `${path}/${i}`));
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value);
+      assert.ok(!(keys.some(key => /Cents/.test(key)) && keys.some(key => /Millis/.test(key))),
+        `mixed currency fields at ${path}: ${keys.join(",")}`);
+      for (const [key, entry] of Object.entries(value)) walk(entry, `${path}/${key}`);
+    }
+  };
+  walk(body.money, "money"); walk(body.roster, "roster");
+});
+
+test("slice2-3: an unreported session renders unknown everywhere, is counted, and is never zeroed", async t => {
+  const f = await setup(t, { serve: true });
+  const agentKey = seedAgentMember(f, "room-b");
+  const revision = proposeAndAccept(f, "room-b", agentKey, "w-silent", "Silent run");
+  runSession(f, "room-b", agentKey, "w-silent", revision, { status: "processing" });
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const task = body.money.cents.tasks.find(entry => entry.workItemId === "w-silent");
+  assert.ok(task, "the silent task has a Panel C row");
+  assert.equal(task.spendCents, "unknown");
+  assert.equal(task.unreportedAttempts, 1);
+  assert.ok(!JSON.stringify(task).includes('"spendCents":0'), "no zero is rendered for the unreported attempt");
+  const agentCut = body.money.cents.agents.find(entry => entry.roomId === "room-b" && entry.memberId === "agent");
+  assert.equal(agentCut.periodCostCents, "unknown");
+  assert.equal(agentCut.unreportedAttempts, 1);
+  assert.equal(body.money.cents.totals.reportedCents, "unknown");
+  assert.ok(body.money.cents.totals.unreportedAttempts >= 1);
+  const rosterRow = body.roster.rows.find(entry => entry.roomId === "room-b" && entry.memberId === "agent");
+  assert.equal(rosterRow.periodCostCents, "unknown");
+  assert.equal(rosterRow.unreportedAttempts, 1);
+});
+
+test("slice2-4: cost per accepted outcome shows the ratio at n=2 and suppresses it at n=0", async t => {
+  const f = await setup(t, { serve: true });
+  const agentKey = seedAgentMember(f, "room-a");
+  const complete = workItemId => {
+    const revision = proposeAndAccept(f, "room-a", agentKey, workItemId, `Done ${workItemId}`);
+    f.send(agentKey, "room-a", T.WORK_STARTED, { workItemId, expectedRevision: revision() });
+    const rev2 = () => f.store.room("room-a").state.workItems[workItemId].revision;
+    f.send(agentKey, "room-a", T.WORK_COMPLETED, { workItemId, expectedRevision: rev2(),
+      summary: "did it", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1",
+      nextAction: "none", signedEvidence: f.signEvidence() });
+  };
+  complete("w-done-1"); complete("w-done-2");
+  const revision = proposeAndAccept(f, "room-a", agentKey, "w-spend", "Spend run");
+  runSession(f, "room-a", agentKey, "w-spend", revision, { status: "processing", budget: { maxSpendCents: 2000 } });
+  const revSpend = () => f.store.room("room-a").state.workItems["w-spend"].revision;
+  runSession(f, "room-a", agentKey, "w-spend", revSpend, { status: "active", spendCents: 1000 });
+  runSession(f, "room-a", agentKey, "w-spend", revSpend, { status: "done", spendCents: 1000 });
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const outcome = body.money.cents.costPerAcceptedOutcome;
+  assert.equal(outcome.status, "ok");
+  assert.equal(outcome.acceptedOutcomes, 2);
+  assert.equal(outcome.ratioCents, 500);
+  assert.equal(outcome.label, "$5.00 / accepted outcome (n=2, 0 unreported)");
+  const rosterRow = body.roster.rows.find(entry => entry.roomId === "room-a" && entry.memberId === "agent");
+  assert.equal(rosterRow.lifetimeAcceptedOutcomes, 2);
+
+  const empty = await setup(t, { serve: true });
+  const none = await getOverview(empty, empty.owner.headers);
+  assert.equal(none.body.money.cents.costPerAcceptedOutcome.status, "no_outcomes");
+  assert.equal(none.body.money.cents.costPerAcceptedOutcome.ratioCents, null);
+  assert.equal(none.body.money.cents.costPerAcceptedOutcome.label, "no accepted outcomes in window");
+});
+
+test("slice2-5: roster derivations agree with presence() and claimIdle on the same fixture", async t => {
+  const f = await setup(t, { serve: true });
+  const agentKey = seedAgentMember(f, "room-a", "agent", "Working Agent");
+  seedAgentMember(f, "room-a", "agent-stalled", "Stalled Agent");
+  seedAgentMember(f, "room-a", "agent-offline", "Offline Agent");
+
+  const revision = proposeAndAccept(f, "room-a", agentKey, "w-live", "Live task");
+  runSession(f, "room-a", agentKey, "w-live", revision, { status: "processing" });
+
+  const now = Date.now();
+  let claim = createWork({ id: "claim-stale", title: "Untouched claim" }, { now: new Date(now - 3 * 3600 * 1000), agentId: "owner" });
+  claim = claimWork(claim, "agent-stalled", { now: new Date(now - 3 * 3600 * 1000) });
+  f.store.workClaims.set("room-a", claim);
+  assert.equal(claimIdle(claim, now), true, "fixture claim is idle per claimIdle");
+
+  const identity = f.store.identities.create("Offline Agent");
+  f.store.db.exec(agentHeartbeatSchema);
+  f.store.db.prepare("INSERT INTO identity_links (room_id, member_id, identity_id, linked_at) VALUES (?,?,?,?)")
+    .run("room-a", "agent-offline", identity.identityId, now);
+  f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "host-offline", mode: "pull-only" });
+  f.store.db.prepare("UPDATE agent_hosts SET last_seen_at=? WHERE agent_id=?")
+    .run(now - 3600 * 1000, identity.identityId);
+
+  const presenceDoc = f.store.presence(f.keys.a, "room-a", []);
+  const presenceAgent = presenceDoc.members.find(member => member.memberId === "agent");
+  assert.equal(presenceAgent.state, "working");
+  assert.equal(presenceAgent.workingOn[0].title, "Live task");
+  const presenceOffline = presenceDoc.members.find(member => member.memberId === "agent-offline");
+  assert.equal(presenceOffline.presence.status, "offline");
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const rowOf = memberId => body.roster.rows.find(entry => entry.roomId === "room-a" && entry.memberId === memberId);
+  const working = rowOf("agent");
+  assert.equal(working.workState, "working");
+  assert.equal(working.currentWork.title, "Live task");
+  assert.equal(working.currentWork.title, presenceAgent.workingOn[0].title);
+  assert.equal(working.identityId, null);
+  assert.equal(rowOf("agent-stalled").workState, "stalled");
+  const offline = rowOf("agent-offline");
+  assert.equal(offline.workState, "offline");
+  assert.equal(offline.hostStatus, "offline");
+  assert.equal(offline.identityId, identity.identityId);
+  assert.equal(offline.hostStatus, presenceOffline.presence.status);
+  assert.equal(body.roster.counts.working, 1);
+  assert.equal(body.roster.counts.stalled, 1);
+  assert.equal(body.roster.counts.offline, 1);
+  // Owner-only: the human owner never appears as a roster row.
+  assert.ok(body.roster.rows.every(entry => entry.memberId !== "owner"));
+});
+
+test("slice2-6: the roster last-receipt payload names a receipt verifyBountyReceipt accepts", async t => {
+  const f = await setup(t, { serve: true });
+  seedAgentMember(f, "room-a", "agent", "Receipt Agent");
+  const keyPair = generateReceiptKeyPair();
+  const signer = createReceiptSigner({ seedHex: keyPair.seedHex, ref: "test-operator" });
+  const escrow = new BountyEscrow(f.store, { now: () => Date.now(), receipts: signer });
+  escrow.ensureGenesis("room-a");
+  const posted = escrow.postBounty("room-a", { poster: "owner", title: "Receipt work", criteria: "done",
+    amount: 5, deadline: new Date(Date.now() + 30 * DAY).toISOString() });
+  escrow.fundBounty("room-a", posted.bounty.bountyId, { funder: "owner" });
+  const claimed = escrow.claimBounty("room-a", posted.bounty.bountyId, { claimant: "agent" });
+  const receipt = claimed.receipt.signed[0];
+  assert.ok(receipt, "claim issued a signed receipt");
+  const journal = { entryHash: id => f.store.db.prepare(
+    "SELECT hash FROM bounty_journal WHERE entry_id=?").get(id)?.hash ?? null };
+  assert.equal(verifyBountyReceipt(receipt, { expectedPubkey: keyPair.pubkeyHex, journal }).ok, true);
+  const tampered = { ...receipt, amountMillis: "1" };
+  assert.equal(verifyBountyReceipt(tampered, { expectedPubkey: keyPair.pubkeyHex, journal }).ok, false);
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  const row = body.roster.rows.find(entry => entry.roomId === "room-a" && entry.memberId === "agent");
+  assert.ok(row.lastReceipt, "roster row carries the last receipt linkage");
+  assert.equal(row.lastReceipt.receiptId, receipt.receiptId);
+  assert.equal(row.lastReceipt.bountyId, posted.bounty.bountyId);
+  assert.ok(row.lastReceipt.drill.path.includes(posted.bounty.bountyId));
+  // Panel R sees the same escrow: the funded+claimed bounty is locked, and
+  // the agent's bond sits in its journal balance.
+  const creditRoom = body.money.credits.rooms.find(entry => entry.roomId === "room-a");
+  assert.equal(creditRoom.lockedMillis, 5000);
+  const agentBalance = body.money.credits.agents.find(entry => entry.roomId === "room-a" && entry.accountId === "agent");
+  assert.ok(agentBalance && agentBalance.lockedMillis >= 1000, "claim bond is locked for the agent");
+});
+
+test("slice2-admin: an admin-everywhere viewer gets no money and no roster", async t => {
+  const f = await setup(t, { serve: true });
+  seedAgentMember(f, "room-a");
+  f.send(f.keys.a, "room-a", T.MEMBER_ADDED, { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] });
+  f.store.createAccount("admin2-account"); f.store.bindHumanAccount("room-a", "admin", "admin2-account");
+  const admin = await getOverview(f, f.accountSession("admin2-account").headers);
+  assert.equal(admin.status, 200, JSON.stringify(admin.body));
+  assert.equal(admin.body.money, null);
+  assert.equal(admin.body.roster, null);
 });
