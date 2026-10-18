@@ -110,35 +110,29 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.match((await raw(origin, "/receipts")).text, /Public task/);
 });
 
-test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner toggle", async t => {
+test("share surfaces: JSON-LD and the share block ride the same owner toggle; the poster routes are deleted", async t => {
   const { origin, store, ownerKey } = await serve(t);
   // The public-work receipt is public from the start: its page carries
-  // structured data and points its share image at the per-receipt card.
+  // structured data and the share block. The generated posters (EXP-5's
+  // per-receipt OG card and badge) are deleted — the page names only the
+  // static site image, and the card routes answer 404 like any unknown
+  // path, whatever the toggle says.
   const pwrPage = await raw(origin, `/receipts/${PWR}`);
   assert.equal(pwrPage.status, 200);
   assert.match(pwrPage.text, /application\/ld\+json/);
-  assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/og\\.png`));
-  assert.match(pwrPage.text, /og:image:alt" content="Artifact hash recorded/);
-  const og = await fetch(`${origin}/receipts/${PWR}/og.png`);
-  assert.equal(og.status, 200);
-  assert.match(og.headers.get("content-type"), /image\/png/);
-  assert.match(og.headers.get("cache-control"), /max-age=300/);
-  const bytes = new Uint8Array(await og.arrayBuffer());
-  assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
-  // The share block shows the exact pre-filled text and one-tap targets,
-  // and the badge serves the graded verdict as an embeddable SVG.
+  assert.doesNotMatch(pwrPage.text, /og\.png/);
+  assert.doesNotMatch(pwrPage.text, /badge\.svg/);
+  assert.doesNotMatch(pwrPage.text, /og:image:alt/);
+  assert.equal((await fetch(`${origin}/receipts/${PWR}/og.png`)).status, 404);
+  assert.equal((await fetch(`${origin}/receipts/${PWR}/badge.svg`)).status, 404);
+  const post = await raw(origin, `/receipts/${PWR}/og.png`, { method: "POST" });
+  assert.equal(post.status, 404);
+  // The share block shows the exact pre-filled text and one-tap targets.
   assert.match(pwrPage.text, /Share this receipt/);
   assert.match(pwrPage.text, /Work, verified: Public task — Artifact hash recorded/);
   assert.match(pwrPage.text, /twitter\.com\/intent\/tweet/);
-  assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/badge\\.svg`));
-  const badge = await fetch(`${origin}/receipts/${PWR}/badge.svg`);
-  assert.equal(badge.status, 200);
-  assert.match(badge.headers.get("content-type"), /image\/svg\+xml/);
-  assert.ok((await badge.text()).includes("Artifact hash recorded"));
-  const post = await raw(origin, `/receipts/${PWR}/og.png`, { method: "POST" });
-  assert.equal(post.status, 405);
   // A claim receipt joins once the owner publishes; unpublishing removes
-  // the page and the card together — the card never outlives the toggle.
+  // the page — the toggle still governs everything that remains.
   await raw(origin, "/api/rooms/commons/commands", {
     method: "POST",
     headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
@@ -146,9 +140,10 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   });
   const id = collectPublicReceipts(store).find(item => item.title === "Ship the door")?.id;
   assert.match(id, /^wcr_/);
-  assert.equal((await fetch(`${origin}/receipts/${id}/og.png`)).status, 200);
+  assert.equal((await fetch(`${origin}/receipts/${id}/og.png`)).status, 404);
   const claimPage = await raw(origin, `/receipts/${id}`);
-  assert.match(claimPage.text, /og:image:alt" content="Server-verified merge/);
+  assert.equal(claimPage.status, 200);
+  assert.doesNotMatch(claimPage.text, /og:image:alt/);
   await raw(origin, "/api/rooms/commons/commands", {
     method: "POST",
     headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },

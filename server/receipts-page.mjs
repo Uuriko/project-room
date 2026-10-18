@@ -4,7 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -104,18 +104,14 @@ ${next}
 
 // The share block. The pre-filled text is shown verbatim — what gets
 // posted is exactly what the page says — and the share targets are plain
-// anchors, because these pages are script-free. The badge embed is the
-// worker's copy-paste path into READMEs and portfolios. This renders only
-// for a receipt that already resolved as public through receipts-live.
+// anchors, because these pages are script-free. This renders only for a
+// receipt that already resolved as public through receipts-live.
 function shareSection(receipt) {
   const links = receiptShareLinks(receipt);
   return `<section class="share" aria-label="Share this receipt">
 <h2>Share this receipt</h2>
 <p class="meta">${escapeHtml(links.text)}</p>
 <p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
-<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
-<p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
-<p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
 </section>`;
 }
 
@@ -319,8 +315,6 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     description,
     path: `/receipts/${receipt.id}`,
     jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
-    ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
-    ogAlt: verdictLine,
   })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>

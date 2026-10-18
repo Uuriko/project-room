@@ -8,13 +8,6 @@ No login. The page is indexable when the URL has no query string.
 
 ## Share layer
 
-`/receipts/<id>/og.png` is the receipt's share card: the title, the graded verdict line, and a footer
-stating that hashes are stored values, not re-verified — rendered at request time from the same public
-record as the page and named by the page's `og:image`. It exists only while the receipt is public: the
-read re-checks the owner toggle and operator unpublish on every request. Unlike the pages (`no-store`),
-the card is cacheable for five minutes so link unfurlers can fetch it — the one deliberate exception,
-bounded by that TTL.
-
 The detail page embeds JSON-LD (`CreativeWork`) mirroring the visible record: title, verdict level,
 pull request, hash evidence (labelled as stored, not re-verified), and the proven note as its
 description. Names are omitted — the page qualifies them as room-recorded, not identity-verified, and
@@ -23,16 +16,13 @@ is a record, not a review.
 
 The detail page also carries a share block: the pre-filled share text
 ("Work, verified: <title> — <verdict line>") shown verbatim on the page,
-one-tap share links (X, LinkedIn, email — plain anchors; these pages are
-script-free), and the badge embed below.
+and one-tap share links (X, LinkedIn, email — plain anchors; these pages
+are script-free).
 
-`/receipts/<id>/badge.svg` is the embeddable badge for READMEs and
-portfolios: the surface name and the receipt's graded verdict in words —
-never a bare checkmark, which readers take as a blanket quality verdict.
-It resolves through the same public read as the page, so it exists only
-while the receipt is public, and it is cacheable under the same
-five-minute exception as the OG card. The snippet the page offers wraps
-the badge in the receipt link with the verdict line as its alt text.
+Generated share posters (the per-receipt `/receipts/<id>/og.png` card and
+`/receipts/<id>/badge.svg` badge, and the per-room proof card below) were
+removed: the pages carry the static site `og:image`, and the share block
+above is the forwarding surface.
 
 ## Per-room proof page
 
@@ -59,10 +49,7 @@ receipt, and its share surfaces follow that same gate.
 
 The proof page carries the same share layer as a receipt: JSON-LD
 (`CollectionPage` with an `ItemList` mirroring the visible entries and
-their level notes) and a per-room share card at
-`/r/<slug>/proof/og.png` — the room's counts and the stored-hashes
-footer — gated by the same view and cacheable under the same five-minute
-exception as the receipt card.
+their level notes).
 
 ## What is public
 
