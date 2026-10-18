@@ -6,7 +6,7 @@
 //   - a clean record of every shape verifies, with the verdict word
 //     matching what the server itself actually checked;
 //   - a tampered stored row, journal entry, chain link, or artifact
-//     flips the verdict to contradicted;
+//     degrades the verdict to no-longer-verifiable (the check itself reports contradicted);
 //   - a check that cannot run (GitHub unreachable, stubbed down here)
 //     is reported not-checked and the verdict drops to partially
 //     verifiable — never silently covered, never failed;
@@ -84,7 +84,7 @@ test("lot: a clean settled lot re-validates its ledger chain", async () => {
   const receipt = publicReceiptById(store, lotId);
   assert.ok(receipt, "fixture lot resolves");
   const verification = await verifyPublicReceipt(store, receipt, { nowMs: NOW });
-  assert.equal(verification.verdict, "record-checked");
+  assert.equal(verification.verdict, "room-recorded");
   assert.equal(verification.checkedAt, new Date(NOW).toISOString());
   assert.equal(check(verification, "journal").status, "pass");
   assert.ok(verification.scope.notChecked.some(line => /any good/.test(line)), "scope names what no check judges");
@@ -97,7 +97,7 @@ test("lot: a tampered journal entry flips the verdict to contradicted", async ()
   const verification = await verify(store, lotId);
   assert.equal(check(verification, "journal").status, "contradicted");
   assert.match(check(verification, "journal").detail, /altered after it was written/);
-  assert.equal(verification.verdict, "contradicted");
+  assert.equal(verification.verdict, "no-longer-verifiable");
 });
 
 test("lot: a rewritten predecessor hash breaks the chain link check", async () => {
@@ -110,7 +110,7 @@ test("lot: a rewritten predecessor hash breaks the chain link check", async () =
   const verification = await verify(store, lotId);
   assert.equal(check(verification, "journal").status, "contradicted");
   assert.match(check(verification, "journal").detail, /chain is broken/);
-  assert.equal(verification.verdict, "contradicted");
+  assert.equal(verification.verdict, "no-longer-verifiable");
 });
 
 // --- work-claim receipt: the room record is the source ---------------------
@@ -148,7 +148,7 @@ test("work claim: a tampered stored row contradicts its source", async t => {
   const verification = await verify(store, receiptId);
   assert.equal(check(verification, "source-record").status, "contradicted");
   assert.match(check(verification, "source-record").detail, /title/);
-  assert.equal(verification.verdict, "contradicted");
+  assert.equal(verification.verdict, "no-longer-verifiable");
 });
 
 // --- public-work receipt: stored delivery record + artifact ----------------
@@ -180,12 +180,12 @@ test("public work: record + artifact re-validate; a forged artifact contradicts"
   const clean = await verify(store, receiptId);
   assert.equal(check(clean, "source-record").status, "pass");
   assert.equal(check(clean, "artifact").status, "pass");
-  assert.equal(clean.verdict, "record-checked");
+  assert.equal(clean.verdict, "room-recorded");
 
   store.db.prepare("UPDATE public_work_receipts SET artifact_text='forged after the fact' WHERE receipt_id=?").run(receiptId);
   const forged = await verify(store, receiptId);
   assert.equal(check(forged, "artifact").status, "contradicted");
-  assert.equal(forged.verdict, "contradicted");
+  assert.equal(forged.verdict, "no-longer-verifiable");
 });
 
 test("public work: a pruned delivery record is no longer verifiable", async t => {

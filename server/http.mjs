@@ -742,6 +742,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
       { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
   }
+  // Verify-at-read-time cache (#4058): receiptVerificationFor runs the
+  // receipt re-check (server/receipt-verify.mjs) for the HTML receipt
+  // page. The external leg (GitHub) is bounded — at most one fresh run
+  // per receipt per RECEIPT_VERIFY_CACHE_MS per server instance, shared
+  // by every reader; a cached verdict keeps its own checkedAt stamp and
+  // is never re-stamped. ?verify=1 ("Verify now") bypasses the cache,
+  // replaces the cached run, and keeps its own per-address rate bucket.
+  const RECEIPT_VERIFY_CACHE_MS = 60_000;
+  const receiptVerifyCache = new Map();
+  async function receiptVerificationFor(receipt, { fresh = false, token = null } = {}) {
+    const cached = receiptVerifyCache.get(receipt.id);
+    if (!fresh && cached && cached.expiresAt > Date.now()) return cached.verification;
+    const verification = await verifyPublicReceipt(store, receipt, {
+      fetchImpl: fetchPullRequest ?? fetch, token,
+    });
+    if (verification) {
+      if (receiptVerifyCache.size >= 512) receiptVerifyCache.clear();
+      receiptVerifyCache.set(receipt.id, { verification, expiresAt: Date.now() + RECEIPT_VERIFY_CACHE_MS });
+    }
+    return verification;
+  }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
     const matches = (req.headers.cookie || "").split(";").map(value => value.trim()).filter(value => value.startsWith(`${scoped}=`));
@@ -2081,19 +2102,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const receipt = publicReceiptById(store, receiptDetail[1]);
           if (!receipt) reject(404, "not_found", "Not found");
           res.setHeader("Link", publicPageLinks(url, `/receipts/${receipt.id}`));
-          // Verify at read time (?verify=1, GET only): re-run the receipt's
-          // checks now — source record, artifact/journal hashes, and the
-          // linked pull request re-fetched from GitHub through the same
-          // fetch/token seams as the claim poll. A verify costs a GitHub
-          // call, so it has its own small bucket; a failed run degrades to
-          // the plain stored record, never an error page.
+          // Verify at read time (#4058): an HTML receipt read runs the
+          // re-check through receiptVerificationFor — fresh at most once
+          // per receipt per minute per instance (see the cache above), so
+          // the verdict block renders from a live re-check, stamped with
+          // the time that run ran. ?verify=1 — the reader's "Verify now"
+          // — always runs fresh under its own small bucket and replaces
+          // the cached run. The JSON twin keeps the stored record on
+          // plain reads (its `verification` field is the tier recorded
+          // on the claim) and gains the read-time verification object
+          // only on ?verify=1. A failed run degrades to the plain stored
+          // record, never an error page.
           let verification = null;
-          if (req.method === "GET" && url.searchParams.get("verify") === "1") {
-            rate(`receipt-verify:${remoteAddress}`, 10);
-            verification = await verifyPublicReceipt(store, receipt, {
-              fetchImpl: fetchPullRequest ?? fetch,
-              token: githubToken === undefined ? githubTokenFromEnv(globalThis.process?.env ?? {}) : githubToken,
-            }).catch(() => null);
+          if (req.method === "GET") {
+            const verifyNow = url.searchParams.get("verify") === "1";
+            if (verifyNow) rate(`receipt-verify:${remoteAddress}`, 10);
+            if (verifyNow || !receiptDetail[2]) {
+              verification = await receiptVerificationFor(receipt, {
+                fresh: verifyNow,
+                token: githubToken === undefined ? githubTokenFromEnv(globalThis.process?.env ?? {}) : githubToken,,
+              }).catch(() => null);
+            }
           }
           if (receiptDetail[2]) {
             const body = Buffer.from(JSON.stringify(receiptJson(receipt, verification)));

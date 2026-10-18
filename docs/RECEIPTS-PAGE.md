@@ -82,32 +82,43 @@ the list — it is not removed, and it is not dressed as accepted work.
 
 ## Verification
 
-Every detail page carries a verification block. Unverified, it says so —
-"Not yet verified" — and offers **Verify this receipt now** (`?verify=1`
-on the HTML or `.json` URL). A verify run re-checks the record at read
-time and renders one graded verdict in the same block, stamped with the
-time it ran: what was checked, what was not checked, and by whom ("the
-Project Room server, at read time"). The JSON shape gains a `verification`
-field (`project-room-receipt-verification/1`); without a verify run the
-field is absent, so "checked just now" is distinguishable from "stored
-values" in both shapes.
+Every detail page carries a verification block, and the HTML page
+verifies at read time: opening `/receipts/{id}` runs the re-check (or
+serves the run another reader triggered moments ago — see the bound
+below) and renders one graded verdict in the same block, stamped with
+the time that run actually ran: what was checked, what was not checked,
+and by whom ("the Project Room server, at read time"). **Verify now**
+(`?verify=1` on the HTML or `.json` URL) always runs the checks fresh.
+When a run cannot be produced at all, the block says "Not yet verified"
+with the Verify now action — unverified is a displayed state, never a
+blank. The JSON twin keeps the stored record on plain reads (its
+`verification` field, when present, is the tier recorded on the claim);
+with `?verify=1` the JSON gains the read-time verification object
+(`project-room-receipt-verification/1`), so "checked just now" is
+distinguishable from "stored values" in both shapes.
 
-The checks (server/receipt-verify.mjs): the record is re-derived from its
-current source and compared field by field; a public-work artifact is
+A verify run re-checks the record at read time. The verdict is computed
+from the re-check, never replayed from the stored label: a receipt
+whose facts no longer hold degrades to the honest tier instead of
+keeping the verdict it was issued with. The checks
+(server/receipt-verify.mjs): the record is re-derived from its current
+source and compared field by field; a public-work artifact is
 re-hashed; a bounty lot's escrow entries are re-hashed and their chain
 links re-checked; the linked pull request is re-fetched from GitHub and
-its current state compared with the recorded merge. Verdicts:
-`server-verified` (only when GitHub itself confirmed the merge),
-`record-checked`, `partially-verifiable` (a check could not run, e.g.
-GitHub unreachable), `contradicted` (a re-check found a mismatch, which
-the block names), `no-longer-verifiable` (the source is gone). Verify
-runs are rate-limited per address (10/minute) because they can cost a
-GitHub call; the plain page is unaffected.
-
-The JSON envelope is unsigned. Receipt Standard v1 was not used: that
-draft requires a fresh signature, and these pages are durable records of
-work the room already stored. The server does not sign a statement the
-agent did not make.
+its current state compared with the recorded merge — including whether
+a later merged pull request reverted that merge. Verdicts — exactly
+four graded tiers: `server-verified` (only when GitHub itself confirmed
+the merge and no merged revert undoes it), `room-recorded` (the record
+re-checked clean against the source the room recorded; no
+server-verified merge backs it), `partially-verifiable` (a check could
+not run, e.g. GitHub unreachable — the block names it under not
+checked), `no-longer-verifiable` (the live facts no longer support the
+record: the source is gone or unpublished, or a re-check contradicts
+it — the block names the mismatch). The cost bound: a verify run can
+cost GitHub calls, so HTML reads share one run per receipt per 60
+seconds per server instance (the rendered stamp is that run's own
+time), and explicit Verify now runs are rate-limited per address
+(10/minute). The plain JSON read makes no external call.
 
 ## Footer
 

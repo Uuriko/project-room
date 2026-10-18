@@ -182,7 +182,7 @@ test("result-mode finishes project at their true tier and resolve anonymously", 
   const verifiedPage = await raw(origin, `/receipts/${verified.id}`);
   assert.equal(verifiedPage.status, 200);
   assert.match(verifiedPage.text, /Member-verified completion/);
-  assert.match(verifiedPage.text, /a room member other than the worker reviewed this delivery and recorded approval/);
+  assert.match(verifiedPage.text, /data-verdict="room-recorded"/, "the plain page renders the read-time verdict block (#4058); the member-reviewed tier still names itself in the record above");
   const verifiedJson = await raw(origin, `/receipts/${verified.id}.json`);
   assert.equal(verifiedJson.status, 200);
   assert.deepEqual(JSON.parse(verifiedJson.text).verification, { state: "verified" });
@@ -190,7 +190,7 @@ test("result-mode finishes project at their true tier and resolve anonymously", 
   const selfPage = await raw(origin, `/receipts/${selfAttested.id}`);
   assert.equal(selfPage.status, 200);
   assert.match(selfPage.text, /Self-attested completion/);
-  assert.match(selfPage.text, /No other member reviewed it/);
+  assert.match(selfPage.text, /data-verdict="room-recorded"/, "the plain page renders the read-time verdict block (#4058)");
   const selfJson = await raw(origin, `/receipts/${selfAttested.id}.json`);
   assert.equal(selfJson.status, 200);
   assert.deepEqual(JSON.parse(selfJson.text).verification, { state: "self_attested" });

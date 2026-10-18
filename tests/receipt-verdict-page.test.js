@@ -24,7 +24,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 const PR_URL = "https://github.com/Uuriko/project-room/pull/2099";
-const github = body => async () => ({ status: 200, ok: true, text: async () => JSON.stringify(body) });
+const github = (body, timeline = []) => async url => ({ status: 200, ok: true, text: async () => JSON.stringify(String(url).includes("/timeline") ? timeline : body) });
 const mergedFetch = github({ state: "closed", merged: true,
   merged_at: "2026-10-01T00:00:00.000Z", merge_commit_sha: "a".repeat(40) });
 const openFetch = github({ state: "open", merged: false });
@@ -50,16 +50,43 @@ async function serve(t, fetchPullRequest) {
   return { origin: `http://127.0.0.1:${server.address().port}`, receiptId };
 }
 
-test("the plain page shows Not yet verified with the action, and claims nothing", async t => {
+test("the plain page verifies at read time and renders the verdict with its scope", async t => {
   const { origin, receiptId } = await serve(t, mergedFetch);
   const html = await (await fetch(`${origin}/receipts/${receiptId}`)).text();
-  assert.match(html, /Not yet verified/);
-  assert.match(html, /href="\?verify=1"/);
-  assert.doesNotMatch(html, /data-verdict=/, "no verdict is rendered before one runs");
-  assert.match(html, /Verification tier: bytes re-verified\. What was checked: the server verified the merge/,
-    "front-door batch B-4: the note names the tier the stored record carries (the server-verified merge), while the block above still says nothing was re-checked at read time");
+  assert.match(html, /data-verdict="server-verified"/,
+    "opening the page runs the re-check — the verdict is rendered, not only offered (#4058)");
+  assert.match(html, /Checked <time datetime=/, "the verdict is stamped with the time the run ran");
+  assert.doesNotMatch(html, /Not yet verified/);
+  assert.doesNotMatch(html, /Hashes are stored values, not re-verified/,
+    "the stored-values note is replaced once a verification ran");
   const json = await (await fetch(`${origin}/receipts/${receiptId}.json`)).json();
-  assert.equal(json.verification, undefined, "JSON carries verification only when one ran");
+  assert.equal(json.verification, undefined,
+    "the JSON twin keeps the stored record on plain reads; its verification object rides ?verify=1");
+});
+
+test("plain reads share one cached verify run; ?verify=1 runs fresh", async t => {
+  let calls = 0;
+  const counting = async url => { calls += 1; return mergedFetch(url); };
+  const { origin, receiptId } = await serve(t, counting);
+  await (await fetch(`${origin}/receipts/${receiptId}`)).text();
+  const afterFirst = calls;
+  assert.ok(afterFirst > 0, "the first plain read ran the checks");
+  await (await fetch(`${origin}/receipts/${receiptId}`)).text();
+  assert.equal(calls, afterFirst, "the second plain read served the cached run — no new GitHub call");
+  await (await fetch(`${origin}/receipts/${receiptId}?verify=1`)).text();
+  assert.ok(calls > afterFirst, "Verify now bypasses the cache and re-runs");
+});
+
+test("a receipt whose live facts change degrades on the next fresh run, never keeping the stale verdict", async t => {
+  let live = mergedFetch;
+  const mutable = async url => live(url);
+  const { origin, receiptId } = await serve(t, mutable);
+  const before = await (await fetch(`${origin}/receipts/${receiptId}`)).text();
+  assert.match(before, /data-verdict="server-verified"/);
+  live = openFetch;
+  const after = await (await fetch(`${origin}/receipts/${receiptId}?verify=1`)).text();
+  assert.match(after, /data-verdict="no-longer-verifiable"/);
+  assert.match(after, /still open — not merged, as this record shows/);
 });
 
 test("?verify=1 renders the graded verdict with its scope in one block", async t => {
@@ -84,10 +111,10 @@ test("?verify=1 puts the same verdict on the JSON shape", async t => {
   assert.equal(json.verification.scope.by, "the Project Room server, at read time");
 });
 
-test("a changed source renders the contradicted verdict on the page", async t => {
+test("a changed source renders the no-longer-verifiable verdict on the page", async t => {
   const { origin, receiptId } = await serve(t, openFetch);
   const html = await (await fetch(`${origin}/receipts/${receiptId}?verify=1`)).text();
-  assert.match(html, /data-verdict="contradicted"/);
+  assert.match(html, /data-verdict="no-longer-verifiable"/);
   assert.match(html, /still open — not merged, as this record shows/);
 });
 

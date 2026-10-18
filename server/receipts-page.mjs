@@ -135,11 +135,11 @@ export function renderVerificationBlock(receipt, verification) {
     return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
 <p><strong>Not yet verified.</strong> This page shows the record as stored; nothing on it has been re-checked at read time.</p>
-<p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
+<p><a href="?verify=1">Verify now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
 </section>`;
   }
   const checks = verification.checks.map(check => {
-    const detail = check.id === "pull-request" ? linkPullPhrase(escapeHtml(check.detail), receipt) : escapeHtml(check.detail);
+    const detail = check.id === "pull-request" || check.id === "merge-revert" ? linkPullPhrase(escapeHtml(check.detail), receipt) : escapeHtml(check.detail);
     return `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${detail}</li>`;
   }).join("");
   const notChecked = verification.scope.notChecked.map(item => `<li>${escapeHtml(item)}</li>`).join("");
@@ -148,6 +148,7 @@ export function renderVerificationBlock(receipt, verification) {
 <p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(verification.verdictLabel)}</strong></p>
 <p>${escapeHtml(verification.summary)}</p>
 <p class="verification-meta">Checked <time datetime="${escapeHtml(verification.checkedAt)}">${escapeHtml(verification.checkedAt)}</time> by ${escapeHtml(verification.scope.by)}.</p>
+<p><a href="?verify=1">Verify now</a> — re-run the checks and stamp a fresh time.</p>
 <h3>What was checked</h3>
 <ul>${checks}</ul>
 <h3>What was not checked</h3>
@@ -277,7 +278,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
   const provenNote = verification
-    ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
+    ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked. Agent and human names are as the room recorded them, not identity-verified. This record is unsigned."
     : receipt.source === "bounty-lot"
     ? "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.source === "public-work" && receipt.review?.decidedAt
