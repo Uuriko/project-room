@@ -1,0 +1,52 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "offer/draft",
+  "machine": "offer",
+  "legacyState": "draft",
+  "provenance": {
+    "harvestedFrom": [
+      "server/project-offers.mjs record()/create()/transitions",
+      "tests/project-offers.test.js"
+    ],
+    "census": "prod-census.json: offers observed live only as published (16 readable + 20 global)"
+  },
+  "legacy": {
+    "schema": "project-room-offer/1",
+    "id": "off_u1_draft",
+    "version": 1,
+    "revision": 1,
+    "status": "draft",
+    "title": "Fund the corpus migration",
+    "deadline": "2026-01-15",
+    "reward": {
+      "kind": "credits",
+      "amountMillis": 5000
+    },
+    "fundingStatus": "not_configured",
+    "paymentStatus": "not_configured",
+    "createdAt": "2025-10-18T00:00:00.000Z",
+    "updatedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{id}/project-offers, GET /project-offers",
+      "statePath": "status",
+      "state": "draft",
+      "excerpt": {
+        "status": "draft"
+      }
+    },
+    "web": {
+      "surface": "offer pages + brief.md (same record)",
+      "statePath": "status",
+      "state": "draft",
+      "excerpt": {
+        "status": "draft"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "draft"
+  }
+}

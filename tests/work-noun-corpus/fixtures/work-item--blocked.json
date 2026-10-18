@@ -1,0 +1,74 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "work-item/blocked",
+  "machine": "work-item",
+  "legacyState": "blocked",
+  "provenance": {
+    "harvestedFrom": [
+      "src/events.js proposeWork/acceptWork/acquireClaim/blockWork/recordWorkCompletion reducers",
+      "tests/work-item-session.test.js"
+    ],
+    "census": "design §1.6: items not directly countable via member API; board mirror is the countable shadow"
+  },
+  "legacy": {
+    "id": "wi_u1_blocked",
+    "title": "Carry the unified object",
+    "definitionOfDone": "U2 reads one shape",
+    "accountableMemberId": "member-owner",
+    "verifierMemberId": "member-verifier",
+    "independentVerificationRequired": false,
+    "ownerDecisionRequired": false,
+    "humanDecisionMakerId": null,
+    "mode": "write",
+    "sourceMessageId": null,
+    "proposedById": "member-owner",
+    "state": "blocked",
+    "revision": 0,
+    "claim": {
+      "holderId": "member-owner",
+      "repository": "Uuriko/project-room",
+      "ref": "main",
+      "paths": [
+        "server/"
+      ],
+      "acquiredAt": "2025-10-18T01:00:00.000Z",
+      "expiresAt": "2025-10-25T01:00:00.000Z"
+    },
+    "receipt": null,
+    "receiptHistory": [],
+    "verification": null,
+    "verificationHistory": [],
+    "decision": null,
+    "decisionHistory": [],
+    "blocker": {
+      "reason": "Waiting on CI capacity",
+      "nextAction": "Retry when runners free",
+      "eventId": "evt_u1_block"
+    },
+    "supersededBy": null,
+    "createdAt": "2025-10-18T00:00:00.000Z",
+    "updatedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "mcp-room": {
+      "surface": "room work verbs / list+read work (MCP room profile)",
+      "statePath": "state",
+      "state": "blocked",
+      "excerpt": {
+        "state": "blocked"
+      }
+    },
+    "commands": {
+      "surface": "/commands event projection state.workItems[id]",
+      "statePath": "state",
+      "state": "blocked",
+      "excerpt": {
+        "state": "blocked"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "blocked"
+  }
+}

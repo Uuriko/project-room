@@ -1,0 +1,55 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "bounty-lot/locked",
+  "machine": "bounty-lot",
+  "legacyState": "locked",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-escrow.mjs journal insert + LOT_STATES",
+      "server/bounty-escrow.mjs SIGNABLE_KINDS comment (journal kind vocabulary)"
+    ],
+    "census": "n/a (internal lanes)"
+  },
+  "legacy": {
+    "room_id": "room-u1-corpus",
+    "entry_id": "je_u1_locked",
+    "account_id": "member-poster",
+    "at": 1760745600000,
+    "kind": "escrow-lock",
+    "bounty_id": "bty_u1_funded",
+    "lot_id": "lot_u1",
+    "amount": 5000,
+    "lot_state": "locked",
+    "prev_hash": "sha256:u1prev",
+    "hash": "sha256:u1locked",
+    "memo": "u1 corpus fixture",
+    "actor_kind": "member",
+    "actor_id": "member-poster",
+    "track": "escrow"
+  },
+  "doors": {
+    "journal": {
+      "surface": "bounty_journal row (internal; no external door)",
+      "statePath": "lot_state",
+      "state": "locked",
+      "excerpt": {
+        "lot_state": "locked",
+        "kind": "escrow-lock",
+        "amount": 5000
+      }
+    },
+    "mcp-full": {
+      "surface": "read_balances -> per-state lane totals",
+      "statePath": "byState.<lot_state>",
+      "state": "locked",
+      "excerpt": {
+        "lot_state": "locked"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "carried",
+    "state": null,
+    "home": "settlement journal lot lane (funding implementation, §4)"
+  }
+}

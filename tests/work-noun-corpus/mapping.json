@@ -1,0 +1,328 @@
+{
+  "schema": "work-noun-mapping/1",
+  "designRef": "strategy-2026-10/unify-work-noun-design.md §2.3 (mapping), §2.2 (unified machine), §2.5 (non-unifying children), §4 (deletions)",
+  "censusBase": "f18cd508b5856f08b16534b26b2d37a5a5fdb5d9",
+  "unified": {
+    "states": [
+      "draft",
+      "open",
+      "claimed",
+      "in_progress",
+      "blocked",
+      "delivered",
+      "accepted",
+      "disputed",
+      "done",
+      "closed"
+    ],
+    "terminal": [
+      "done",
+      "closed"
+    ],
+    "closeReasons": [
+      "cancelled",
+      "refunded",
+      "expired",
+      "declined",
+      "duplicate",
+      "withdrawn",
+      "superseded"
+    ]
+  },
+  "machines": {
+    "bounty": {
+      "enumSource": {
+        "file": "server/bounty-escrow.mjs",
+        "anchor": "BOUNTY_STATES"
+      },
+      "states": {
+        "proposed": {
+          "disposition": "mapped",
+          "unified": "open",
+          "attributes": {
+            "funding.state": "unfunded"
+          },
+          "note": "Claimable only when funding ready — claimability is a derived predicate, as today's funded gate (§2.3)."
+        },
+        "funded": {
+          "disposition": "mapped",
+          "unified": "open",
+          "attributes": {
+            "funding.state": "locked"
+          },
+          "note": "The funding event is a journal fact, not a state (§2.3)."
+        },
+        "claimed": {
+          "disposition": "mapped",
+          "unified": "claimed",
+          "note": "Poster != claimant guard carries over (I-9)."
+        },
+        "submitted": {
+          "disposition": "mapped",
+          "unified": "delivered"
+        },
+        "accepted": {
+          "disposition": "mapped",
+          "unified": "accepted",
+          "note": "Challenge window from terms (§2.3)."
+        },
+        "disputed": {
+          "disposition": "mapped",
+          "unified": "disputed",
+          "attributes": {
+            "disputeId": "<dispute child id>"
+          },
+          "note": "Dispute child keeps its own machine (§2.5)."
+        },
+        "approved": {
+          "disposition": "mapped",
+          "unified": "accepted",
+          "attributes": {
+            "settlement": "pending-sweep"
+          },
+          "note": "'approved' was verdict-recorded/payout-unswept — a settlement-queue position, not a lifecycle state; the keeper settles accepted rows whose window passed with settlement unrecorded (§2.3)."
+        },
+        "paid": {
+          "disposition": "mapped",
+          "unified": "done",
+          "settlement": {
+            "kind": "payout"
+          }
+        },
+        "refunded": {
+          "disposition": "mapped",
+          "unified": "closed",
+          "closeReason": "refunded",
+          "settlement": {
+            "recorded": true
+          }
+        },
+        "cancelled": {
+          "disposition": "mapped",
+          "unified": "closed",
+          "closeReason": "cancelled",
+          "note": "Decline/duplicate triage land here with closeReason declined/duplicate (§2.3)."
+        }
+      }
+    },
+    "bounty-lot": {
+      "enumSource": {
+        "file": "server/bounty-escrow.mjs",
+        "anchor": "LOT_STATES"
+      },
+      "note": "Journal lot lanes are the funding implementation, not work lifecycle states; the journal stays and is re-keyed to the unified id (§4). Each lane is carried unchanged.",
+      "states": {
+        "payable": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "settlement journal lot lane (funding implementation, §4)"
+        },
+        "locked": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "settlement journal lot lane (funding implementation, §4)"
+        },
+        "attributed": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "settlement journal lot lane (funding implementation, §4)"
+        },
+        "approved": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "settlement journal lot lane (funding implementation, §4)"
+        }
+      }
+    },
+    "dispute": {
+      "enumSource": {
+        "file": "server/bounty-disputes.mjs",
+        "anchor": "STATES"
+      },
+      "note": "The dispute lifecycle does NOT unify: it stays a child object with its own 6-state machine (§2.5). The parent Work carries state=disputed + disputeId only.",
+      "states": {
+        "opened": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        },
+        "challenged": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        },
+        "evidence": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        },
+        "adjudicating": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        },
+        "decided": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        },
+        "resolved": {
+          "disposition": "carried",
+          "unified": null,
+          "home": "dispute child machine (§2.5)"
+        }
+      }
+    },
+    "offer": {
+      "enumSource": {
+        "file": "server/project-offers.mjs",
+        "anchor": "status literals (create/publish/withdraw)"
+      },
+      "states": {
+        "draft": {
+          "disposition": "mapped",
+          "unified": "draft"
+        },
+        "published": {
+          "disposition": "mapped",
+          "unified": "open",
+          "note": "The offer IS the work object; public-task enable is publish (§2.3)."
+        },
+        "withdrawn": {
+          "disposition": "mapped",
+          "unified": "closed",
+          "closeReason": "withdrawn"
+        }
+      }
+    },
+    "public-task": {
+      "enumSource": {
+        "file": "server/public-work-claims.mjs",
+        "anchor": "derived states (packet/_starterTaskState)"
+      },
+      "note": "Derived states over the wrapped claim; the facade disappears and the states become the object's own (§2.3).",
+      "states": {
+        "unclaimed": {
+          "disposition": "mapped",
+          "unified": "open",
+          "note": "Derived state disappears; it was the wrapped claim read through the facade (§2.3)."
+        },
+        "claimed": {
+          "disposition": "mapped",
+          "unified": "claimed",
+          "attributes": {
+            "round": "<from generation>"
+          },
+          "note": "generation -> round, same integer (§2.3, M2)."
+        },
+        "submitted": {
+          "disposition": "mapped",
+          "unified": "delivered",
+          "note": "Receipt exists at the current round (§2.3)."
+        },
+        "verified": {
+          "disposition": "mapped",
+          "unified": "done",
+          "condition": "done, or accepted if a funded challenge window is still running (§2.3)"
+        }
+      }
+    },
+    "board-claim": {
+      "enumSource": {
+        "file": "server/work-claims.mjs",
+        "anchor": "CLAIM_LIFECYCLE"
+      },
+      "states": {
+        "unclaimed": {
+          "disposition": "mapped",
+          "unified": "open"
+        },
+        "claimed": {
+          "disposition": "mapped",
+          "unified": "claimed"
+        },
+        "in_progress": {
+          "disposition": "mapped",
+          "unified": "in_progress"
+        },
+        "blocked": {
+          "disposition": "mapped",
+          "unified": "blocked"
+        },
+        "delivered": {
+          "disposition": "mapped",
+          "unified": "delivered"
+        },
+        "done": {
+          "disposition": "mapped",
+          "unified": "done",
+          "note": "Terminal; later verdicts are journal facts with no state effect (§2.3 drop: verdict-overwrite)."
+        },
+        "closed": {
+          "disposition": "mapped",
+          "unified": "closed"
+        }
+      }
+    },
+    "work-item": {
+      "enumSource": {
+        "file": "src/events.js",
+        "anchor": "WORK_STATES"
+      },
+      "states": {
+        "proposed": {
+          "disposition": "mapped",
+          "unified": "open",
+          "note": "Proposer is accountableId until a holder claims (§2.3)."
+        },
+        "accepted": {
+          "disposition": "mapped",
+          "unified": "claimed",
+          "note": "'Acceptance' was accountability-taking = the claim act; the scoped write fence becomes scope on the claim, not a second lifecycle (§2.3)."
+        },
+        "working": {
+          "disposition": "mapped",
+          "unified": "in_progress"
+        },
+        "blocked": {
+          "disposition": "mapped",
+          "unified": "blocked",
+          "note": "blocker_resolved returns to in_progress (§2.3)."
+        },
+        "completed": {
+          "disposition": "mapped",
+          "unified": "delivered",
+          "note": "Completion and verification were separate facts squeezed into one state; the unified machine separates them — verdict then moves delivered -> done (§2.3)."
+        },
+        "superseded": {
+          "disposition": "mapped",
+          "unified": "closed",
+          "closeReason": "superseded",
+          "attributes": {
+            "successorId": "<successor work id>"
+          }
+        }
+      }
+    }
+  },
+  "droppedBehaviours": [
+    {
+      "id": "verdict-overwrite-on-terminal-item",
+      "machine": "work-item",
+      "rationale": "Event machine lets a second verdict replace the first even after completion; the board refuses from done. Two doors disagree today and terminal-state mutability is incompatible with settlement finality. Later verdicts are journal facts; reopening requires changes_requested before the terminal verdict or a successor object (§2.3).",
+      "signedBy": "Jill (design ruling, UNIFY-WORK-NOUN)"
+    },
+    {
+      "id": "bounty-snooze-verbs",
+      "machine": "bounty",
+      "rationale": "Decline/snooze/duplicate as state-adjacent endpoints are dropped; the triage acts survive as close reasons (declined/duplicate) + the claimableFrom attribute (snooze) (§2.3).",
+      "signedBy": "Jill (design ruling, UNIFY-WORK-NOUN)"
+    },
+    {
+      "id": "offer-machine-existence",
+      "machine": "offer",
+      "rationale": "The offer lifecycle as a separate machine is dropped; terms become data on the unified object. The terms, brief rendering, and request-id ledger are NOT dropped — the ledger generalises (I-7) (§2.3).",
+      "signedBy": "Jill (design ruling, UNIFY-WORK-NOUN)"
+    }
+  ]
+}

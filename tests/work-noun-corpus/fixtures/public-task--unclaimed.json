@@ -1,0 +1,65 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "public-task/unclaimed",
+  "machine": "public-task",
+  "legacyState": "unclaimed",
+  "provenance": {
+    "harvestedFrom": [
+      "server/public-work-claims.mjs packet()/_starterTaskState",
+      "tests/public-work-claims.test.js"
+    ],
+    "census": "prod-census.json + design §1.4: 20 public tasks (unclaimed 3, submitted 4, verified 13)"
+  },
+  "legacy": {
+    "schema": "public-work-task/1",
+    "taskId": "off_u1_task",
+    "termsVersion": 1,
+    "namespaceId": "public-work",
+    "repositoryUrl": "https://github.com/Uuriko/project-room",
+    "repositoryRef": "main",
+    "title": "Verify the corpus fixtures",
+    "acceptanceCriteria": [
+      "Fixtures replay green"
+    ],
+    "files": [
+      "tests/work-noun-mapping-corpus.test.js"
+    ],
+    "reward": {
+      "kind": "credits",
+      "amountMillis": 5000
+    },
+    "claimable": true,
+    "claim": {
+      "state": "unclaimed",
+      "generation": 3,
+      "identityId": null,
+      "leaseExpiresAt": null,
+      "submittedReceiptId": null,
+      "verification": null,
+      "deliveryDigest": null,
+      "criteriaAttestation": null
+    }
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /public-work/tasks/{id}",
+      "statePath": "claim.state",
+      "state": "unclaimed",
+      "excerpt": {
+        "claim.state": "unclaimed"
+      }
+    },
+    "mcp": {
+      "surface": "read_task (server/mcp-public-work.mjs)",
+      "statePath": "claim.state",
+      "state": "unclaimed",
+      "excerpt": {
+        "claim.state": "unclaimed"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "open"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "board-claim/in_progress",
+  "machine": "board-claim",
+  "legacyState": "in_progress",
+  "provenance": {
+    "harvestedFrom": [
+      "server/work-claims.mjs item literal + CLAIM_LIFECYCLE",
+      "tests/work-claim-board.test.js",
+      "tests/work-claim-bundle-lifecycle.test.js"
+    ],
+    "census": "prod-census.json: board claims observed live in unclaimed/done/closed"
+  },
+  "legacy": {
+    "id": "wc_u1_in_progress",
+    "title": "Unify the work nouns",
+    "state": "in_progress",
+    "owner": "ai_worker_u1",
+    "history": [],
+    "claimedAt": "2025-10-18T01:00:00.000Z",
+    "leaseStartAt": "2025-10-18T01:00:00.000Z",
+    "leaseExpiresAt": "2025-10-19T01:00:00.000Z",
+    "deliveryMode": null,
+    "reviewPolicy": null,
+    "reviewedBy": null,
+    "attestations": [],
+    "tags": [],
+    "files": [],
+    "fileBlocks": {},
+    "blobs": [],
+    "dependsOn": [],
+    "parentClaimId": null,
+    "evidenceRefs": [],
+    "premiseFlag": null,
+    "acceptanceCriteria": [
+      "One state machine"
+    ],
+    "delivery": null,
+    "verification": null,
+    "pullRequest": null,
+    "pullRequests": [],
+    "repo": null,
+    "branch": null,
+    "chain": [],
+    "supersededBy": null,
+    "workItemId": null,
+    "squadId": null,
+    "kind": "work",
+    "revision": 0,
+    "ci": null,
+    "reviews": []
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{id}/work-claims/{claimId}",
+      "statePath": "state",
+      "state": "in_progress",
+      "excerpt": {
+        "state": "in_progress"
+      }
+    },
+    "board-v2": {
+      "surface": "board/v2 claims lens (same item)",
+      "statePath": "state",
+      "state": "in_progress",
+      "excerpt": {
+        "state": "in_progress"
+      }
+    },
+    "commands": {
+      "surface": "work_claim.updated event payload",
+      "statePath": "state",
+      "state": "in_progress",
+      "excerpt": {
+        "state": "in_progress"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "in_progress"
+  }
+}
