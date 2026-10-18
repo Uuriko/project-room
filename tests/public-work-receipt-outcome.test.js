@@ -261,3 +261,37 @@ test('paid rejection: full feeless refund exactly as the train pins it, faces re
   publicReceiptById(store, id); store.publicWorkClaims.receipt(id);
   assert.equal(f.journalCount(), journalAfter);
 });
+
+test('#3613: period and reviewer criteria outcomes reach every public face; nothing private leaks', t => {
+  const f = unpaidFixture(t, 'agent');
+  const receipt = f.finish('period-task', { criteriaAttestation: [{ criterion: 'Correct result', status: 'met' }] });
+  const id = receipt.receiptId;
+  // B1 pin + B4 period are on the record itself.
+  assert.deepEqual(receipt.acceptanceCriteriaWithIds, [{ criterionId: 'c1', text: 'Correct result' }]);
+  assert.equal(receipt.period.submittedAt, receipt.createdAt);
+  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass', 0,
+    { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
+  const pub = publicReceiptById(f.store, id);
+  assert.deepEqual(pub.period, receipt.period);
+  assert.deepEqual(pub.review.criteriaOutcomes, [{ criterionId: 'c1', verdict: 'pass' }]);
+  assert.equal(pub.review.criteriaHash, receipt.criteriaHash);
+  // The review block gains exactly the two outcome keys — no more.
+  assert.deepEqual(Object.keys(pub.review).sort(),
+    ['criteriaHash', 'criteriaOutcomes', 'decidedAt', 'state', 'verificationReviewerKind', 'verificationVerdict', 'verifiedAt']);
+  // JSON + HTML faces state the period and the outcomes.
+  const json = receiptJson(pub);
+  assert.deepEqual(json.period, receipt.period);
+  assert.deepEqual(json.review.criteriaOutcomes, [{ criterionId: 'c1', verdict: 'pass' }]);
+  const html = renderReceiptDetailHtml(pub);
+  assert.match(html, /Work period/);
+  assert.match(html, /c1 — pass/);
+  // The canonical member read composes the same review block.
+  assert.deepEqual(f.store.publicWorkClaims.receipt(id).review, pub.review);
+  // Still nothing private: no reason, no fingerprint, no reviewer id.
+  const fingerprint = f.reviewRow(id).verification.fingerprint;
+  for (const surface of [JSON.stringify(json), html, JSON.stringify(pub)]) {
+    assert.equal(surface.includes(REASON), false);
+    assert.equal(surface.includes(fingerprint), false);
+    assert.equal(surface.includes(REVIEWER), false);
+  }
+});

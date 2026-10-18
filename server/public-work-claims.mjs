@@ -236,7 +236,8 @@ export class PublicWorkClaims {
     const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
-      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria,
+      acceptanceCriteriaWithIds: offer.acceptanceCriteriaWithIds ?? [], criteriaHash: offer.criteriaHash ?? null, files: JSON.parse(row.files_json),
       reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed' && !deadlinePassed,
       claim: { state, generation: row.generation,
@@ -518,15 +519,32 @@ export class PublicWorkClaims {
           if (input.criteriaAttestation !== undefined) {
             check(Array.isArray(input.criteriaAttestation) && input.criteriaAttestation.length <= 64
               && input.criteriaAttestation.every(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
-                && typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500
+                && ((typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500)
+                  || (typeof entry.criterionId === 'string' && entry.criterionId.length > 0 && entry.criterionId.length <= 64))
                 && ['met', 'not_met', 'na'].includes(entry.status)
                 && (entry.evidenceRef === undefined || entry.evidenceRef === null
                   || (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0 && entry.evidenceRef.length <= 512))),
               'Invalid criteria attestation');
-            check(new Set(input.criteriaAttestation.map(entry => entry.criterion)).size === input.criteriaAttestation.length,
+            // #3613 B1: an attestation entry may cite a criterion by its
+            // pinned criterionId instead of its full text; the id resolves
+            // against the offer's pinned criteria set (unknown id refused,
+            // a text that disagrees with its id refused) and the stored
+            // attestation keeps the legacy text-keyed shape.
+            const pinnedTextById = new Map((Array.isArray(offer.acceptanceCriteriaWithIds) ? offer.acceptanceCriteriaWithIds : [])
+              .map(entry => [entry.criterionId, entry.text]));
+            criteriaAttestation = input.criteriaAttestation.map(entry => {
+              let criterion = entry.criterion;
+              if (entry.criterionId !== undefined && entry.criterionId !== null) {
+                const resolved = pinnedTextById.get(entry.criterionId);
+                check(resolved !== undefined, `criteriaAttestation cites unknown criterionId "${entry.criterionId}"`);
+                check(criterion === undefined || criterion === resolved, 'criteriaAttestation criterion text does not match its criterionId');
+                criterion = resolved;
+              }
+              return { criterion, status: entry.status,
+                ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) };
+            });
+            check(new Set(criteriaAttestation.map(entry => entry.criterion)).size === criteriaAttestation.length,
               'criteriaAttestation maps a criterion more than once');
-            criteriaAttestation = input.criteriaAttestation.map(entry => ({ criterion: entry.criterion, status: entry.status,
-              ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) }));
             if (offerCriteria.length > 0) {
               const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
               const missing = offerCriteria.find(criterion => !mapped.has(criterion));
@@ -560,13 +578,24 @@ export class PublicWorkClaims {
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
+          const submittedAt = new Date(this.store.now()).toISOString();
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            // #3613 B1: the receipt binds the pinned criteria set (ids +
+            // hash) its finish attested against, so a reviewer's
+            // per-criterion outcomes cite this exact set.
+            ...(Array.isArray(offer.acceptanceCriteriaWithIds) && offer.acceptanceCriteriaWithIds.length
+              ? { acceptanceCriteriaWithIds: offer.acceptanceCriteriaWithIds, criteriaHash: offer.criteriaHash } : {}),
+            // #3613 B4: the work period — claimedAt from the claim item
+            // already in hand, submittedAt is this receipt's createdAt.
+            // Receipts minted before this field carry no period and no
+            // start is ever fabricated for them.
+            ...(typeof item.claimedAt === 'string' && item.claimedAt ? { period: { claimedAt: item.claimedAt, submittedAt } } : {}),
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.
-            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: submittedAt };
           // Paid tasks attach the submission to the funded escrow bounty
           // before the receipt lands, so a receipt never exists without its
           // settlement vehicle in 'submitted' state (no-op when unpaid).

@@ -853,6 +853,14 @@ export function publicWorkReceiptOutcome(store, receiptId) {
   } catch { saved = null; } // a store predating the reviews table has no outcome to compose
   const verification = saved?.verification && typeof saved.verification === "object" ? saved.verification : null;
   const decision = saved?.decision && typeof saved.decision === "object" ? saved.decision : null;
+  // #3613 B2: the reviewer's per-criterion outcomes, composed from the
+  // recorded verification fact — sanitized to {criterionId, verdict}
+  // pairs against the closed verdict set, with the pinned criteria hash
+  // they cite. Absent when the reviewer recorded none.
+  const criteriaOutcomes = Array.isArray(verification?.criteriaOutcomes)
+    ? verification.criteriaOutcomes.filter(outcome => outcome && typeof outcome.criterionId === "string"
+      && ["pass", "fail"].includes(outcome.verdict)).map(outcome => ({ criterionId: outcome.criterionId, verdict: outcome.verdict }))
+    : [];
   // No review row, no review block: an unreviewed receipt's faces stay
   // exactly its record's shape plus state/verification/checks.
   const review = saved ? {
@@ -861,13 +869,20 @@ export function publicWorkReceiptOutcome(store, receiptId) {
     verificationReviewerKind: verification && ["human", "agent"].includes(verification.reviewerKind) ? verification.reviewerKind : null,
     verifiedAt: iso(verification?.at),
     decidedAt: iso(decision?.at),
+    ...(criteriaOutcomes.length ? { criteriaOutcomes,
+      ...(typeof verification.criteriaHash === "string" && /^[a-f0-9]{64}$/.test(verification.criteriaHash) ? { criteriaHash: verification.criteriaHash } : {}) } : {}),
   } : null;
+  // #3613 B4: the work period recorded on the receipt body at finish.
+  // Legacy receipts carry no period; none is fabricated here.
+  const period = record.period && typeof record.period === "object" && iso(record.period.claimedAt) && iso(record.period.submittedAt)
+    ? { claimedAt: iso(record.period.claimedAt), submittedAt: iso(record.period.submittedAt) } : null;
   const executed = executedChecksOf(record.executedChecks);
   return {
     state: review && WORK_DECISIONS.has(review.state) ? review.state : outcomeWord(record.state) ?? "submitted",
     verification: outcomeWord(record.verification) ?? "hash_only",
     checksReported: reportedChecks(record.checksReported),
     ...(executed.length ? { executedChecks: executed } : {}),
+    ...(period ? { period } : {}),
     review,
   };
 }
