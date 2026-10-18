@@ -2371,8 +2371,13 @@ export class BountyEscrow {
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
-      // The dispute bond is exactly 25% of the bounty: the >= 25% minimum
-      // and the <= 25% total-dispute-cost cap (v2 economics) coincide.
+      // The dispute bond is exactly 25% of the bounty (DISPUTE_BOND_RATIO).
+      // This door is the production rule (#3307, confirmed live by the
+      // FS-13 drill): any other amount is refused invalid_bond. 25% also
+      // equals the dispute machine's total-cost cap, so a dispute's whole
+      // cost is its bond. The machine's own 5% floor (MIN_BOND_RATIO in
+      // bounty-disputes.mjs) is a machine-level minimum for direct callers,
+      // NOT the bond this door accepts.
       const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
       check(bondMillis === required, "invalid_bond",
         `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);

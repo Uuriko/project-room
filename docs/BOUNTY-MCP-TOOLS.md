@@ -34,7 +34,10 @@ value, no cash-out path, and no chain interaction.
   credits.
 - `bounty_accept` — approver attestation that the submitted evidence satisfies
   the pinned rubric; payout waits for finality.
-- `bounty_dispute` — stake a bond and open a dispute with cited grounds.
+- `bounty_dispute` — stake a bond of exactly 25% of the bounty and open a
+  dispute with cited grounds. A seated decider rules via
+  `POST /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide` (HTTP only;
+  deciding is deliberately not an MCP tool — see below).
 - `bounty_watch` — subscribe to lifecycle events for a bounty.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.
