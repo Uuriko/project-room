@@ -307,7 +307,16 @@ function basisCurrent(review, item) {
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === (item.delivery?.digest ?? null)
     : (basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1;
-  return deliveryCurrent && basis.owner === item.owner && basis.claimedAt === item.claimedAt
+  // B4-HARDENING/D3 (client mirror of the kernel rule): the basis names
+  // its claim round. A round-stamped basis counts only in its own round
+  // — a same-timestamp release/reclaim used to compare equal here, so
+  // the board offered Verify on a stale round-1 approval. An unstamped
+  // (pre-rounds) basis attests at most the first explicit round.
+  const basisRound = basis.claimRound ?? null;
+  const roundCurrent = basisRound === null
+    ? (item.claimRound ?? 0) <= 1
+    : basisRound === (item.claimRound ?? 0);
+  return deliveryCurrent && roundCurrent && basis.owner === item.owner && basis.claimedAt === item.claimedAt
     && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
 }
 
@@ -365,8 +374,27 @@ export function canSendBackClaim(item, viewer, members) {
   return standing.some(entry => entry.memberId === viewer.id);
 }
 
+// The round fingerprint segment (B4-HARDENING/D6): a release resets
+// deliveryGeneration to 0, so generation alone re-derives round 1's id
+// for a new round's send-back and the kernel replays round 1's recorded
+// outcome. The fingerprint hashes the round basis (claimedAt + lifetime
+// history length) the same way the deliver/verify ids bind it — two
+// independent 32-bit string hashes as 16 hex chars; a stable browser-
+// computable fingerprint, not a security digest. Computed inline so
+// this derivation carries its round binding by itself.
+const sendBackRoundPart = item => {
+  const text = [item?.claimedAt ?? "", (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0)].join("|");
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) ^ code) >>> 0;
+  }
+  return [h1.toString(16).padStart(8, "0"), h2.toString(16).padStart(8, "0")].join("");
+};
+
 const sendBackRequestId = (item, memberId) =>
-  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), sendBackRoundPart(item), requestIdPart(memberId)].join("-");
 
 // The send-back POST body, pure like claimVerifyBody: the transition
 // plus its operation identity (#3829's replay binding covers reviewer
@@ -390,7 +418,7 @@ export function claimReviewBody(item, verdict, summary) {
   return { verdict, summary, expectedBasis: { version: 1, owner: item?.owner ?? null,
     claimedAt: item?.claimedAt ?? null, revision: item?.revision ?? null,
     headSha: item?.ci?.headSha ?? null, deliveryDigest: item?.delivery?.digest ?? null,
-    deliveryGeneration: item?.deliveryGeneration ?? 0 } };
+    deliveryGeneration: item?.deliveryGeneration ?? 0, claimRound: item?.claimRound ?? 0 } };
 }
 
 // #3889 readback: after the board reloads, the submitted review counts
@@ -407,22 +435,37 @@ export function reviewOutcomeConfirmed(item, memberId, verdict, summary) {
 // catalog via uiText, and each literal holds only complete HTML tags, so the
 // i18n harness sees no new hardcoded copy. The form posts to
 // POST /work-claims/:id/review through the board's submit handler.
-export function claimReviewForm(item) {
+// B4-HARDENING/D4: an unsent draft (captured by the controller from the
+// live form) re-enters the render as the field values, so a background
+// repaint no longer wipes what the reviewer typed or the verdict they
+// selected. A draft counts only for the round it was typed in: its
+// captured claimedAt must still be the claim's.
+const liveDraft = (item, draft) => (draft && (draft.claimedAt == null || draft.claimedAt === (item?.claimedAt ?? null)) ? draft : null);
+const draftValue = (draft, name, index = 0) => draft?.values?.[`${name}#${index}`];
+
+export function claimReviewForm(item, draft = null) {
   const id = escapeHtml(item.id);
+  const live = liveDraft(item, draft);
+  const verdict = draftValue(live, "verdict");
+  const summary = draftValue(live, "summary");
+  const option = (value, label) => ["<option value=\"", value, "\"",
+    verdict === value ? " selected" : "", ">", label, "</option>"].join("");
   return [
     `<form class="board-new" data-claim-review="${id}">`,
     "<span class=\"form-hint\">", uiText("board.review.legend"), "</span>",
     "<label>",
     uiText("board.review.verdict.label"),
     " <select name=\"verdict\" required>",
-    "<option value=\"approve\">", uiText("board.review.verdict.approve"), "</option>",
-    "<option value=\"changes_requested\">", uiText("board.review.verdict.changes_requested"), "</option>",
-    "<option value=\"comment\">", uiText("board.review.verdict.comment"), "</option>",
+    option("approve", uiText("board.review.verdict.approve")),
+    option("changes_requested", uiText("board.review.verdict.changes_requested")),
+    option("comment", uiText("board.review.verdict.comment")),
     "</select>",
     "</label>",
     "<label>",
     uiText("board.review.summary.label"),
-    " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\">",
+    " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\"",
+    summary !== undefined ? [" value=\"", escapeHtml(summary), "\""].join("") : "",
+    ">",
     "</label>",
     "<span class=\"form-hint\">", uiText("board.review.summary.placeholder"), "</span>",
     "<button type=\"submit\" class=\"button secondary\">", uiText("board.review.submit"), "</button>",
@@ -467,14 +510,16 @@ const CRITERION_STATUS_KEYS = { met: "board.deliver.criterion.met", not_met: "bo
 // reference, and the stored bundle itself on a re-delivery, so reusing a
 // valid bundle is one submit. Labels come from the strings catalog, like
 // claimReviewForm; criterion texts are claim data, escaped as values.
-export function claimDeliverForm(item) {
+export function claimDeliverForm(item, draft = null) {
   const id = escapeHtml(item.id);
+  // D4: unsent edits win over the stored-bundle prefill, per field.
+  const live = liveDraft(item, draft);
   const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests
     : (item.pullRequest?.url ? [item.pullRequest] : []);
   const artifact = item.delivery?.artifact ?? null;
-  const kind = artifact?.kind ?? (pulls.length ? "pull_request" : "");
-  const ref = artifact?.ref ?? pulls[0]?.url ?? "";
-  const sha = artifact?.sha256 ?? "";
+  const kind = draftValue(live, "artifactKind") ?? artifact?.kind ?? (pulls.length ? "pull_request" : "");
+  const ref = draftValue(live, "artifactRef") ?? artifact?.ref ?? pulls[0]?.url ?? "";
+  const sha = draftValue(live, "artifactSha256") ?? artifact?.sha256 ?? "";
   const checks = Array.isArray(item.delivery?.checks) && item.delivery.checks.length ? item.delivery.checks : [null];
   // Composed like claimReviewForm — array pieces and complete-tag literals
   // with at most one interpolation each — so the i18n harness sees no
@@ -492,11 +537,11 @@ export function claimDeliverForm(item) {
     "<label>", uiText("board.deliver.artifact.sha256"),
     ` <input name="artifactSha256" required maxlength="71" autocomplete="off" value="${escapeHtml(sha)}">`, "</label>",
   ];
-  checks.forEach(entry => {
+  checks.forEach((entry, checkIndex) => {
     parts.push("<label>", uiText("board.deliver.check.name"),
-      ` <input name="checkName" required maxlength="200" autocomplete="off" value="${escapeHtml(entry?.name ?? "")}">`, "</label>",
+      ` <input name="checkName" required maxlength="200" autocomplete="off" value="${escapeHtml(draftValue(live, "checkName", checkIndex) ?? entry?.name ?? "")}">`, "</label>",
       "<label>", uiText("board.deliver.check.result"), " <select name=\"checkResult\">",
-      ...DELIVERY_CHECK_RESULTS.map(result => option(result, entry?.result === result, uiText(CHECK_RESULT_KEYS[result]))),
+      ...DELIVERY_CHECK_RESULTS.map(result => option(result, (draftValue(live, "checkResult", checkIndex) ?? entry?.result) === result, uiText(CHECK_RESULT_KEYS[result]))),
       "</select>", "</label>");
   });
   const criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
@@ -504,8 +549,8 @@ export function claimDeliverForm(item) {
     const mappedStatus = new Map((Array.isArray(item.delivery?.criteria) ? item.delivery.criteria : [])
       .map(entry => [entry?.criterion, entry?.status]));
     parts.push("<span class=\"form-hint\">", uiText("board.deliver.criteria.legend"), "</span>");
-    criteria.forEach(criterion => {
-      const selected = mappedStatus.get(criterion) ?? "met";
+    criteria.forEach((criterion, criterionIndex) => {
+      const selected = draftValue(live, "criterion", criterionIndex) ?? mappedStatus.get(criterion) ?? "met";
       parts.push("<label>", escapeHtml(criterion), " <select name=\"criterion\">",
         ...Object.keys(CRITERION_STATUS_KEYS).map(status => option(status, selected === status, uiText(CRITERION_STATUS_KEYS[status]))),
         "</select>", "</label>");
@@ -656,7 +701,7 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, drafts = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -705,7 +750,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
   // reviewers now get the verdict form right on the card.
-  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item, drafts?.get(`review:${item.id}`)));
   // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
   // approval is still current against the delivered bundle verifies it to
   // done from the same card. The update route re-runs canCloseWork on POST;
@@ -740,7 +785,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     // control (#3887). Criteria-free self-attested claims keep Done.
     if (policy === "self_attested" && !(Array.isArray(item.acceptanceCriteria) && item.acceptanceCriteria.length)) {
       actions.push(button("done", "Done", "primary"));
-    } else actions.push(claimDeliverForm(item));
+    } else actions.push(claimDeliverForm(item, drafts?.get(`deliver:${item.id}`)));
   }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
@@ -761,8 +806,12 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
-function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
+function newItemForm(draft = null) {
+  // D4: the unsent title/note ride through repaints like the card forms.
+  const title = draftValue(draft, "title");
+  const note = draftValue(draft, "note");
+  const value = text => (text !== undefined ? ` value="${escapeHtml(text)}"` : "");
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"${value(title)}></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"${value(note)}></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -821,7 +870,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null, drafts = null } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -837,13 +886,13 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
-  const form = canWrite ? newItemForm() : "";
+  const form = canWrite ? newItemForm(drafts?.get("new")) : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const bar = filterBarHtml(filter);
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, drafts)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
@@ -927,6 +976,33 @@ export function installWorkBoard({ client, getState, getSession }) {
   // claims; cleared on room/member context change.
   let filter = { q: "", mine: false };
   let pendingCaret = null;
+  // B4-HARDENING/D4: unsent form drafts, captured from the live forms by
+  // the input listener and handed back to the render by paint(), so a
+  // background repaint stops destroying in-progress typing. Keyed
+  // "review:<claimId>" / "deliver:<claimId>" / "new"; values are keyed
+  // "<fieldName>#<occurrence>" within the form.
+  const drafts = new Map();
+
+  // A draft dies with its round (the claim's claimedAt moved), with its
+  // claim (left the board), or with its purpose (the review it held has
+  // landed; the new item it named now exists). Everything else — in
+  // particular background updates to other claims — leaves it alone.
+  function pruneDrafts(viewerId) {
+    for (const [key, entry] of drafts) {
+      if (key === "new") {
+        const title = entry.values["title#0"];
+        if (title && items.some(item => item.title === title)) drafts.delete(key);
+        continue;
+      }
+      const separator = key.indexOf(":");
+      const item = items.find(candidate => candidate.id === key.slice(separator + 1));
+      if (!item || (entry.claimedAt != null && item.claimedAt !== entry.claimedAt)) { drafts.delete(key); continue; }
+      if (key.startsWith("review:") && viewerId) {
+        const standing = (item.reviews ?? []).find(review => review?.memberId === viewerId);
+        if (standing && standing.verdict === entry.values["verdict#0"] && standing.summary === entry.values["summary#0"]) drafts.delete(key);
+      }
+    }
+  }
 
   function paint() {
     const state = getState();
@@ -940,9 +1016,11 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
     pendingFocus = null;
     pendingStatus = "";
-    root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
+    const viewer = viewerOf(state, session);
+    pruneDrafts(viewer.id);
+    root.innerHTML = boardHtml(items, status, viewer, state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy, drafts
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
@@ -1003,7 +1081,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; drafts.clear(); paint();
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -1100,13 +1178,33 @@ export function installWorkBoard({ client, getState, getSession }) {
 
   root.addEventListener("input", event => {
     const form = event.target.closest("[data-board-filter]");
-    if (!form || !root.contains(form)) return;
-    const data = new FormData(form);
-    filter = { q: String(data.get("q") ?? ""), mine: form.querySelector('[name="mine"]')?.checked ?? false };
+    if (form && root.contains(form)) {
+      const data = new FormData(form);
+      filter = { q: String(data.get("q") ?? ""), mine: form.querySelector('[name="mine"]')?.checked ?? false };
+      const field = event.target;
+      pendingCaret = field?.name === "q" && typeof field.selectionStart === "number"
+        ? { start: field.selectionStart, end: field.selectionEnd } : null;
+      paint();
+      return;
+    }
+    // B4-HARDENING/D4: capture unsent data from the board's own forms as
+    // it is typed; paint() hands it back to the render, so a background
+    // work_claim.updated repaint stops wiping it. The files field is
+    // excluded — its value is a browser-owned path, not user data.
     const field = event.target;
-    pendingCaret = field?.name === "q" && typeof field.selectionStart === "number"
-      ? { start: field.selectionStart, end: field.selectionEnd } : null;
-    paint();
+    const host = field?.closest?.("form");
+    if (!host || !root.contains(host)) return;
+    const kind = host.dataset.claimReview ? "review" : host.dataset.claimDeliver ? "deliver" : host.id === "board-new-item" ? "new" : null;
+    const name = field.name;
+    if (!kind || typeof name !== "string" || !name || name === "files") return;
+    const siblings = host.querySelectorAll("[name]").filter(candidate => candidate.name === name);
+    const index = siblings.indexOf(field);
+    if (index < 0) return;
+    const id = kind === "review" ? host.dataset.claimReview : host.dataset.claimDeliver;
+    const key = kind === "new" ? "new" : `${kind}:${id}`;
+    const entry = drafts.get(key) ?? { claimedAt: kind === "new" ? null : items.find(candidate => candidate.id === id)?.claimedAt ?? null, values: {} };
+    entry.values[`${name}#${index}`] = String(field.value ?? "");
+    drafts.set(key, entry);
   });
   root.addEventListener("click", event => {
     const retry = event.target.closest("[data-board-retry]");
@@ -1381,6 +1479,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; drafts.clear(); if (root.isConnected) root.replaceChildren(); }
   };
 }

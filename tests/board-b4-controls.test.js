@@ -72,7 +72,10 @@ test("H1: claimSendBackBody posts the transition with operation identity and rou
   const item = claim("wc_sb5", { history: [{ action: "claimed" }, { action: "state:delivered" }], historyOmitted: 1 });
   const body = claimSendBackBody(item, "rev-1");
   assert.equal(body.state, "in_progress");
-  assert.match(body.requestId, /^sendback-wc_sb5-1-rev-1$/);
+  // B4-HARDENING/D6 pin move: the id now carries the round fingerprint
+  // segment (claimedAt + lifetime history) like the deliver/verify ids —
+  // the old generation-only shape re-derived round 1's id in round 2.
+  assert.match(body.requestId, /^sendback-wc_sb5-1-[0-9a-f]{16}-rev-1$/);
   assert.equal(body.expectedClaimedAt, T0);
   assert.equal(body.expectedHistoryLength, 3);
   // Kernel composition: the body drives the real transition for the
