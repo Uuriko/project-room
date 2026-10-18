@@ -58,6 +58,47 @@ export const workClaimSchema = `
   );
 `;
 
+// PERF-BUILDS P0-1: generated probe columns over item_json, so the job
+// due probes (claimDueAt / autolinkDueAt in server/jobs.mjs) are index
+// lookups instead of full scans that json_extract every row. The columns
+// COALESCE the enveloped ($.data.*) and legacy ($.*) shapes exactly as the
+// probes' OR clauses did. Kept OUT of workClaimSchema: the strict DDL-text
+// verifySchema compares the stored CREATE TABLE verbatim, and deployed
+// tables carry the old text — the columns converge additively via
+// ensureWorkClaimProbeColumns (the agent-heartbeats additive pattern),
+// and workClaimProbeSchema is hashed into the room schema stamp so a
+// warm wake whose stamp predates the columns runs the full schema pass
+// once and gains them.
+export const WORK_CLAIM_PROBE_COLUMNS = Object.freeze({
+  claim_state: "COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'))",
+  claim_pr_url: "COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url'))",
+  claim_pr_outcome: "COALESCE(json_extract(item_json, '$.data.pullRequest.outcome'), json_extract(item_json, '$.pullRequest.outcome'))",
+  claim_next_poll_at: "COALESCE(json_extract(item_json, '$.data.pullRequest.nextPollAt'), json_extract(item_json, '$.pullRequest.nextPollAt'), 0)",
+  claim_repo: "COALESCE(json_extract(item_json, '$.data.repo'), json_extract(item_json, '$.repo'))"
+});
+export const workClaimProbeSchema = `
+  CREATE INDEX IF NOT EXISTS work_claims_due_probe ON work_claims(claim_state, claim_pr_url, claim_pr_outcome, claim_next_poll_at, claim_repo);
+`;
+const PROBE_COLUMN_TYPES = Object.freeze({
+  claim_state: "TEXT", claim_pr_url: "TEXT", claim_pr_outcome: "TEXT",
+  claim_next_poll_at: "INTEGER", claim_repo: "TEXT"
+});
+// Add any missing probe column and the due-probe index. Idempotent; a
+// no-op when work_claims does not exist yet (the schema pass creates the
+// table first, then calls this). Returns true when the table exists.
+export function ensureWorkClaimProbeColumns(db) {
+  if (!db?.prepare) return false;
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_claims'").get()) return false;
+  const present = new Set(db.prepare("SELECT name FROM pragma_table_xinfo('work_claims')").all().map(row => row.name));
+  for (const [name, expression] of Object.entries(WORK_CLAIM_PROBE_COLUMNS)) {
+    if (!present.has(name)) {
+      db.exec(`ALTER TABLE work_claims ADD COLUMN ${name} ${PROBE_COLUMN_TYPES[name]} GENERATED ALWAYS AS (${expression}) VIRTUAL`);
+    }
+  }
+  db.exec(workClaimProbeSchema);
+  return true;
+}
+
 const parse = text => {
   const value = JSON.parse(text);
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("work claim row is not an object");

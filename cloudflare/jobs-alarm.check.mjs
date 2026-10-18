@@ -101,6 +101,40 @@ test("a webhook due in 30 seconds waits for the alarm", { timeout: 60_000 }, asy
   }
 });
 
+test("a read-only request performs no re-arm; the backstop picks past-due work up (PERF-BUILDS P0-1)", async () => {
+  const mf = await start();
+  try {
+    // Seeded 30 s in the past. Before P0-1 the per-request fetch finally
+    // re-armed unconditionally, so a plain read would have armed this at
+    // ~now (the L12 tail from PR #3809, incorporated there) — the scan
+    // ran on EVERY request. P0-1(a): the fetch path re-arms only when the
+    // request itself committed a write; this GET commits none, so the
+    // alarm must stay unset — proof the re-arm scan did not run.
+    const seeded = await call(mf, "/probe/seed-due?name=invite-only-pilot&delayMs=-30000");
+    assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
+    assert.ok(seeded.body.due < Date.now());
+    const arm = await call(mf, "/probe/arm?name=invite-only-pilot");
+    assert.equal(arm.status, 200, JSON.stringify(arm.body));
+    // Give waitUntil a chance to land a (wrong) arm, then read the alarm.
+    let alarmAt = "unset";
+    for (let attempt = 0; attempt < 10 && alarmAt === "unset"; attempt += 1) {
+      const armed = await call(mf, "/probe/alarm-at?name=invite-only-pilot");
+      alarmAt = armed.body.alarmAt;
+      if (alarmAt !== null) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(alarmAt, null, "a read-only request must not arm the job alarm");
+    // The 30-minute safety-net cron (ensureJobAlarm) is the backstop for
+    // work no request committed: it runs the past-due job itself.
+    const ensured = await call(mf, "/probe/ensure?name=invite-only-pilot");
+    assert.equal(ensured.status, 200, JSON.stringify(ensured.body));
+    assert.ok(ensured.body.ran.includes("webhook-dispatch"),
+      `backstop must run the past-due webhook job, ran: ${JSON.stringify(ensured.body.ran)}`);
+  } finally {
+    await mf.dispose();
+  }
+});
+
 test("a thrown alarm is rescheduled", async () => {
   const mf = await start();
   try {

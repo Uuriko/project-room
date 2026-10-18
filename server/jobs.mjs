@@ -33,6 +33,12 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// PERF-10X L12 / Lane 8 C4 (from PR #3809, incorporated by the PERF-BUILDS
+// P0-1 supersede): an explicit nextDueAt already in the past arms the alarm
+// this far from now — not a full cadence later. 1 s is inside the alarm
+// granularity the jobs-alarm workerd check already tolerates (±1 s) and far
+// below the delivery/poll backoffs the due times themselves encode.
+export const PAST_DUE_ALARM_MS = 1000;
 // Slow jobs ride the */30 safety-net cron, whose phase can land a few
 // seconds before the job's own anchor. Without slack the job waits a
 // whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
@@ -75,7 +81,41 @@ function landDueAt(store, now) {
   return Number(open.due);
 }
 
+// PERF-BUILDS P0-1: the work_claims due probes read the generated probe
+// columns (work-claim-sqlite.mjs ensureWorkClaimProbeColumns) so they are
+// index lookups on work_claims_due_probe, not full scans json_extract-ing
+// every row. Stores whose schema predates the columns (a read-only open
+// never migrates) fall back to the legacy json_extract form. The probe for
+// column presence executes once per store and is cached in a WeakMap.
+const probeColumnStores = new WeakMap();
+function probeColumnsReady(store) {
+  if (!store?.db?.prepare) return false;
+  let ready = probeColumnStores.get(store);
+  if (ready === undefined) {
+    try {
+      store.db.prepare("SELECT claim_state, claim_pr_url, claim_pr_outcome, claim_next_poll_at, claim_repo FROM work_claims LIMIT 0").get();
+      ready = true;
+    } catch { ready = false; }
+    probeColumnStores.set(store, ready);
+  }
+  return ready;
+}
+
 function claimDueAt(store, now) {
+  if (probeColumnsReady(store)) {
+    const row = read(store, `SELECT MIN(claim_next_poll_at) AS due, COUNT(*) AS n
+      FROM work_claims
+      WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+        AND typeof(claim_pr_url) = 'text'
+        AND claim_pr_outcome IS NULL`);
+    if (row) {
+      if (!row.n) return null;
+      const due = Number(row.due);
+      return Number.isFinite(due) ? due : now;
+    }
+    // The generated-column probe errored despite the presence check (the
+    // read() helper swallowed it): fall through to the legacy form.
+  }
   const row = read(store, `SELECT MIN(COALESCE(
       json_extract(item_json, '$.data.pullRequest.nextPollAt'),
       json_extract(item_json, '$.pullRequest.nextPollAt'),
@@ -101,6 +141,18 @@ function claimDueAt(store, now) {
 // fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
 // only decides whether the job wakes at all.
 function autolinkDueAt(store, now) {
+  if (probeColumnsReady(store)) {
+    const row = read(store, `SELECT COUNT(*) AS n
+      FROM work_claims
+      WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+        AND typeof(claim_repo) = 'text'
+        AND (
+          COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests')) IS NULL
+          OR json_array_length(COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'))) = 0
+        )
+        AND claim_pr_url IS NULL`);
+    if (row) return row.n ? now : null;
+  }
   const row = read(store, `SELECT COUNT(*) AS n
     FROM work_claims
     WHERE (
@@ -654,16 +706,72 @@ export function lastRanFrom(stored) {
   return lastRan;
 }
 
+// PERF-BUILDS P0-1: next-due cache. A job's raw nextDueAt is a function of
+// the tables its probe reads, and RoomStore.writeStamp() counts every
+// successful write statement run against the store (see
+// _armProjectionWatch in server/store.mjs), so a value computed at one
+// write stamp stays valid until a write lands. Any write may touch a
+// job's tables, so invalidation is stamp-scoped — conservative and exact
+// in the safe direction: the cache can only go stale by being discarded
+// too often, never by surviving a write. Stores without writeStamp()
+// (unit-test fakes) never cache. Cadence-only jobs are not cached: their
+// due time is lastRan arithmetic, no probe to save.
+const nextDueCache = new WeakMap();
+function jobNextDueCached(job, store, now, lastRanAt) {
+  if (!store || typeof store.writeStamp !== "function") return jobNextDue(job, store, now, lastRanAt);
+  const stamp = store.writeStamp();
+  let entry = nextDueCache.get(store);
+  if (!entry || entry.stamp !== stamp) {
+    entry = { stamp, dues: new Map() };
+    nextDueCache.set(store, entry);
+  }
+  if (entry.dues.has(job.name)) return entry.dues.get(job.name);
+  const value = jobNextDue(job, store, now, lastRanAt);
+  entry.dues.set(job.name, value);
+  return value;
+}
+
 // Fast jobs only. Slow jobs ride the safety-net cron so an idle hour stays
-// at two Durable Object wakes. A due time already in the past is pushed out
-// by one cadence so a finished tick cannot schedule an immediate loop.
-export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker" }) {
+// at two Durable Object wakes. What a past-due time arms at depends on how
+// the job's due time was derived (PERF-10X L12 / Lane 8 C4, from PR #3809):
+// - A job with an explicit nextDueAt (webhook-dispatch, land-queue,
+//   claim-prs) names the moment a concrete item is due, and that moment
+//   already encodes the item's own spacing — webhook retry backoff, the
+//   GitHub poll backoff steps, a rate-limit horizon. Pushing it out by a
+//   whole cadence was a pure latency tail on top of that spacing, so a
+//   past-due explicit time arms at now + PAST_DUE_ALARM_MS.
+// - A cadence-only job (gmail-sync, channel-drain, public-read-model,
+//   public-work-reseed) has no concrete item due; its cadence IS the
+//   schedule, so a past-due time keeps the one-cadence push-out — a
+//   finished tick cannot schedule an immediate loop.
+// `notBefore` (Map or plain object, job name → ms timestamp) floors a job's
+// contribution: the alarm-failure path passes the retry time for the jobs
+// that just threw, so a poison item that stays past-due re-arms at the
+// retry delay instead of tight-looping at the past-due epsilon, while
+// other jobs' due times are unaffected.
+// PERF-BUILDS P0-1: a job with an explicit nextDueAt is never also asked
+// enabled() — for every such job in the registry enabled() re-runs the
+// same probe nextDueAt runs (webhook/land/claim/escrow due queries,
+// patrolPending), so the pair cost two scans per re-arm for one answer.
+// nextDueAt returning null IS the disabled answer for those jobs.
+export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker", notBefore = null }) {
+  const floorOf = name => {
+    if (!notBefore) return null;
+    const value = notBefore instanceof Map ? notBefore.get(name) : notBefore[name];
+    return Number.isFinite(value) ? value : null;
+  };
   let earliest = null;
   for (const job of jobs) {
-    if (job.slow || !job.runtimes.includes(runtime) || !jobEnabled(job, env, store)) continue;
-    let next = jobNextDue(job, store, now, lastRan?.[job.name]);
+    if (job.slow || !job.runtimes.includes(runtime)) continue;
+    const hasNextDue = typeof job.nextDueAt === "function";
+    if (!hasNextDue && !jobEnabled(job, env, store)) continue;
+    let next = hasNextDue
+      ? jobNextDueCached(job, store, now, lastRan?.[job.name])
+      : jobNextDue(job, store, now, lastRan?.[job.name]);
     if (next == null) continue;
-    if (next <= now) next = now + job.cadenceMs;
+    if (next <= now) next = hasNextDue ? now + PAST_DUE_ALARM_MS : now + job.cadenceMs;
+    const floor = floorOf(job.name);
+    if (floor != null && next < floor) next = floor;
     if (earliest == null || next < earliest) earliest = next;
   }
   return earliest;

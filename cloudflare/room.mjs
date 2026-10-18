@@ -219,13 +219,25 @@ export class ProjectRoom extends DurableObject {
     if (url.pathname === '/api/operator/restore-from-backup') {
       return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
     }
+    // PERF-BUILDS P0-1: snapshot the store's write stamp so the finally
+    // below can tell whether THIS request committed a write. Read-only
+    // requests (the overwhelming majority) used to pay a full
+    // earliestFutureAlarm scan — five-plus table probes — in this
+    // finally; now they pay one integer comparison.
+    const writeStampAtStart = typeof this.store?.writeStamp === "function" ? this.store.writeStamp() : 0;
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
       this.ctx.waitUntil(this.store.humanPush.flush());
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
-      // A commit in this request may have queued webhook, land, or claim work.
-      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      // A commit in this request may have queued webhook, land, or claim
+      // work — re-arm only then. Work queued by non-request paths is
+      // armed by those paths themselves (the webhook dispatch kick, the
+      // alarm's own re-arm) or by the 30-minute safety-net cron
+      // (ensureJobAlarm), which remains the backstop.
+      if (typeof this.store?.writeStamp === "function" && this.store.writeStamp() !== writeStampAtStart) {
+        this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      }
     }
   }
 
@@ -503,16 +515,24 @@ export class ProjectRoom extends DurableObject {
   }
   // Set the alarm only when the new time is earlier than the one already set.
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
-  async #armJobAlarm({ retryDelayMs = 0 } = {}) {
+  async #armJobAlarm({ retryDelayMs = 0, failedJobs = null } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
     const now = Date.now();
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    // When the caller names the jobs that just threw, the retry delay floors
+    // only those jobs (a past-due poison item must not re-arm at the
+    // past-due epsilon and tight-loop); other jobs keep their due times.
+    const notBefore = retryDelayMs > 0 && Array.isArray(failedJobs) && failedJobs.length
+      ? new Map(failedJobs.map(name => [name, now + retryDelayMs]))
+      : null;
     let when = earliestFutureAlarm(JOBS, {
-      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
+      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker", notBefore
     });
     if (retryDelayMs > 0) {
       const retryAt = now + retryDelayMs;
-      when = when == null ? retryAt : Math.min(when, retryAt);
+      // No named failures (the tick itself threw): keep the legacy cap so
+      // the failed tick still retries no later than the retry delay.
+      when = when == null ? retryAt : notBefore ? when : Math.min(when, retryAt);
     }
     const current = await this.ctx.storage.getAlarm();
     if (when == null) {
@@ -538,18 +558,20 @@ export class ProjectRoom extends DurableObject {
   async alarm() {
     if (this.paused || !this.store) return;
     let retryDelayMs = 0;
+    let failedJobs = null;
     try {
       const outcomes = await this.#runDueJobs({ includeSlow: false });
       const failed = outcomes.filter(outcome => !outcome.ok);
       if (failed.length) {
         retryDelayMs = ALARM_RETRY_MS;
+        failedJobs = failed.map(outcome => outcome.job);
         throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
       }
     } catch (error) {
       if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
       throw error;
     } finally {
-      try { await this.#armJobAlarm({ retryDelayMs }); }
+      try { await this.#armJobAlarm({ retryDelayMs, failedJobs }); }
       catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
     }
   }
