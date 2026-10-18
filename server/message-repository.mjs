@@ -1,3 +1,4 @@
+import { messageQueries, decodeMessageRecord as decode } from './message-queries.mjs';
 // Current message records across the migration boundary. The working set wins;
 // only rows explicitly removed by the archive marker may supply missing records.
 // Uncertified non-archived rows are never used as a fallback. Authorization stays
@@ -5,24 +6,17 @@
 import { messageReadIndex } from './message-read-index.mjs';
 import { archiveMarker } from './messages-store.mjs';
 
-function decode(row) {
-  const record = JSON.parse(row.record_json);
-  if (!record || record.id !== row.message_id || typeof record !== 'object') {
-    throw new Error('Invalid archived message record');
-  }
-  // NULL is meaningful for deleted/redacted content, never resurrect record text.
-  return { ...record, body: row.body };
-}
-
 export function messageRepository(store, roomId, state = store.room(roomId).state) {
   const live = messageReadIndex(state.messages);
-  if (!state.messagesArchive) return live;
-  const marker = archiveMarker(store.db, roomId);
+  const marker = state.messagesArchive ? archiveMarker(store.db, roomId) : null;
+  const queries = messageQueries(store, roomId, state, marker);
+  if (!marker) return Object.freeze({ ...live, ...queries });
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = [roomId, marker.throughSeq, marker.retainedJson];
   // Request-scoped derived reply sets avoid one history scan per inbox item.
   const replies = new Map();
   return Object.freeze({
+    ...queries,
     get(id) {
       const current = live.get(id);
       if (current || typeof id !== 'string') return current;
@@ -56,4 +50,18 @@ export function messageRepository(store, roomId, state = store.room(roomId).stat
       return replies.get(authorId).has(messageId);
     }
   });
+}
+
+// Follow only this message's ancestry; do not build a whole-room thread graph.
+export function messageThreadRoot(repository, id) {
+  let message = repository.get(id);
+  const seen = new Set();
+  while (message?.replyToId) {
+    if (seen.has(message.id)) throw new Error('Cyclic message ancestry');
+    seen.add(message.id);
+    const parent = repository.get(message.replyToId);
+    if (!parent) break;
+    message = parent;
+  }
+  return message?.id;
 }

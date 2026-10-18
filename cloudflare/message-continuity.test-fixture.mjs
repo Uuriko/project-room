@@ -15,7 +15,10 @@ export class MessageContinuityTestRoom extends HttpTestRoom {
     command('message.edited',{messageId:'fixture-0',body:'Corrected.',expectedMessageRevision:0});
     const selected=readConversation(s,token,'commons',{messageId:'fixture-0'});
     const certificate=s.db.prepare('SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id=?').get('commons');
-    return Response.json({head:s.headSequence('commons'),certified:certificate.parity_at_seq,
+    const records=messageRepository(s,'commons');
+    const recent=records.recent(3).map(m=>m.id);
+    const recordCount=[...records.records()].length;
+    return Response.json({recent,recordCount,head:s.headSequence('commons'),certified:certificate.parity_at_seq,
       tail:s.room('commons').state.messages.length,body:selected.messages[0].body,archivedBody:messageRepository(s,'commons').get('fixture-1').body,parity:s.checkMessagesParity().ok});
   }
 }

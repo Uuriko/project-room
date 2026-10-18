@@ -5621,12 +5621,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // projection is the current state. A mention deleted after posting must
     // not surface at all (it listed a tombstone with a room_reply next step),
     // and an edited mention must show its current body, not the pre-edit
-    // text. Messages missing from the projection fall back to the logged
-    // body, as the #2941 fix did for room DMs. Deleted rows are skipped
+    // text. Archived messages resolve through current normalized records;
+    // only genuinely absent legacy records fall back to the logged body. Deleted rows are skipped
     // inside the scan so they never consume one of the caller's limit slots.
-    let liveMessages = [];
-    try { liveMessages = this.room(roomId).state?.messages ?? []; } catch { /* unknown room: no overlay */ }
-    const currentById = new Map(liveMessages.map(message => [message.id, message]));
+    let currentById = { get: () => undefined, hasReply: () => false };
+    try { currentById = messageRepository(this, roomId); }
+    catch (error) { if (error?.code !== 'room_not_found') throw error; }
     const rows = [];
     try {
       const stmt = this.db.prepare(
@@ -5663,16 +5663,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     // timed_out is terminal, so a late reply does not flip the row. Once this
     // member has replied to that message, it is no longer waiting in the inbox.
-    const answeredBy = new Map();
-    if (rows.some(row => row.state === "timed_out")) {
-      for (const message of this.room(roomId).state.messages ?? []) {
-        if (message.authorId === memberId && message.replyToId) answeredBy.set(message.replyToId, true);
-      }
-    }
     return rows.map(row => ({ row, event: JSON.parse(row.body) }))
       .filter(({ event }) => event?.type === T.MESSAGE_POSTED
         && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
-      .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
+      .filter(({ row, event }) => row.state !== "timed_out" || !currentById.hasReply(memberId, event.data.messageId ?? row.eventId))
       .map(({ row, event }) => Object.freeze({
         sequence: row.sequence,
         eventId: row.eventId,

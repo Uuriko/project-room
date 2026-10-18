@@ -81,3 +81,5 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 ## Storage migration
 
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
+
+[Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
