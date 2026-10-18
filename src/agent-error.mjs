@@ -193,6 +193,20 @@ export const ERROR_REGISTRY = {
       command("If the room's owner is an agent identity (no account behind it): trial seats cannot be minted in this room. Admit the agent durably instead — POST /api/rooms/{roomId}/agent-invites mints a one-time Add-agent invite code on your owner identity bearer.")],
     catalog: { http: 403, retry: "no", recovery: "Trial seats are sponsored by the room owner's account: mint with the owner's signed-in account session (POST /api/rooms/{roomId}/guest-invites) or as an owner delegate that account granted. An agent identity bearer cannot mint, even as room owner — in an agent-owned room, use Add agent instead (POST /api/rooms/{roomId}/agent-invites)." },
   },
+  // Invite issuance surfaces (#3960): the email-verification gate refuses
+  // the CALLER's own account, but the generic 403 branch answered with
+  // room-permission guidance — "Run room_check_access" and "Ask the owner
+  // to mint a guest invite or Add agent" — which is a self-loop for the
+  // founder-owner who hits this on their first invite, and names no verify
+  // or resend action at all. The remedy is the account's own email state:
+  // verify (or resend, via the account session) and retry unchanged.
+  email_unverified: {
+    status: "action_required",
+    hint: "This action needs a verified email on the account behind this session. The refusal is about that account's own email state — not room permissions, and not something the room owner can grant. Verify the email (or resend the verification code), then retry.",
+    next: [path("/api/auth/email/verify/resend"),
+      command("Verify the account's email: open Sign-in & security from the account menu and use Resend verification (or POST /api/auth/email/verify/resend with the account session), enter the emailed code at POST /api/auth/email/verify, then retry this call unchanged. Do not ask the room owner to mint an invite instead — for an unverified owner that path is refused by the same gate.")],
+    catalog: { http: 403, retry: "fix", recovery: "Verify the account's email first: Sign-in & security → Resend verification (or POST /api/auth/email/verify/resend with the account session), enter the emailed code, then retry unchanged. The refusal is the caller's own account email state, not room permissions." },
+  },
   // Referral surface (#3218 park, decision #8): minting is frozen at the
   // HTTP door; preview and redeem of outstanding tokens are unaffected.
   referral_invites_parked: {

@@ -101,6 +101,13 @@ export function invitationFailureMessage(error) {
 }
 
 export function invitationManagementFailureMessage(error, operation) {
+  // #3960 UI remedy: the bare server message ("Verify your email before
+  // this action") names a remedy the dialog does not offer. Name the
+  // actual path — Sign-in & security resend — and that the pending
+  // request is kept, so retrying here after verifying completes it.
+  if (error?.code === "email_unverified") {
+    return "Verify your email to create invite links. Open Sign-in & security from the account menu to resend the verification email, then try again here — your link settings are kept.";
+  }
   if (!interrupted(error)) return error.message;
   if (operation === "list") return "The connection was interrupted. Close and reopen this window to reload invitation links.";
   if (operation === "cancel") return "The connection was interrupted. We could not confirm cancellation. Try cancelling this same link again to check or finish it.";
