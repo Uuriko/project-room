@@ -711,7 +711,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
-  const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
+  const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms, verifyOAuthToken: token => oauthProvider.verifyAccessToken(token) });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),

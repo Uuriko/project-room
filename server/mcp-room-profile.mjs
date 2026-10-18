@@ -104,13 +104,25 @@ function failureValue(error) {
   return { status: 500, code: "internal", message: "Request could not be completed" };
 }
 
+// AGENT-DOOR-AUTH stage 1: the minted OAuth access-token shape
+// (server/oauth-provider.mjs issues `oat_` + base64url(32 bytes) = 43
+// chars). Recognising the shape here is parsing only — a presented
+// credential, not trust. createHostedRoomMcp verifies the token through
+// the injected verifyOAuthToken before anything is bound to it, and
+// store.authenticate deliberately still does not know oat_ (teaching it
+// would open every secret-threaded store method at once).
+const OAUTH_ACCESS_TOKEN_PATTERN = /^oat_[A-Za-z0-9_-]{43}$/;
+export function isOAuthAccessTokenShape(token) {
+  return typeof token === "string" && OAUTH_ACCESS_TOKEN_PATTERN.test(token);
+}
+
 export function identityBearer(authorization) {
   // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER" accepted).
   if (typeof authorization !== "string" || !/^bearer /i.test(authorization)) {
     return { error: "Hosted room tools require Authorization: Bearer and a live identity or room token" };
   }
   const token = authorization.slice("Bearer ".length);
-  if (!token || /\s/.test(token) || !(isIdentitySecret(token) || token.startsWith(API_KEY_PREFIX))) {
+  if (!token || /\s/.test(token) || !(isIdentitySecret(token) || token.startsWith(API_KEY_PREFIX) || isOAuthAccessTokenShape(token))) {
     return { error: "Hosted room tools require a live identity or room token" };
   }
   return { secret: token };
@@ -418,6 +430,14 @@ function enforceMcpCallVisibility(store, identity, toolName) {
 
 async function callLandTool(store, secret, name, args) {
   const auth = store.authenticate(secret, args.roomId);
+  return callLandToolAsMember(store, auth, name, args);
+}
+
+// The land-queue tail shared by the secret path above and the OAuth path:
+// everything past authentication works on the already-bound member — the
+// LandQueue methods take (roomId, memberId) and the autonomy-tier check is
+// member-based, so no secret is ever passed deeper than this layer.
+async function callLandToolAsMember(store, auth, name, args) {
   // add/remove/report are room writes; the read-only tier applies to them
   // exactly as it does to command-backed writes (issue #993).
   if (name !== "list_land_queue") {
@@ -1019,6 +1039,202 @@ function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !s
   return rooms.length > 0 ? rooms : null;
 }
 
+// ---------------------------------------------------------------------------
+// AGENT-DOOR-AUTH stage 1: OAuth grants at the MCP door (coordinator ruling,
+// option (c) — the profile-layer-bindable subset).
+//
+// A verified oat_ grant binds to the consenting account's human room member
+// via store.authenticateOAuthAccount — the provider proves the grant, the
+// store proves membership, exactly as on the REST door. Only the tools below
+// can be served from that binding at this layer: their handlers authenticate
+// at the profile layer and never pass a secret deeper (contrast the rest of
+// the profile, whose handlers thread the raw secret into store methods that
+// re-authenticate it — serving those to OAuth grants would need grant-bound
+// store variants, a separate program; store.authenticate is NOT taught oat_).
+// EVERY other tool answers an OAuth grant with 403 insufficient_scope naming
+// the exclusion: all chat post/read tools, all work-lifecycle tools, the
+// full-profile (stdio) tools, inbox/wake tools, the meta tools, and the
+// charter-excluded families (money/bond/escrow/dispute, room_create,
+// admin/owner, credential-minting). Scopes only ever restrict what the
+// account's member could already do; membership loss or account
+// deactivation cuts OAuth access at the binding, on the next call.
+const OAUTH_INSTRUCTIONS = "OAuth grant accepted. This grant acts as the consenting account's human room member. Stage 1 serves only a profile-layer subset of room tools over OAuth: room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item and report_tip, each gated by the scopes on the grant (rooms:read, chat:read, work:read, work:write). tools/list shows exactly the tools this grant can call. Every other hosted tool answers 403 insufficient_scope for OAuth grants in stage 1, including chat posting and reads, the work lifecycle, inbox and wake tools, and all money, admin and credential-minting tools. Names are snake_case.";
+
+const MCP_OAUTH_TOOL_SCOPES = Object.freeze({
+  room_check_access: Object.freeze(["rooms:read"]),
+  room_member_card: Object.freeze(["rooms:read"]),
+  // The pack discloses room metadata, pinned message bodies and open work
+  // inseparably — all three read scopes, mirroring the REST ruling for the
+  // same payload (no partial-scope pack).
+  room_activation_pack: Object.freeze(["rooms:read", "chat:read", "work:read"]),
+  room_work_claim_provenance: Object.freeze(["work:read"]),
+  list_land_queue: Object.freeze(["work:read"]),
+  add_land_item: Object.freeze(["work:write"]),
+  remove_land_item: Object.freeze(["work:write"]),
+  report_tip: Object.freeze(["work:write"]),
+});
+
+// The provider's own scope rule: exact, or a `prefix:*` wildcard.
+function oauthGrantHasScope(grant, required) {
+  return (grant.scopes ?? []).some(scope =>
+    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+}
+
+function oauthExcludedError(name) {
+  return new ServiceError(403, "insufficient_scope",
+    `Tool ${name} is not available to OAuth grants in stage 1: an OAuth credential can only call the profile-layer room subset (room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item, report_tip)`);
+}
+
+// Wrap the store binding in the oauth auth shape (the same shape the REST
+// door builds in roomAuth): kind "oauth", no session binding, no CSRF.
+function bindOAuthGrant(store, grant, roomId) {
+  const bound = store.authenticateOAuthAccount(grant.userId, roomId);
+  return {
+    account: bound.account, member: bound.member, roomId: bound.roomId,
+    credentialScope: "oauth", kind: "oauth",
+    oauthClientId: grant.clientId, oauthScopes: [...grant.scopes],
+  };
+}
+
+async function dispatchOAuthRoomToolCall(store, grant, name, args) {
+  const roomId = args.roomId;
+  if (name === "room_check_access") {
+    // Only the roomId form is bindable: the identity-wide form resolves an
+    // agent identity's rooms, and an OAuth grant has no agent identity.
+    if (roomId === undefined) {
+      throw new ServiceError(403, "insufficient_scope",
+        "room_check_access without a roomId is the identity-wide form, which is not available to OAuth grants in stage 1: an OAuth grant binds per room");
+    }
+    const auth = bindOAuthGrant(store, grant, roomId);
+    return {
+      contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
+      roomId, memberId: auth.member.id, identityId: null,
+      kind: auth.member.kind, permissions: [...auth.member.permissions],
+      checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
+    };
+  }
+  if (name === "room_activation_pack") {
+    const auth = bindOAuthGrant(store, grant, roomId);
+    return buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+  }
+  if (name === "room_member_card") {
+    bindOAuthGrant(store, grant, roomId);
+    // viewerIdentityId null on purpose: the OAuth caller is the account's
+    // human member, not an agent identity, so private directory cards stay
+    // hidden (cardForMember returns them only to the owning identity) —
+    // the same fail-closed answer a non-owner identity viewer gets.
+    const doc = store.agentPlugin.cardForMember({
+      roomId, memberId: args.memberId, viewerIdentityId: null,
+    });
+    if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
+    return doc;
+  }
+  if (name === "room_work_claim_provenance") {
+    bindOAuthGrant(store, grant, roomId);
+    const items = store.workClaims.list(roomId);
+    try {
+      return { roomId, claimId: args.claimId, ...walkProvenance(items, args.claimId) };
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "unknown_claim") {
+        throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
+      }
+      throw error;
+    }
+  }
+  // The land-queue tools share callLandTool's member-bound tail. No
+  // withSpendCharge here: the charge keys on identity secrets and is a
+  // no-op for human members (chargeSpendBeforeCall returns null unless the
+  // bound member is an agent), and the OAuth actor IS the human member.
+  const auth = bindOAuthGrant(store, grant, roomId);
+  return callLandToolAsMember(store, auth, name, args);
+}
+
+async function handleOAuthAuthed(message, { store, grant, mcpUrl, searchParams }) {
+  const hasId = object(message) && Object.hasOwn(message, "id");
+  const requestId = message?.id;
+  if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
+    || (hasId && !(typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId)))) {
+    return mcpInvalidRequest();
+  }
+  if (!hasId) return null;
+  if (message.method === "ping") return { jsonrpc: "2.0", id: requestId, result: {} };
+  if (message.method === "initialize") {
+    const params = message.params;
+    if (!object(params) || typeof params.protocolVersion !== "string" || !object(params.capabilities)
+      || typeof params.clientInfo?.name !== "string" || typeof params.clientInfo?.version !== "string") {
+      return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Invalid initialization" } };
+    }
+    const negotiated = MCP_SUPPORTED_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_VERSION;
+    const versionNote = negotiated === params.protocolVersion ? {} : { _meta: { protocolVersionSubstituted: {
+      requested: params.protocolVersion, negotiated, supported: [...MCP_SUPPORTED_VERSIONS],
+      hint: "This server does not support the requested protocol version. Continue with the negotiated version, or disconnect." } } };
+    return {
+      jsonrpc: "2.0", id: requestId,
+      result: {
+        ...versionNote,
+        protocolVersion: negotiated,
+        capabilities: { tools: {} },
+        serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
+        instructions: OAUTH_INSTRUCTIONS
+      }
+    };
+  }
+  if (message.method === "tools/list") {
+    const selection = listSelection(message, searchParams);
+    if (selection.error === "cursor") {
+      return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
+    }
+    if (selection.error === "profile") {
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { profile: "must be core, lean or full" } });
+    }
+    if (selection.error === "focus" || selection.error === "focus_profile") {
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: {
+        focus: selection.error === "focus_profile" ? "omit focus when profile is full" : "must be conversation, work, review, automation, or public_work"
+      } });
+    }
+    // Catalog honesty: an OAuth principal is shown only the tools this
+    // grant can actually call — the stage-1 subset narrowed by the grant's
+    // scopes. A profile or focus parameter never widens the list: tools
+    // that would all fail are not advertised.
+    const tools = HOSTED_TOOLS.filter(entry => {
+      const required = MCP_OAUTH_TOOL_SCOPES[entry.name];
+      return required !== undefined && required.every(scope => oauthGrantHasScope(grant, scope));
+    });
+    return { jsonrpc: "2.0", id: requestId, result: {
+      profile: selection.profile,
+      tools,
+      _meta: { discovery: MCP_DISCOVERY_BLOCK }
+    } };
+  }
+  if (message.method === "tools/call") {
+    const called = message.params?.name;
+    const name = canonicalMcpToolName(called);
+    if (typeof name !== "string" || !SUGGESTABLE_TOOLS.includes(name)) {
+      return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
+    }
+    const args = message.params?.arguments ?? {};
+    try {
+      const required = MCP_OAUTH_TOOL_SCOPES[name];
+      if (required === undefined) throw oauthExcludedError(name);
+      for (const scope of required) {
+        if (!oauthGrantHasScope(grant, scope)) {
+          throw new ServiceError(403, "insufficient_scope", `OAuth grant lacks the ${scope} scope`);
+        }
+      }
+      const selected = HOSTED_TOOLS.find(entry => entry.name === name);
+      if (!validRoomArgs(name, args)) return argumentFailure(requestId, name, args, selected.inputSchema);
+      const value = await dispatchOAuthRoomToolCall(store, grant, name, args);
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value) };
+    } catch (error) {
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(failureValue(error), true) };
+    }
+  }
+  if (message.method === "server/discover") {
+    return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: `Method not found; this server supports MCP ${MCP_SUPPORTED_VERSIONS.join(" and ")}` } };
+  }
+  return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
+}
+
 function resolveMcpIdentity(store, secret, userAgent) {
   if (secret.startsWith(API_KEY_PREFIX)) {
     const record = store.agentPlugin.verifyPresentedApiKey(secret);
@@ -1035,7 +1251,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, verifyOAuthToken } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1048,10 +1264,32 @@ export function createHostedRoomMcp(store, { agentRooms } = {}) {
       const absent = authorization === undefined;
       const parsed = absent ? { secret: null } : identityBearer(authorization);
       if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
-      return handlePublicWorkMcp(store, message, parsed.secret, mcpUrl);
+      // An oat_ bearer is an OAuth grant, not a public-work identity: fall
+      // through to the OAuth door below (the public-work tools are not in
+      // the stage-1 OAuth subset and answer insufficient_scope there).
+      if (!isOAuthAccessTokenShape(parsed.secret)) {
+        return handlePublicWorkMcp(store, message, parsed.secret, mcpUrl);
+      }
     }
     const parsed = identityBearer(authorization);
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
+    if (isOAuthAccessTokenShape(parsed.secret)) {
+      // AGENT-DOOR-AUTH stage 1: verify the grant at the door through the
+      // injected verifier (server/http.mjs passes the server's own
+      // oauthProvider.verifyAccessToken — the one provider instance; no
+      // second verifier, no duplicated token semantics). Without an
+      // injected verifier an oat_ credential is rejected exactly as before
+      // stage 1, and an unknown/expired/revoked grant gets the same -32001
+      // with the same message as any other dead credential: no oracle for
+      // token validity classes. The 401 challenge in mcp-http.mjs is
+      // unchanged — no resource_metadata parameter (that is stage 3).
+      let grant = null;
+      if (typeof verifyOAuthToken === "function") {
+        try { grant = verifyOAuthToken(parsed.secret); } catch { grant = null; }
+      }
+      if (!grant) return rpcError(message, MCP_AUTH_REQUIRED, "Hosted room tools require a live identity or room token");
+      return handleOAuthAuthed(message, { store, grant, mcpUrl, searchParams });
+    }
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
     return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });

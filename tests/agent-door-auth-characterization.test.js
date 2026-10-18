@@ -26,10 +26,15 @@
 //   403 access_denied for a non-member account session, 403
 //   insufficient_scope for an api-key missing the route's scope.
 // - /mcp: anonymous initialize + tools/list are public; an identity secret
-//   reaches the room profile; an oat_ bearer gets the -32001
-//   MCP_AUTH_REQUIRED error and a WWW-Authenticate header of exactly
+//   reaches the room profile; an oat_ bearer whose token the server's
+//   provider does not know gets the -32001 MCP_AUTH_REQUIRED error and a
+//   WWW-Authenticate header of exactly
 //   Bearer realm="project-room", charset="UTF-8" — with NO
 //   resource_metadata parameter (stage 3 changes this deliberately).
+//   Stage 1 Lane C changed the other half of that pin: a server-valid
+//   oat_ now reaches the room profile's OAuth subset (pinned in
+//   tests/agent-door-auth-mcp.test.js); the tokens below are minted by a
+//   standalone provider, so this server still refuses them at the door.
 // - The OAuth provider island verifies its own tokens, but no resource-side
 //   path accepts them (the REST and MCP pins above cover this).
 import test from "node:test";
@@ -324,7 +329,7 @@ test("direct-authenticate sites: stream and /api/session still reject oat_ (stag
   assert.equal(sessionOk.body.member.id, "owner");
 });
 
-test("/mcp: anonymous discovery is public, identity secret reaches the room profile, oat_ gets -32001 with the exact 401 challenge", async t => {
+test("/mcp: anonymous discovery is public, identity secret reaches the room profile, unknown oat_ gets -32001 with the exact 401 challenge", async t => {
   const f = await serve(t);
   const oat = mintOat();
 
@@ -356,8 +361,12 @@ test("/mcp: anonymous discovery is public, identity secret reaches the room prof
 
   // A real minted oat_ token — and a fabricated one of the same shape —
   // are refused at the MCP door exactly like any other non-identity
-  // credential: no data envelope on this path, and the challenge header
-  // carries no resource_metadata parameter.
+  // credential: both are unknown to THIS server's OAuth provider (the
+  // minted one comes from a standalone provider), so the door's -32001
+  // is unchanged. A token this server's provider verifies reaches the
+  // OAuth subset instead — pinned in tests/agent-door-auth-mcp.test.js.
+  // No data envelope on this path, and the challenge header carries no
+  // resource_metadata parameter.
   for (const [label, token] of [["minted oat_", oat], ["fabricated oat_", "oat_" + "B".repeat(43)]]) {
     const listed = await f.rpc("tools/list", undefined, token);
     assert.equal(listed.status, 401, label);
