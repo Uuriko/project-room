@@ -1,0 +1,156 @@
+{
+  "fullSuite": {
+    "tests": 11141,
+    "passed": 11109,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 546928.9525,
+    "failuresMatchRecordedBaseline": true,
+    "failures": [
+      {
+        "file": "tests/host-context-policy.test.js",
+        "test": "host policy has one explicit no-network, no-secret, no-external-effects profile"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "automatic host cannot read parent secrets or reach the network"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "sandbox refuses executables outside the checkout and system paths"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "configured environment is refused before a host starts"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "default host has isolated HOME so a room path cannot expand to operator HOME"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host process receives JSON and literal arguments without ambient environment"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host malformed output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host nonzero output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host oversized output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host empty output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "timeout and cancellation stop host processes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "different host processes cannot write the same checkout concurrently"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "process adapter accepts optional coding evidence without replacing its bytes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "adapter gets a typed data envelope rather than top-level room instructions"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "adapter runs configured checks and binds observations to exact local patch"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "failed configured check remains a failed observed exit, despite model success claim"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "mismatched patch, untracked files, and wrong repository never start checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "check that edits tracked files cannot produce a current verification receipt"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "committed artifact verification requires exact clean head and valid ancestor"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "checkout stays reserved through verification and cancellation releases it"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "model stdout cannot inject an adapter observation"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "observed result is journaled and redelivered after restart without repeating execution or checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "bounded verification times out without an observation and releases checkout ownership"
+      },
+      {
+        "file": "tests/reply-agent.test.js",
+        "test": "one command drives a separate host process and repeat invocation reuses its result"
+      }
+    ],
+    "scope": "Qualification runtime/tooling before integration of main 9c409dec"
+  },
+  "affected": {
+    "files": 411,
+    "passed": true
+  },
+  "focused": {
+    "tests": 66,
+    "passed": 66
+  },
+  "mainIntegrated": "9c409dec7fdee8ff1684e6bd288211da5e3f48be",
+  "integratedHead": "fa93e2dc7f92124d0fbf68bf8e0ff4b417e64639",
+  "capacity": "release-capacity.json",
+  "nativeInterruption": "release-inflight-host.json",
+  "benchmark": "release-bodies-at-rest-bench.json",
+  "releaseReady": false,
+  "openGates": [
+    "Exact latest-candidate Linux CI",
+    "Physical Mac sleep/wake",
+    "Merge and production deployment with smoke/recovery evidence"
+  ],
+  "integrationChecks": {
+    "passed": 47,
+    "failed": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 290
+  },
+  "contract": {
+    "passed": true,
+    "mode": "CI=1 (unit suite separately executed)"
+  },
+  "schemaGate": {
+    "passed": 4,
+    "failed": 0
+  },
+  "docsLinks": 586,
+  "cloudflareCiInitialFailure": {
+    "upgradeChecks": 20,
+    "recordRailsChecks": 1,
+    "cause": "Raw projection equality predates work-entity references; hard-coded schema 41 expectation.",
+    "repair": "Compare fully hydrated, digest-validated work payloads; use current schema constant."
+  },
+  "workerUpgradeRepair": {
+    "tests": 21,
+    "passed": 21,
+    "failed": 0
+  }
+}

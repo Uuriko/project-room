@@ -80,3 +80,18 @@ A noninteractive administrator capability check failed on this Mac. Scheduling a
 The standalone 8,000-message bodies-at-rest trial passed: zero failed seeds, 8,001 messages after a new reply to the oldest message, exact retry without sequence advance, byte-for-byte message-record parity after restart and replay, and 1,487,641 projection bytes. See `release-capacity.json` and reproduce with `node scripts/qualify-room-capacity.mjs 8000 /absolute/report.json`. This was a fidelity run alongside tests, not a benchmark.
 
 All 411 selected affected test files passed; 66 focused Node/Worker checks passed. The contract gate identified stale schema references in README, CURRENT-ROOM and SERVICE; corrected to 42 and the schema consistency check passes. Lint is being repeated after the full suite to avoid a concurrent i18n test's temporary source probe.
+
+
+### Full suite and main reconciliation
+
+Full suite: 11,141 tests, 11,109 passed, 24 failed, 8 skipped; every failed file/name matches the recorded baseline Linux-only cases. The nested deliberately failing CI probe is not an additional failure. See `release-qualification.json`. This run preceded integration of main `9c409dec`; that merge was conflict-free and has a separate focused integration/contract check. No claim of an all-green Mac suite or final Linux result is made.
+
+
+### CI-discovered Worker assumptions
+
+Cloudflare CI on the first published head failed 20 historical upgrade checks and one record-rails check. The upgrade assertion compared raw schema-42 work references to old inline payloads. It now hydrates and validates referenced work rows before comparing the complete original payload; rollback still compares raw rows/catalog exactly. The record-rails assertion uses the current schema constant instead of stale 41. These are test-contract repairs, with no production behavior change.
+
+After main integration: 47 targeted tests passed; full contract check passes; lint has 0 errors and 290 existing warnings; schema migration gate 4/4 and documentation links 586/586 pass. The earlier lint collision cleared when rerun after the full suite.
+
+
+All 21 repaired Worker checks pass locally, including historical v8–v27 upgrades, rollback, old-writer refusal and persisted restart. Changed-file ESLint is clean. PR #4114 must still complete its new-head Linux/Worker CI before merge; the physical sleep/wake and production deployment gates remain open.
