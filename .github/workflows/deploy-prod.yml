@@ -272,6 +272,7 @@ jobs:
         shell: bash
         env:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
+          ROOM_SMOKE_EXPECTED_SHA: ${{ env.SHA }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs | tee "$RUNNER_TEMP/live-smoke.json"
       - name: Recover only when prior code meets the schema floor

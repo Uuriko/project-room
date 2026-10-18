@@ -47,9 +47,9 @@ function stand(overrides = {}) {
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-async function smoke(server) {
+async function smoke(server, { expectedRevision = null } = {}) {
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const env = { ...process.env, ROOM_SMOKE_ORIGIN: origin, ROOM_SMOKE_GITHUB_API: origin, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "" };
+  const env = { ...process.env, ROOM_SMOKE_ORIGIN: origin, ROOM_SMOKE_GITHUB_API: origin, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "", ROOM_SMOKE_EXPECTED_SHA: expectedRevision ?? "" };
   try {
     const { stdout } = await run(process.execPath, ["scripts/live-smoke.mjs"], { env });
     return { code: 0, report: JSON.parse(stdout) };
@@ -107,4 +107,32 @@ test("public-page CSP regressions remain hard failures after the analytics repai
   assert.equal(report.ok, false);
   assert.deepEqual(report.findings.filter(f => f.code === "csp_console").map(f => [f.detail.split("@")[0], f.severity, f.known]),
     paths.map(path => [path, "fail", undefined]));
+});
+
+
+test("pinned deployment passes when main advanced with old branch commits", async () => {
+  const comparePath = `/repos/Uuriko/project-room/compare/${LIVE}...${MAIN}`;
+  const { code, report } = await smoke(await stand({
+    "/repos/Uuriko/project-room/commits/main": [200, "application/json", JSON.stringify({ sha: MAIN })],
+    [comparePath]: [200, "application/json", JSON.stringify({ status: "ahead", ahead_by: 8, behind_by: 0,
+      commits: [{ commit: { committer: { date: new Date(Date.now() - 52 * HOUR).toISOString() } } }] })],
+  }), { expectedRevision: LIVE });
+  assert.equal(code, 0);
+  assert.equal(report.expectedRevision, LIVE);
+  assert.deepEqual(failures(report), []);
+  assert.equal(report.findings.find(f => f.code === "deploy_lag")?.severity, "warn");
+});
+
+for (const [expectedRevision, expectedCode] of [[MAIN, "deploy_revision_mismatch"], ["not-a-sha", "deploy_pin_invalid"]]) {
+  test(`pinned deployment refuses ${expectedCode} even when live equals main`, async () => {
+    const { code, report } = await smoke(await stand(), { expectedRevision });
+    assert.equal(code, 1);
+    assert.ok(failures(report).includes(expectedCode));
+  });
+}
+
+test("a matching deployment pin does not hide broken discovery", async () => {
+  const { code, report } = await smoke(await stand({ "/a2a": [404, "application/json", "{}"] }), { expectedRevision: LIVE });
+  assert.equal(code, 1);
+  assert.deepEqual(failures(report), ["advertised_url"]);
 });

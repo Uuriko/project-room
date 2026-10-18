@@ -2,7 +2,7 @@
 //
 // Complements scripts/live-audit.mjs (auth/route guardrails). This file checks
 // what an outside visitor or agent actually meets on the live origin:
-//   1. deploy lag: live /api/version sourceRevision vs GitHub main;
+//   1. deployed revision vs an optional pinned SHA; main lag is advisory for a deploy;
 //   2. discovery integrity: every machine file is 200, the right media type,
 //      parses, and every same-host URL it advertises resolves;
 //   3. human doors: public pages are 200 HTML, unknown paths give a 404;
@@ -112,8 +112,13 @@ async function deployLag({ liveRevision, githubApi = GITHUB_API, repo = REPO, to
     mainRevision: head.sha, aheadBy: diff.ahead_by ?? null, behindBy: diff.behind_by ?? null, lagHours };
 }
 
-export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000 } = {}) {
+export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000, expectedRevision = null } = {}) {
   const { findings, add } = makeRecorder();
+  // A queued deployment is qualified against its selected SHA, not a moving
+  // main branch. Scheduled (unpinned) smoke still enforces the freshness budget.
+  const pinned = expectedRevision !== null;
+  const validPin = typeof expectedRevision === "string" && /^[0-9a-f]{40}$/.test(expectedRevision);
+  if (pinned && !validPin) add("deploy_pin_invalid", "expected revision must be a full 40-character commit SHA");
   const hosts = [...SAME_HOSTS, new URL(origin).hostname];
   const timings = [];
   const get = async (path, init = {}) => {
@@ -129,10 +134,11 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
     liveRevision = typeof body?.sourceRevision === "string" && /^[0-9a-f]{40}$/.test(body.sourceRevision) ? body.sourceRevision : null;
     if (version.res.status !== 200 || !liveRevision) add("version", `${version.res.status} ${version.text.slice(0, 80)}`);
     if (liveRevision) {
+      if (validPin && liveRevision !== expectedRevision) add("deploy_revision_mismatch", `live ${liveRevision} does not match pinned ${expectedRevision}`);
       try { lag = await deployLag({ liveRevision, githubApi, token: githubToken, now, maxLagHours }); }
       catch (error) { lag = { status: "unknown", reason: error instanceof Error ? error.message : String(error) }; }
-      if (lag.status === "stale") add("deploy_lag", `live ${liveRevision.slice(0, 8)} is ${lag.aheadBy} commits / ${lag.lagHours} h behind main ${lag.mainRevision.slice(0, 8)}`);
-      else if (lag.status === "diverged") add("deploy_diverged", `live ${liveRevision.slice(0, 8)} is not an ancestor of main`);
+      if (lag.status === "stale") add("deploy_lag", `live ${liveRevision.slice(0, 8)} is ${lag.aheadBy} commits / ${lag.lagHours} h behind main ${lag.mainRevision.slice(0, 8)}`, { severity: pinned ? "warn" : "fail" });
+      else if (lag.status === "diverged") add("deploy_diverged", `live ${liveRevision.slice(0, 8)} is not an ancestor of main`, { severity: pinned ? "warn" : "fail" });
       else if (lag.status === "unknown") add("deploy_unknown", `deploy lag not measured: ${lag.reason}`, { severity: "warn" });
       else if (lag.status === "pending") add("deploy_pending", `${lag.aheadBy} commits awaiting deploy (${lag.lagHours} h)`, { severity: "warn" });
     }
@@ -184,7 +190,7 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
   const sorted = timings.map(t => t.ms).sort((a, b) => a - b);
   const p95 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] : null;
 
-  return { ok: !findings.some(f => f.severity === "fail"), origin, liveRevision, deploy: lag, p95Ms: p95, findings };
+  return { ok: !findings.some(f => f.severity === "fail"), origin, liveRevision, ...(pinned ? { expectedRevision } : {}), deploy: lag, p95Ms: p95, findings };
 }
 
 // Optional browser pass. browserFactory returns a Playwright Browser; axe is
@@ -232,7 +238,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const args = new Set(process.argv.slice(2));
   const origin = process.env.ROOM_SMOKE_ORIGIN || LIVE_ORIGIN;
   const report = await liveSmoke({ origin, githubApi: process.env.ROOM_SMOKE_GITHUB_API || GITHUB_API,
-    githubToken: process.env.GITHUB_TOKEN || null, maxLagHours: Number(process.env.ROOM_SMOKE_MAX_LAG_HOURS || 24) });
+    githubToken: process.env.GITHUB_TOKEN || null, expectedRevision: process.env.ROOM_SMOKE_EXPECTED_SHA || null, maxLagHours: Number(process.env.ROOM_SMOKE_MAX_LAG_HOURS || 24) });
   if (args.has("--browser")) {
     const { chromium } = await import("playwright");
     let AxeBuilder = null;
