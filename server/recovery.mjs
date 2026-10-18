@@ -227,7 +227,15 @@ export function auditRecovery(store) {
     }
     requireState(byWork.size === 0);
     const contents = applicationTables.map(table => {
-      const rows = store.db.prepare(`SELECT * FROM ${table}`).all().map(canonical).sort();
+      // Stored columns only (PRAGMA table_info excludes generated
+      // columns): a generated column (STORAGE-S1's ev_idempotency_key on
+      // events) is a pure function of the stored body, so digesting it
+      // would change every upgraded database's audit digest with no
+      // stored byte changing, breaking the cross-version digest
+      // comparison the agent-upgrade tests pin. Export/restore already
+      // follow the same table_info convention.
+      const stored = store.db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+      const rows = store.db.prepare(`SELECT ${stored.map(name => `"${name}"`).join(", ")} FROM ${table}`).all().map(canonical).sort();
       return { table, rows: rows.length, sha256: digest(rows) };
     });
     return { contractVersion: 1, schemaVersion: STORE_SCHEMA_VERSION, platform,

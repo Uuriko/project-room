@@ -247,6 +247,17 @@ test("genuine v11 legacy request-like fields stay ordinary, while reserved marke
         try {
           assert.equal(Object.hasOwn(current.room("commons").state, "replyRequests"), false);
           for (const [table, rows] of Object.entries(before.tables)) {
+            if (table === "events") {
+              // STORAGE-S1 adds a generated column to events; it is a pure
+              // function of body, which is compared here, so strip it.
+              const stripDerived = row => {
+                const stripped = Object.assign(Object.create(null), row);
+                delete stripped.ev_idempotency_key;
+                return stripped;
+              };
+              assert.deepEqual(records().tables.events.map(stripDerived), rows);
+              continue;
+            }
             if (table !== "rooms") { assert.deepEqual(records().tables[table], rows); continue; }
             // v28 adds rooms.archived_at, null for every pre-v28 room; every other column is unchanged.
             const after = records().tables.rooms.map(({ archived_at, ...rest }, index) => {

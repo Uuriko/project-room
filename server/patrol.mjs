@@ -493,11 +493,24 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
 
   // Idempotency look-back: a key first used before this batch must not be
   // re-used inside it. One bounded query over the batch's keys.
+  // STORAGE-S1: on a converged store the probe reads the VIRTUAL generated
+  // column ev_idempotency_key (json_extract(body, '$.idempotencyKey')),
+  // served by the events_room_idempotency index — SEARCH over the batch's
+  // keys instead of extracting the key from every body up to batchStart.
+  // A legacy-shaped store whose column has not been added yet (a store the
+  // schema pass has never run on with this code, e.g. a raw fixture) keeps
+  // the original json_extract form: the column is a pure function of body,
+  // so both forms return exactly the same rows. Presence is probed with
+  // pragma_table_xinfo — table_info omits generated columns. Within a key
+  // both plans iterate sequences ascending, so the last-row-wins Map below
+  // resolves a repeated prior key to its highest prior sequence either way.
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
     const keys = [...new Set(keyUses.map(use => use.key))];
     const placeholders = keys.map(() => "?").join(",");
-    const prior = db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
-      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (${placeholders})`)
+    const keyExpr = db.prepare("SELECT 1 FROM pragma_table_xinfo('events') WHERE name='ev_idempotency_key'").get()
+      ? "ev_idempotency_key" : "json_extract(body, '$.idempotencyKey')";
+    const prior = db.prepare(`SELECT sequence, ${keyExpr} AS k
+      FROM events WHERE room_id=? AND sequence<=? AND ${keyExpr} IN (${placeholders})`)
       .all(roomId, batchStart, ...keys);
     if (prior.length) {
       const firstByKey = new Map(prior.map(row => [row.k, row.sequence]));

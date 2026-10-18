@@ -481,7 +481,7 @@ export class ReferralInvites {
       const projection = this.store.storedProjection(roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
-      this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));
+      this.store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));
       this.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, memberId, now);

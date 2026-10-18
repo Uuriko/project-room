@@ -105,7 +105,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   let next = state;
   let sequence = shared.maxSequence;
   if (!isRoomArchived(state)) {
-    const insert = db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+    const insert = db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)");
     const length = Number.isInteger(byteLength) && byteLength > 0 ? { byteLength } : {};
     if (receiptCites(state, messageId) && !alreadyWithdrawn) {
       const incoming = event({

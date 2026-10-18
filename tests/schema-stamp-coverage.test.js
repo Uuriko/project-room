@@ -72,6 +72,7 @@ const SOURCE_PINS = {
   "ensureGrantsSchema@1": "fe4b311a64923973",
   "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
+  "ensureEventIdempotencyKeySchema@1": "c3540274ebcf1ab3",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
   "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
 };
