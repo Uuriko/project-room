@@ -611,8 +611,18 @@ export class PublicWorkClaims {
       // plain recommendation (autoClaim not set, including MCP
       // public_work_recommend) claims nothing and is never counted.
       const recommend = () => {
-        const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
-        if (reward !== 'volunteer') return outcome;
+        const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer', 'work_trade'] };
+        // The reward classes name what the board actually serves — the
+        // same tasks list/read/claim serve: 'volunteer' matches unpaid
+        // offers, 'work_trade' matches work_trade/credit offers (funded
+        // on the credit settlement rail when claimed). 'cash' matches
+        // nothing: cash rewards stay not-configured on that rail, so the
+        // request returns an empty outcome whose supportedRewards field
+        // teaches the caller what exists. Candidates are filtered to the
+        // requested class, so a volunteer request never auto-claims a
+        // paid task and a work_trade request finds the paid board.
+        const rewardClass = task => task.reward?.kind === 'work_trade' && task.reward?.unit === 'credit' ? 'work_trade'
+          : !task.reward || task.reward.kind === 'unpaid' ? 'volunteer' : null;
         const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
@@ -620,12 +630,13 @@ export class PublicWorkClaims {
           // claimable (not just unclaimed): a task past its submission
           // deadline must not be recommended as claimable (#3707).
           if (task.claim.state !== 'unclaimed' || !task.claimable) return false;
+          if (rewardClass(task) !== reward) return false;
           return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
           const matched = [...new Set(preferences.filter(value => text.includes(value)))];
-          return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
+          return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : [reward === 'work_trade' ? 'Available work_trade credit task with declared repository paths' : 'Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
         // Machine-readable complement to a bare empty list (#2988): tasks

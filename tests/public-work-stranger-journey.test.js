@@ -58,7 +58,7 @@ test('anonymous discovery recommends unclaimed volunteer tasks and excludes subm
   const ids = match.body.recommendations.map(r => r.task.taskId);
   assert.ok(ids.includes('journey:open'), 'unclaimed task is recommended');
   assert.ok(!ids.includes('journey:submitted'), 'submitted task is never recommended');
-  assert.deepEqual(match.body.supportedRewards, ['volunteer']);
+  assert.deepEqual(match.body.supportedRewards, ['volunteer', 'work_trade']);
   const list = await f.call('GET', '/api/public-work/tasks?limit=20');
   assert.equal(list.status, 200);
   const states = Object.fromEntries(list.body.tasks.map(task => [task.taskId, task.claim.state]));

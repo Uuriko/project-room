@@ -173,7 +173,7 @@ test('anonymous recommendations are grounded, bounded, and leave the registry/jo
   assert.equal(result.recommendations[0].task.taskId, 'b-typescript');
   assert.deepEqual(result.recommendations[0].reasons, ['Matches preference: typescript']);
   assert.equal(result.claim, null); assert.equal(result.inspected, 3);
-  assert.deepEqual(result.supportedRewards, ['volunteer']);
+  assert.deepEqual(result.supportedRewards, ['volunteer', 'work_trade']);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_requests').get().n, before);
   assert.ok(f.service().list().tasks.every(task => task.claim.state === 'unclaimed'));
   f.service().act('b-typescript', a.secret, 'claim', claim('hold-src'));
@@ -181,10 +181,38 @@ test('anonymous recommendations are grounded, bounded, and leave the registry/jo
   f.tick(3600001);
   assert.equal(f.service().match(null, {}).recommendations.length, 3);
   for (const reward of ['cash', 'work_trade']) assert.deepEqual(f.service().match(null, { reward }), {
-    recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] });
+    recommendations: [], claim: null, inspected: 3, hasMore: false, nextCursor: null, supportedRewards: ['volunteer', 'work_trade'] });
   assert.throws(() => f.service().match(null, { autoClaim: true, requestId: 'no-auth' }), code('unauthenticated'));
   assert.throws(() => f.service().match('revoked', {}), code('unauthenticated'));
   assert.throws(() => f.service().match(null, { skills: ['bad\nvalue'] }), code('invalid_public_work'));
+});
+
+test('match serves the reward class asked for: work_trade finds the paid board, volunteer never does', t => {
+  const f = fixture(t), [a] = f.identities;
+  f.enable('free-docs', ['docs']);
+  f.enable('paid-src', ['src'], { kind: 'work_trade', unit: 'credit', amountMinor: '5000' });
+  // The default (volunteer) class sees only the unpaid task — never the
+  // paid one, so a volunteer auto-claim can never take a credit task.
+  assert.deepEqual(f.service().match(null, {}).recommendations.map(entry => entry.task.taskId), ['free-docs']);
+  // The work_trade class finds the paid board the list/claim paths serve.
+  const paid = f.service().match(null, { reward: 'work_trade' });
+  assert.deepEqual(paid.recommendations.map(entry => entry.task.taskId), ['paid-src']);
+  assert.deepEqual(paid.recommendations[0].reasons, ['Available work_trade credit task with declared repository paths']);
+  assert.deepEqual(paid.supportedRewards, ['volunteer', 'work_trade']);
+  // A paid claim settles to a room-member ledger lane: link the worker
+  // identity to a room member and run the room genesis, mirroring the
+  // settlement fixture, before the autoClaim leg.
+  const state = structuredClone(f.store.room('commons').state);
+  state.members.worker = { id: 'worker', revision: 1, kind: 'agent', active: true, displayName: 'Worker', permissions: ['read'] };
+  f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  f.store.db.prepare('INSERT INTO identity_links VALUES (?,?,?,?)').run('commons', a.identityId, 'worker', f.store.now());
+  f.store.bountyEscrow.ensureGenesis('commons');
+  // autoClaim through the work_trade door claims the paid task itself.
+  const claimed = f.service().match(a.secret, { requestId: 'take-paid', reward: 'work_trade', autoClaim: true });
+  assert.equal(claimed.claim.action, 'claimed');
+  assert.equal(claimed.claim.task.taskId, 'paid-src');
+  assert.equal(claimed.claim.task.reward.kind, 'work_trade');
+  assert.deepEqual(f.service().match(null, { reward: 'work_trade' }).recommendations, []);
 });
 
 test('explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart', t => {

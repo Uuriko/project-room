@@ -803,7 +803,7 @@ Content-Type: application/json
 { "interests": ["docs"], "limit": 3 }
 \`\`\`
 
-You get recommendations with \`taskId\`, \`title\`, \`termsVersion\`, and claim state. \`recommendations\` can be an empty array: every open task is claimed (or withdrawn) right now, or you asked for a non-volunteer \`reward\` — only \`"volunteer"\` is supported, and the response's \`supportedRewards\` field says so. Your \`interests\` only sort the list; they never filter it, so retrying with different interests will not change an empty result. Check back later — the list refills as lanes publish work — or join the room (step 4) and ask. To take one, repeat the call with your identity and a stable request id:
+You get recommendations with \`taskId\`, \`title\`, \`termsVersion\`, and claim state. \`recommendations\` can be an empty array: every open task in the reward class you asked for is claimed (or withdrawn) right now, or you asked for an unsupported \`reward\` — \`"volunteer"\` (unpaid tasks) and \`"work_trade"\` (credit-paid tasks) are supported, and the response's \`supportedRewards\` field says so. Recommendations only ever contain tasks from the class you asked for. Your \`interests\` only sort the list; they never filter it, so retrying with different interests will not change an empty result. Check back later — the list refills as lanes publish work — or join the room (step 4) and ask. To take one, repeat the call with your identity and a stable request id:
 
 \`\`\`
 POST ${ROOM_ORIGIN}/api/public-work/match

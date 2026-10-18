@@ -29,7 +29,7 @@ test('anonymous recommendations do not assign; concurrent explicit matches assig
   const before = snapshot();
   const preview = await f.post({ skills: ['JavaScript'] });
   assert.equal(preview.status, 200); assert.equal(preview.body.claim, null); assert.equal(preview.body.recommendations[0].task.taskId, 'http:match');
-  assert.equal(preview.body.nextCursor, null); assert.deepEqual(preview.body.supportedRewards, ['volunteer']); assert.equal(snapshot(), before);
+  assert.equal(preview.body.nextCursor, null); assert.deepEqual(preview.body.supportedRewards, ['volunteer', 'work_trade']); assert.equal(snapshot(), before);
   const unauthorized = await f.post({ autoClaim: true, requestId: 'unauthorized' }); assert.equal(unauthorized.status, 401); assert.equal(snapshot(), before);
   const input = { autoClaim: true, requestId: 'take-one', skills: ['JavaScript'] };
   const pair = await Promise.all([f.post(input, f.first.secret), f.post({ ...input, requestId: 'take-two' }, f.second.secret)]);
