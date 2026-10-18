@@ -11,8 +11,6 @@ The product test: two people and an authorized agent turn a conversation into an
 accepted result, change direction, survive a disconnect, and return without
 reconstructing the project or losing control.
 
-## Active list — six outcomes
-
 ## Current execution prompt: reconcile architecture with deployed storage
 
 Integrate candidate `93727acb` (#4114) with deployed main `14e4320b` (#4123)
@@ -63,6 +61,36 @@ Initial inventory: seven textual conflicts (store, messages-store, Worker packag
 generated manifest and three recovery/backfill tests). Main remains schema38;
 candidate is schema42. Replay snapshot/cursor composition is a semantic review
 requirement even where Git reports a clean merge.
+
+### Integration decisions and evidence (2026-10-18)
+
+The candidate incorporates deployed `14e4320b` and the subsequent copy-only
+main update `342f250c`. Snapshot serialization/chunk ownership lives in
+`server/message-replay-snapshot.mjs`; cursor metadata stays in
+`server/messages-store.mjs`. Large bodies use the deployed chunk format and hash
+verification, while independent replay/certification anchors retain linear replay.
+Blocked-room diagnosis reads that same snapshot contract, including replay ahead
+of certification. Privacy discard deletes the marker and all chunks; small
+replacements remove obsolete chunks. Main's legacy-shape repair, v1 name replay,
+storage limits and guarded archive route remain present. No retired direct message
+writer was restored to resolve an import conflict.
+
+Both parents' regression cases are retained. New boundary tests cover a deployed
+schema38 chunked cursor migrating to schema42, Unicode boundaries, corrupt chunks,
+transaction rollback and shrinking away private chunks. A separate experiment
+created a database using the actual deployed revision, then opened it with this
+candidate: chunks migrated unchanged, the old connection could not write, parity
+certified, work acceptance persisted, 18 of 20 messages archived, and restart
+preserved the archived tail and accepted work. This was synthetic data on disk,
+not a live-room archive. Recovery comparison covers 205 application tables.
+
+Qualification results and the full shared benchmark are recorded with the updated
+PR #4114. The next source slice remains #4118 after this base is qualified. Its
+continuity work, exact-head Linux checks, supported-host sleep/wake, deployment
+rehearsal and the human productivity pilot are not silently marked complete by
+this integration.
+
+## Active list — six outcomes
 
 | ID | Outcome and bounded scope | Finish condition |
 |---|---|---|
