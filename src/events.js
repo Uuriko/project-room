@@ -209,7 +209,7 @@ export function historyVisibility(state) {
 export function memberHistoryVisibility(state, memberId) {
   const room = state?.room;
   if (!room || typeof memberId !== "string" || memberId === room.ownerId) return "all";
-  const member = state.members?.[memberId];
+  const member = ownMember(state.members, memberId);
   if (Array.isArray(member?.permissions) && member.permissions.includes("manage_members")) return "all";
   const setting = historyVisibility(state);
   if (setting.value) return setting.value;
@@ -275,7 +275,7 @@ export function roomTrust(state) {
 // Humans own themselves. An agent belongs to its accountable human, or to
 // the room owner when that sponsor was never recorded.
 export function memberOwnerId(state, memberId) {
-  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? ownMember(state.members, memberId) : null;
   if (!member) return null;
   if (typeof member.accountableHumanId === "string" && member.accountableHumanId) return member.accountableHumanId;
   if (member.kind === "human") return member.id;
@@ -296,8 +296,8 @@ export function distinctMemberOwnerIds(state) {
 // one of them is an agent. Two humans coordinating are not this gate.
 export function isCrossOwnerAgentAction(state, actorId, targetId) {
   if (!actorId || !targetId || actorId === targetId) return false;
-  const actor = state?.members?.[actorId];
-  const target = state?.members?.[targetId];
+  const actor = ownMember(state?.members, actorId);
+  const target = ownMember(state?.members, targetId);
   if (!actor || !target || actor.active === false || target.active === false) return false;
   if (actor.kind !== "agent" && target.kind !== "agent") return false;
   const ownerA = memberOwnerId(state, actorId);
@@ -336,7 +336,7 @@ export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
 export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
 export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
 export function isLeaveRequest(state, incoming) {
-  const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
+  const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && ownMember(state.members, incoming.data.memberId);
   return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
     && Array.isArray(incoming.data.permissions) && JSON.stringify(incoming.data.permissions) === JSON.stringify(member.permissions);
 }
@@ -425,7 +425,7 @@ export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"
 // Owner, manage_members, or invite_member (agents may hold invite_member
 // without manage_members/decide). Used by invite-code mint/redeem.
 export function canInviteMembers(state, memberId) {
-  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? ownMember(state.members, memberId) : null;
   if (!member || member.active === false) return false;
   if (memberId === state.room?.ownerId) return true;
   return member.permissions.includes("manage_members") || member.permissions.includes("invite_member");
@@ -954,14 +954,14 @@ function transferOwnership(state, incoming) {
   if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may transfer ownership");
   // Unknown and inactive targets share one error so member enumeration is
   // impossible; the module maps it to a bare 404.
-  const target = Object.hasOwn(state.members, incoming.data.toMemberId) && state.members[incoming.data.toMemberId];
+  const target = Object.hasOwn(state.members, incoming.data.toMemberId) && ownMember(state.members, incoming.data.toMemberId);
   if (!target || target.active === false) throw new Error("Unknown member");
   if (target.id === state.room.ownerId) throw new Error("Already the room owner");
   if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) {
     throw new Error("Transfer reason must be 280 characters or fewer");
   }
   const previous = state.room.ownerId;
-  const previousOwner = state.members[previous];
+  const previousOwner = ownMember(state.members, previous);
   target.permissions = [...PERMISSIONS];
   target.revision += 1;
   // Ownership supersedes delegation: the new owner is authoritative in its
@@ -1038,6 +1038,10 @@ function addMember(state, incoming) {
     if (incoming.data.referredBy === memberId) throw new Error("a member cannot refer themselves");
     // Historical events admitted prototype names as referrers. Preserve their
     // replay; live commands enforce own-member attribution before persistence.
+    // T-1 justification J-1: this replay-path read stays raw on purpose — the
+    // live door is fail-closed in server/store.mjs (Object.hasOwn-guarded
+    // referrer check before persistence), and an ownMember here would make
+    // pre-guard historical events throw during replay.
     const referrer = state.members?.[incoming.data.referredBy];
     if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
   }
@@ -1129,7 +1133,7 @@ function validatePermissions(permissions, kind, isOwner = false, isOwnerGrant = 
 function changeMemberAccess(state, incoming) {
   if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
   requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
-  const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
+  const member = Object.hasOwn(state.members, incoming.data.memberId) && ownMember(state.members, incoming.data.memberId);
   if (!member) throw new Error("Unknown member");
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
   // #643: thread the owner-grant context like addMember does — the owner may
@@ -1169,7 +1173,7 @@ function updateMemberStatus(state, incoming) {
   requireFields(incoming.data, ["message"]);
   requireMember(state, incoming.actorId);
   const targetId = incoming.data.memberId ?? incoming.actorId;
-  const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
+  const member = Object.hasOwn(state.members, targetId) && ownMember(state.members, targetId);
   if (!member) throw new Error("Unknown member");
   if (member.active === false) throw new Error("Member access revoked");
   if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
@@ -1223,7 +1227,7 @@ function setMemberMute(state, incoming) {
 }
 
 export function mutedMemberIds(state, viewerId) {
-  return state?.members?.[viewerId]?.mutedMemberIds ?? [];
+  return ownMember(state?.members, viewerId)?.mutedMemberIds ?? [];
 }
 
 export function isMutedBy(state, viewerId, authorId) {
@@ -1950,7 +1954,7 @@ function recordHandoff(state, incoming) {
 
 function clearHalt(state, incoming) {
   requireMember(state, incoming.actorId);
-  const permissions = state.members[incoming.actorId]?.permissions || [];
+  const permissions = ownMember(state.members, incoming.actorId)?.permissions || [];
   if (!permissions.includes("steer") && !permissions.includes("decide")) throw new Error("Clearing a halt requires steer or decide");
   requireFields(incoming.data, ["memberId", "haltEventId"]);
   const halt = state.agentHalts?.[incoming.data.memberId];
@@ -2349,7 +2353,7 @@ function requireMember(state, memberId) {
 }
 
 function knownMember(state, memberId) {
-  const member = Object.hasOwn(state.members, memberId) && state.members[memberId];
+  const member = Object.hasOwn(state.members, memberId) && ownMember(state.members, memberId);
   if (!member) throw new Error(`Unknown member: ${memberId}`);
   return member;
 }

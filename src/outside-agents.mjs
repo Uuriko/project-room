@@ -1,7 +1,7 @@
 // Agents who are not room members can still be named, related, and later
 // linked. A record is a room message. It grants no access, mints no identity,
 // and issues no invite. The same messages are the network every member reads.
-import { validId } from "./events.js";
+import { validId, ownMember } from "./events.js";
 import { createHash } from "node:crypto";
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
@@ -48,7 +48,7 @@ export function planOutsideAgentRecord(messages, members, roomId, actorId, input
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["externalRef", "displayName", "origin", "reach", "note"].includes(key)))
     fail(422, "invalid_outside_agent", "Choose public agent facts only");
   const externalRef = publicRef(input?.externalRef);
-  if (members?.[externalRef]) fail(422, "invalid_outside_agent", "That handle is already a room member");
+  if (ownMember(members, externalRef)) fail(422, "invalid_outside_agent", "That handle is already a room member");
   const displayName = publicText(input?.displayName, "Display name", 80);
   if (!ORIGINS.has(input?.origin)) fail(422, "invalid_outside_agent", "Name where this agent lives: bus, host, product, mcp, room, or other");
   const reach = reachOf(input?.reach ?? null);
@@ -118,8 +118,8 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
   const edges = [];
   const pendingLinks = []; // link records seen before their introduction (L-42)
   const applyLink = (agent, record, authorId, messageId = null) => {
-    if (agent && authorId === record.memberId && Object.hasOwn(members, record.memberId)
-        && members[record.memberId].active !== false && agent.linkedMemberId === null) {
+    if (agent && authorId === record.memberId && ownMember(members, record.memberId)
+        && ownMember(members, record.memberId).active !== false && agent.linkedMemberId === null) {
       agent.linkedMemberId = record.memberId;
       agent.linkedBy = authorId;
       agent.linkMessageId = messageId;

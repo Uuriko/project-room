@@ -14,7 +14,7 @@
 // reported on the { growthOk, growthReason } result. A failed emission
 // never changes the room state that applyEvent produced.
 
-import { EVENT_TYPES, applyEvent } from "./events.js";
+import { EVENT_TYPES, applyEvent, ownMember } from "./events.js";
 import { defineEvent } from "./growth-events.js";
 import { createCollector } from "./growth-collector.js";
 import { detectMentions } from "./growth-mentions.js";
@@ -83,10 +83,10 @@ const classifyActor = (roomEvent, state) => {
   // ACT-1a: Room Guide is an agent member flagged system. AN-1 should read
   // member.system and data.actorKind the same way. System actors never count
   // toward weekly productive rooms.
-  if (roomEvent?.data?.actorKind === "system" || state?.members?.[id]?.system === true) {
+  if (roomEvent?.data?.actorKind === "system" || ownMember(state?.members, id)?.system === true) {
     return { id, kind: "system" };
   }
-  const kind = state?.members?.[id]?.kind;
+  const kind = ownMember(state?.members, id)?.kind;
   return { id, kind: kind === "agent" ? "agent" : "human" };
 };
 

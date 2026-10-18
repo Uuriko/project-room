@@ -13,6 +13,7 @@
 //     spend cap (server/autonomy-tiers.mjs);
 //   - lastProgress is null until AX-1 claim activity exists.
 
+import { ownMember } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { claimUpdatedAt } from "./work-claims.mjs";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
@@ -145,7 +146,7 @@ export function claimIdle(claim, nowMs) {
 // Who may read which rows: the room owner and delegated admins see every
 // agent; a human sees the agents they sponsor; anyone else is refused.
 export function fleetScope(state, viewerId) {
-  const viewer = state.members?.[viewerId];
+  const viewer = ownMember(state.members, viewerId);
   if (!viewer || viewer.active === false) return null;
   if (state.room?.ownerId === viewerId || viewer.delegatedAdmin === true) return { all: true };
   if (viewer.kind !== "human") return null;
@@ -166,7 +167,7 @@ export function fleetRows(store, roomId, room, { memberIds = null } = {}) {
   const lastEvents = lastEventsByActor(store.db, roomId, agents.map(member => member.id));
   const wakes = wakeState(store.db, roomId);
   return agents.map(member => {
-    const sponsorMember = member.accountableHumanId && member.accountableHumanId !== member.id ? state.members?.[member.accountableHumanId] : null;
+    const sponsorMember = member.accountableHumanId && member.accountableHumanId !== member.id ? ownMember(state.members, member.accountableHumanId) ?? null : null;
     const tier = tierOf(store.db, roomId, member.id);
     const halt = state.agentHalts?.[member.id] ?? null;
     const pause = wakes.paused.get(member.id) ?? null;

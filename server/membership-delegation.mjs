@@ -4,15 +4,17 @@
 // clears both paths. Agent delegates cannot confer manage_members.
 
 import { randomUUID } from "node:crypto";
+import { ownMember } from "../src/events.js";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// Mirrors memberCan() from src/events.js (Workers-bundle reason as above).
+// Mirrors memberCan() from src/events.js (Workers-bundle reason as above),
+// resolving the member through ownMember so prototype-named ids fail closed.
 const memberCan = (authority, memberId, permission) => {
-  const member = authority?.members?.[memberId];
+  const member = ownMember(authority?.members, memberId);
   return Array.isArray(member?.permissions) && member.permissions.includes(permission);
 };
 
@@ -72,7 +74,7 @@ export class MembershipDelegation {
       // in; revoke() strips it on the way out. The owner issuing the
       // member.access_changed event is the audit trail, and manage_members
       // itself never enters the agent's member record.
-      const member = this.store.roomAuthority(roomId).members[target.member.id];
+      const member = ownMember(this.store.roomAuthority(roomId).members, target.member.id);
       const addedInvite = member && !member.permissions.includes("invite_member")
         ? (this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
             data: { memberId: member.id, expectedMemberRevision: member.revision,
@@ -206,7 +208,7 @@ export class MembershipDelegation {
   // manage_claims or invite_member for someone else.
   unheldPermissions(authority, auth, permissions) {
     if (!Array.isArray(permissions) || auth?.member?.id === authority?.ownerId) return [];
-    const held = authority?.members?.[auth?.member?.id]?.permissions;
+    const held = ownMember(authority?.members, auth?.member?.id)?.permissions;
     const own = new Set(Array.isArray(held) ? held : []);
     return [...new Set(permissions)].filter(permission => !own.has(permission));
   }
@@ -234,7 +236,7 @@ export class MembershipDelegation {
       const grant = this.db.prepare(
         "SELECT added_invite_member FROM membership_delegation_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL").get(roomId, identityId);
       const target = this.store.identities.resolveIdentityLink(identityId, roomId);
-      const member = target ? this.store.roomAuthority(roomId).members[target.member.id] : null;
+      const member = target ? ownMember(this.store.roomAuthority(roomId).members, target.member.id) : null;
       if (member?.id === authority.ownerId) fail(409, "already_administers", "The room owner retains membership administration");
       const hasAdmin = !!member && member.permissions.some(permission => adminBits.includes(permission));
       if (!grant && !hasAdmin) fail(404, "not_found", "No membership-administration authority for this identity");

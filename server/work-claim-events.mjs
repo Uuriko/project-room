@@ -10,7 +10,7 @@
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived, ownMember } from "../src/events.js";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
@@ -236,7 +236,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   // can still end every claim it has open, it just cannot grow.
   const resolvingEvent = resolving === true || isResolvingClaimEvent(action, item, previousState);
   if (!resolvingEvent && room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-  const actor = room.state.members?.[actorId];
+  const actor = ownMember(room.state.members, actorId);
   const incoming = event({
     id: randomUUID(),
     idempotencyKey: randomUUID(),

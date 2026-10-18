@@ -25,7 +25,7 @@ DELETE FROM buyer_signoff_requests WHERE room_id=OLD.id;
 END;`;
 export const railFail=(status,code,message)=>{throw Object.assign(new Error(message),{status,code});};
 export function railActor(store,roomId,actorId,{writing=false}={}) {
- const state=store.room(roomId).state,member=state.members[actorId];
+ const state=store.room(roomId).state,member=ownMember(state.members,actorId);
  if(!member||member.active===false)railFail(403,'access_denied','Active room membership required');
  if(writing&&state.room.archivedAt)railFail(409,'room_archived','Archived room');
  if(writing&&member.kind==='agent'&&!member.permissions.includes('accept_work'))railFail(403,'access_denied','Agent needs accept_work');
@@ -98,7 +98,7 @@ export class TrialTasks {
       const key=JSON.parse(this.db.prepare('SELECT value FROM room_vetting_keys WHERE room_id=?').get(roomId)?.value??'null');
       const receipt=input.receipt;
       if(!key||!verifyVettingReceipt(receipt,{expectedPubkey:key.pubkey,now:this.store.now(),expectedCandidateId:task.candidateId,expectedTrialTaskId:task.id}).ok)railFail(422,'invalid_vetting_receipt','Trusted signed receipt required');
-      if(receipt.demigodReqId!==task.demigodReqId||canonicalJson(receipt.scope)!==canonicalJson(task.trialScope)||canonicalJson(receipt.rubricScores)!==canonicalJson(input.rubricScores)||receipt.verdict!==input.verdict||receipt.evaluator.id!==actorId||receipt.evaluator.kind!==state.members[actorId].kind)railFail(422,'receipt_binding_mismatch','Receipt must bind exact trial, evaluator and decision');
+      if(receipt.demigodReqId!==task.demigodReqId||canonicalJson(receipt.scope)!==canonicalJson(task.trialScope)||canonicalJson(receipt.rubricScores)!==canonicalJson(input.rubricScores)||receipt.verdict!==input.verdict||receipt.evaluator.id!==actorId||receipt.evaluator.kind!==ownMember(state.members,actorId)?.kind)railFail(422,'receipt_binding_mismatch','Receipt must bind exact trial, evaluator and decision');
       task=receiptTrialTask(verdictTrialTask(task,{rubricScores:input.rubricScores,verdict:input.verdict},now),{receiptRef:receipt.receiptId},now);
       if(this.db.prepare('SELECT 1 FROM room_vetting_receipts WHERE room_id=? AND receipt_id=?').get(roomId,receipt.receiptId))railFail(409,'receipt_replayed','Receipt already used');
       this.db.prepare('INSERT INTO room_vetting_receipts VALUES(?,?,?,?)').run(roomId,receipt.receiptId,task.id,JSON.stringify({receipt,trust:key,verifiedAt:now}));

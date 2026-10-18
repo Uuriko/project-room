@@ -1,4 +1,4 @@
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
@@ -685,7 +685,7 @@ export class PublicWorkClaims {
     if (this.store.roomDirectory.publicReceiptsVisible(roomId)) return;
     if (typeof memberId === "string" && memberId) {
       const members = this.store.roomAuthority(roomId)?.members ?? {};
-      const member = members[memberId];
+      const member = ownMember(members, memberId);
       if (member && member.active !== false) return;
     }
     fail(403, 'receipts_private', 'This room keeps its work receipts private');
