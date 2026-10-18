@@ -67,7 +67,7 @@ function bareFixture(t) {
   return store;
 }
 
-test('arm path: earliestFutureAlarm drops 23 -> 12 statements once the reseed memo is warm, same alarm', t => {
+test('arm path: earliestFutureAlarm drops 30 -> 19 statements once the reseed memo is warm, same alarm', t => {
   const store = bareFixture(t);
   // VIS-C section 4 fixture shape: one due webhook delivery and one open
   // land-queue item, public-read-model backfill unfinished, no starter
@@ -94,10 +94,10 @@ test('arm path: earliestFutureAlarm drops 23 -> 12 statements once the reseed me
   // starterPoolStatus() every time — VIS-C's measured 23.
   counter.reset();
   const offAlarm = arm(unmemoized(store));
-  assert.equal(counter.count(), 23, 'unmemoized arm scan (VIS-C baseline)');
+  assert.equal(counter.count(), 30, 'unmemoized arm scan (VIS-C baseline, main job set grown)');
   counter.reset();
   assert.equal(arm(unmemoized(store)), offAlarm);
-  assert.equal(counter.count(), 23, 'unmemoized arm scan pays full price again');
+  assert.equal(counter.count(), 30, 'unmemoized arm scan pays full price again');
 
   // Memo on (the store singleton): the first scan in the wake computes
   // (23 + the 1-statement memo key probe); later scans in the same
@@ -105,14 +105,14 @@ test('arm path: earliestFutureAlarm drops 23 -> 12 statements once the reseed me
   counter.reset();
   const coldAlarm = earliestFutureAlarm(JOBS, { env: {}, store, now, lastRan: {}, runtime: 'worker' });
   assert.equal(coldAlarm, offAlarm, 'cold memoized scan arms the same alarm');
-  assert.equal(counter.count(), 24, 'cold scan = unmemoized 23 + 1 key probe');
+  assert.equal(counter.count(), 31, 'cold scan = unmemoized 30 + 1 key probe');
   counter.reset();
   const warmAlarm = earliestFutureAlarm(JOBS, { env: {}, store, now, lastRan: {}, runtime: 'worker' });
   assert.equal(warmAlarm, offAlarm, 'warm memoized scan arms the same alarm');
-  assert.equal(counter.count(), 12, 'warm arm scan: reseed gate 12 -> 1 statement');
+  assert.equal(counter.count(), 19, 'warm arm scan: reseed gate 12 -> 1 statement');
   counter.reset();
   assert.equal(earliestFutureAlarm(JOBS, { env: {}, store, now, lastRan: {}, runtime: 'worker' }), offAlarm);
-  assert.equal(counter.count(), 12, 'warm arm scan stays at 12');
+  assert.equal(counter.count(), 19, 'warm arm scan stays at 19');
 
   // The gate alone: 12 statements unmemoized, 1 warm.
   const job = jobByName('public-work-reseed');
