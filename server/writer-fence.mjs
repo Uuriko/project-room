@@ -411,6 +411,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // mirrored by the public read model (#3594). Same class as the four tables
   // above — older writers have no path to it.
   "room_public_receipts_setting",
+  // public_receipts_projection_stamp (PR-1): the per-room fingerprint of the
+  // receipt inputs at the last re-projection, written in the same
+  // transaction as the rebuild it stamps. Same class as the tables above —
+  // older writers have no path to it, and a missing or stale row only means
+  // the next sync rebuilds.
+  "public_receipts_projection_stamp",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",

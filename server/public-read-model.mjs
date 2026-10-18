@@ -80,6 +80,10 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
     cursor TEXT,
     done INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS public_receipts_projection_stamp (
+    room_id TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL
+  );
 `;
 
 const hashId = (prefix, roomId, localId) =>
@@ -344,6 +348,84 @@ function replaceOptedInReceipts(store, state) {
   for (const row of optedInRows(store, state)) insertReceipt(store, row);
 }
 
+// PR-1 (HOT-PATH): the receipt re-projection gate. replaceOptedInReceipts
+// deletes and rebuilds every work-claim/work-item receipt row of a room, so
+// running it on every command made a plain chat post in an opted-in room
+// cost O(claims) public_receipts writes inside the write transaction. The
+// gate fingerprints exactly the inputs optedInRows reads — the receipts
+// setting, room title/owner, the listed flag, every member's credit fields
+// (active/displayName/kind), every work item's receipt-bearing fields, and
+// the claim registry (its per-room change counter plus row aggregates, so
+// a registry swapped or written outside the onChange hook still moves the
+// fingerprint) — and stores the fingerprint in
+// public_receipts_projection_stamp in the SAME transaction as the rebuild.
+// A later sync whose fingerprint still matches the stamp skips the rebuild:
+// the rows in the table are exactly what a full rebuild would write. Any
+// doubt (no stamp, unreadable stamp/inputs, an authoritative previous=null
+// caller) rebuilds. The stamp is transactional, so a rolled-back command
+// rolls its stamp back with its rows and can never mask a needed rebuild.
+function receiptInputsFingerprint(store, state) {
+  try {
+    const roomId = state?.room?.id;
+    if (!roomId) return null;
+    const members = Object.entries(state.members ?? {})
+      .map(([id, member]) => [id, member?.active === false ? 0 : 1,
+        typeof member?.displayName === "string" ? member.displayName : null,
+        typeof member?.kind === "string" ? member.kind : null])
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const workItems = Object.entries(state.workItems ?? {})
+      .map(([id, item]) => [id, item?.state ?? null,
+        typeof item?.title === "string" ? item.title : null,
+        item?.updatedAt ?? null, item?.accountableMemberId ?? null,
+        item?.receipt && typeof item.receipt === "object"
+          ? [item.receipt.reportedById ?? null, item.receipt.producerId ?? null,
+            item.receipt.evidenceVersion ?? null, item.receipt.evidenceUrl ?? null]
+          : null])
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    let claims = null;
+    try {
+      const count = typeof store.workClaims?.changeCount === "function" ? store.workClaims.changeCount(roomId) : null;
+      const agg = store.db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(length(item_json)),0) AS bytes, COALESCE(MAX(updated_at),0) AS latest FROM work_claims WHERE room_id=?").get(roomId);
+      claims = [count, agg?.n ?? null, agg?.bytes ?? null, agg?.latest ?? null];
+    } catch { claims = null; }
+    if (!claims) return null;
+    const inputs = [
+      publicReceipts(state).enabled === true,
+      typeof state.room?.title === "string" ? state.room.title : null,
+      state.room?.ownerId ?? null,
+      isListed(store, roomId),
+      members, workItems, claims,
+    ];
+    return createHash("sha256").update(JSON.stringify(inputs)).digest("hex");
+  } catch { return null; }
+}
+
+function storedReceiptsStamp(store, roomId) {
+  try {
+    return store.db.prepare("SELECT fingerprint FROM public_receipts_projection_stamp WHERE room_id=?").get(roomId)?.fingerprint ?? null;
+  } catch { return undefined; } // unknown (e.g. table predates the gate): rebuild
+}
+
+function rememberReceiptsStamp(store, roomId, fingerprint) {
+  if (!fingerprint) return;
+  try {
+    store.db.prepare(`INSERT INTO public_receipts_projection_stamp (room_id, fingerprint) VALUES (?,?)
+      ON CONFLICT(room_id) DO UPDATE SET fingerprint=excluded.fingerprint`).run(roomId, fingerprint);
+  } catch { /* a store without the stamp table rebuilds next time instead */ }
+}
+
+// Rebuild only when the receipt inputs moved since the last projection (or
+// the caller is authoritative: previous === null means bootstrap, import or
+// backfill, where the stamp alone must not be trusted to skip).
+function reprojectReceiptsIfChanged(store, state, { authoritative = false } = {}) {
+  const roomId = state?.room?.id;
+  if (!roomId) return;
+  const fingerprint = receiptInputsFingerprint(store, state);
+  if (!authoritative && fingerprint !== null && storedReceiptsStamp(store, roomId) === fingerprint) return;
+  replaceOptedInReceipts(store, state);
+  rememberReceiptsStamp(store, roomId, fingerprint);
+}
+
 function touchPublicWorkListing(store, state) {
   const roomId = state?.room?.id;
   if (!roomId) return;
@@ -472,7 +554,7 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
         store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
       }
     }
-    if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
+    if (receiptsOn || receiptsWere) reprojectReceiptsIfChanged(store, state, { authoritative: previous === null });
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
     if (pageOn) upsertPublicRoom(store, state, auth);
     else if (pageWas) store.db.prepare("DELETE FROM public_rooms WHERE slug=?").run(roomId);
@@ -499,7 +581,13 @@ export function refreshListedRoom(store, roomId) {
   try { state = store.room(roomId).state; } catch { return; }
   const write = () => {
     touchPublicWorkListing(store, state);
-    if (publicReceipts(state).enabled === true) replaceOptedInReceipts(store, state);
+    // The listing inputs just changed (that is why this door was called), so
+    // the rebuild is unconditional — but it re-stamps the gate, so the next
+    // unrelated command can skip again.
+    if (publicReceipts(state).enabled === true) {
+      replaceOptedInReceipts(store, state);
+      rememberReceiptsStamp(store, roomId, receiptInputsFingerprint(store, state));
+    }
   };
   if (store.db.isTransaction) write();
   else store.transaction(write);
