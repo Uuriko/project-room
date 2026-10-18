@@ -47,7 +47,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "guest_invite_authority",
   // Settlement links exist only once a paid public task is enabled
   // (First Shift settlement rail).
-  "public_work_settlements"
+  "public_work_settlements",
+  // Sponsor room caps exist only once a paid public task is funded
+  // (COMP-DEEP #23 C1).
+  "public_work_room_caps"
 ]);
 
 const EVENTS = 200_000;
