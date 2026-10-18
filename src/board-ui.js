@@ -324,6 +324,31 @@ export function currentApprovalFor(item, memberId) {
   return attested ? review : null;
 }
 
+// Whether the board may offer this viewer the send-back on a delivered
+// claim (#3888): the kernel's verb exists (delivered -> in_progress via
+// a recorded changes_requested review) and the update route gates it
+// to the owner, a claim manager, or the reviewer who recorded the
+// changes_requested review (server/work-claim-routes.mjs) — but no
+// surface in the human UI posted it, so changes_requested was a dead
+// end whose only exits were the API or retiring the work. The route
+// re-checks on POST; this only decides whether the control is offered.
+export function canSendBackClaim(item, viewer) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  return viewer.id === item.owner || Boolean(viewer.manage)
+    || (item.reviews ?? []).some(entry => entry?.memberId === viewer.id && entry?.verdict === "changes_requested");
+}
+
+const sendBackRequestId = (item, memberId) =>
+  ["send-back", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+
+// The send-back body as a pure value (the claimVerifyBody precedent):
+// the state transition plus its operation identity, derived from the
+// claim, the delivery round and the actor like verify's, so a retry
+// after a lost response replays the landed outcome.
+export function claimSendBackBody(item, memberId) {
+  return { state: "in_progress", requestId: sendBackRequestId(item, memberId) };
+}
+
 // Review controls for a claim card. Every label comes from the strings
 // catalog via uiText, and each literal holds only complete HTML tags, so the
 // i18n harness sees no new hardcoded copy. The form posts to
@@ -645,8 +670,23 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     // form, not a bare button: a first finish without the bundle is
     // refused delivery_incomplete, so the form composes it.
     const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
-    if (policy === "self_attested") actions.push(button("done", "Done", "primary"));
+    // #3886: the one-step Done collapse runs the finish path, which
+    // requires a complete delivery bundle whenever the claim carries
+    // acceptance criteria — under self_attested too. With no bundle on
+    // record the card offers the deliver form (the step that composes
+    // it) instead of a Done the kernel would refuse
+    // delivery_incomplete; a claim whose bundle is already recorded
+    // (e.g. retained through a send-back) keeps the single step.
+    if (policy === "self_attested" && ((item.acceptanceCriteria?.length ?? 0) === 0 || item.delivery)) actions.push(button("done", "Done", "primary"));
     else actions.push(claimDeliverForm(item));
+  }
+  // #3888: the send-back — a delivered claim whose reviewer recorded
+  // changes_requested can be returned to in_progress from the card
+  // (delivery retained as the round's record), by the people the
+  // update route authorizes: the owner, a claim manager, or that
+  // reviewer.
+  if (canSendBackClaim(item, viewer)) {
+    actions.push(button("send-back", uiText("board.action.send-back"), "secondary"));
   }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
@@ -700,6 +740,7 @@ const PENDING_OUTCOME_KEYS = {
   done: "board.action.pending.done",
   deliver: "board.action.pending.deliver",
   verify: "board.action.pending.verify",
+  "send-back": "board.action.pending.send-back",
   release: "board.action.pending.release",
   close: "board.action.pending.close",
   cancel: "board.action.pending.cancel",
@@ -895,6 +936,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (action === "done") return `Done '${title}'`;
     if (action === "deliver") return uiText("board.action.outcome.deliver", { title });
     if (action === "verify") return uiText("board.action.outcome.verify", { title });
+    if (action === "send-back") return uiText("board.action.outcome.send-back", { title });
     if (action === "release") return `Released '${title}'`;
     if (action === "close" || action === "cancel") return uiText(action === "close" ? "board.claim.closed" : "board.claim.cancelled", { title });
     if (action === "reassign") return `Reassigned '${title}'`;
