@@ -171,3 +171,5 @@ A draft PR description with the complete benchmark table is prepared locally at
 production deploy was performed at the original qualification checkpoint. John removed
 the current-session publishing restriction on 2026-10-18; publish this candidate for
 remote CI next. Local checks cannot certify the Linux boundary.
+
+The next execution gates and measured results are tracked in the [release qualification plan](RELEASE-QUALIFICATION-PLAN.md).

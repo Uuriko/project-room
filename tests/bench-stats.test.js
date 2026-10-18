@@ -46,3 +46,14 @@ test("a tiny fixture builds and one run reports every metric", { timeout: 60000 
     assert.equal(run.writeFailures, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test("refused writes invalidate the whole write sample series without hiding read evidence", async () => {
+  const { qualifiedSamples } = await import("../scripts/bench/validity.mjs");
+  const samples = [{ writeFailures: 0, writeP50Ms: 10, coldRoomMs: 4 },
+    { writeFailures: 1, writeP50Ms: 1, coldRoomMs: 5 }];
+  assert.ok(qualifiedSamples(samples, "writeP50Ms", r => r.writeP50Ms).every(Number.isNaN));
+  assert.deepEqual(qualifiedSamples(samples, "coldRoomMs", r => r.coldRoomMs), [4, 5]);
+  samples[0].fixtureFailures = 1;
+  assert.ok(qualifiedSamples(samples, "coldRoomMs", r => r.coldRoomMs).every(Number.isNaN));
+});

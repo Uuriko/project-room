@@ -158,3 +158,10 @@ uses a production Room connection or imports operator credentials. Its private
 fixture/journal are retained for reconciliation if execution is ambiguous.
 A passing report does not establish physical sleep/wake, service restart, work
 quality or general tool execution. See [the integrated qualification](WORK-INTEGRATION-PLAN.md).
+
+
+For the separate in-flight transport failure trial, append `--disconnect-after-start`
+to the qualification command. It closes the actual dedicated runtime immediately after
+start acknowledgement, reopens the journal and runtime, and verifies the original turn
+is reconciled without a second model start. An interrupted or unresolved original turn
+is reported as such; this does not certify physical sleep/wake or successful completion.

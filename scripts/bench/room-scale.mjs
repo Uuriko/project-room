@@ -31,7 +31,7 @@ const ms = fn => { const t = performance.now(); fn(); return performance.now() -
 const gc = () => globalThis.gc?.();
 const safe = fn => { try { return fn(); } catch { return null; } };
 const round = (v, d = 2) => v === null || v === undefined || !Number.isFinite(v) ? null : +v.toFixed(d);
-const result = { size: meta.size, sequence: meta.sequence };
+const result = { size: meta.size, sequence: meta.sequence, fixtureFailures: meta.failed ?? 0 };
 
 // Writes on top of the seeded room: what one more message costs at this size.
 store.room(room); // warm the cache the way a live room is warm
@@ -41,13 +41,17 @@ for (let i = 0; i < WRITES; i++) {
   clock += 15000;
   const command = { id: `bench-${i}`, type: T.MESSAGE_POSTED, data: { messageId: `bench-${i}`, body: messageBody(random, meta.size + i) } };
   const t = performance.now();
-  try { store.command(meta.keys[i % meta.keys.length], room, command); } catch { failed++; }
-  times.push(performance.now() - t);
+  try {
+    store.command(meta.keys[i % meta.keys.length], room, command);
+    times.push(performance.now() - t);
+  } catch { failed++; }
 }
 const sorted = [...times].sort((a, b) => a - b);
 result.writeP50Ms = round(median(times));
 result.writeP95Ms = round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]);
 result.writeFailures = failed;
+result.writeAttempts = WRITES;
+result.writeSuccesses = times.length;
 
 gc();
 const state = store.room(room).state;

@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compare, holm, median, medianInterval, verdict } from "./stats.mjs";
+import { qualifiedSamples } from "./validity.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -129,7 +130,7 @@ try {
       lines.push("|---|---|");
     }
     const compared = base ? METRICS.map(([key, name, pick]) => {
-      const b = samples[size][base.label].map(pick).map(v => v ?? NaN), h = samples[size][head.label].map(pick).map(v => v ?? NaN);
+      const b = qualifiedSamples(samples[size][base.label], key, pick), h = qualifiedSamples(samples[size][head.label], key, pick);
       return { key, name, ...compare(b, h, { floor }), baseSamples: b, headSamples: h };
     }) : [];
     // Metrics that are identical constants on both sides (byte counts that did not
@@ -138,7 +139,7 @@ try {
     const adjusted = holm(compared.map(c => constantSame(c) ? NaN : c.p));
     compared.forEach((c, i) => { c.pAdjusted = Number.isFinite(adjusted[i]) ? adjusted[i] : c.p; c.verdict = verdict(c.ratio, c.pAdjusted, { floor }); });
     for (const [key, name, pick] of METRICS) {
-      const h = samples[size][head.label].map(pick).map(v => v ?? NaN);
+      const h = qualifiedSamples(samples[size][head.label], key, pick);
       if (base) {
         const c = compared.find(row => row.key === key);
         rows.push(c);
@@ -155,7 +156,7 @@ try {
     lines.push("");
   }
   const failures = sizes.flatMap(size => Object.values(samples[size]).flat().map(r => r.writeFailures)).reduce((a, b) => a + b, 0);
-  if (failures) lines.push(`Note: ${failures} benchmark writes were refused; check the fixture before trusting write numbers.`);
+  if (failures) lines.push(`Note: ${failures} benchmark writes were refused; affected write comparisons are n/a. Raw successful-write timings are retained.`);
   lines.push(`Verdicts need a Holm-adjusted p < 0.05 across this size's metrics and a move of ${Math.round(floor * 100)}% or more. Under 6 runs, intervals span the full range.`);
   process.stdout.write(lines.join("\n") + "\n");
   if (out) writeFileSync(resolve(out), JSON.stringify({ ...report, raw: samples }, null, 1));

@@ -31,6 +31,7 @@ Each tree builds its own deterministic room shaped like muse-room. It has 60 mem
 | replay from log | rebuilding the room from its event log (recovery, account deletion, archive restore); skipped above `--replay-cap` |
 
 A metric that an older commit cannot measure shows `n/a` instead of failing the run.
+Any refused measured write invalidates that side’s entire write metric series; failed fixture seeding invalidates all its metric series. Raw samples retain failure counts and successful-write timings for diagnosis. Read timings after refused writes describe the saturated room, not unrestricted growth.
 
 ## How to read it
 

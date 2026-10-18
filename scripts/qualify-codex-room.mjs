@@ -11,8 +11,9 @@ import { openRequestJournal } from '../client/request-runner.mjs';
 import { openCodexStdio, validateCodexRuntimeConfig, checkCodexProtocol } from '../client/codex-stdio.mjs';
 import { runCodexSharedAssistant } from '../client/codex-shared-assistant.mjs';
 
-const [configPath, reportPath] = process.argv.slice(2);
-if (process.argv.length !== 4 || !isAbsolute(configPath ?? '') || !isAbsolute(reportPath ?? ''))
+const [configPath, reportPath, mode] = process.argv.slice(2);
+const disconnectAfterStart = mode === "--disconnect-after-start";
+if ((process.argv.length !== 4 && !(process.argv.length === 5 && disconnectAfterStart)) || !isAbsolute(configPath ?? '') || !isAbsolute(reportPath ?? ''))
   throw new Error('Explicit absolute runtime config and report paths required');
 const f = createAcceptanceFixture({ dmConsent: true });
 const workspace = join(realpathSync(f.directory), 'provider-workspace');
@@ -29,7 +30,12 @@ const open = () => {
   const threads = db.prepare("SELECT 1 FROM sqlite_master WHERE name='codex_runtime_attempts'").get()
     ? db.prepare('SELECT thread_id FROM codex_runtime_attempts WHERE thread_id IS NOT NULL').all().map(r => r.thread_id) : [];
   rpc = openCodexStdio(config, { allowedThreadIds: threads });
-  return { ...rpc, request(method, ...args) { calls.push(method); return rpc.request(method, ...args); } };
+  return { ...rpc, async request(method, ...args) {
+    calls.push(method);
+    const value = await rpc.request(method, ...args);
+    if (disconnectAfterStart && method === 'turn/start') await rpc.close();
+    return value;
+  } };
 };
 const report = { version: 1, platform: process.platform, arch: process.arch, node: process.version,
   modelTurnExecuted: false, protocolReady: false, publication: false, hostRestartRetry: false,
@@ -47,7 +53,28 @@ try {
   let measuredRpc = open();
   await checkCodexProtocol(measuredRpc, config); report.protocolReady = true;
   const run = () => runCodexSharedAssistant({ connection, db, rpc: measuredRpc, cwd: config.cwd,
-    policy: config.policy, runId: 'qualification', timeoutMs: config.turnTimeoutMs });
+    policy: config.policy, runId: 'qualification', timeoutMs: disconnectAfterStart ? 3000 : config.turnTimeoutMs });
+  if (disconnectAfterStart) {
+    // Drop the real process after start acknowledgement, before publication.
+    // The durable turn identifier must be reconciled, never blindly restarted.
+    await assert.rejects(run());
+    await rpc.close(); rpc = null; db.close(); db = null;
+    measuredRpc = open();
+    let recovered = null;
+    try { recovered = await run(); } catch (error) {
+      assert.match(error.message, /recovery required|uncertain|unavailable|not completed|not found/i);
+    }
+    assert.equal(calls.filter(m => m === 'turn/start').length, 1);
+    const records = db.prepare('SELECT state FROM codex_runtime_attempts').all();
+    assert.equal(records.length, 1);
+    report.modelTurnExecuted = true;
+    report.inFlightDisconnect = true;
+    report.duplicateExecutionPrevented = true;
+    report.reconciledState = records[0].state;
+    report.recoveredPublication = recovered?.result?.status === 'done';
+    report.modelStarts = 1;
+    report.status = 'passed';
+  } else {
   const first = await run();
   assert.equal(first.result.status, 'done');
   const resultId = first.result.resultMessageId;
@@ -66,6 +93,7 @@ try {
   assert.equal(f.store.room('commons').state.messages.filter(m => m.id === resultId).length, 1);
   report.hostRestartRetry = true; report.modelStarts = starts;
   report.status = 'passed';
+  }
 } catch (error) {
   report.status = 'failed';
   // Deliberately no runtime stdout, credentials, prompts or diagnostic text in report.
