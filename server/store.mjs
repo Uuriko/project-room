@@ -47,7 +47,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { captureMessageCertification, advanceMessageCertification, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
@@ -1370,10 +1370,14 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
+    if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
+      throw new Error("messageProjectionWindow must be a positive integer or null");
+    this.messageProjectionWindow = messageProjectionWindow;
+    this.maintainMessageCertification = maintainMessageCertification === true || messageProjectionWindow !== null;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -5799,6 +5803,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
             && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
       }
+      // Normalized-tail mode loads only the referenced archived record and its
+      // ancestor chain for the existing reducer. Visibility is checked before
+      // restoration; permissions and revision checks remain in applyEvent.
+      if (this.messageProjectionWindow !== null) {
+        let reference = command.data?.[ARCHIVED_REF_FIELDS[command.type]];
+        const seen = new Set();
+        while (typeof reference === "string" && reference && !seen.has(reference)) {
+          seen.add(reference);
+          const archived = archivedMessageRow(this.db, roomId, reference);
+          if (!archived || archived.to_member_id && archived.author_id !== auth.member.id && archived.to_member_id !== auth.member.id) break;
+          if (!restoreArchivedMessage(this, roomId, reference)) break;
+          room = this.room(roomId);
+          reference = archived.reply_to_id;
+        }
+      }
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
@@ -6063,6 +6082,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
+      const messageCertificate = this.maintainMessageCertification
+        ? captureMessageCertification(this.db, { roomId, sequence: room.sequence, event: incoming, state: room.state }) : null;
       const projection = this.storedProjection(roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
@@ -6090,9 +6111,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
         // MSG-1: double-write the messages table in this same transaction.
-        // A throw here rolls the event back with the row. No read path uses
-        // the table yet. Older events wait for the MSG-2 backfill.
+        // A throw here rolls the event back with the row. Certified conversation
+        // reads use these rows; older events wait for the MSG-2 backfill.
         syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        advanceMessageCertification(this.db, messageCertificate, { sequence, event: incoming, state });
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }
@@ -6246,6 +6268,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
       }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
+      if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
+        // Archive only at an exact certified head; unsafe transitions defer to
+        // backfill. This is the existing reversible format, not another store.
+        this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
+      }
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });

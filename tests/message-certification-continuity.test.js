@@ -1,0 +1,138 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { readConversation } from '../server/conversation-sync.mjs';
+
+function setup(t, enabled = true, window = null) {
+  const directory = mkdtempSync(join(tmpdir(), 'message-carrier-'));
+  const file = join(directory, 'room.sqlite');
+  let store = new RoomStore(file, { maintainMessageCertification: enabled, messageProjectionWindow: window });
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey('commons', 'owner');
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const command = (type, data, id = randomUUID()) => store.command(owner, 'commons', { id, type, data });
+  const certify = () => { while (!store.backfillMessages({ limit: 1000 }).done) {} store.checkMessagesParity(); };
+  const certificate = () => store.db.prepare('SELECT applied_seq,parity_at_seq,state_seq FROM messages_backfill_cursor WHERE room_id=?').get('commons');
+  const read = (opts = {}, token = owner) => readConversation(store, token, 'commons', opts);
+  // Compare stable wire semantics against the real fallback at the SAME state.
+  // Certificate mutation is rolled back, so pages retain their original domain.
+  const compare = (opts = {}, token = owner) => {
+    const indexed = read(opts, token); let fallback;
+    try { store.transaction(() => {
+      store.db.prepare('UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?').run('commons');
+      fallback = read(opts, token); throw new Error('comparison rollback');
+    }); } catch (e) { assert.equal(e.message, 'comparison rollback'); }
+    for (const key of ['messages','sequence','mode','messageBytes','viewerId','addressing']) assert.deepEqual(indexed[key],fallback[key],key);
+    assert.equal(Boolean(indexed.nextCursor),Boolean(fallback.nextCursor));
+    return indexed;
+  };
+  return { get store(){return store;},owner,command,certify,certificate,read,compare,
+    post:(id,body,extra={})=>command('message.posted',{messageId:id,body,...extra}),
+    reopen:()=>{store.close();store=new RoomStore(file,{maintainMessageCertification:enabled,messageProjectionWindow:window});} };
+}
+
+test('certified rows survive post/edit/pin/unpin with semantic parity, duplicate receipt and reopen',t=>{
+ const f=setup(t);f.post('first','first body');f.certify();const snapshotSeq=f.certificate().state_seq;
+ f.post('second','second body');assert.equal(f.certificate().parity_at_seq,f.store.headSequence('commons'));f.compare({limit:1});
+ const id=randomUUID();f.command('message.edited',{messageId:'first',body:'changed',expectedMessageRevision:0},id);
+ f.command('message.edited',{messageId:'first',body:'changed',expectedMessageRevision:0},id);
+ assert.equal(f.compare({messageId:'first'}).messages[0].body,'changed');
+ for(const type of ['message.pinned','message.unpinned']){f.command(type,{messageId:'first'});assert.equal(f.certificate().parity_at_seq,f.store.headSequence('commons'));f.compare();}
+ assert.equal(f.certificate().state_seq,snapshotSeq,'no full replay-state rewrite per command');
+ f.reopen();assert.equal(f.certificate().parity_at_seq,f.store.headSequence('commons'));f.compare();
+ // Independent full parity sweep validates every field after incremental promotion.
+ assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+test('uncertified and default-off rooms never receive incremental certification',t=>{
+ for(const enabled of [false,true]){const f=setup(t,enabled);f.post('uncertified','body');assert.notEqual(f.certificate()?.parity_at_seq,f.store.headSequence('commons'));f.certify();f.post('next','next');assert.equal(f.certificate().parity_at_seq===f.store.headSequence('commons'),enabled);}
+});
+
+test('failed command rolls back event, rows, receipt and certificate together',t=>{
+ const f=setup(t);f.certify();const before={...f.certificate()},head=f.store.headSequence('commons');
+ f.store.db.exec("CREATE TRIGGER inject_message_failure BEFORE UPDATE OF applied_seq ON messages_backfill_cursor BEGIN SELECT RAISE(ABORT,'injected certificate failure'); END");
+ assert.throws(()=>f.post('failed','never visible'),/injected certificate failure/);
+ assert.equal(f.store.headSequence('commons'),head);assert.deepEqual({...f.certificate()},before);
+ assert.equal(f.store.db.prepare('SELECT 1 FROM messages WHERE message_id=?').get('failed'),undefined);
+ f.store.db.exec('DROP TRIGGER inject_message_failure');f.compare();
+});
+
+test('deletion and unsupported transitions fall back, then replay catches up correctly',t=>{
+ const f=setup(t);f.post('gone','secret');f.certify();f.post('live','current');
+ const old=f.read({limit:1});f.command('message.deleted',{messageId:'gone',expectedMessageRevision:0});
+ assert.notEqual(f.certificate()?.parity_at_seq,f.store.headSequence('commons'));
+ assert.equal(f.read({messageId:'gone'}).messages[0].body,null);
+ assert.equal(f.read({limit:1,cursor:old.nextCursor}).mode,'reset');
+ f.certify();assert.equal(f.compare({messageId:'gone'}).messages[0].body,null);
+ f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ assert.notEqual(f.certificate().parity_at_seq,f.store.headSequence('commons'));f.certify();f.compare();
+});
+
+test('normalized-tail mode removes settled history from the rewritten blob and keeps edits/replies accessible',t=>{
+ const f=setup(t,true,4);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<30;i++)f.post(`history-${i}`,`Record ${i} completed.`);
+ const state=f.store.room('commons').state;
+ assert.ok(state.messages.length<=8,`tail contains ${state.messages.length}`);
+ assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM messages WHERE room_id=?').get('commons').n,30);
+ assert.equal(f.certificate().parity_at_seq,f.store.headSequence('commons'));
+ assert.equal(f.read({messageId:'history-0'}).messages[0].body,'Record 0 completed.');
+ f.command('message.edited',{messageId:'history-0',body:'Corrected record.',expectedMessageRevision:0});
+ assert.equal(f.read({messageId:'history-0'}).messages[0].body,'Corrected record.');
+ f.post('reply-old','A follow-up.',{replyToId:'history-1'});
+ assert.equal(f.read({messageId:'reply-old'}).messages[0].replyToId,'history-1');
+ f.reopen();assert.equal(f.read({messageId:'history-0'}).messages[0].body,'Corrected record.');
+ assert.equal(f.store.checkMessagesParity().ok,true);
+ // The migration has an executable reverse path, preserving current wording.
+ f.store.rehydrateAllProjections();assert.equal(f.store.room('commons').state.messagesArchive,undefined);
+ assert.equal(f.store.room('commons').state.messages.find(m=>m.id==='history-0').body,'Corrected record.');
+});
+
+test('DM and channel-copy records agree after live writes; access revocation is fresh',t=>{
+ const f=setup(t);f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ const reader=f.store.issueAccessKey('commons','reader');f.certify();f.post('root','Public root.');
+ f.post('direct','Private note.',{toMemberId:'owner'});f.post('copy','Reply with public copy.',{replyToId:'root',alsoSendToChannel:true});
+ const page=f.compare({},reader);assert.equal(page.messages.some(m=>m.id==='direct'),false);assert.ok(page.messages.some(m=>m.id==='copy:channel'));
+ assert.equal(f.store.checkMessagesParity().ok,true);
+ const member=f.store.room('commons').state.members.reader;
+ f.command('member.access_changed',{memberId:'reader',expectedMemberRevision:member.revision,active:false,permissions:[]});
+ assert.throws(()=>f.read({},reader),e=>e.status===401||e.status===403);
+});
+
+test('failed archived edit restores neither a record nor a new marker',t=>{
+ const f=setup(t,true,2);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<8;i++)f.post(`old-${i}`,'Settled record.');
+ const before=f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection;
+ assert.throws(()=>f.command('message.edited',{messageId:'old-0',body:'bad revision',expectedMessageRevision:999}));
+ assert.equal(f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection,before);
+});
+
+test('cutover preserves complete conversation pages and poll mutations without copying history back',t=>{
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ for(let i=0;i<24;i++)f.post(`before-${i}`,'Historical record.');
+ f.certify();const before=f.read({limit:100}).messages;
+ f.store.messageProjectionWindow=4;
+ assert.equal(f.store.archiveMessages('commons',{keepNewest:4,dryRun:false}).ok,true);
+ assert.deepEqual(f.read({limit:100}).messages,before);
+ f.post('poll','Choose a path.',{kind:'poll',poll:{question:'Choose a path.',options:['A','B'],allowMultiple:false}});
+ f.command('poll.voted',{messageId:'poll',option:1,active:true});
+ assert.equal(f.certificate().parity_at_seq,f.store.headSequence('commons'));
+ assert.deepEqual(f.read({messageId:'poll'}).messages[0].pollVotes,[[],['owner']]);
+ assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+test('same-head imported history never inherits the old certificate in candidate mode',t=>{
+ const f=setup(t);f.post('imported','Before import.');f.certify();f.post('live','Still current.');
+ const lines=[...f.store.exportEvents(f.owner,'commons')].map(line=>{
+  if(line.event.type==='message.posted'&&line.event.data.messageId==='imported')line.event.data.body='Replacement history.';
+  return line;
+ });
+ f.store.importEvents(f.owner,'commons',lines);
+ assert.notEqual(f.certificate()?.parity_at_seq,f.store.headSequence('commons'));
+ assert.equal(f.read({messageId:'imported'}).messages[0].body,'Replacement history.');
+ f.certify();f.compare();
+});

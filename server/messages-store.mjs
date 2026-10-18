@@ -235,6 +235,62 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
   return written;
 }
 
+// Opt-in migration carrier: only transitions whose message writes are fully
+// covered by syncMessageRows can carry an existing parity certificate forward.
+// Redaction, archive and import still require the budgeted parity sweep.
+const CERTIFIED_MESSAGE_TRANSITIONS = new Set([
+  "message.posted", "message.edited", "poll.voted", "message.pinned", "message.unpinned"
+]);
+export function captureMessageCertification(db, { roomId, sequence, event }) {
+  if (!db.isTransaction || !CERTIFIED_MESSAGE_TRANSITIONS.has(event?.type)) return null;
+  const row = db.prepare(`SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c
+    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence
+    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence
+      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id
+      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)`)
+    .get(roomId, sequence);
+  if (!row) return null;
+  const positions = new Map(affectedMessageIds(event).map(id => [id,
+    db.prepare("SELECT seq FROM messages WHERE room_id=? AND message_id=?").get(roomId, id)?.seq ?? null]));
+  return { roomId, sequence, anchor: row.anchor, positions };
+}
+
+export function advanceMessageCertification(db, certificate, { sequence, event, state }) {
+  if (!certificate || !db.isTransaction || !CERTIFIED_MESSAGE_TRANSITIONS.has(event?.type)
+    || sequence !== certificate.sequence + 1) return false;
+  const { roomId } = certificate;
+  const ids = affectedMessageIds(event);
+  if (!ids.length) return false;
+  const messages = state.messages ?? [];
+  const pinned = new Set((state.pins ?? []).map(pin => pin.messageId));
+  for (const id of ids) {
+    const message = messages.find(entry => entry?.id === id);
+    const row = db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=?").get(roomId, id);
+    if (!message || !row) return false;
+    let record, reactions;
+    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
+    catch { return false; }
+    const expectedSequence = event.type === "message.posted" ? sequence : certificate.positions.get(id);
+    if (expectedSequence == null || row.seq !== expectedSequence
+      || row.thread_root_id !== threadRootId(messages, message)
+      || !isDeepStrictEqual(record, currentRecord(message)) || row.author_id !== message.authorId
+      || row.body !== storedBody(message) || row.channel_id !== textOrNull(message.channelId)
+      || row.reply_to_id !== textOrNull(message.replyToId) || row.to_member_id !== textOrNull(message.toMemberId)
+      || row.work_item_id !== textOrNull(message.workItemId) || row.created_at !== message.createdAt
+      || row.edited_at !== textOrNull(message.editedAt) || row.deleted_at !== textOrNull(message.deletedAt)
+      || row.pinned !== (pinned.has(id) ? 1 : 0) || !isDeepStrictEqual(reactions, message.reactions ?? {})) return false;
+  }
+  // Keep state_json/state_seq at the older replay checkpoint: loadState already
+  // replays its delta when the next unsupported event needs backfill.
+  const result = db.prepare(`UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?
+    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?
+      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence
+        WHERE r.id=? AND r.sequence=? AND e.id=?)`)
+    .run(sequence, event.id, sequence, roomId, certificate.sequence, certificate.sequence, certificate.anchor,
+      roomId, sequence, event.id);
+  return Number(result.changes) === 1;
+}
+
 // Re-derive a room's existing messages rows from a rebuilt projection
 // state (account deletion's rebuildRoom, after redaction rewrote the log).
 // Per-row redaction nulls a row's record for already-archived rooms; the
@@ -899,8 +955,12 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     const cursor = db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
     if (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence) return { ok: false, reason: "messages_table_not_certified" };
     const state = store.room(roomId).state;
-    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
     const inProjection = state.messages ?? [];
+    // Once migrated, only the bounded tail/dependency set needs inspection.
+    // Do not rescan every normalized history row on each compaction.
+    const projectionIds = JSON.stringify(inProjection.map(message => message.id));
+    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))")
+      .all(roomId, projectionIds).map(row => [row.message_id, row.seq]));
     if (inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
     const ordered = [...inProjection].sort((a, b) => seqs.get(a.id) - seqs.get(b.id));
     if (ordered.length <= keepNewest) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: archiveMarker(db, roomId).throughSeq };
@@ -943,8 +1003,11 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     if (dryRun) return result;
     const next = { ...state, messages: inProjection.filter(message => !movingIds.has(message.id)) };
     // The marker must never claim a message that is still in the projection.
-    const priorArchived = archivedMessageIds(db, roomId);
-    if (next.messages.some(message => movingIds.has(message.id) || priorArchived.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
+    const overlaps = db.prepare(`SELECT 1 FROM messages WHERE room_id=? AND seq<=?
+      AND message_id NOT IN (SELECT value FROM json_each(?))
+      AND message_id IN (SELECT value FROM json_each(?)) LIMIT 1`)
+      .get(roomId, marker.throughSeq, marker.retainedJson, JSON.stringify(next.messages.map(message => message.id)));
+    if (overlaps || next.messages.some(message => movingIds.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
     next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
     db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
     return result;
