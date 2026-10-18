@@ -1,0 +1,112 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T, event } from "../src/events.js";
+
+// r52: a parked room's re-diagnosis replayed the whole log from sequence 0
+// with no deadline. On muse-room's own log (about 14k events) that was 35.8 s
+// of CPU in one integrity tick on a 4-CPU box, over the production Durable
+// Object's 30 s cpu_ms. The cursor already holds the state the backfill
+// resumes from, so the re-diagnosis now starts there and only asks whether
+// the room moves past its block. And a room whose park was lifted is lagging,
+// not failing: its integrity record clears then, not after full catch-up
+// (hourly-only, muse-room had not caught up after 152 simulated hours).
+
+function open(t) {
+  const directory = mkdtempSync(join(tmpdir(), "r52-rediagnosis-resume-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  return store;
+}
+
+const at = offset => new Date(Date.UTC(2026, 9, 2) + offset * 1000).toISOString();
+const posted = (roomId, id, messageId, offset) => event({
+  type: T.MESSAGE_POSTED, actorId: "owner", roomId, id, idempotencyKey: `${id}-key`, at: at(offset), data: { messageId, body: `text ${messageId}` }
+});
+
+function append(store, roomId, events) {
+  // Stand-in for live writes: the stored log and projection gain events the
+  // backfill has not replayed yet.
+  const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+  const insert = store.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+  events.forEach((e, i) => insert.run(roomId, head + i + 1, e.id, JSON.stringify(e)));
+  store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(head + events.length, roomId);
+  return head + 1;
+}
+
+function setMessageId(store, eventId, messageId) {
+  const row = store.db.prepare("SELECT body FROM events WHERE id=?").get(eventId);
+  const body = JSON.parse(row.body);
+  body.data.messageId = messageId;
+  store.db.prepare("UPDATE events SET body=? WHERE id=?").run(JSON.stringify(body), eventId);
+}
+
+// Genesis + two posts, fully backfilled (cursor snapshot at the head), then a
+// poisoned live event and a tail: the backfill parks at the poison.
+function parkedRoom(store, roomId, tail = 1) {
+  store.initialize([...initialRoom(roomId), posted(roomId, "ev-a", "a", 10), posted(roomId, "ev-b", "b", 11)]);
+  assert.equal(store.backfillMessages({ limit: 1000 }).done, true);
+  const poisonSeq = append(store, roomId, [posted(roomId, "ev-p", "p", 12),
+    ...Array.from({ length: tail }, (_, i) => posted(roomId, `ev-t${i}`, `t${i}`, 13 + i))]);
+  setMessageId(store, "ev-p", "bad id@x");
+  const parked = store.backfillMessages({ limit: 1000 });
+  assert.equal(parked.blocked.length, 1);
+  assert.equal(parked.blocked[0].sequence, poisonSeq);
+  return poisonSeq;
+}
+
+test("a head-moved re-diagnosis resumes from the cursor snapshot, not sequence 0", t => {
+  const store = open(t);
+  parkedRoom(store, "aaa");
+  // An event the backfill already applied (before its cursor) no longer
+  // replays. A from-zero replay would move the park back to it; the backfill
+  // itself never re-reads it, so the resume diagnosis does not either.
+  setMessageId(store, "ev-a", "also bad@x");
+  setMessageId(store, "ev-p", "p"); // operator repair of the named event
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]); // head moves
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.deepEqual(after.blocked, [], "the room moves past its block, so the park lifts");
+  const { lag } = store.db.prepare("SELECT r.sequence - c.applied_seq AS lag FROM rooms r JOIN messages_backfill_cursor c ON c.room_id=r.id WHERE r.id='aaa'").get();
+  assert.equal(lag, 0, "and the backfill replays to the head in the same call");
+});
+
+test("a re-diagnosis still keeps the park when the named event still fails", t => {
+  const store = open(t);
+  const poisonSeq = parkedRoom(store, "aaa");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.equal(after.blocked.length, 1);
+  assert.equal(after.blocked[0].sequence, poisonSeq);
+});
+
+test("without a usable snapshot the re-diagnosis falls back to the full replay", t => {
+  const store = open(t);
+  parkedRoom(store, "aaa");
+  setMessageId(store, "ev-a", "also bad@x");
+  setMessageId(store, "ev-p", "p");
+  store.db.prepare("UPDATE messages_backfill_cursor SET state_seq=0 WHERE room_id='aaa'").run();
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.equal(after.blocked.length, 1, "the full replay finds the earlier event");
+  assert.equal(after.blocked[0].eventId, "ev-a");
+});
+
+test("a lifted park clears the room's integrity record before the room catches up", t => {
+  const store = open(t);
+  // A tail longer than one MESSAGES_BACKFILL_BATCH (200) keeps the room
+  // lagging after the lift on main as well as with Unmeb's per-call limit.
+  parkedRoom(store, "aaa", 450);
+  store.runIntegrityBackfillStep(Date.now() + 5000);
+  assert.ok(store.integrityFailures().some(row => row.step === "messages_backfill" && row.recordId === "aaa"), "parked: recorded");
+  setMessageId(store, "ev-p", "p");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 300)]);
+  store.runIntegrityBackfillStep(Date.now() + 5000, { limit: 25 });
+  const lag = store.db.prepare(`SELECT r.sequence - c.applied_seq AS lag FROM rooms r JOIN messages_backfill_cursor c ON c.room_id=r.id WHERE r.id='aaa'`).get().lag;
+  assert.ok(lag > 0, `still catching up (lag ${lag})`);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n, 0);
+  assert.deepEqual(store.integrityFailures().filter(row => row.step === "messages_backfill"), [], "lag is not a failure");
+});

@@ -29,6 +29,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "private_update_commands",
   "messages_backfill_cursor",
   "messages_backfill_blocks",
+  // Replay state parts exist only while a state is over one row.
+  "messages_backfill_state",
   "agent_wants_work",
   // Code drops exist only after an agent shares a patch.
   "room_code_drops",

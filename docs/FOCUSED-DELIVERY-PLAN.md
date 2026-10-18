@@ -13,6 +13,57 @@ reconstructing the project or losing control.
 
 ## Active list — six outcomes
 
+## Current execution prompt: reconcile architecture with deployed storage
+
+Integrate candidate `93727acb` (#4114) with deployed main `14e4320b` (#4123)
+in an isolated checkout. Produce one coherent, testable architecture candidate,
+not a mechanical choice of one side of each conflict. Preserve both parents and
+their independently useful behavior. Do not deploy, archive live rooms, downgrade
+writer fences, or overwrite another lane's source work.
+
+1. Inventory conflicts and semantic overlaps before editing. Map message entity
+   ownership, replay snapshots/cursor chunks, legacy-shape repair, operator archive,
+   canonical work, privacy purge and recovery to their authoritative modules.
+   Record which behavior is retained, combined or superseded and why.
+2. Preserve main's bounded replay cursors, version-1 display-name replay,
+   audited legacy shape repair, measured storage limits and guarded archive door.
+   Preserve the candidate's canonical work repository, exact-evidence acceptance,
+   entity-backed message reads, linear replay and fail-closed writer fences.
+3. Choose migration order explicitly: opening a schema-38 deployed database must
+   reach schema42 without losing cursor state, entities, work facts or audit rows.
+   Certification metadata must refer to the same replay snapshot representation.
+   Privacy edits and recovery must invalidate/delete every corresponding copy.
+   Older writers must remain fenced. Inverse representation conversion is not a
+   schema downgrade and must not imply an operator unarchive feature.
+4. Resolve source conflicts before generated metadata. Reconcile both parents'
+   tests without weakening their invariants; replace obsolete assertions only
+   when the new storage contract explains the change. Add a crossing-boundary
+   regression using a real pre-integration database when possible: upgrade,
+   certification/archive, canonical work, restart and recovery/privacy behavior.
+5. Run focused storage/replay/work/archive/migration tests and Worker checks first.
+   Regenerate manifests from the integrated tree, verify packaging and lint, and
+   then run affected tests and one full Node24 suite after fixes stabilize.
+   Report baseline failures separately; no skipped security tests to obtain green.
+6. Run the shared room benchmark once on the finished candidate against the pinned
+   deployed main, using bodies-at-rest and the documented statistical method.
+   Retain slower and inconclusive results. Do not claim productive-user gains
+   from microbenchmarks. Verify fixture and measured writes were accepted.
+7. Publish the integration as an update to #4114 with the conflict decisions,
+   test/benchmark evidence and explicit open gates. Verify remote head and actual
+   merge composition. Keep #4118 separate until its base is reconciled; account
+   for its follow-up rather than silently dropping it. Release only this source
+   claim at the checkpoint, leaving shared deployment roles untouched.
+
+Done means a published integrated source candidate with inspectable evidence and
+no unexplained new failures in exercised boundaries. Hosted exact-head checks,
+production rollout, physical sleep/wake and the human productivity pilot remain
+separate acceptance gates; no local result closes those automatically.
+
+Initial inventory: seven textual conflicts (store, messages-store, Worker package,
+generated manifest and three recovery/backfill tests). Main remains schema38;
+candidate is schema42. Replay snapshot/cursor composition is a semantic review
+requirement even where Git reports a clean merge.
+
 | ID | Outcome and bounded scope | Finish condition |
 |---|---|---|
 | F1 | **Finish the core overhaul.** One owner for each domain and execution transition; canonical message/work/attempt/artifact records; narrow commands and repositories; shared authorization; transactions and due-effect intent. Migrate existing data and remove replaced writers, serializers and callers. | A normal change does not require unrelated central-file edits; tested migration/restore works; no competing writer or permanent compatibility layer remains in the changed scope. |

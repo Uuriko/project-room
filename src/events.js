@@ -456,7 +456,16 @@ export const INVITATION_ROLES = INVITATION_ROLE_POLICIES[INVITATION_ROLE_POLICY_
 export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
 // Live member.added commands stamp this. Events written before it omit the
 // field and keep replaying, including a bootstrap owner named "Room owner".
-export const DISPLAY_NAME_POLICY_VERSION = 1;
+// v2 (r50): the G16b first-word collision rule. Events stamped v1 were admitted
+// without it (Oct 5-15 muse-room has two), so replay checks a v1 stamp with
+// the v1 rules; a tightened rule needs a new version, not a rewrite of v1.
+export const DISPLAY_NAME_POLICY_VERSION = 2;
+const DISPLAY_NAME_POLICY_VERSIONS = new Set([1, 2]);
+function assertStampedDisplayName(data, members) {
+  const version = data.displayNamePolicyVersion;
+  if (!DISPLAY_NAME_POLICY_VERSIONS.has(version)) return;
+  assertMemberDisplayNameAvailable(data.displayName, members, { firstWordRule: version >= 2 });
+}
 // Live message.pinned commands stamp this (store.command injects it at
 // admission). Pin events written before the F-1 DM-party rule omit the field
 // and must keep replaying; the reducer only enforces the party check on
@@ -1032,9 +1041,7 @@ function addMember(state, incoming) {
   // Reserved, duplicate, confusable, and control-character names are refused
   // on the live command path. The bootstrap owner is exempt so a room can
   // still be created under "Room owner". Older events omit the policy stamp.
-  if (!isBootstrapOwner && incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
-    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
-  }
+  if (!isBootstrapOwner) assertStampedDisplayName(incoming.data, state.members);
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
@@ -1116,9 +1123,7 @@ function joinMemberViaInvitation(state, incoming) {
   // Reserved, duplicate, confusable, and control-character names are refused
   // on the invitation join path too. Older events omit the policy stamp, so
   // replay never throws for already-admitted members.
-  if (incoming.data.displayNamePolicyVersion === DISPLAY_NAME_POLICY_VERSION) {
-    assertMemberDisplayNameAvailable(incoming.data.displayName, state.members);
-  }
+  assertStampedDisplayName(incoming.data, state.members);
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,

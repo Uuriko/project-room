@@ -51,6 +51,7 @@ import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
@@ -2043,6 +2044,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM message_replay_snapshots").run();
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
+        this.db.prepare("DELETE FROM messages_backfill_state").run();
       }
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
@@ -2222,8 +2224,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   backfillMessages(options = {}) {
     return runMessagesBackfill(this, options);
   }
-  checkMessagesParity() {
-    return verifyMessagesParity(this);
+  checkMessagesParity(options = {}) {
+    return verifyMessagesParity(this, options);
   }
   // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
   // it writes only patrol_* tables and files findings; see server/patrol.mjs.
@@ -2304,7 +2306,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // "" is not a room, so the moot-room rule below must not eat it.
       if (row.step !== "messages_backfill" || !row.recordId || failedNow.has(row.recordId)) continue;
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
-      if (!roomExists || messagesBackfillCaughtUp(this.db, row.recordId)) {
+      // r52: a room whose park was lifted (its block re-diagnosed clean) and
+      // that did not fail in this call is lagging, not failing: lag is not
+      // an integrity failure for any other room. Without this the record
+      // stood until the room fully caught up, keeping integrity red for days
+      // after the cause was fixed. A later failure re-parks and re-records.
+      const parked = this.db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      if (!roomExists || !parked || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
       }
     }
@@ -2316,6 +2324,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to the next room in the same visit; a room that certifies clears any
   // earlier record.
   runIntegrityParityStep() {
+    // Legacy record shapes would fail parity forever; upgrade them first.
+    this.upgradeLegacyMessageShapes();
     const result = runMessagesParityCheck(this, {
       report: ({ roomId, error }) => {
         if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
@@ -3226,7 +3236,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     `).all().map(row => row.id);
     return new Set(ids);
   }
+  // Projection shape upgrade v1 (server/legacy-message-shape.mjs): stored
+  // message records the current reducer no longer builds. Idempotent.
+  upgradeLegacyMessageShapes({ skipIds = new Set() } = {}) {
+    if (this.readOnly) return { rooms: 0, reactionsRemoved: 0, receiptIdsAdded: 0 };
+    return runLegacyMessageShapeUpgrade(this, { skipIds });
+  }
   repairProjectionShape(skipIds) {
+    this.upgradeLegacyMessageShapes({ skipIds });
     const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
     const missingChannel = this.db.prepare(`
       SELECT id, projection FROM rooms
@@ -3485,7 +3502,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -4411,7 +4428,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -5132,6 +5149,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {
         this.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
       }
+      this.db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
@@ -6092,7 +6110,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const sequence = room.sequence + 1;
       const messageWrite = prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence});
       const { projection } = messageWrite;
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the
