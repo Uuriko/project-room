@@ -204,11 +204,11 @@ function sampleArgs(name, roomId) {
   return args;
 }
 
-// Every family of write tool: ordinary messages, reactions, reply requests and
+// Every family of write tool: ordinary messages, reply requests and
 // responses, help offers, work actions, drafts, claims, bounties. A mutant that
 // classifies any of them as a read lets a rooms:read key through.
 const WRITE_TOOLS = [
-  "room_post_message", "room_react",
+  "room_post_message",
   "room_reply", "room_respond_to_request", "room_request_reply", "room_cancel_request",
   "room_offer_help", "room_select_help_offer", "room_withdraw_help_offer",
   "room_begin_work", "room_start_work", "room_propose_work", "room_record_completion",

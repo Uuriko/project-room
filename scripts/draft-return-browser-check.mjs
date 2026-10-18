@@ -10,6 +10,26 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 
+// Hosted runners stall hard enough that the page-wide 8s default kills waits
+// whose product leg is ~1s on an unloaded box. Waits on an async round trip
+// poll the actual state with a generous ceiling and, on timeout, fail with a
+// dump of the page state that says why — never a bare locator timeout.
+async function waitForState(page, description, probe, { timeout = 30000, interval = 250 } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await probe()) return;
+    await page.waitForTimeout(Math.min(interval, deadline - Date.now()));
+  }
+  if (await probe()) return;
+  const state = await page.evaluate(() => ({
+    hash: location.hash,
+    status: document.querySelector("#status")?.textContent ?? null,
+    eventCount: document.querySelector("#event-count")?.textContent ?? null,
+    workCard: document.querySelector("[data-work-record-id]")?.outerHTML.slice(0, 600) ?? null,
+  })).catch(() => null);
+  throw new Error(`Timed out after ${timeout}ms waiting for ${description}. Page state: ${JSON.stringify(state)}`);
+}
+
 async function setup(t, { humanWork = false, mobile = false } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   const workId = humanWork ? "human-handoff" : "test-handoff";
@@ -25,7 +45,11 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" }), errors = [], outside = [];
-  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
+  // The 8s default was calibrated for an unloaded runner: under hosted stall
+  // it kills waits whose product leg is ~1s (sign-in's #main wait inside
+  // auth-signin.mjs rides this page default), so the file's waits get the
+  // same generous ceiling the state polls above use.
+  page.setDefaultTimeout(30000); page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
     return route.continue();
@@ -41,9 +65,10 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   await page.goto(origin);
   let initialLogin = true;
   const login = async (key = f.keys.owner) => {
-    await page.locator("#auth-panel").waitFor({ state: "visible" });
+    await waitForState(page, "the auth panel to appear", async () => await page.locator("#auth-panel").isVisible().catch(() => false));
     if (initialLogin) { await signInFixture(page, key); initialLogin = false; }
-    else await signInFixtureInPlace(page, f.store, key); await page.locator("#main").waitFor({ state: "visible" });
+    else await signInFixtureInPlace(page, f.store, key);
+    await waitForState(page, "the room to open after sign-in", async () => await page.locator("#main").isVisible().catch(() => false));
   };
   await login();
   const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
@@ -112,18 +137,34 @@ test("uncommitted return retry unlocks only after stale rejection, preserving me
   assert.equal(messages.length, 1); assert.equal(messages[0].proposal.submittedAtRevision, 1);
 });
 
-test("confirmed draft with failed snapshot remains saved, then becomes findable on refresh", { timeout: 30000 }, async t => {
+test("confirmed draft applies locally with failed snapshot, remains saved, and stays findable on refresh", { timeout: 60000 }, async t => {
   const f = await setup(t), { page } = f; let failSnapshot = false, command;
   await page.route(/\/api\/rooms\/commons(\?.*)?$/, route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
   await page.route("**/commands", async route => { command = route.request().postDataJSON(); failSnapshot = true; const response = await route.fetch(); return route.fulfill({ response }); });
-  await f.open(); await f.input.fill(f.answer()); await f.submit.click(); await f.dialog.waitFor({ state: "hidden" });
-  await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).waitFor();
-  assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1);
-  assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 0);
+  await f.open(); await f.input.fill(f.answer()); await f.submit.click();
+  await waitForState(page, "the draft dialog to close after submit", async () => await f.dialog.isHidden().catch(() => false));
+  // CONTRACT CHANGE (delta sync, stated for sign-off in PR #3854): the
+  // committed receipt now applies locally at once, so the draft is visible
+  // immediately even though every snapshot read is failing — the notice is
+  // the visible-draft one, not "Refresh to view it", and the work card's
+  // draft link is present without any refresh. Before delta sync the same
+  // choreography pinned the opposite: not visible, no link, refresh owed.
+  const postedNotice = page.getByText("Draft posted. Work status is unchanged.", { exact: true });
+  await waitForState(page, "the posted-draft notice to appear", async () => (await postedNotice.count().catch(() => 0)) > 0);
+  assert.equal(await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).count(), 0);
+  assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1, "the draft is saved server-side");
+  const draftLink = f.card.getByRole("link", { name: "View latest draft", exact: true });
+  assert.equal(await draftLink.count(), 1, "the draft is findable immediately, with snapshot reads still failing");
+  await draftLink.click({ timeout: 30000 });
+  await waitForState(page, "focus to land on the posted draft record", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
   await page.locator("#session-menu-button").click();
   failSnapshot = false; await clickChrome(page, "#refresh-button");
-  await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
-  await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId);
+  // Findability after a refresh is a full snapshot round trip + re-render: the
+  // leg is ~1s unloaded but blew the 8s default in three straight hosted
+  // attempts (pure locator timeouts, no assertion failures). Poll the state.
+  await waitForState(page, "the posted draft to remain findable after refresh", async () => await draftLink.isVisible().catch(() => false));
+  await draftLink.click({ timeout: 30000 });
+  await waitForState(page, "focus to land on the posted draft record after refresh", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
   await f.open(); assert.equal(await f.input.inputValue(), "");
 });
 
