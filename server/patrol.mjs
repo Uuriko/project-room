@@ -663,6 +663,18 @@ function patrolAgreements({ store, file, snapshot, claimWork, claimPrior, messag
   const roomId = snapshot.roomId;
   const head = snapshot.head;
   const headEventId = snapshot.headEventId;
+  // Projection identity (#4127): the stored materialisation must claim to
+  // be this room. A parseable projection whose embedded room id disagrees
+  // with the row was silent before — the messages leg below compares
+  // message records, never the room's own identity — so name it here.
+  // Unparseable bytes are the boot quarantine's and the readers' typed
+  // errors' territory, not a finding.
+  let stored = null;
+  try { stored = JSON.parse(snapshot.projection); } catch { stored = null; }
+  if (stored && typeof stored === "object" && !Array.isArray(stored)
+    && typeof stored.room?.id === "string" && stored.room.id !== roomId) {
+    file(head, headEventId, "sequence", "projection_room_mismatch", roomId, { storedRoomId: stored.room.id });
+  }
 
   // Messages: full shadow vs the hydrated projection, both directions.
   // Runs when this tick touched messages, and on a forced recheck.

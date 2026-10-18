@@ -62,7 +62,9 @@ test("a torn projection is repaired from the journal with data conserved", () =>
   const before = store.room("repair-room");
   const journalDigest = eventsDigest(store);
   const torn = tear(store);
-  assert.throws(() => store.room("repair-room"), SyntaxError);
+  // #4127 (corruption-hardening PR2): reads of an unreadable projection now
+  // fail with the typed room_corrupt_projection error, not a raw SyntaxError.
+  assert.throws(() => store.room("repair-room"), error => error?.status === 500 && error?.code === "room_corrupt_projection");
 
   const plan = planProjectionRepair(store, { roomId: "repair-room" }, "req-3");
   assert.equal(plan.stored.parses, false);
@@ -130,6 +132,51 @@ test("a torn journal refuses: replay fails in the plan and execute writes nothin
     () => executeProjectionRepair(store, { roomId: "repair-room", ...plan.executeGuard }, "req-9")
   );
   assert.equal(rawProjection(store).projection, torn);
+});
+
+// #4127: repairability extends to shape failures — projections that parse
+// but are not a state for this room. The read path refuses them with the
+// typed room_corrupt_projection error; this tool is their repair path.
+test("a hollow ({}) projection is repairable: plan names the shape, execute rebuilds", () => {
+  const store = seededStore();
+  store.db.prepare("UPDATE rooms SET projection='{}' WHERE id='repair-room'").run();
+  assert.throws(() => store.room("repair-room"), error => error?.code === "room_corrupt_projection");
+  const plan = planProjectionRepair(store, { roomId: "repair-room" }, "req-shape-1");
+  assert.equal(plan.stored.parses, true);
+  assert.equal(plan.stored.shapeProblem, "room_missing");
+  assert.equal(plan.replay.ok, true);
+  assert.equal(plan.repairable, true);
+  const outcome = executeProjectionRepair(store, { roomId: "repair-room", ...plan.executeGuard }, "req-shape-2");
+  assert.equal(outcome.messages, 2);
+  assert.equal(store.room("repair-room").state.messages.length, 2);
+});
+
+test("a projection filed under a foreign room id is repairable", () => {
+  const store = seededStore();
+  const foreign = JSON.parse(rawProjection(store).projection);
+  foreign.room.id = "someone-else";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='repair-room'").run(JSON.stringify(foreign));
+  const plan = planProjectionRepair(store, { roomId: "repair-room" }, "req-shape-3");
+  assert.equal(plan.stored.shapeProblem, "room_id_mismatch");
+  assert.equal(plan.repairable, true);
+  executeProjectionRepair(store, { roomId: "repair-room", ...plan.executeGuard }, "req-shape-4");
+  assert.equal(store.room("repair-room").state.room.id, "repair-room");
+  assert.equal(store.room("repair-room").state.messages.length, 2);
+});
+
+test("a well-shaped projection that merely drifted is still not this repair's", () => {
+  const store = seededStore();
+  const drifted = JSON.parse(rawProjection(store).projection);
+  drifted.messages = drifted.messages.slice(0, 1);
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='repair-room'").run(JSON.stringify(drifted));
+  const plan = planProjectionRepair(store, { roomId: "repair-room" }, "req-shape-5");
+  assert.equal(plan.stored.parses, true);
+  assert.equal(plan.stored.shapeProblem, null);
+  assert.equal(plan.repairable, false);
+  assert.throws(
+    () => executeProjectionRepair(store, { roomId: "repair-room", ...plan.executeGuard }, "req-shape-6"),
+    error => error?.status === 422 && error?.code === "not_corrupt"
+  );
 });
 
 test("archived rooms are refused: the compacted shape is not this repair's", () => {

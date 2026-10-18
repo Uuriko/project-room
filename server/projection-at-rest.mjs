@@ -194,6 +194,22 @@ export function storedProjection(db, roomId, state, { enabled = false } = {}) {
   return JSON.stringify({ ...state, messages: slim });
 }
 
+// The shape every stored projection must have (src/events.js
+// emptyRoomState + compact): a state object whose room is this room, with
+// the core collections present. Anything else — valid JSON, wrong shape —
+// is corruption a reader must refuse, not serve as a hollow room (#4127).
+// O(1) field checks only: this runs on the hot read path. Returns a short
+// problem token, or null when the shape is sound.
+export function projectionShapeProblem(state, roomId) {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return "not_an_object";
+  if (!state.room || typeof state.room !== "object" || Array.isArray(state.room)) return "room_missing";
+  if (state.room.id !== roomId) return "room_id_mismatch";
+  if (!state.members || typeof state.members !== "object" || Array.isArray(state.members)) return "members_missing";
+  if (!state.channels || typeof state.channels !== "object" || Array.isArray(state.channels)) return "channels_missing";
+  if (!Array.isArray(state.messages)) return "messages_missing";
+  if (!state.workItems || typeof state.workItems !== "object" || Array.isArray(state.workItems)) return "work_items_missing";
+  return null;
+}
 // Put bodies back into a state parsed from rooms.projection. Mutates and
 // returns the state. `missing` lists messages whose body row is gone, which
 // only an out-of-band write could cause; the caller rebuilds from the log.
