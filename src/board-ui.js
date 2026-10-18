@@ -355,15 +355,47 @@ export function claimReviewForm(item) {
 // carrying a requestId records its outcome server-side, and the identical
 // retry replays that outcome instead of applying twice. The id is derived
 // from the operation itself — claim, delivery round, actor — so a retry of
-// the same click re-sends the same id, while a new round (a re-delivery
-// advances deliveryGeneration, #3684) or a different actor is a new
-// operation with a new id. Sanitized to the route's requestId shape.
-const requestIdPart = value => String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40);
+// the same click re-sends the same id, while a new round or a different
+// actor is a new operation with a new id. Sanitized to the route's
+// requestId shape.
+//
+// B4/H2: the round is bound explicitly, not only through
+// deliveryGeneration. A release resets the generation to 0, so a
+// same-owner re-claim used to derive the IDENTICAL deliver id as round 1
+// and the kernel replayed round 1's recorded outcome — the round-2
+// delivery was silently swallowed (identical bundle) or refused as a
+// conflict (changed bundle). The id now carries a fingerprint of the
+// round basis (claimedAt + lifetime history length, the same basis the
+// release/reassign posts bind), which every new round changes. The
+// kernel also clears recorded outcomes when a round ends, so the two
+// fixes are independent locks on the same door.
+// Two independent 32-bit string hashes combined into 16 hex chars: not a
+// security digest, just a stable fingerprint a browser can compute
+// synchronously for id derivation.
+const fingerprint = value => {
+  const text = String(value ?? "");
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) ^ code) >>> 0;
+  }
+  return h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
+};
+// Parts were truncated to 40 chars, so two ids sharing a 40-char prefix
+// collided into one operation. A long part now keeps a readable prefix
+// plus a fingerprint of the FULL value, so distinct values stay distinct.
+const requestIdPart = value => {
+  const clean = String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-");
+  return clean.length <= 40 ? clean : `${clean.slice(0, 23)}-${fingerprint(clean)}`;
+};
+const historyLengthOf = item => (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0);
+const roundPart = item => fingerprint(`${item?.claimedAt ?? ""}|${historyLengthOf(item)}`);
 export function verifyRequestId(item, memberId) {
-  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 }
 const deliverRequestId = (item, memberId) =>
-  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 
 // The reviewer's verify as a pure body, so the requestId wiring is
 // unit-testable at this boundary (the newItemCreateBody precedent). Before

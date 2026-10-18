@@ -1152,7 +1152,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
-          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }));
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }),
+        item.claimRound);
       if (verdict === "replay") return json(res, 200, item);
       if (verdict === "conflict") reject(409, "work_claim_conflict",
         `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
