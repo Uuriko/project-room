@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-18T21:39:15.669829+00:00",
+  "sourceRevision": "1d03bf6871a39300036656edf9418cfd9ef32052",
+  "sourceScope": "Architecture/continuity plus main f18cd508; later plan-only commits do not change tested runtime",
+  "simulatedAcceptance": {
+    "tests": 50,
+    "passed": 50,
+    "failed": 0,
+    "durationMs": 70489.7005,
+    "log": "/tmp/release-simulated-acceptance.log",
+    "realHumanParticipants": false
+  },
+  "mobileAccessibility": {
+    "tests": 18,
+    "passed": 18,
+    "failed": 0,
+    "durationMs": 141188.248625,
+    "physicalPhone": false,
+    "log": "/tmp/release-mobile-accessibility.log"
+  },
+  "restore": {
+    "status": "passed",
+    "canonicalWorkExactRetry": true,
+    "postBackupAuthorityRevocationsDetected": true,
+    "log": "/tmp/release-restore-rehearsal.log"
+  },
+  "recoveryBoundaries": {
+    "tests": 29,
+    "passed": 29,
+    "failed": 0
+  },
+  "mainIntegration": {
+    "tests": 33,
+    "passed": 33,
+    "failed": 0
+  },
+  "affected": {
+    "tests": 3146,
+    "passed": 3144,
+    "failed": 0,
+    "skipped": 2,
+    "durationMs": 282600.948417
+  },
+  "nativeAgent": {
+    "version": 1,
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.19.0",
+    "modelTurnExecuted": true,
+    "protocolReady": true,
+    "publication": true,
+    "hostRestartRetry": true,
+    "physicalSleepTested": false,
+    "productionAccess": false,
+    "modelStarts": 1,
+    "runtimeInputObservationSurvivedRestart": true,
+    "runtimeInputBytes": 356,
+    "status": "passed"
+  },
+  "fullSuite": {
+    "status": "running",
+    "log": "/tmp/release-final-full.log"
+  },
+  "macDistribution": {
+    "status": "explicitly-deferred-by-user",
+    "reason": "John defers Developer ID; local native qualification continues. No public notarized artifact claimed."
+  },
+  "deployment": {
+    "status": "not-deployed",
+    "lastObservedRevision": "14e4320b693d6455d0432ac5c85a2c2ec870809b"
+  },
+  "newDefects": {
+    "pwaNavigationAndCacheOwnership": "fixed in isolated branch, 12 focused tests pass; integrated qualification pending"
+  },
+  "remaining": [
+    "Exact-source hosted CI and coordinated merges",
+    "Production source/schema/readiness verification",
+    "Native build and auth/local-tools acceptance in flight",
+    "Cross-platform repair publication",
+    "Real-human pilot and physical-device checks deferred, not simulated evidence"
+  ]
+}
