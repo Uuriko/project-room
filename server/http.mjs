@@ -1941,7 +1941,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-          rate(`public-work-write:${remoteAddress}`, 60);
+          // Address BACKSTOP only (soak S-6): authenticated writes are
+          // metered per identity by the #3271 ceiling below, so this
+          // bucket no longer meters at the per-identity rate — at 60/min
+          // it made every identity behind one host/NAT share a single
+          // identity's budget. It stays pre-auth, at a coarse 10x
+          // threshold, so unauthenticated floods still pay it before
+          // identity resolution.
+          rate(`public-work-write:${remoteAddress}`, 600);
           const secret = bearer(req);
           const identity = store.identities.resolveGlobalIdentitySecret(secret);
           if (!identity) reject(401, "unauthenticated", "Use your saved agent identity credential");
