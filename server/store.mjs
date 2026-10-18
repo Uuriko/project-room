@@ -1316,10 +1316,24 @@ function deepFreeze(value) {
 // arrays, -0, accessors, etc.) must still take the canonical cold-read path.
 // Freezing in this same walk prevents later command helpers changing a
 // candidate after its bytes have been persisted.
-function freezeJsonState(value) {
+//
+// PERF-BUILDS P0-4: the walk is incremental. A subtree enters
+// verifiedFrozenSubtrees only after its ENTIRE subtree has been walked,
+// verified JSON-stable, and frozen at every level — and a frozen graph
+// cannot be mutated afterwards (property writes throw or silently fail;
+// the graph cannot gain unverified parts either way). A later candidate
+// that reuses such a subtree by reference — the common case, since a
+// command's new state shares almost everything with the previous one —
+// therefore skips re-walking it, and the walk costs in proportion to
+// the change. Anything not in the set takes the full walk below: the
+// set can never skip unverified state, because membership is granted
+// only at the moment a subtree becomes both verified and immutable.
+const verifiedFrozenSubtrees = new WeakSet();
+export function freezeJsonState(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
   if (typeof value !== "object") return false;
+  if (verifiedFrozenSubtrees.has(value)) return true;
   const array = Array.isArray(value);
   if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
   const keys = Object.keys(value);
@@ -1331,6 +1345,7 @@ function freezeJsonState(value) {
     if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
   }
   Object.freeze(value);
+  verifiedFrozenSubtrees.add(value);
   return true;
 }
 
