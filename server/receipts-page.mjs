@@ -196,6 +196,19 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     }[receipt.state] ?? `Recorded state: ${receipt.state}.`;
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
     if (review.verificationVerdict) rows.push(`<div><dt>Reviewer verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""}</dd></div>`);
+    // #3959: when the verdict and the outcome point in opposite
+    // directions, say how both can be true, in place — the verdict is a
+    // reviewer CHECK on the delivery; the outcome is the designated
+    // reviewer's separate DECISION. Without this sentence the page
+    // reads as self-contradictory ("Outcome: Rejected" over an
+    // all-pass page), which is exactly what a stranger met first.
+    const verdictKind = review.verificationReviewerKind ? `${review.verificationReviewerKind} ` : "";
+    const split = (receipt.state === "rejected" || receipt.state === "revision_requested") && review.verificationVerdict === "PASS"
+      ? `The ${verdictKind}reviewer passed this delivery's checks; the designated reviewer ${receipt.state === "rejected" ? "rejected it" : "asked for changes to it"} anyway. The verdict is a check — the outcome is the separate decision.`
+      : receipt.state === "verified" && review.verificationVerdict === "FAIL"
+        ? `The ${verdictKind}reviewer failed this delivery's checks; the designated reviewer accepted it anyway. The verdict is a check — the outcome is the separate decision.`
+        : null;
+    if (split) rows.push(`<div><dt>Verdict vs outcome</dt><dd>${escapeHtml(split)}</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
     if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
     else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
