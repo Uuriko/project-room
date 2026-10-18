@@ -616,11 +616,22 @@ export class PublicWorkClaims {
         const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
+        // The overlap check sweeps a candidate's whole claim namespace.
+        // The sweep is pure (list + releaseExpired write nothing), so run
+        // it once per namespace per call, not once per candidate: with C
+        // candidates sharing a namespace of N claims this was C sweeps of
+        // N items (HUNT-SCALE-SPIKE bench3: one sweep is ~3.1 s at 10k
+        // claims carrying histories).
+        const sweeps = new Map();
+        const sweptNamespace = namespaceId => {
+          if (!sweeps.has(namespaceId)) sweeps.set(namespaceId, releaseExpired(this.store.workClaims.list(namespaceId), this.store.now()));
+          return sweeps.get(namespaceId);
+        };
         const candidates = page.tasks.filter(task => {
           // claimable (not just unclaimed): a task past its submission
           // deadline must not be recommended as claimable (#3707).
           if (task.claim.state !== 'unclaimed' || !task.claimable) return false;
-          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
+          return !sweptNamespace(task.namespaceId).some(other =>
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
