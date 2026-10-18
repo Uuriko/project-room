@@ -1,8 +1,8 @@
 // Local probe. Workerd decides when ProjectRoom.alarm runs and whether a
 // thrown alarm is still armed afterwards.
-import worker, { ProjectRoom } from "./room.mjs";
-import { CHANNEL_DRAIN_INFLIGHT_KEY } from "./channel-drain-tick.mjs";
-import { runCronJobs } from "./job-heartbeat.mjs";
+import worker, { ProjectRoom } from "../../cloudflare/room.mjs";
+import { CHANNEL_DRAIN_INFLIGHT_KEY } from "../../cloudflare/channel-drain-tick.mjs";
+import { runCronJobs } from "../../cloudflare/job-heartbeat.mjs";
 
 export class JobsProbe extends ProjectRoom {
   constructor(ctx, env) {

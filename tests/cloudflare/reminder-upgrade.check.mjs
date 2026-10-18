@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
-import { durableFenceDefinitions } from './storage.mjs';
-import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
+import { createAcceptanceFixture } from '../../scripts/acceptance-fixture.mjs';
+import { durableFenceDefinitions } from '../../cloudflare/storage.mjs';
+import { STORE_SCHEMA_VERSION } from '../../server/writer-fence.mjs';
 
 test(`real Workers v7→v${STORE_SCHEMA_VERSION} migration fences a cached legacy adapter, rolls back failures and survives restart`, { timeout: 90000 }, async () => {
   const fixture = createAcceptanceFixture(), db = fixture.store.db;

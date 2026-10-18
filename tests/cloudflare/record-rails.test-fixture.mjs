@@ -1,10 +1,10 @@
 // Synthetic fixture, never deploy. Actual workerd SQLite and crypto own the contract.
 import assert from 'node:assert/strict';
 import {DurableObject} from 'cloudflare:workers';
-import {RoomStore} from '../server/store.mjs';
-import {initialRoom} from '../server/bootstrap.mjs';
-import {seedRecordRails} from '../scripts/record-rails-fixture.mjs';
-import {DurableDatabase,durableStorage} from './storage.mjs';
+import {RoomStore} from '../../server/store.mjs';
+import {initialRoom} from '../../server/bootstrap.mjs';
+import {seedRecordRails} from '../../scripts/record-rails-fixture.mjs';
+import {DurableDatabase,durableStorage} from '../../cloudflare/storage.mjs';
 export class RecordRailRoom extends DurableObject {
  constructor(ctx,env){super(ctx,env);this.db=new DurableDatabase(ctx.storage);this.store=new RoomStore(null,{database:this.db,storagePlatform:durableStorage});}
  async fetch(request){const path=new URL(request.url).pathname,store=this.store;

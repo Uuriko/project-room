@@ -1,7 +1,7 @@
 // Local probe only. Calls the real ProjectRoom over the Durable Object
 // binding so workerd, not a stand-in, decides whether the method exists.
-import worker, { ProjectRoom } from './room.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
+import worker, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
 
 export { ProjectRoom };
 
