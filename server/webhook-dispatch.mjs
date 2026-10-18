@@ -202,9 +202,10 @@ export async function pinnedDispatchPost(url, addresses, { headers, body, timeou
   });
 }
 
-async function checkDispatchTarget(target, dnsResolvers) {
+async function checkDispatchTarget(target, dnsResolvers, dnsCache = null) {
   try {
-    const { url, addresses } = await resolveWebhookTarget(target, dnsResolvers ?? {});
+    const { url, addresses } = await resolveWebhookTarget(target,
+      { ...(dnsResolvers ?? {}), ...(dnsCache ? { dnsCache } : {}) });
     return { ok: true, url, addresses };
   } catch (error) {
     const message = error?.message ?? "webhook target rejected";
@@ -250,7 +251,7 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // so the Workers egress sandbox stays the backstop and plain fetch is used.
 // fetchImpl remains as an injectable override (tests); when it is given,
 // pinning is the caller's responsibility.
-export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
+export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers, dnsCache = null } = {}) {
   check(fetchImpl === undefined || typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
@@ -258,10 +259,11 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   check(Number.isInteger(timeoutMs) && timeoutMs > 0, "timeoutMs must be a positive integer");
   check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
     "dnsResolvers must be an object");
+  check(dnsCache === null || dnsCache instanceof Map, "dnsCache must be a Map or null");
   const body = JSON.stringify(envelope);
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-    const checked = await checkDispatchTarget(current, dnsResolvers);
+    const checked = await checkDispatchTarget(current, dnsResolvers, dnsCache);
     if (!checked.ok) return checked.result;
     let response;
     try {

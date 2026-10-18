@@ -333,7 +333,7 @@ export const JOBS = Object.freeze([
     nextDueAt: store => webhookDueAt(store),
     async run(store, ctx) {
       if (ctx.room?.drainWebhookDeliveries) return ctx.room.drainWebhookDeliveries();
-      return store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
+      return store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers, deadline: ctx.deadline });
     }
   }),
   defineJob({
@@ -519,7 +519,7 @@ export const JOBS = Object.freeze([
     nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
-      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
+      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now(), deadline: ctx.deadline });
     }
   }),
   defineJob({
@@ -685,7 +685,7 @@ function finiteInterval(value, fallback) {
 // counters; the fields below never count — the exhaustion signal
 // itself, the failure channel (already graded as a failure), a
 // remaining-work gauge, a timestamp, and a configured batch limit.
-const NON_PROGRESS_FIELDS = new Set(["budgetExceeded", "errors", "pending", "at", "batchLimit"]);
+const NON_PROGRESS_FIELDS = new Set(["budgetExceeded", "errors", "pending", "at", "batchLimit", "due", "overdue"]);
 export const BUDGET_EXHAUSTED_NO_PROGRESS = "budget_exceeded_no_progress";
 export function budgetExhaustedWithoutProgress(result) {
   if (!result || typeof result !== "object") return false;
@@ -896,7 +896,8 @@ export function wireNodeJobs(store, options = {}) {
   store.agentPlugin?.setDispatchKick(() => {
     queueMicrotask(() => {
       store.agentPlugin.drainWebhookDeliveries({
-        fetchImpl: options.fetchImpl, dnsResolvers: options.dnsResolvers
+        fetchImpl: options.fetchImpl, dnsResolvers: options.dnsResolvers,
+        deadline: Date.now() + JOB_BUDGET_MS
       }).catch(() => {});
     });
   });
