@@ -67,7 +67,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:b6a60b090da7580574ba91c8b76299664af57067918cff3c7657df15d7c6f545",
-    "src/app.js": "sha256:461c9c3a879daa794d29d8a31740cbec80067c530879e0b09460d3c18ff2ec51",
+    "src/app.js": "sha256:c3a870c367cd004d7e34494ed6070f82ec567fc8e8a5596a99d512de5581909f",
     "src/auth-signin-ui.js": "sha256:e7f5c5337c4391e25c966482a4cac8e03ef658a40b25379774416c1a3e43d6bc",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -148,8 +148,8 @@
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:184c5340a8a28d8a3cd41cadb4d25c68bc0272508d563c84a85fd6bf4f2e0fa0",
-    "strings/en.json": "sha256:8db38bf150f0b485bc543338c0a4e013da66fe08de532e1b3a9f1b9117c7b456"
+    "strings/en.js": "sha256:de6071a49d7b88931ce7abbc64f18c48ad3953739af09005606a0126dd962049",
+    "strings/en.json": "sha256:085a99991f811dcb7228186f0d8154b95943e0b9e8cb80c4c5adbc4ba88f6ffc"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:3d49dedbf8f41adf17b4760a6a5de03d617160d13fa4f38989c29c2754662c7b",
@@ -164,6 +164,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:b8af04e88c45036cb76900861d9675049040753680bad39c4d364248cab1dc2f"
+    "package.json": "sha256:f8dc4fa62aa97b0d3c80a472ca31f25018ee73e9197c12dadb8858f4fe60b19a"
   }
 }
