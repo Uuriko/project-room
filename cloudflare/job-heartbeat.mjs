@@ -208,6 +208,12 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
     const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited' : null;
+    // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
+    // the text alone cannot say whether it is today's failure. On
+    // 2026-10-17 claim-prs read degraded (github_rate_limited) beside a
+    // lastError from 2026-10-15 and was triaged as a live validation
+    // failure. lastErrorCurrent is true only while the job is failing now.
+    const lastErrorCurrent = record.lastError != null && (record.consecutiveFailures ?? 0) > 0;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -217,12 +223,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       secondsSinceSuccess: enabled ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
-      // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
-      // the text alone cannot say whether it is today's failure. On
-      // 2026-10-17 claim-prs read degraded (github_rate_limited) beside a
-      // lastError from 2026-10-15 and was triaged as a live validation
-      // failure. lastErrorCurrent is true only while the job is failing now.
-      lastErrorCurrent: record.lastError != null && (record.consecutiveFailures ?? 0) > 0,
+      lastErrorCurrent,
       lastErrorCode: record.lastFailure?.code ?? null,
       lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
       lastErrorClass: record.lastFailure?.errorClass ?? null,
@@ -235,7 +236,16 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      // A current error outranks the disabled presentation. A work-gated
+      // job's resting state right after a failure is "nothing pending" —
+      // patrol parked at the room's current head — so grading it
+      // 'disabled' would let the failure switch off its own grade and
+      // drop the job out of the rollup's active set below (production,
+      // 2026-10-18: patrol read 'disabled' while carrying a current
+      // error through 1,610 consecutive failures). The gate's honest
+      // `reason` stays alongside; a disabled job with no current error
+      // still presents 'disabled'.
+      status: !enabled && lastErrorCurrent ? 'failing' : !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
