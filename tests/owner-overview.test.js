@@ -16,7 +16,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { ownerOverview } from "../server/owner-overview.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { createWork, claimWork } from "../server/work-claims.mjs";
+import { createWork, claimWork, updateWork } from "../server/work-claims.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const DAY = 24 * 3600 * 1000;
@@ -313,4 +313,21 @@ test("window parameter is validated", async t => {
   const ok = await getOverview(f, f.owner.headers, "?window=24h");
   assert.equal(ok.status, 200);
   assert.equal(ok.body.window.key, "24h");
+});
+
+test("decisions: a delivered board claim carries its delivery age and board_review consequence (#3890 F7)", t => {
+  const f = setup(t);
+  const now = Date.now();
+  f.send(f.keys.a, "room-a", T.MEMBER_ADDED, { memberId: "agent", displayName: "Worker", kind: "agent", permissions: [] });
+  let claim = createWork({ id: "claim-board-review", title: "Delivered board work" }, { now: new Date(now - 3 * DAY), agentId: "owner" });
+  claim = claimWork(claim, "owner", { now: new Date(now - 3 * DAY) });
+  claim = updateWork(claim, "owner", { state: "in_progress", now: new Date(now - 3 * DAY) });
+  claim = updateWork(claim, "owner", { state: "delivered", delivery: { summary: "shipped" }, now: new Date(now - 2 * DAY) });
+  f.store.workClaims.set("room-a", claim);
+  const doc = ownerOverview({ store: f.store, accessRequests: f.accessRequests, jobHealth: null },
+    f.owner.slot.token, f.owner.session.sessionBinding, now, {});
+  const item = doc.decisions.items.find(entry => entry.kind === "board_review" && entry.id === "claim-board-review");
+  assert.ok(item, "the delivered claim reaches the owner overview as a board_review decision");
+  assert.equal(item.consequence, "Delivered work stays unverified and the claim cannot close until the review lands");
+  assert.ok(Math.abs(item.ageMs - 2 * DAY) < 60_000, `ageMs tracks the delivery time, got ${item.ageMs}`);
 });

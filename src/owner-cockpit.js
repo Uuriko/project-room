@@ -13,6 +13,7 @@ const KIND_LABEL = {
   decision: "Decision",
   dispute: "Dispute",
   claim_lease: "Claim lease",
+  board_review: "Board review",
   spend: "Spend",
 };
 
@@ -39,8 +40,16 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     const label = KIND_LABEL[item.kind] ?? item.kind;
     const age = formatAge(item.ageMs);
     const actions = (item.actions ?? []).map(action => {
-      if (action.method === "POST") {
+      if (action.method === "POST" && action.body) {
         return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
+      }
+      // A POST without a body is a pointer, not a decide (sweep F8): the
+      // spend item's "adjust" names an endpoint and the fields to send
+      // it. Rendering it as a Deny button POSTs an empty body that can
+      // only fail, mislabeled as a denial — the in-room needs-attention
+      // card renders the hint instead, and so does the cockpit.
+      if (action.method === "POST") {
+        return action.hint ? `<span class="form-hint">${esc(action.hint)}</span>` : "";
       }
       return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
     }).join(" ");

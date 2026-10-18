@@ -324,6 +324,19 @@ export function currentApprovalFor(item, memberId) {
   return attested ? review : null;
 }
 
+// The review basis the board read, in the kernel's own shape
+// (reviewBasisFor in work-claims.mjs). A review submission names it as
+// expectedBasis so an identical re-review after the basis moved is a
+// deliberate refresh instead of a silent no-op (#2966, sweep F6), and a
+// submission whose named basis no longer matches is refused as a
+// conflict instead of recording against context the reviewer never saw.
+export function expectedReviewBasis(item) {
+  if (!item || typeof item.owner !== "string" || !item.owner) return null;
+  return { version: 1, owner: item.owner, claimedAt: item.claimedAt ?? null,
+    revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
+    deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0 };
+}
+
 // Review controls for a claim card. Every label comes from the strings
 // catalog via uiText, and each literal holds only complete HTML tags, so the
 // i18n harness sees no new hardcoded copy. The form posts to
@@ -707,8 +720,30 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   // approval is still current against the delivered bundle verifies it to
   // done from the same card. The update route re-runs canCloseWork on POST;
   // this only renders the control when the approval could close the claim.
-  if (item.state === "delivered" && currentApprovalFor(item, viewer.id)) {
+  // The gate mirrors canCloseWork (sweep F2/F4) for the policy the board
+  // resolved — the claim's own, else the room's from the board config:
+  // under self_attested the OWNER closes a delivered claim (no approval
+  // can exist for them; recordReview refuses owners), while under a
+  // reviewed policy the holder of a current approval closes it, and
+  // under independent_principal that approver must also hold the verify
+  // permission (the route's verifyMembers) or the kernel refuses the
+  // very click the card offered. With no policy resolved (a bare render
+  // in tests), the approval gate stands as before.
+  const effectivePolicy = item.reviewPolicy ?? roomPolicy ?? null;
+  const canVerify = item.state === "delivered" && (effectivePolicy === "self_attested"
+    ? mine
+    : Boolean(currentApprovalFor(item, viewer.id)) && (effectivePolicy !== "independent_principal"
+      || (members?.[viewer.id]?.permissions ?? []).includes("verify")));
+  if (canVerify) {
     actions.push(button("verify", uiText("board.action.verify"), "primary"));
+  }
+  // Send-back (sweep F5): the delivered → in_progress transition the
+  // route reserves for the claim's owner, a claim manager, or the
+  // reviewer who recorded changes_requested on it. Without this control
+  // the reviewer's changes_requested verdict is a dead end on the board.
+  if (item.state === "delivered" && (mine || viewer.manage
+    || (item.reviews ?? []).some(review => review.memberId === viewer.id && review.verdict === "changes_requested"))) {
+    actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
@@ -779,6 +814,7 @@ const PENDING_OUTCOME_KEYS = {
   progress: "board.action.pending.progress",
   done: "board.action.pending.done",
   deliver: "board.action.pending.deliver",
+  sendback: "board.action.pending.sendback",
   verify: "board.action.pending.verify",
   release: "board.action.pending.release",
   close: "board.action.pending.close",
@@ -974,6 +1010,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (action === "progress") return `Marked '${title}' in progress`;
     if (action === "done") return `Done '${title}'`;
     if (action === "deliver") return uiText("board.action.outcome.deliver", { title });
+    if (action === "sendback") return uiText("board.action.outcome.sendback", { title });
     if (action === "verify") return uiText("board.action.outcome.verify", { title });
     if (action === "release") return `Released '${title}'`;
     if (action === "close" || action === "cancel") return uiText(action === "close" ? "board.claim.closed" : "board.claim.cancelled", { title });
@@ -1162,6 +1199,10 @@ export function installWorkBoard({ client, getState, getSession }) {
       flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimVerifyBody(item, me) }), focus, reconcile,
         uiText("board.action.verify.unconfirmed", { title }));
     }
+    else if (action === "sendback") {
+      const item = items.find(entry => entry.id === id);
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress", ...claimRoundBasis(item) } }), focus);
+    }
     else if (action === "renew") {
       flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
@@ -1266,8 +1307,9 @@ export function installWorkBoard({ client, getState, getSession }) {
         return;
       }
       const title = item.title || id;
+      const basis = expectedReviewBasis(item);
       flySubmit(review,
-        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary, ...(basis ? { expectedBasis: basis } : {}) } }),
         { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
       return;
     }

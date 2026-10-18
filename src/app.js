@@ -3160,7 +3160,8 @@ async function revealClaimRecord(id) {
   const opening = navigationBoardEpoch;
   if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
     || !workNavigationContext()) return;
-  await navigationBoardRevealClaim?.(id);
+  const revealed = await navigationBoardRevealClaim?.(id);
+  if (!revealed) { notice(SOURCE_UNAVAILABLE_NOTICE, true); return; }
   syncWorkReturnControl();
 }
 function navigateWorkRecord(kind, id, extra = {}) {

@@ -62,6 +62,7 @@ const CONSEQUENCE = Object.freeze({
   verification: "Settlement stays locked in escrow and the worker stays unpaid until this is verified",
   decision: "Settlement stays locked in escrow and the worker stays unpaid until you decide",
   spend: "At zero headroom, new session starts are refused",
+  board_review: "Delivered work stays unverified and the claim cannot close until the review lands",
 });
 
 function reviewBountiesAction(roomId) {
@@ -273,6 +274,12 @@ function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
     return { createdAtMs: workItem ? (ms(workItem.updatedAt) ?? ms(workItem.createdAt)) : null,
       consequenceAtMs: null, consequence: CONSEQUENCE[item.kind],
       amountCents: typeof budget === "number" ? budget : null };
+  }
+  if (item.kind === "board_review") {
+    // Board-native claims are not in workItems; the waiting fact rides
+    // on the attention item (waitingSinceMs, from the delivery).
+    return { createdAtMs: typeof item.waitingSinceMs === "number" ? item.waitingSinceMs : null,
+      consequenceAtMs: null, consequence: CONSEQUENCE.board_review };
   }
   if (item.kind === "spend") {
     return { createdAtMs: null, consequenceAtMs: null, consequence: CONSEQUENCE.spend };

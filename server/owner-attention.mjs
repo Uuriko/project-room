@@ -184,6 +184,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
             ? "Delivered work is waiting for your verification"
             : "Delivered work you approved is waiting for your verification",
           actions: Object.freeze([boardReviewAction(roomId, item.id)]),
+          waitingSinceMs: item.delivery?.deliveredAt ? Date.parse(item.delivery.deliveredAt) : null,
         }));
         continue;
       }
@@ -207,6 +208,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
         title: `Review: ${item.title}`,
         detail: "Delivered work is waiting for your review",
         actions: Object.freeze([boardReviewAction(roomId, item.id)]),
+        waitingSinceMs: item.delivery?.deliveredAt ? Date.parse(item.delivery.deliveredAt) : null,
       }));
     }
   }
