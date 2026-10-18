@@ -324,6 +324,58 @@ export function currentApprovalFor(item, memberId) {
   return attested ? review : null;
 }
 
+// Whether the board may offer this viewer the Verify step on a delivered
+// claim — the render-side mirror of the kernel's canCloseWork
+// (server/work-claims.mjs), whose inputs the routes derive from room
+// membership (reviewersOf/verifiersOf in server/work-claim-routes.mjs).
+// The update route re-runs the real check on POST; this only decides
+// whether the control is offered, so a step the kernel would refuse is
+// never presented as available (#3885: under independent_principal an
+// approver without the verify permission was offered a Verify the
+// kernel then refused) — and the step the kernel DOES authorize is
+// never withheld (#3887: under self_attested the owner closes by their
+// own verify, but the owner cannot hold an approval — recordReview
+// refuses owners — so the approval-only gate was unsatisfiable for
+// exactly the authorized person).
+export function canVerifyClaim(item, viewer, members, roomPolicy = null) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
+  if (policy === "self_attested") return viewer.id === item.owner;
+  if (viewer.id === item.owner || item.supersededBy) return false;
+  if (!currentApprovalFor(item, viewer.id)) return false;
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  const permissions = new Set(member.permissions ?? []);
+  // reviewersOf: an active member who may write work claims (the
+  // board's viewer.write carries that derivation) or holds verify.
+  if (!viewer.write && !permissions.has("verify")) return false;
+  // verifiersOf: independent_principal additionally requires verify.
+  if (policy === "independent_principal") return permissions.has("verify");
+  return true;
+}
+
+// The basis a review is recorded against, in the kernel's reviewBasis
+// shape (server/work-claims.mjs reviewBasisFor). The board holds every
+// field on the item it renders, so the review submit names the basis
+// the reviewer actually read (#3889): without expectedBasis, an
+// identical re-review after the basis moved (a new CI head) was a
+// silent kernel no-op while the board announced "Reviewed".
+export function claimReviewBasis(item) {
+  if (!item?.owner) return null;
+  return {
+    version: 1, owner: item.owner, claimedAt: item.claimedAt ?? null,
+    revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
+    deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0,
+  };
+}
+
+// The review submit body as a pure value (the claimVerifyBody
+// precedent), so the basis wiring is unit-testable at this boundary.
+export function claimReviewBody(item, verdict, summary) {
+  const basis = claimReviewBasis(item);
+  return basis ? { verdict, summary, expectedBasis: basis } : { verdict, summary };
+}
+
 // Review controls for a claim card. Every label comes from the strings
 // catalog via uiText, and each literal holds only complete HTML tags, so the
 // i18n harness sees no new hardcoded copy. The form posts to
@@ -629,9 +681,12 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
   // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
   // approval is still current against the delivered bundle verifies it to
-  // done from the same card. The update route re-runs canCloseWork on POST;
-  // this only renders the control when the approval could close the claim.
-  if (item.state === "delivered" && currentApprovalFor(item, viewer.id)) {
+  // done from the same card — or, under self_attested, the owner verifies
+  // their own delivered claim. The update route re-runs canCloseWork on
+  // POST; canVerifyClaim mirrors it so the control renders exactly when
+  // the approval (or the owner's self-attested standing) could close the
+  // claim (#3885/#3887).
+  if (canVerifyClaim(item, viewer, members, roomPolicy)) {
     actions.push(button("verify", uiText("board.action.verify"), "primary"));
   }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
@@ -1171,7 +1226,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       }
       const title = item.title || id;
       flySubmit(review,
-        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: claimReviewBody(item, verdict, summary) }),
         { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
       return;
     }

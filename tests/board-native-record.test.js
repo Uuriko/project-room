@@ -109,6 +109,10 @@ const deliveredBundle = (digest = DIGEST) => ({
 });
 const approvedDelivered = (id, extra = {}) => claim(id, {
   state: "delivered",
+  // The reviewed-policy scenario this helper builds: a policy-less claim
+  // resolves to the kernel's self_attested default, under which only the
+  // owner can close — the reviewer's verify belongs to a named policy.
+  reviewPolicy: "distinct_member",
   pullRequest: { url: "https://github.com/o/r/pull/7" },
   delivery: deliveredBundle(),
   deliveryGeneration: 1,
