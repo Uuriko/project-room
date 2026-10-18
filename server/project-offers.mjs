@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Public offers are owner-authored opt-in terms, not room projection exports.
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
@@ -22,6 +23,21 @@ const list = (value, required = false) => {
   check(Array.isArray(value) && value.length <= 20 && (!required || value.length > 0), 'Invalid criteria list');
   return value.map(item => text(item, 1000));
 };
+// #3613 B1: citable criterion ids + a criteria pin. Ids are derived
+// positionally (c1…cN, order-preserving) from the criterion texts at
+// terms-write time, in the manner of the bounty lane's defaultRubricFor,
+// and the hash is sha256 over the canonical {criterionId, text} list —
+// so a verdict can cite an id against the exact criteria set pinned by
+// the offer's termsVersion instead of a text snapshot. Derivation is
+// deterministic: termsOf recomputes the pin on every read, so a stored
+// pin can never drift from the criteria it names, and rewording one
+// criterion changes the hash while the other criteria keep their ids.
+export const criteriaWithIdsOf = texts => texts.map((criterionText, index) => ({ criterionId: `c${index + 1}`, text: criterionText }));
+export const criteriaHashOf = criteria => createHash('sha256').update(canonicalJson(criteria)).digest('hex');
+const criteriaPinOf = texts => {
+  const acceptanceCriteriaWithIds = criteriaWithIdsOf(texts);
+  return { acceptanceCriteriaWithIds, criteriaHash: criteriaHashOf(acceptanceCriteriaWithIds) };
+};
 export const projectOffersSchema = `
 CREATE TABLE IF NOT EXISTS project_offers (
   offer_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -38,7 +54,7 @@ CREATE INDEX IF NOT EXISTS project_offers_published_id
   ON project_offers(offer_id) WHERE status='published';`;
 
 function termsOf(value) {
-  shape(value, ['kind', 'title', 'summary', 'acceptanceCriteria', 'reward', 'approvalPolicy'], ['exclusions', 'repositoryUrl', 'submissionUrl', 'deadline']);
+  shape(value, ['kind', 'title', 'summary', 'acceptanceCriteria', 'reward', 'approvalPolicy'], ['exclusions', 'repositoryUrl', 'submissionUrl', 'deadline', 'acceptanceCriteriaWithIds', 'criteriaHash']);
   check(['task', 'project'].includes(value.kind), 'kind must be task or project');
   shape(value.reward, ['kind'], ['unit', 'amountMinor', 'terms', 'decimals', 'basis']);
   const reward = { kind: value.reward.kind };
@@ -56,8 +72,9 @@ function termsOf(value) {
   if (value.reward.terms != null) reward.terms = text(value.reward.terms, 2000);
   shape(value.approvalPolicy, ['mode']);
   check(['human', 'agent', 'human_with_agent_review'].includes(value.approvalPolicy.mode), 'Invalid approval mode');
+  const criteriaTexts = list(value.acceptanceCriteria, true);
   const terms = { kind: value.kind, title: text(value.title, 200), summary: text(value.summary, 4000),
-    acceptanceCriteria: list(value.acceptanceCriteria, true), exclusions: list(value.exclusions ?? []),
+    acceptanceCriteria: criteriaTexts, ...criteriaPinOf(criteriaTexts), exclusions: list(value.exclusions ?? []),
     reward, approvalPolicy: { mode: value.approvalPolicy.mode } };
   for (const field of ['repositoryUrl', 'submissionUrl']) {
     if (value[field] == null) continue;

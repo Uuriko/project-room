@@ -392,3 +392,75 @@ test("bundle contract: a criteria-bearing claim needs a bundle even when self-at
     delivery: bundle({ criteria: [{ criterion: "tests green", status: "met" }] }) });
   assert.equal(done.state, "done");
 });
+
+// #3613 B3: reviewer per-criterion outcomes on board claim reviews, and a
+// structured criteria_coverage breakdown on the executed check.
+const criteriaItem = (id = "w-crit") => start(createWork(
+  { id, reviewPolicy: "distinct_member", acceptanceCriteria: ["docs updated", "tests green"] }, { agentId: "quill" }));
+const criteriaBundle = () => bundle({ criteria: [{ criterion: "docs updated", status: "met" }, { criterion: "tests green", status: "met" }] });
+
+test("B3: an approve records per-criterion outcomes that survive the item codec", () => {
+  const delivered = updateWork(criteriaItem(), "quill", { state: "delivered", delivery: criteriaBundle() });
+  const outcomes = [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "fail" }];
+  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "mostly there", criteriaOutcomes: outcomes });
+  assert.deepEqual(reviewed.reviews.at(-1).criteriaOutcomes, outcomes);
+  assert.deepEqual(workOf(reviewed).reviews.at(-1).criteriaOutcomes, outcomes);
+});
+
+test("B3: outcomes must cite the item's criteria, completely, with pass|fail verdicts", () => {
+  const delivered = updateWork(criteriaItem(), "quill", { state: "delivered", delivery: criteriaBundle() });
+  // Incomplete coverage is refused.
+  throwsCode(() => recordReview(delivered, "sage", { verdict: "approve", summary: "x",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }] }), "invalid_claim_input");
+  // A criterion the item does not carry is refused.
+  throwsCode(() => recordReview(delivered, "sage", { verdict: "approve", summary: "x",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }, { criterion: "invented", verdict: "pass" }] }), "invalid_claim_input");
+  // The verdict set is closed: the delivery vocabulary (met) is not a verdict.
+  throwsCode(() => recordReview(delivered, "sage", { verdict: "approve", summary: "x",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "met" }] }), "invalid_claim_input");
+  // Outcomes against a criteria-less item cite nothing real.
+  const plain = updateWork(reviewedItem(), "quill", { state: "delivered", delivery: bundle() });
+  throwsCode(() => recordReview(plain, "sage", { verdict: "approve", summary: "x",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }] }), "invalid_claim_input");
+  // changes_requested without outcomes is still a plain review.
+  const sent = recordReview(delivered, "sage", { verdict: "changes_requested", summary: "redo it" });
+  assert.equal(sent.reviews.at(-1).criteriaOutcomes, undefined);
+});
+
+test("B3: resubmitting a review with different outcomes is a new review, not a replay", () => {
+  const delivered = updateWork(criteriaItem(), "quill", { state: "delivered", delivery: criteriaBundle() });
+  const outcomes = [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "pass" }];
+  const first = recordReview(delivered, "sage", { verdict: "approve", summary: "ok", criteriaOutcomes: outcomes });
+  const replay = recordReview(first, "sage", { verdict: "approve", summary: "ok", criteriaOutcomes: outcomes });
+  assert.equal(replay.history, first.history);
+  const changed = recordReview(first, "sage", { verdict: "approve", summary: "ok",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "fail" }] });
+  assert.notEqual(changed.history, first.history);
+  assert.deepEqual(changed.reviews.at(-1).criteriaOutcomes.at(-1), { criterion: "tests green", verdict: "fail" });
+});
+
+test("B3: criteria_coverage carries a structured per-criterion breakdown", () => {
+  const delivered = updateWork(criteriaItem(), "quill", { state: "delivered",
+    delivery: bundle({ criteria: [{ criterion: "docs updated", status: "met" }, { criterion: "tests green", status: "not_met" }] }) });
+  const coverage = executeDeliveryChecks(delivered).find(entry => entry.name === "criteria_coverage");
+  assert.equal(coverage.result, "fail");
+  assert.deepEqual(coverage.criteria, [{ criterion: "docs updated", result: "met" }, { criterion: "tests green", result: "not_met" }]);
+  assert.match(coverage.detail, /not_met/); // the prose detail stays for existing readers
+  // A stored bundle whose mapping is partial (legacy/tampered rows) reads
+  // as missing, and an na names whether its evidence resolves.
+  const partial = { ...delivered, delivery: { ...delivered.delivery,
+    criteria: [{ criterion: "docs updated", status: "na", evidenceRef: `sha256:${SHA}` }] } };
+  const partialCoverage = executeDeliveryChecks(partial).find(entry => entry.name === "criteria_coverage");
+  assert.deepEqual(partialCoverage.criteria,
+    [{ criterion: "docs updated", result: "na", evidenceBacked: true }, { criterion: "tests green", result: "missing" }]);
+});
+
+test("B3: the breakdown rides the verification fact through its codec", () => {
+  const delivered = updateWork(criteriaItem(), "quill", { state: "delivered", delivery: criteriaBundle() });
+  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "ok",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "pass" }] });
+  const done = updateWork(reviewed, "sage", { state: "done", reviewedBy: "sage", authority: true });
+  const coverage = done.verification.executedChecks.find(entry => entry.name === "criteria_coverage");
+  assert.deepEqual(coverage.criteria, [{ criterion: "docs updated", result: "met" }, { criterion: "tests green", result: "met" }]);
+  assert.deepEqual(workOf(done).verification.executedChecks.find(entry => entry.name === "criteria_coverage").criteria, coverage.criteria);
+});

@@ -398,7 +398,25 @@ const executedChecksOf = value => {
     check(EXECUTED_CHECK_RESULTS.includes(entry.result), `each executed check result must be one of ${EXECUTED_CHECK_RESULTS.join(", ")}`);
     if (entry.detail !== undefined && entry.detail !== null)
       check(typeof entry.detail === "string" && entry.detail.length <= 500, "executed check detail must be at most 500 characters");
-    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.detail != null ? { detail: entry.detail } : {}) });
+    // #3613 B3: an executed check may carry a structured per-criterion
+    // breakdown (the criteria_coverage check's results, computed by
+    // executeDeliveryChecks) beside its prose detail.
+    let criteria;
+    if (entry.criteria !== undefined && entry.criteria !== null) {
+      check(Array.isArray(entry.criteria) && entry.criteria.length <= MAX_DELIVERY_CRITERIA, `executed check criteria must hold at most ${MAX_DELIVERY_CRITERIA} entries`);
+      criteria = Object.freeze(entry.criteria.map(row => {
+        check(row !== null && typeof row === "object" && !Array.isArray(row), "each executed check criterion must be an object");
+        check(typeof row.criterion === "string" && row.criterion.length > 0 && row.criterion.length <= 500,
+          "each executed check criterion must be 1..500 characters");
+        check(["met", "not_met", "na", "missing"].includes(row.result), "each executed check criterion result must be met, not_met, na or missing");
+        if (row.evidenceBacked !== undefined && row.evidenceBacked !== null)
+          check(typeof row.evidenceBacked === "boolean", "executed check criterion evidenceBacked must be a boolean");
+        return Object.freeze({ criterion: row.criterion, result: row.result,
+          ...(row.evidenceBacked != null ? { evidenceBacked: row.evidenceBacked } : {}) });
+      }));
+    }
+    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.detail != null ? { detail: entry.detail } : {}),
+      ...(criteria ? { criteria } : {}) });
   }));
 };
 const verificationOf = value => {
@@ -551,6 +569,28 @@ const currentReviewBasis = (review, item) => {
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
+// #3613 B3: a review may record per-criterion outcomes against the
+// item's acceptanceCriteria — { criterion, verdict } pairs with the
+// bounty lane's closed pass|fail verdict set (citationsAgainstRubric's
+// contract, mirrored here; board criteria are text-keyed, so outcomes
+// cite the criterion text). The codec validates shape only; recordReview
+// validates membership and complete coverage against the item.
+export const REVIEW_CRITERION_VERDICTS = ["pass", "fail"];
+const reviewCriteriaOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(Array.isArray(value) && value.length >= 1 && value.length <= MAX_ACCEPTANCE_CRITERIA,
+    `criteriaOutcomes must hold 1..${MAX_ACCEPTANCE_CRITERIA} entries`);
+  const seen = new Set();
+  return Object.freeze(value.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each criteria outcome must be an object");
+    check(typeof entry.criterion === "string" && entry.criterion.length > 0 && entry.criterion.length <= 500,
+      "each criteria outcome criterion must be 1..500 characters");
+    check(!seen.has(entry.criterion), `criteriaOutcomes cites criterion "${entry.criterion}" twice`);
+    seen.add(entry.criterion);
+    check(REVIEW_CRITERION_VERDICTS.includes(entry.verdict), `each criteria outcome verdict must be one of ${REVIEW_CRITERION_VERDICTS.join(", ")}`);
+    return Object.freeze({ criterion: entry.criterion, verdict: entry.verdict });
+  }));
+};
 const reviewRecordOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
@@ -559,8 +599,9 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  const criteriaOutcomes = reviewCriteriaOutcomesOf(value.criteriaOutcomes);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
-    ...(basis ? { basis } : {}) });
+    ...(basis ? { basis } : {}), ...(criteriaOutcomes ? { criteriaOutcomes } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -685,9 +726,19 @@ export function executeDeliveryChecks(item) {
         ...(notMet.length > 0 ? [`criteria the delivery declares not_met: ${notMet.join("; ")}`] : []),
         ...(unbackedNa.length > 0 ? [`criteria declared na without evidence resolving to the delivered artifact: ${unbackedNa.join("; ")}`] : []),
       ];
+      // #3613 B3: the same per-criterion results, structured — the prose
+      // detail above stays for existing readers, but a review or receipt
+      // no longer has to parse sentences to learn which criterion failed.
+      const breakdown = criteria.map(criterion => {
+        const entry = mapped.get(criterion);
+        if (!entry) return Object.freeze({ criterion, result: "missing" });
+        if (entry.status === "na") return Object.freeze({ criterion, result: "na", evidenceBacked: naEvidenceResolves(delivery, entry.evidenceRef) });
+        return Object.freeze({ criterion, result: entry.status });
+      });
       results.push(Object.freeze({ name: "criteria_coverage",
         result: problems.length > 0 ? "fail" : "pass",
-        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met` }));
+        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met`,
+        criteria: Object.freeze(breakdown) }));
     }
   }
   const ci = item?.ci ?? null;
@@ -1440,7 +1491,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis, criteriaOutcomes } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
@@ -1453,6 +1504,19 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     try { parsed = new URL(url); } catch { parsed = null; }
     check(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password, "url must be an https URL without credentials");
     reviewUrl = url;
+  }
+  // #3613 B3: per-criterion outcomes, when supplied, must satisfy the
+  // full contract against the item's acceptanceCriteria — every cited
+  // criterion is one of the item's, and coverage is complete (the bounty
+  // citations contract, mirrored for text-keyed board criteria). The
+  // field stays optional: reviews recorded without it are unchanged,
+  // and changes_requested/comment never require it.
+  const reviewOutcomes = reviewCriteriaOutcomesOf(criteriaOutcomes);
+  if (reviewOutcomes) {
+    const known = new Set(item.acceptanceCriteria ?? []);
+    for (const outcome of reviewOutcomes)
+      check(known.has(outcome.criterion), `criteriaOutcomes cites criterion "${outcome.criterion}" which is not one of this item's acceptanceCriteria`);
+    check(reviewOutcomes.length === known.size, "criteriaOutcomes must record one outcome per acceptance criterion");
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
   // #2966, revised: an identical resubmission is ambiguous — it can be a
@@ -1474,7 +1538,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
       fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
     }
   }
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl
+    && canonicalPayload(prior.criteriaOutcomes ?? null) === canonicalPayload(reviewOutcomes)) {
     // A true replay on the still-current basis changes nothing.
     if (currentReviewBasis(prior, item)) return Object.freeze(item);
     // The prior basis is stale (or the record predates bases). Only a
@@ -1492,7 +1557,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item),
+    ...(reviewOutcomes ? { criteriaOutcomes: reviewOutcomes } : {}) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),

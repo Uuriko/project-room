@@ -197,6 +197,12 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
     if (review.verificationVerdict) rows.push(`<div><dt>Reviewer verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""}</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
+    // #3613 B4: the work period the receipt body records (claim →
+    // submission). Legacy receipts carry none and show no row.
+    if (receipt.period?.claimedAt && receipt.period?.submittedAt) rows.push(`<div><dt>Work period</dt><dd>Claimed <time datetime="${escapeHtml(receipt.period.claimedAt)}">${escapeHtml(receipt.period.claimedAt)}</time> · Submitted <time datetime="${escapeHtml(receipt.period.submittedAt)}">${escapeHtml(receipt.period.submittedAt)}</time></dd></div>`);
+    // #3613 B2: the reviewer's per-criterion outcomes, cited by the
+    // pinned criterion ids.
+    if (review.criteriaOutcomes?.length) rows.push(`<div><dt>Criteria outcomes</dt><dd>${review.criteriaOutcomes.map(outcome => `${escapeHtml(outcome.criterionId)} — ${escapeHtml(outcome.verdict)}`).join("<br>")}</dd></div>`);
     if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
     else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
     else if (receipt.verification) rows.push(`<div><dt>Verification</dt><dd>${escapeHtml(receipt.verification)}</dd></div>`);
@@ -323,6 +329,7 @@ const publicJson = receipt => ({
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.state ? { state: receipt.state } : {}),
+  ...(receipt.period ? { period: receipt.period } : {}),
   ...(receipt.checksReported ? { checksReported: receipt.checksReported } : {}),
   ...(receipt.executedChecks ? { executedChecks: receipt.executedChecks } : {}),
   ...(receipt.review ? { review: receipt.review } : {}),

@@ -5989,7 +5989,13 @@ paths:
       description: |
         Send `{ verdict, summary, url? }` to record a review. verdict is
         approve, changes_requested, or comment. summary is 1..2000
-        characters. url, when present, is https without credentials. The
+        characters. url, when present, is https without credentials.
+        `criteriaOutcomes` (#3613 B3, optional) records per-criterion
+        outcomes as `[{ criterion, verdict }]` against the item's
+        acceptanceCriteria: every cited criterion must be one of the
+        item's, coverage must be complete (one outcome per criterion),
+        and verdict is pass or fail. The outcomes persist on the review
+        record and the claim read. The
         caller must be a member other than the claim owner and must hold
         contribute, review, or collaborate rights (or be the room owner, or
         a human with contribute or verify rights). The owner gets 403
@@ -6023,6 +6029,18 @@ paths:
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
+                criteriaOutcomes:
+                  type: array
+                  minItems: 1
+                  maxItems: 32
+                  description: "#3613 B3 (optional): one { criterion, verdict } per acceptance criterion; complete coverage required when present."
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [criterion, verdict]
+                    properties:
+                      criterion: { type: string, minLength: 1, maxLength: 500 }
+                      verdict: { type: string, enum: [pass, fail] }
       responses:
         '200':
           description: The updated item with the review or note recorded; identical latest retries return the existing record
@@ -15960,6 +15978,26 @@ paths:
                   enum:
                     - "PASS"
                     - "FAIL"
+                criteriaOutcomes:
+                  type: "array"
+                  minItems: 1
+                  maxItems: 20
+                  description: "#3613 B2 (optional): the reviewer's per-criterion outcomes against the criteria set pinned on the receipt. When present, coverage must be complete — one outcome per pinned criterionId, verdicts pass|fail, unknown ids refused. Recorded on the verification fact; a fail outcome stops a PASS from counting as a current pass."
+                  items:
+                    type: "object"
+                    additionalProperties: false
+                    required:
+                      - "criterionId"
+                      - "verdict"
+                    properties:
+                      criterionId:
+                        type: "string"
+                        minLength: 1
+                        maxLength: 64
+                      verdict:
+                        enum:
+                          - "pass"
+                          - "fail"
   /api/rooms/{roomId}/public-work/results:
     get:
       operationId: "listPublicWorkResults"
@@ -17004,6 +17042,26 @@ components:
               items:
                 type: "string"
                 maxLength: 1000
+            acceptanceCriteriaWithIds:
+              type: "array"
+              maxItems: 20
+              description: "#3613 B1: the offer's criteria with citable ids, as pinned."
+              items:
+                type: "object"
+                required:
+                  - "criterionId"
+                  - "text"
+                properties:
+                  criterionId:
+                    type: "string"
+                  text:
+                    type: "string"
+                    maxLength: 1000
+            criteriaHash:
+              type:
+                - "string"
+                - "null"
+              pattern: "^[a-f0-9]{64}$"
             exclusions:
               type: "array"
               maxItems: 20
@@ -17159,6 +17217,25 @@ components:
           type: "array"
           items:
             type: "string"
+        acceptanceCriteriaWithIds:
+          type: "array"
+          description: "#3613 B1: the offer's criteria with their citable ids (c1…cN, order-preserving), pinned by termsVersion."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "text"
+            properties:
+              criterionId:
+                type: "string"
+              text:
+                type: "string"
+        criteriaHash:
+          type:
+            - "string"
+            - "null"
+          description: "#3613 B1: sha256 over the canonical acceptanceCriteriaWithIds list; the criteria pin verdicts cite."
+          pattern: "^[a-f0-9]{64}$"
         files:
           type: "array"
           items:
@@ -17269,6 +17346,25 @@ components:
                 - "string"
                 - "null"
               format: "date-time"
+            criteriaOutcomes:
+              type: "array"
+              description: "#3613 B2: the reviewer's per-criterion outcomes, present when recorded at verify time."
+              items:
+                type: "object"
+                required:
+                  - "criterionId"
+                  - "verdict"
+                properties:
+                  criterionId:
+                    type: "string"
+                  verdict:
+                    enum:
+                      - "pass"
+                      - "fail"
+            criteriaHash:
+              type: "string"
+              description: "#3613 B2: the pinned criteria hash the outcomes cite."
+              pattern: "^[a-f0-9]{64}$"
         artifact:
           type: "object"
           required:
@@ -17293,6 +17389,42 @@ components:
           enum:
             - "hash_only"
             - "system_checked"
+        acceptanceCriteriaWithIds:
+          type: "array"
+          description: "#3613 B1: the criteria set pinned on this receipt at finish (absent on pre-B1 receipts)."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "text"
+            properties:
+              criterionId:
+                type: "string"
+              text:
+                type: "string"
+        criteriaHash:
+          type: "string"
+          description: "#3613 B1: sha256 over the canonical pinned criteria list."
+          pattern: "^[a-f0-9]{64}$"
+        criteriaAttestation:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "object"
+        period:
+          type: "object"
+          description: "#3613 B4: the work period — claimedAt from the claim, submittedAt is this receipt's createdAt. Absent on legacy receipts; never fabricated."
+          required:
+            - "claimedAt"
+            - "submittedAt"
+          properties:
+            claimedAt:
+              type: "string"
+              format: "date-time"
+            submittedAt:
+              type: "string"
+              format: "date-time"
         createdAt:
           type: "string"
           format: "date-time"
@@ -17778,6 +17910,15 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              criteriaOutcomes:
+                type: array
+                description: "#3613 B3: the reviewer's per-criterion outcomes against the item's acceptanceCriteria; absent when the review recorded none."
+                items:
+                  type: object
+                  required: [criterion, verdict]
+                  properties:
+                    criterion: { type: string }
+                    verdict: { type: string, enum: [pass, fail] }
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.

@@ -539,7 +539,10 @@ function mergeReviews(mapped, existing) {
     if (!review || typeof review.memberId !== "string" || typeof review.at !== "string") continue;
     if (seen.has(key(review))) continue;
     seen.add(key(review));
-    merged.push({ memberId: review.memberId, verdict: review.verdict, summary: review.summary, url: review.url ?? null, at: review.at });
+    // #3613 B3: a kernel review's per-criterion outcomes survive the
+    // board re-map verbatim, like the rest of the record.
+    merged.push({ memberId: review.memberId, verdict: review.verdict, summary: review.summary, url: review.url ?? null, at: review.at,
+      ...(Array.isArray(review.criteriaOutcomes) ? { criteriaOutcomes: review.criteriaOutcomes } : {}) });
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   return merged.slice(-MAX_REVIEWS);

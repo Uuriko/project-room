@@ -431,3 +431,20 @@ for (const exit of reviewerExits) {
     assert.deepEqual(effects(r, id), before);
   });
 }
+
+test("B3: a verdict review records per-criterion outcomes over the route; bad outcomes are refused", async t => {
+  const r = await claimed(t, "crit-review", { reviewPolicy: "distinct_member", acceptanceCriteria: ["docs updated", "tests green"] });
+  const critBundle = { ...bundle, criteria: [{ criterion: "docs updated", status: "met" }, { criterion: "tests green", status: "met" }] };
+  await r.call("update", "crit-review", { state: "delivered", delivery: critBundle }, { auth: WORKER });
+  const outcomes = [{ criterion: "docs updated", verdict: "pass" }, { criterion: "tests green", verdict: "pass" }];
+  const reviewed = (await r.call("review", "crit-review", { verdict: "approve", summary: "criteria checked", criteriaOutcomes: outcomes }, { auth: REVIEWER })).value;
+  assert.deepEqual(reviewed.reviews.at(-1).criteriaOutcomes, outcomes);
+  // The durable registry round-trip keeps the field on the claim read.
+  assert.deepEqual(r.get("crit-review").reviews.at(-1).criteriaOutcomes, outcomes);
+  assert.deepEqual(workOf(r.get("crit-review")).reviews.at(-1).criteriaOutcomes, outcomes);
+  // Incomplete coverage over the route is a 422, and records nothing.
+  await assert.rejects(r.call("review", "crit-review", { verdict: "comment", summary: "partial",
+    criteriaOutcomes: [{ criterion: "docs updated", verdict: "pass" }] }, { auth: REVIEWER }),
+    error => error.status === 422 && error.code === "invalid_claim_input");
+  assert.equal(r.get("crit-review").reviews.length, 1);
+});

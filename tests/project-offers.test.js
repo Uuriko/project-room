@@ -113,3 +113,35 @@ test('guest verify bits cannot publish an approval promise the guest scope canno
   assert.throws(() => store.projectOffers.create('commons', 'owner', draft), error => error.code === 'invalid_project_offer' && /guest/i.test(error.message));
   assert.deepEqual(store.projectOffers.ownerList('commons', 'owner').offers, []);
 });
+
+test('#3613 B1: offers carry citable criterion ids and a criteria hash pinned by the terms', t => {
+  const { store } = fixture(t);
+  const created = store.projectOffers.create('commons', 'owner', input());
+  assert.deepEqual(created.acceptanceCriteriaWithIds, [{ criterionId: 'c1', text: 'One concrete accepted result' }]);
+  assert.match(created.criteriaHash, /^[a-f0-9]{64}$/);
+  // The pin is derived from the terms: a fresh public read recomputes the
+  // identical pin, so what a verdict cites is exactly what the offer says.
+  store.projectOffers.transition('commons', 'owner', 'public-work', 'publish', { requestId: 'publish', expectedRevision: 1 });
+  const read = store.projectOffers.read('public-work');
+  assert.equal(read.criteriaHash, created.criteriaHash);
+  assert.deepEqual(read.acceptanceCriteriaWithIds, created.acceptanceCriteriaWithIds);
+  // The public brief carries the ids and the hash, so work can cite them.
+  const brief = store.projectOffers.brief('public-work');
+  assert.ok(brief.includes('"criterionId": "c1"'));
+  assert.ok(brief.includes(created.criteriaHash));
+});
+
+test('#3613 B1: rewording one criterion changes the hash; untouched criteria keep their ids', t => {
+  const { store } = fixture(t);
+  const terms = criteria => ({ repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'project', title: 'Useful work', summary: 'Produce a reviewable result', acceptanceCriteria: criteria, reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } });
+  const a = store.projectOffers.create('commons', 'owner', { requestId: 'c-a', offerId: 'offer-a', reviewerMemberIds: ['owner'], terms: terms(['Alpha', 'Beta', 'Gamma']) });
+  const b = store.projectOffers.create('commons', 'owner', { requestId: 'c-b', offerId: 'offer-b', reviewerMemberIds: ['owner'], terms: terms(['Alpha', 'Beta reworded', 'Gamma']) });
+  assert.deepEqual(a.acceptanceCriteriaWithIds.map(entry => entry.criterionId), ['c1', 'c2', 'c3']);
+  assert.deepEqual(b.acceptanceCriteriaWithIds.map(entry => entry.criterionId), ['c1', 'c2', 'c3']);
+  assert.equal(a.acceptanceCriteriaWithIds[0].text, b.acceptanceCriteriaWithIds[0].text);
+  assert.equal(a.acceptanceCriteriaWithIds[2].text, b.acceptanceCriteriaWithIds[2].text);
+  assert.notEqual(a.criteriaHash, b.criteriaHash);
+  // Deterministic derivation: identical criteria pin the identical hash.
+  const c = store.projectOffers.create('commons', 'owner', { requestId: 'c-c', offerId: 'offer-c', reviewerMemberIds: ['owner'], terms: terms(['Alpha', 'Beta', 'Gamma']) });
+  assert.equal(c.criteriaHash, a.criteriaHash);
+});

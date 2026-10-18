@@ -39,6 +39,32 @@ const knownMember = (state, actorId) => {
   if (!actor || actor.active === false || isGuestAgentMemberId(actorId)) fail(403, 'review_forbidden', 'Current non-guest room membership required');
   return actor;
 };
+// #3613 B2: reviewer per-criterion outcomes against the receipt's pinned
+// criteria set (B1). The validation contract mirrors the bounty lane's
+// citationsAgainstRubric (server/bounty-escrow.mjs) — complete coverage
+// of the pinned set, a closed pass|fail verdict set, unknown ids and
+// duplicates refused — re-implemented here rather than imported, so the
+// two domains stay decoupled. The field is optional on the verify action
+// (the live verify contract predates it); when it is supplied it must
+// satisfy the full contract, and a recorded fail outcome stops a PASS
+// from counting as a current pass (passCurrent below).
+const CRITERIA_OUTCOME_VERDICTS = ['pass', 'fail'];
+const criteriaOutcomesAgainstPin = (outcomes, receipt) => {
+  const pinned = receipt?.acceptanceCriteriaWithIds;
+  check(Array.isArray(pinned) && pinned.length > 0, 'This receipt pins no criteria set for outcomes to cite');
+  check(Array.isArray(outcomes) && outcomes.length >= 1, 'criteriaOutcomes must hold one outcome per pinned criterion');
+  const ids = new Set(pinned.map(entry => entry.criterionId));
+  const seen = new Set();
+  for (const outcome of outcomes) {
+    check(outcome && typeof outcome === 'object' && !Array.isArray(outcome), 'criteriaOutcomes entries must be { criterionId, verdict } objects');
+    check(ids.has(outcome.criterionId), `criteriaOutcomes cites unknown criterionId "${outcome.criterionId}"`);
+    check(CRITERIA_OUTCOME_VERDICTS.includes(outcome.verdict), 'criteriaOutcomes verdict must be pass or fail');
+    check(!seen.has(outcome.criterionId), `criteriaOutcomes cites criterionId "${outcome.criterionId}" more than once`);
+    seen.add(outcome.criterionId);
+  }
+  for (const id of ids) check(seen.has(id), `criteriaOutcomes does not cover pinned criterion "${id}"`);
+  return Object.freeze(outcomes.map(outcome => Object.freeze({ criterionId: outcome.criterionId, verdict: outcome.verdict })));
+};
 export class PublicWorkReviews {
   constructor(store) { this.store = store; this.db = store.db; }
   verifySchema({ allowAbsent = false } = {}) {
@@ -100,7 +126,12 @@ export class PublicWorkReviews {
   }
   passCurrent(scope, review) {
     const evidence = review.verification;
-    return evidence?.verdict === 'PASS' && evidence.fingerprint === scope.fingerprint && this.permissions(scope, evidence.actorId).verify;
+    if (evidence?.verdict !== 'PASS' || evidence.fingerprint !== scope.fingerprint || !this.permissions(scope, evidence.actorId).verify) return false;
+    // #3613 B2: a PASS whose own recorded per-criterion outcomes contain
+    // a fail does not count as a current pass — the aggregate verdict
+    // cannot paper over the reviewer's criterion-level record.
+    if (Array.isArray(evidence.criteriaOutcomes) && evidence.criteriaOutcomes.some(outcome => outcome?.verdict === 'fail')) return false;
+    return true;
   }
   needsPass(scope) { return scope.offer.approvalPolicy.mode !== 'human' || scope.policy.requireIndependentReview || scope.work?.independentVerificationRequired; }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
@@ -113,6 +144,7 @@ export class PublicWorkReviews {
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
     return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+        acceptanceCriteriaWithIds: scope.offer.acceptanceCriteriaWithIds ?? [], criteriaHash: scope.offer.criteriaHash ?? null,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -186,7 +218,11 @@ export class PublicWorkReviews {
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
     const keys = ['requestId', 'expectedReviewRevision', 'taskId', 'expectedTermsVersion', 'generation', 'artifactSha256', 'reason', action === 'decide' ? 'decision' : 'verdict'];
-    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key)), 'Unexpected or missing review fields');
+    // #3613 B2: criteriaOutcomes is the one deliberately admitted extra
+    // key, on the verify action only — the whitelist stays closed to
+    // everything else.
+    const allowed = action === 'verify' ? [...keys, 'criteriaOutcomes'] : keys;
+    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => allowed.includes(key)), 'Unexpected or missing review fields');
     check(validId(input.requestId) && validId(input.taskId) && Number.isSafeInteger(input.expectedReviewRevision) && input.expectedReviewRevision >= 0
       && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 && Number.isSafeInteger(input.generation) && input.generation > 0
       && typeof input.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(input.artifactSha256), 'Invalid review binding');
@@ -232,8 +268,14 @@ export class PublicWorkReviews {
             fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
           executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
         }
+        // #3613 B2: per-criterion outcomes, when supplied, are validated
+        // against the criteria set pinned on the receipt (B1) and
+        // recorded on the verification fact beside the pinned hash.
+        const criteriaOutcomes = input.criteriaOutcomes !== undefined
+          ? criteriaOutcomesAgainstPin(input.criteriaOutcomes, scope.receipt) : null;
         current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
-          ...(executedChecks ? { executedChecks } : {}) };
+          ...(executedChecks ? { executedChecks } : {}),
+          ...(criteriaOutcomes ? { criteriaOutcomes, criteriaHash: scope.receipt.criteriaHash } : {}) };
       } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
