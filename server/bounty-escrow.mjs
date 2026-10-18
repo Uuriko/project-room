@@ -69,6 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { pricingGuidanceFromSettledRows } from "./bounty-pricing-guidance.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -3025,6 +3026,19 @@ export class BountyEscrow {
         })
         .filter(b => group === null || b.group === group)
         .filter(b => posterLane === null || b.poster === posterLane);
+    });
+  }
+
+  // Pricing guidance at post time (#3524): this room's settled, paid-out
+  // receipt history as a typical paid range. Read-only; the computation
+  // (server/bounty-pricing-guidance.mjs) counts only rows carrying a
+  // settlement verdict that paid the worker, so unsettled and
+  // settled-at-zero bounties never move the numbers.
+  pricingGuidance(roomId) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const rows = this.db.prepare("SELECT resolution_json, rubric_json, approval_mode FROM bounty_records WHERE room_id=?").all(roomId);
+      return pricingGuidanceFromSettledRows(rows);
     });
   }
 

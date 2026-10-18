@@ -184,7 +184,14 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const posterParam = url.searchParams.get("poster");
     const poster = posterParam === null ? null : posterParam === "self" ? caller : posterParam;
     const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer, poster }));
-    return json(res, 200, { roomId, bounties });
+    // Pricing guidance at post time (#3524): read-only, derived from this
+    // room's settled receipts only, room-wide (independent of the list
+    // filters above), and NEVER allowed to fail the listing — a guidance
+    // error serves pricingGuidance: null and posting proceeds exactly as
+    // it did before guidance existed.
+    let pricingGuidance = null;
+    try { pricingGuidance = escrow.pricingGuidance(roomId); } catch { pricingGuidance = null; }
+    return json(res, 200, { roomId, bounties, pricingGuidance });
   }
   // Slice 10: arbiter inspection of correlation review packets. Read-only
   // (rooms:read); packets are immutable once created. ?bountyId= filters

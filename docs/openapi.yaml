@@ -7287,6 +7287,26 @@ paths:
                   bounties:
                     type: array
                     items: { $ref: '#/components/schemas/Bounty' }
+                  pricingGuidance:
+                    type: object
+                    nullable: true
+                    description: |
+                      Pricing guidance at post time (#3524), derived from
+                      this room's settled receipts only (recorded settlement
+                      verdicts that paid the worker). State
+                      `no-settled-history` carries null ranges when the
+                      room has no settled, paid-out history — no numbers
+                      are invented. Null when guidance could not be
+                      computed; guidance is read-only and never blocks
+                      posting.
+                    properties:
+                      schema: { type: string }
+                      source: { type: string }
+                      state: { type: string, enum: [ok, no-settled-history] }
+                      sampleCount: { type: integer }
+                      paidRangeCredits: { type: object, nullable: true }
+                      rubricCriteriaCount: { type: object, nullable: true }
+                      approvalModes: { type: array, items: { type: string } }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
     post:

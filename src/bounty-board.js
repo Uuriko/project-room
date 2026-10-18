@@ -116,7 +116,7 @@ function normalizeReceipt(row) {
 }
 
 // Pure view model over the three endpoint payloads. Tested without DOM.
-export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) {
+export function bountyBoardModel({ bounties, balances, receipts, selfId, pricingGuidance } = {}) {
   const self = canonicalLaneId(selfId);
   const rows = Array.isArray(bounties) ? bounties : [];
   const items = rows.map(row => normalizeBounty(row, self));
@@ -133,6 +133,7 @@ export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) 
     },
     items,
     count: items.length,
+    guidance: pricingGuidanceModel(pricingGuidance),
     receipts: history.slice(-10).reverse(),
   };
 }
@@ -182,6 +183,43 @@ export function restoreBountyFocus(root, key) {
   else if (kind === "submit") target = root.querySelector('button[type="submit"], input[type="submit"]');
   if (target && typeof target.focus === "function") { target.focus(); return true; }
   return false;
+}
+
+// Pricing guidance at post time (#3524): the server derives it from this
+// room's settled receipts only and serves it on the bounty list response
+// as pricingGuidance (null when it could not be computed). Normalized
+// defensively like every other payload in this panel: anything malformed
+// becomes null, which renders NO panel - posting proceeds exactly as
+// before guidance existed. Guidance is read-only; it never blocks posting.
+export function pricingGuidanceModel(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.state === "no-settled-history") return { state: "no-settled-history", sampleCount: 0, paidRange: null, rubricCriteriaCount: null, approvalModes: [] };
+  if (raw.state !== "ok") return null;
+  const range = raw.paidRangeCredits;
+  if (!range || typeof range.min !== "number" || typeof range.median !== "number" || typeof range.max !== "number") return null;
+  const criteria = raw.rubricCriteriaCount && Number.isInteger(raw.rubricCriteriaCount.min) && Number.isInteger(raw.rubricCriteriaCount.max)
+    ? { min: raw.rubricCriteriaCount.min, max: raw.rubricCriteriaCount.max } : null;
+  return {
+    state: "ok",
+    sampleCount: Number.isInteger(raw.sampleCount) && raw.sampleCount > 0 ? raw.sampleCount : 0,
+    paidRange: { min: range.min, median: range.median, max: range.max },
+    rubricCriteriaCount: criteria,
+    approvalModes: Array.isArray(raw.approvalModes) ? raw.approvalModes.filter(mode => typeof mode === "string") : [],
+  };
+}
+
+export function bountyGuidanceHtml(guidance) {
+  if (!guidance) return "";
+  if (guidance.state === "no-settled-history") {
+    return `<div class="bounty-guidance" data-bounty-guidance="none"><strong>Pricing guidance</strong>` +
+      `<p class="form-hint">No settled bounties in this room yet, so there is no settled receipt history to base a typical paid range on. Price this one from the work itself.</p></div>`;
+  }
+  const range = guidance.paidRange;
+  const counts = guidance.rubricCriteriaCount
+    ? ` They pinned a rubric of ${escapeHtml(String(guidance.rubricCriteriaCount.min))} to ${escapeHtml(String(guidance.rubricCriteriaCount.max))} criteria.`
+    : "";
+  return `<div class="bounty-guidance" data-bounty-guidance="ok"><strong>Pricing guidance</strong>` +
+    `<p class="form-hint">Settled receipts only: ${escapeHtml(String(guidance.sampleCount))} settled ${guidance.sampleCount === 1 ? "bounty" : "bounties"} in this room actually paid out, typically ${escapeHtml(formatCredits(range.median))} credits (range ${escapeHtml(formatCredits(range.min))} to ${escapeHtml(formatCredits(range.max))}).${counts} Guidance only - it never blocks posting.</p></div>`;
 }
 
 export function bountyBalanceHtml(model) {
@@ -254,11 +292,12 @@ export function defaultDeadlineLocal(nowMs = Date.now()) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-export function bountyFormHtml(nowMs = Date.now()) {
+export function bountyFormHtml(nowMs = Date.now(), guidance = null) {
   return `<form id="bounty-post-form" class="bounty-form"><h4>Post a bounty</h4>` +
     `<label class="field">Title <input id="bounty-title" type="text" required maxlength="256"></label>` +
     `<label class="field">What done looks like <textarea id="bounty-criteria" required rows="2" maxlength="2000"></textarea></label>` +
     `<label class="field">Amount (credits) <input id="bounty-amount" type="number" required min="0.001" step="0.001"></label>` +
+    `${bountyGuidanceHtml(guidance)}` +
     `<label class="field">Deadline <input id="bounty-deadline" type="datetime-local" required value="${escapeHtml(defaultDeadlineLocal(nowMs))}"></label>` +
     `<div class="bounty-actions"><button class="button primary" type="submit">Post &amp; fund escrow</button></div></form>`;
 }
@@ -314,7 +353,7 @@ export function installBountyBoard({ client, getSession }) {
     lastModel = model;
     if (chip) chip.textContent = String(model.count);
     const focusKey = typeof host.contains === "function" && host.contains(document.activeElement) ? bountyFocusKey(document.activeElement) : null;
-    host.innerHTML = bountyFormHtml() +
+    host.innerHTML = bountyFormHtml(Date.now(), model.guidance) +
       `<div id="bounty-balance-host">${bountyBalanceHtml(model)}</div>` +
       `<div id="bounty-list-host">${bountyListHtml(model)}</div>` +
       `<div id="bounty-receipts-host">${bountyReceiptsHtml(model, highlightReceiptId)}</div>`;
@@ -338,6 +377,7 @@ export function installBountyBoard({ client, getSession }) {
       render(bountyBoardModel({
         bounties: list?.bounties, balances: balances?.balances,
         receipts: history?.receipts, selfId: session.member.id,
+        pricingGuidance: list?.pricingGuidance,
       }));
       loadedFor = roomId;
       setStatus("");
