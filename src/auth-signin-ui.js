@@ -428,7 +428,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
           return;
         }
         if (linkRequest) { await requestEmailLink(session, passwordEmail); return; }
-        const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+        let view;
+        try {
+          view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+        } catch (error) {
+          // A REJECTED password is never repainted (the browser gate's
+          // standing rule): clear the field itself, not just the draft —
+          // withBusy's finally-render captures the live field first, so
+          // clearing only the variable would resurrect the failed value.
+          // Only unsubmitted drafts survive re-renders (#3771).
+          passwordDraft = "";
+          const field = surface()?.querySelector?.('[name="password"]');
+          if (field) field.value = "";
+          throw error;
+        }
         await finish(view);
       }); return;
     }
