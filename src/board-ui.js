@@ -380,17 +380,17 @@ const fingerprint = value => {
     h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
     h2 = (Math.imul(h2, 33) ^ code) >>> 0;
   }
-  return h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
+  return [h1.toString(16).padStart(8, "0"), h2.toString(16).padStart(8, "0")].join("");
 };
 // Parts were truncated to 40 chars, so two ids sharing a 40-char prefix
 // collided into one operation. A long part now keeps a readable prefix
 // plus a fingerprint of the FULL value, so distinct values stay distinct.
 const requestIdPart = value => {
   const clean = String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-");
-  return clean.length <= 40 ? clean : `${clean.slice(0, 23)}-${fingerprint(clean)}`;
+  return clean.length <= 40 ? clean : [clean.slice(0, 23), fingerprint(clean)].join("-");
 };
 const historyLengthOf = item => (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0);
-const roundPart = item => fingerprint(`${item?.claimedAt ?? ""}|${historyLengthOf(item)}`);
+const roundPart = item => fingerprint([item?.claimedAt ?? "", historyLengthOf(item)].join("|"));
 export function verifyRequestId(item, memberId) {
   return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 }
