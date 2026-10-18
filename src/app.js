@@ -3160,7 +3160,14 @@ async function revealClaimRecord(id) {
   const opening = navigationBoardEpoch;
   if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
     || !workNavigationContext()) return;
-  await navigationBoardRevealClaim?.(id);
+  // #3892: the click path (navigateClaimRecord) names a claim the board
+  // cannot show with SOURCE_UNAVAILABLE_NOTICE; this deep-link/reload
+  // path awaited the same reveal and discarded its result, so an
+  // unplaced, closed, aged-out or foreign id opened the board on
+  // nothing, silently. Mirror the click path's honesty.
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+  }
   syncWorkReturnControl();
 }
 function navigateWorkRecord(kind, id, extra = {}) {
