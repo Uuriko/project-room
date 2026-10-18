@@ -4,6 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -30,13 +31,19 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
 .receipt-next p{margin:0}
+.share{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.share h2{font-size:1.1rem;margin:0 0 .5rem}
+.share code{overflow-wrap:anywhere;word-break:break-word}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -47,12 +54,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -93,6 +100,23 @@ ${next}
 </main>
 <footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
+}
+
+// The share block. The pre-filled text is shown verbatim — what gets
+// posted is exactly what the page says — and the share targets are plain
+// anchors, because these pages are script-free. The badge embed is the
+// worker's copy-paste path into READMEs and portfolios. This renders only
+// for a receipt that already resolved as public through receipts-live.
+function shareSection(receipt) {
+  const links = receiptShareLinks(receipt);
+  return `<section class="share" aria-label="Share this receipt">
+<h2>Share this receipt</h2>
+<p class="meta">${escapeHtml(links.text)}</p>
+<p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
+<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
+<p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
+<p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
+</section>`;
 }
 
 // The verdict block (charter Workstream B, P2): one graded verdict with
@@ -156,7 +180,8 @@ export function renderVerificationBlock(receipt, verification) {
 }
 
 export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
-  const description = `${receipt.title}. A public receipt from Project Room.`;
+  const verdictLine = verdictLineOf(receipt);
+  const description = `${receipt.title} — ${verdictLine}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
     : receipt.room?.id
@@ -289,7 +314,14 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     : receipt.verification?.state === "self_attested"
     ? "Verification tier: bundle unaltered (self-asserted). What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "Verification tier: bundle unaltered (self-asserted). What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
-  return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
+  return `${head({
+    title: receipt.title,
+    description,
+    path: `/receipts/${receipt.id}`,
+    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
+    ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
+    ogAlt: verdictLine,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
@@ -302,6 +334,7 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+${shareSection(receipt)}
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
