@@ -42,6 +42,14 @@ export function classifyAuthLink(params) {
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions, onProviderCapabilities }) {
   let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
+  // #3771 (F-12): the typed password's only home was the DOM node, and
+  // render() rebuilds the panel — so every re-render (the login<->signup
+  // mode switch above all) silently wiped it (17 -> 0 in QA, both on the
+  // sign-in wall and in the join panel, which share this component) while
+  // the email survived via passwordEmail. passwordDraft carries the value
+  // across renders exactly like the email; it is memory-only (never
+  // templated into HTML) and cleared on sign-in finish and on clear().
+  let passwordDraft = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
@@ -194,7 +202,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const node = surface();
     const view = currentView();
     const hideBack = view === "welcome" || view === "terms" || view.startsWith("password-");
+    // #3771: capture the live password before the rebuild discards its node.
+    const livePassword = node?.querySelector?.('[name="password"]');
+    if (livePassword && typeof livePassword.value === "string") passwordDraft = livePassword.value;
     if (node) node.innerHTML = ["", hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`, "<div data-signin-panel>", panelHtml(), "</div><p class=\"status form-status\" role=\"alert\" data-signin-status></p>"].join('');
+    const freshPassword = node?.querySelector?.('[name="password"]');
+    if (freshPassword && passwordDraft) freshPassword.value = passwordDraft;
     if (node) {
       node.setAttribute("aria-busy", String(busy));
       for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
@@ -210,9 +223,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       pendingTerms = session;
       setStatus("");
       render();
+      passwordDraft = ""; // #3771: sign-in succeeded — retire the draft (after render, whose capture would otherwise resurrect it).
       return;
     }
     pendingTerms = null;
+    passwordDraft = ""; // #3771: a completed sign-in retires the draft.
     setStatus("");
     await onSignedIn(session);
   }
@@ -521,9 +536,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     },
     closeEmail() { return back(); },
     clear() {
-      resetCode = ""; resetEmail = ""; resetPhase = "request"; magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; pendingTerms = null; statusText = ""; passwordEmail = ""; passwordMode = "login"; emailMethod = "password"; busy = false;
+      resetCode = ""; resetEmail = ""; resetPhase = "request"; magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; pendingTerms = null; statusText = ""; passwordEmail = ""; passwordDraft = ""; passwordMode = "login"; emailMethod = "password"; busy = false;
       onBusyChange?.(false);
       render();
+      // #3771: render()'s capture reads the still-live input, so blank it
+      // and the draft explicitly — clear() is the sign-out wipe.
+      passwordDraft = "";
+      const clearedPassword = surface()?.querySelector?.('[name="password"]');
+      if (clearedPassword) clearedPassword.value = "";
     },
     unmount() {
       container?.removeEventListener("click", onClick);
