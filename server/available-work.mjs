@@ -61,23 +61,6 @@ const boardItem = (roomId, item) => ({
   }
 });
 
-const publicTaskItem = packet => ({
-  id: packet.taskId,
-  title: packet.title ?? packet.taskId,
-  source: "publicTask",
-  roomId: packet.namespaceId,
-  state: "unclaimed",
-  owner: null,
-  leaseExpiresAt: packet.claim?.leaseExpiresAt ?? null,
-  terms: { termsVersion: packet.termsVersion, generation: packet.claim?.generation },
-  untrusted: true,
-  claimAction: {
-    method: "POST",
-    endpoint: `/api/public-work/tasks/${packet.taskId}/claim`,
-    params: { requestId: "<uuid>" }
-  }
-});
-
 // May this viewer take board work in the room? Mirrors needs-me's gate:
 // no named viewer (public/internal reads) means no viewer narrowing.
 function viewerMayClaim(state, viewerId) {
@@ -153,27 +136,3 @@ export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
 }
 
-// Cross-room public pool: published public-work tasks the facade itself
-// calls claimable. Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()). The scan
-// always walks the whole pool: total is the pool-wide claimable count
-// (the availableWorkInRoom contract), not the limit-capped page size.
-export function availablePublicTasks(store, { limit = 50 } = {}) {
-  const facade = store.publicWorkClaims;
-  if (!facade?.list) return { items: [], total: 0 };
-  const items = [];
-  let total = 0;
-  let after = "";
-  for (;;) {
-    const page = facade.list({ limit: 100, after });
-    const tasks = page?.tasks ?? [];
-    for (const packet of tasks) {
-      if (packet?.claimable !== true) continue;
-      total += 1;
-      if (items.length < limit) items.push(publicTaskItem(packet));
-    }
-    if (!page?.nextCursor || tasks.length === 0) break;
-    after = page.nextCursor;
-  }
-  return { items, total };
-}
