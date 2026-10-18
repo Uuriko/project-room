@@ -9,7 +9,6 @@ export { closeKeepSet };
 // do not double-write. The integrity cron runs that replay.
 import { applyEvent, emptyRoomState } from "../src/events.js";
 import { isDeepStrictEqual } from "node:util";
-import { createHash } from "node:crypto";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -51,8 +50,9 @@ CREATE INDEX IF NOT EXISTS messages_room_dm_seq ON messages(room_id, to_member_i
 `;
 
 // One row per room the replay has touched. applied_seq is the last event
-// whose message rows are committed. state_json is the room state after that
-// event, so the next batch does not replay the prefix. The empty room_id row
+// whose message rows are certified. state_seq/replay_event_id anchor the
+// separate, possibly chunked snapshot; replay may be ahead of certification.
+// The empty room_id row
 // is the parity sweep cursor, not a room. Written by the cron, not on open.
 export const MESSAGES_BACKFILL_CURSOR_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
@@ -525,14 +525,12 @@ function diagnoseBlock(db, roomId) {
 // rewritten anchor event), and the caller falls back to the full replay.
 function diagnoseFromCursor(db, roomId, upTo) {
   const cursor = readCursor(db, roomId, true);
-  if (!cursor || typeof cursor.state_json !== "string" || cursor.state_seq !== cursor.applied_seq || !(cursor.applied_seq > 0)) return undefined;
-  if (!(Number.isInteger(upTo) && upTo > cursor.applied_seq)) return undefined;
-  const anchor = db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, cursor.applied_seq);
-  if (!anchor || anchor.id !== cursor.applied_event_id) return undefined;
+  if (!cursor || typeof cursor.state_json !== "string" || !Number.isInteger(cursor.state_seq) || cursor.state_seq <= 0 || cursor.state_seq < cursor.applied_seq) return undefined;
+  if (!(Number.isInteger(upTo) && upTo > cursor.state_seq) || !cursorMatches(db,roomId,cursor,upTo)) return undefined;
   let state;
   try { state = decodeMessageReplaySnapshot(db, roomId, cursor.state_json); } catch { return undefined; }
   const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
-    .all(roomId, cursor.applied_seq, upTo);
+    .all(roomId, cursor.state_seq, upTo);
   for (const row of rows) {
     try {
       state = compactState(applyEvent(state, JSON.parse(row.body)));
