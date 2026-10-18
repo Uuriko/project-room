@@ -57,7 +57,7 @@ export function columnOf(item, byId, now) {
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
   if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
-  if (openPull(item)) return "review";
+  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
   if (item.state === "unclaimed" && !item.owner && dependenciesMet(item, byId)) return "ready";
