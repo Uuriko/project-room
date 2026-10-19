@@ -407,6 +407,9 @@ const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
+  // Older history loads on a reader gesture, not 250 ms after open: on a busy
+  // room the background fill was most of a phone's bytes (~3 MB per open).
+  lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
@@ -2317,7 +2320,13 @@ function renderMessages() {
     if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  // Lazy history: a reply whose thread root is older than the held window
+  // indexes as a root; it stays in its (unloaded) thread, as it would with
+  // full history, instead of posing as a top-level message.
+  const owesHistory = client.owesHistory;
+  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
+  if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
+  const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
@@ -2374,7 +2383,7 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
-  if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
+  if (hiddenCount || showPager) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
   // after them on every arrival. They are repainted after each render.
@@ -2465,7 +2474,7 @@ function renderMessages() {
   for (const [key, node] of previous) if (key?.startsWith("work:") && !workById.has(key.slice(5))) node.remove();
   let wi = 0;
   const merged = [];
-  if (hiddenCount) {
+  if (hiddenCount || showPager) {
     let pager = previous.get(TIMELINE_PAGER_KEY);
     if (!pager) {
       pager = document.createElement("li");
@@ -2752,11 +2761,12 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
-  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room${loadingOlder ? " · loading older messages…" : ""}`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
@@ -3020,6 +3030,7 @@ function switchThread(threadId, focusComposer = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
+  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) { pendHashReveal(id); return; }
   if (!state || busy || !conversation.byId.has(id)) return;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
@@ -3402,6 +3413,7 @@ function decodeFragment(value) {
 function pendHashReveal(messageId) {
   pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
     generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+  client.loadHistory();
 }
 // Runs on every snapshot. The pending reveal fires only when this
 // snapshot first holds the target and nothing about the navigation
@@ -4368,6 +4380,7 @@ function expandTimelineTo(id) {
 }
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
+    if (client.loadHistory()) return; // older history first; it renders on arrival
     const view = `room:${activeChannelId}`;
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
@@ -5100,6 +5113,8 @@ for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
     noteReaderScroll();
+    // Lazy history: reading up toward the oldest held message loads the rest.
+    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
