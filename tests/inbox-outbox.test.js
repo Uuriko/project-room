@@ -8,6 +8,17 @@ import { SyntheticMailFixture } from "../scripts/synthetic-mail-fixture.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+
+// IR-2: a backup copy carries the restore-gate boot-lock stamp, so its
+// recovery audit differs from the source's exactly in the
+// restore_reconcile_state entry (and the whole-store digest over it).
+// Backup comparisons normalise that one entry; everything else must
+// match exactly.
+const auditSansStamp = store => {
+  const audit = auditRecovery(store);
+  return { ...audit, dataSha256: "ir2-stamp", tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) };
+};
 import { backupRoom } from "../server/backup.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -94,7 +105,7 @@ test("one dispatch survives lost acknowledgement and both databases restarting; 
   assert.equal(f.apply(request).receipt.send.status, "queued", "original receipt remains exact; status is a separate current read");
   const backup = await backupRoom(f.filename, f.directory);
   const restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), auditRecovery(f.store)); } finally { restored.close(); }
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
 });
 test("a crash before the provider call and an unavailable provider remain unknown, not definitely unsent", async t => {
   const f = setup(t), request = f.reserve(); f.apply(request);

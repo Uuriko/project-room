@@ -29,6 +29,9 @@ const EMPTY_UNTIL_CRON = new Set([
   "private_update_commands",
   "messages_backfill_cursor",
   "messages_backfill_blocks",
+  // IR-2: the restore-gate boot-lock row is written by a restore, a backup
+  // stamp, or a file replay — a never-restored fixture store carries none.
+  "restore_reconcile_state",
   // Replay state parts exist only while a state is over one row.
   "messages_backfill_state",
   "agent_wants_work",
