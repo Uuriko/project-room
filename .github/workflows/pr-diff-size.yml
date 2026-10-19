@@ -1,9 +1,18 @@
 name: pr-diff-size
 
-# Smaller-PR discipline: diffs over ~300 changed lines must carry an explicit
-# "Large diff justification:" section in the PR body. Smaller diffs mean fewer
-# rebase conflicts and faster reviews. Split when you can; justify when you
-# cannot.
+# Smaller-PR discipline, as an advisory signal: diffs over ~300 changed
+# lines should carry an explicit "Large diff justification:" section in
+# the PR body. Smaller diffs mean fewer rebase conflicts and faster
+# reviews. Split when you can; justify when you cannot.
+#
+# Advisory since LAB-CITIER (2026-10-19, HUNT-TELEMETRY T-5). This check
+# is not a required status check, and its red never gated anything: in a
+# 25-run sample of its 151 failures in the 2026-10-16->19 window, every
+# one was the bookkeeping verdict "justification missing" and none was a
+# checker error -- a red that is always prose trains readers to ignore
+# red everywhere. The verdict is still computed on every PR and
+# published in the job summary plus a warning annotation; only a checker
+# malfunction (exit 2: the diff could not be computed) fails the run.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
@@ -26,9 +35,31 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-      - name: check diff size
+      - name: check diff size (advisory)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/pr-diff-size-check.mjs
+        run: |
+          out="$RUNNER_TEMP/diff-size-verdict.txt"
+          node scripts/pr-diff-size-check.mjs > "$out" 2>&1 || code=$?
+          code="${code:-0}"
+          cat "$out"
+          {
+            echo "## pr-diff-size (advisory)"
+            echo
+            echo '```'
+            cat "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -eq 1 ]; then
+            # Size verdict: over threshold without a justification
+            # section. Advisory only -- annotate and pass.
+            line=$(grep -m1 "changed lines" "$out" || true)
+            echo "::warning title=pr-diff-size::${line:-PR diff exceeds the size threshold without a justification section.} Full verdict is in the job summary."
+            exit 0
+          fi
+          # 0 = within threshold or justified. Anything else (2 = the
+          # checker could not compute the diff) stays a failed step: a
+          # broken instrument should still read red.
+          exit "$code"
