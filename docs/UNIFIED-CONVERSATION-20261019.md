@@ -40,7 +40,8 @@ participants are functional evidence, not evidence of real human productivity.
   completed results start another request without reopening completed execution.
 - Preserved attributed inputs, exact retry IDs, attempt and revision checks,
   drafts, private-message boundaries and explicit scope resolution permissions.
-- Assistant connection and detailed activity history now live in settings.
+- Assistant connection lives in settings. Work history is available in a compact
+  disclosure above the conversation, with active and needs-input counts.
   Current status follows the viewed channel/thread and mounts beneath its source
   message when loaded. The prompt is not repeated there. Recovery remains visible.
 - PR4245 owner released the UI paths and preserved its branch at55532407.
@@ -66,7 +67,33 @@ participants are functional evidence, not evidence of real human productivity.
   against a driver-message regex; preserve the driver-text boundary while fixing
   that assertion. The assertion now validates random ID shape separately and
   scans the remaining response for driver text; all5 storage-failure tests pass.
-- The selected current run is inline; showing all concurrent runs inline remains
-  unfinished. Other runs remain accessible in settings history. The expanded
-  result reader/revision journey also remains separate follow-up work.
+- The selected current run stays inline. Concurrent runs are accessible from
+  Work without opening settings. Do not automatically add a large card beneath
+  every message: use compact contextual status and existing result links. The
+  expanded result reader/revision journey remains separate follow-up work.
 - No production deployment or claim of real-human qualification.
+
+## Compact work access follow-up
+
+The next slice corrects the history placement without adding a second work
+model. The collapsed summary reports active requests and requests needing input;
+it disappears when there is no history. Expanded rows preserve the existing
+request, result, pause, stop and contribution controls. Jumping to a message or
+contribution closes the disclosure. Escape closes it and restores summary focus.
+Session/room changes reset the disclosure. On phones the row controls wrap, and
+the history list is bounded so conversation and composer remain reachable.
+
+This is a functional iteration, not a claim of optimal design. Screenshot review
+still shows repeated status inside expanded rows and verbose pre-existing work
+cards. The result reader and those cards should be simplified as the next slice,
+with source attribution and recovery controls preserved.
+
+Validation for the compact-work follow-up: affected suite 1,911 passed, one
+skipped; lint passed with 291 existing warnings. Initial browser run had 25
+passes, two failures and two timeouts from four cases still opening Settings.
+Corrected navigation and reran those four: all passed. The layout case also
+passed at desktop/phone sizes in both themes, including Escape/Enter disclosure
+behavior, horizontal bounds and composer visibility. Screenshots are synthetic.
+
+Final frozen-source Node24 full suite: 11,375 passed, 31 skipped, zero failures
+(562 seconds). No runtime edits occurred during this qualification run.

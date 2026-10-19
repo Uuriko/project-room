@@ -234,7 +234,6 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   // Losing the committed response must preserve one exact cancellation for retry.
   const ownerRun = owner.locator(`[data-assistant-run="${recovery.id}"]`);
   const peerRun = peer.locator(`[data-assistant-run="${recovery.id}"]`);
-  await openSettings(owner);
   await owner.locator('#assistant-activity').evaluate(n => { n.open = true; });
   await ownerRun.getByRole('button', {name:'Stop', exact:true}).waitFor({timeout:3000});
   assert.equal(await peerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
@@ -252,9 +251,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   recovery = (await api('producer')).runs.find(r => r.id === recovery.id);
   assert.equal(recovery.status, 'cancel_requested');
-  await openSettings(owner);
   await ownerRun.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation', {exact:true}).waitFor();
-  await closeSettings(owner);
   assert.equal(await ownerRun.getByRole('button', {name:'Add to this ask', exact:true}).count(), 0);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   await owner.locator('#assistant-retry').click();
@@ -265,7 +262,6 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(id => document.querySelector(`[data-assistant-run="${id}"]`).textContent.includes('Cancelled'), recovery.id);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   // The result link returns to the exact public answer, rather than a different run.
-  await openSettings(peer);
   await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
   await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
@@ -476,13 +472,10 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:1,state:'working',summary:'ERASED-BROWSER-PROMPT'});
   const page=await browser.newPage();await page.goto(origin);await signInFixture(page,f.keys.owner);
   await page.locator('#main').waitFor({state:'visible'});
-  await openSettings(page);
   await page.locator('#assistant-activity > summary').click();
   const panel=page.locator('[data-assistant-run="deleted-browser-run"]');
   await panel.getByRole('button',{name:'Original prompt',exact:true}).waitFor();
-  await closeSettings(page);
   await page.locator('#message-input').fill('Keep my unsent conversation draft.');
-  await openSettings(page);
   // Keep the old assistant projection cached while real message deletion arrives.
   await page.route('**/api/rooms/commons/assistant',route=>route.request().method()==='GET'?route.abort():route.continue());
   const deletion=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),type:'message.deleted',data:{messageId:'erase-browser-prompt',expectedMessageRevision:0}})});
@@ -492,13 +485,11 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await page.unroute('**/api/rooms/commons/assistant');
   for(const name of ['Original prompt','Add to this ask','Change direction','Resolve direction','Resume']) assert.equal(await panel.getByRole('button',{name,exact:true}).count(),0);
   await panel.getByRole('button',{name:'Pause',exact:true}).click();
-  await openSettings(page);
   await panel.locator('.assistant-run-status').getByText('Pausing · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:3,state:'paused',summary:'Stopped'});
   await panel.locator('.assistant-run-status').getByText('Paused',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button',{name:'Resume',exact:true}).count(),0);
   await panel.getByRole('button',{name:'Stop',exact:true}).click();
-  await openSettings(page);
   await panel.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
   await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor();
@@ -707,7 +698,6 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin); await signInFixture(page, f.keys.guest);
     await page.locator('#assistant-runs [data-assistant-run="shared"]').waitFor({ state: 'attached' });
-    await openSettings(page);
     await page.locator('#assistant-activity > summary').click();
     await page.locator('#assistant-runs [data-assistant-message="shared-ask"]').click();
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
@@ -722,7 +712,6 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
     await page.locator('#message-input').fill('Keep this unrelated general draft.');
     const historyContribution = async () => {
-      await openSettings(page);
       await page.locator('#assistant-activity').evaluate(node => { node.open = true; });
       await page.locator('[data-assistant-run="shared"]').evaluate(node => { node.open = true; });
       return page.locator('#assistant-runs [data-contribute-run="shared"]:not([data-conflict])');
@@ -829,8 +818,14 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
   await send('First question for the room?');
   await send('Second question for the room?');
   await page.waitForFunction(()=>document.querySelectorAll('#assistant-runs details.assistant-run').length===2);
-  await openSettings(page);
   await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
+  assert.equal(await page.locator('#settings-dialog').evaluate(n => n.open), false);
+  assert.equal(await page.locator('#assistant-activity > summary').textContent(), 'Work · 2 active');
+  await page.locator('#assistant-activity > summary').focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#assistant-activity').evaluate(n => n.open), false);
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#assistant-activity').evaluate(n => n.open), true);
   // One line per ask: the summary carries the prompt and the status.
   const summaries = await page.locator('#assistant-runs details.assistant-run > summary').allTextContents();
   assert.equal(summaries.length,2);
@@ -852,6 +847,18 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
   await page.evaluate(()=>{ document.querySelector('#assistant-runs details.assistant-run[open] summary [data-cancel]').click(); });
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stopping'));
   assert.equal(await page.locator('#assistant-runs details.assistant-run[open]').count(),1,'summary controls do not toggle the fold');
+  mkdirSync('test-results', { recursive: true });
+  for (const [width, theme] of [[1280, 'dark'], [1280, 'light'], [390, 'dark'], [390, 'light']]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await page.screenshot({ path: `test-results/work-disclosure-${width}-${theme}.png` });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#assistant-activity > summary').click();
+    await page.screenshot({ path: `test-results/work-collapsed-${width}-${theme}.png` });
+    const composer = await page.locator('#message-input').boundingBox();
+    assert.ok(composer && composer.y >= 0 && composer.y + composer.height <= 900);
+    await page.locator('#assistant-activity > summary').click();
+  }
   assert.deepEqual(errors,[]);
 });
 
@@ -873,7 +880,6 @@ test('Add to this ask wires the composer into the run and names the ask', { time
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What should we prioritize?'));
-  await openSettings(page);
   await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
   await page.locator('details.assistant-run').evaluate(n=>{n.open=true;});
   // The ask card offers "Add to this ask"; the composer names the ask.
@@ -990,7 +996,6 @@ for (const width of [1280, 390]) {
     const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'pause-run', ask: 'pause-ask' });
     await api('producer', { action: 'claim', runId: 'pause-run', attemptId: 'pause-host', expectedRevision: 0 });
     const pause = page.locator('#assistant-runs [data-pause-run]:not([data-cancel]):not([data-resume])').first();
-    await openSettings(page);
     await page.locator('#assistant-activity summary').first().click().catch(() => {});
     await pause.click();
     await page.locator('#assistant-review').waitFor({ state: 'visible' });

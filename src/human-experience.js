@@ -73,7 +73,13 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   ask.addEventListener('click', () => { contribution = null; endContribution?.(); paint(); $('#message-input').focus(); });
   const assistantSettings = document.createElement('div');
   assistantSettings.append(section.querySelector('.assistant-heading'));
-  assistantSettings.append($('#assistant-activity'));
+  const activity = $('#assistant-activity');
+  $('.room-topbar').after(activity);
+  activity.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && activity.open) {
+      activity.open = false; activity.querySelector('summary').focus(); event.stopPropagation();
+    }
+  });
   $('#settings-dialog').append(assistantSettings);
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
@@ -121,6 +127,12 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     assistantSettings.hidden = !human();
     const context = getConversation?.();
     const runs = Object.values(projection?.runs ?? {});
+    activity.hidden = !human() || !runs.length;
+    const activeCount = runs.filter(run => !CLOSED.includes(run.status)).length;
+    const needsInput = runs.filter(run => !run.sourceDeleted && run.status === 'needs_input').length;
+    activity.querySelector('summary').textContent = needsInput
+      ? uiText('human.workNeedsInput', { active: activeCount, count: needsInput })
+      : activeCount ? uiText('human.workActive', { count: activeCount }) : uiText('human.workHistory');
     const contextualRuns = runs.filter(run => {
       if (!context) return true;
       const source = getState()?.messages.find(message => message.id === run.sourceMessageId);
@@ -270,7 +282,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   $('#assistant-runs').onclick = async event => {
     // Controls in a run's summary row must not toggle the fold.
     if (event.target.closest('summary button')) event.preventDefault();
-    if (event.target.closest('button') && $('#settings-dialog').open) $('#settings-dialog').close();
+    if (event.target.closest('[data-assistant-message], [data-contribute-run]')) activity.open = false;
     const message = event.target.closest('[data-assistant-message]'); if (message) { openMessage(message.dataset.assistantMessage); return; }
     const context = event.target.closest('[data-contribute-run]');
     if (context) {
@@ -339,13 +351,14 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
-      section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active;
+      section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active;
       if (active) {
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
       if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
+        activity.open = false; activity.hidden = true;
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
         resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
         boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0;

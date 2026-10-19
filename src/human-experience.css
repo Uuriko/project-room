@@ -16,11 +16,12 @@
 .human-composer-actions #composer-attach { min-width: 44px; min-height: 44px; }
 .assistant-heading { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
 #room-assistant-status { flex: 1; font-size: var(--text-sm); color: var(--muted); }
-#assistant-activity { margin-top: .5rem; }
+#assistant-activity { padding: 0 1rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#assistant-activity > summary { min-height: 32px; align-content: center; cursor: pointer; color: var(--muted); font-size: var(--text-sm); }
 #assistant-runs { max-height: 25vh; overflow: auto; }
 .assistant-run { padding: .5rem 0; }
 .assistant-run + .assistant-run { border-top: 1px solid var(--border); }
-.assistant-run summary { display: flex; align-items: baseline; gap: .6rem; cursor: pointer; overflow: hidden; }
+.assistant-run summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; cursor: pointer; }
 .assistant-run summary > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-run-status { flex: 0 0 auto; color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
 .assistant-run-resultline { flex: 2 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-sm); }
@@ -30,7 +31,6 @@
 .assistant-run-detail > .text-button { margin-right: .6rem; margin-block: .2rem; }
 .assistant-run-result { border-left: 2px solid var(--border); padding-left: .6rem; color: var(--text); }
 .assistant-run-result strong { margin-right: .4rem; }
-#ask-room[aria-pressed="true"] { outline: 2px solid var(--blue); }
 .human-project-item { display: flex; text-align: left; width: 100%; justify-content: space-between; gap: 1rem; padding: .8rem; margin: .4rem 0; }
 #room-assistant-setup, #human-project-dialog { max-width: min(38rem, calc(100vw - 2rem)); }
 #room-assistant-setup select { width: 100%; }
