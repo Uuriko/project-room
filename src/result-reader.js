@@ -41,6 +41,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    const textMessage = getState().messages.find(message => message.id === view.textMessageId);
+    if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };
+    if (view.withdrawn) {
+      view.body = "";
+      resultElement("result-body").textContent = "";
+      resultElement("result-body").hidden = true;
+      resultElement("result-original").hidden = true;
+      resultElement("result-use-status").textContent = "";
+      clearResultComparison(resultElement("result-diff"));
+    }
     const item = getState().workItems[view.workItemId];
     const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
@@ -142,7 +152,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       view.loaded = true; view.retrying = false;
       if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
       resultStatus();
-      loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, resultElement("result-diff"), owns);
+      if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
+        resultElement("result-diff"), () => owns() && !view.withdrawn);
     }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
   }
   resultElement("result-retry").addEventListener("click", () => {

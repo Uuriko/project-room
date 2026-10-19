@@ -118,7 +118,7 @@
     "src/reminders.js": "sha256:b1a57316743260616b3925384d5e37cbc04ee9dd311fad9198d18e2dc46b6800",
     "src/reply-requests.js": "sha256:5106297da7c2b1b55ba510dbc61b0ca229faeed473eeb8ced16c1393f654f38c",
     "src/request-access.js": "sha256:2d6345ba587441567eea949bb7fab6d7c14983ea0c7be6f481819f08381dfa5f",
-    "src/result-reader.js": "sha256:9eb28c181a5f1c976cc6350920186e6a47f70fc630ff81984100c8ab0748ccc8",
+    "src/result-reader.js": "sha256:931aa2e39693e53b3c38975105d0d1b35d45de6ac403f770655bc6306be27dbf",
     "src/retention-ui.js": "sha256:2b444302ca6d074a7c549af1d6a79fa2ff217c426aea36096213f27ae9a81a47",
     "src/return-brief.js": "sha256:bf1c2775a5347645110b87a1d8ef22810950089c3616e7b4467e79788bdd4114",
     "src/room-charter.js": "sha256:594e8a1486774d56cd197349996e6225ce9a435918641717c8794c0c2ee21d64",

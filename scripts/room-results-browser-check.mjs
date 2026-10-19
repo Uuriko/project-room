@@ -175,16 +175,42 @@ test("guest Results remain useful with large text and no creation controls", { t
   await f.capture("large-text");
 });
 
-test("a withdrawn result loses its discussion action without disturbing a draft", { timeout: 30000 }, async t => {
-  const f = await setup(t), p = f.p;
+for (const theme of ["dark", "light"]) for (const mobile of [false, true]) test(`a withdrawn result clears its reader: ${theme} ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { theme, mobile }), p = f.p;
   await p.locator("#message-input").fill("Keep this thought");
   await f.open(); await f.read(); await f.ready();
   await p.locator("#result-discuss").waitFor({ state: "visible" });
   const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
   f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
   await p.locator("#result-discuss").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#result-body").textContent(), "", "withdrawal clears already loaded text");
+  assert.equal(await p.locator("#result-body").isHidden(), true);
+  assert.match(await p.locator("#result-status").textContent(), /Text withdrawn/);
+  assert.equal(await p.locator("#result-copy-text").isHidden(), true);
+  assert.equal(await p.locator("#result-download").isHidden(), true);
+  await f.capture(`withdrawn-${theme}-${mobile ? "phone" : "desktop"}`);
   await p.locator("#close-result").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Keep this thought");
+});
+
+test("a delayed result response cannot restore withdrawn text", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open();
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; }), began = new Promise(resolve => { started = resolve; });
+  t.after(() => release());
+  await p.route("**/work-result?**", async route => {
+    const response = await route.fetch(); started(); await gate; await route.fulfill({ response });
+  });
+  await f.read(); await began;
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  // Wait for the live deletion before releasing the older exact-text response.
+  await p.waitForFunction(id => document.querySelector(`[data-message-record-id="${id}"]`)?.textContent.includes("deleted"), messageId);
+  release();
+  await p.locator("#result-status").filter({ hasText: "Text withdrawn" }).waitFor();
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.equal(await p.locator("#result-copy-text").isHidden(), true);
+  assert.equal(await p.locator("#result-discuss").isHidden(), true);
 });
 
 test("returning from a result preserves an uncertain send's exact target and retry", { timeout: 30000 }, async t => {
