@@ -451,12 +451,13 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const receiptsWere = publicReceipts(previous).enabled === true;
   // Lot receipts have no public_receipts row for an opt-out to delete, so
   // the RECORDED receipts setting is mirrored into
-  // room_public_receipts_setting for the lot read: only a recorded off
-  // hides a lot, and "never recorded" must stay distinguishable from
-  // "recorded false". The setter bumps the recorded revision on every
-  // record, so an unchanged revision needs no write; a null previous
-  // (bootstrap, import, backfill) is an authoritative state and always
-  // re-mirrors.
+  // room_public_receipts_setting for the lot read: only a recorded on
+  // serves a lot (#3594) — "never recorded" and "recorded false" both
+  // keep the lot private, and the mirror keeps the exact recorded value
+  // so the read can require the on. The setter bumps the recorded
+  // revision on every record, so an unchanged revision needs no write;
+  // a null previous (bootstrap, import, backfill) is an authoritative
+  // state and always re-mirrors.
   const recorded = state.room.publicReceipts;
   const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
   const recordedWas = previous?.room?.publicReceipts ?? null;
@@ -947,8 +948,9 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // The owner's consent gates it like every other shape, through the
 // switches that can apply to a row-less record: operator unpublish,
 // the directory receipts toggle (receipts-live), and the room's own
-// recorded public-receipts setting — a RECORDED off hides the lot,
-// while a room that never recorded the setting is served by default.
+// recorded public-receipts setting — only a RECORDED on serves the
+// lot (#3594): a recorded off, and a room that never recorded the
+// setting, both keep the settled lot private.
 // Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
 export function publicLotReceiptById(store, id) {
   if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
@@ -977,13 +979,15 @@ export function publicLotReceiptById(store, id) {
   if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
   // No public_receipts row exists for an opt-out to delete, so the
   // recorded setting is read from its write-time mirror
-  // (syncRoomPublication). No row means the owner never recorded the
-  // setting, which is not an opt-out.
+  // (syncRoomPublication). #3594: a settled lot is public only with
+  // the owner's recorded opt-in — no mirror row (never recorded), a
+  // store whose schema cannot answer, and a recorded off all keep
+  // the lot private; only a recorded enabled = 1 serves it.
   let settingRow = null;
   try {
     settingRow = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
-  } catch { settingRow = null; } // a store without the read-model schema recorded no setting
-  if (settingRow && settingRow.enabled === 0) return null;
+  } catch { settingRow = null; } // a store without the read-model schema recorded no opt-in
+  if (!settingRow || settingRow.enabled !== 1) return null;
   let roomTitle = null;
   try {
     if (isListed(store, roomId)) {
