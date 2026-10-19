@@ -1424,6 +1424,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_review_reads",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_successor_requests",
     "key": "room_id",
     "action": "delete",

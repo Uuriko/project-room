@@ -54,7 +54,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "guest_invite_authority",
   // Settlement links exist only once a paid public task is enabled
   // (First Shift settlement rail).
-  "public_work_settlements"
+  "public_work_settlements",
+  // Outcome reads are journaled only when a contributor reads their
+  // outcome; the fixture's coverage performs no contributor read.
+  "public_work_review_reads"
 ]);
 
 const EVENTS = 200_000;

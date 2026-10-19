@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS public_work_review_versions (
   action TEXT NOT NULL, actor_id TEXT NOT NULL, at TEXT NOT NULL, state_json TEXT NOT NULL,
   PRIMARY KEY(receipt_id, revision)
 );
+CREATE TABLE IF NOT EXISTS public_work_review_reads (
+  receipt_id TEXT NOT NULL, room_id TEXT NOT NULL, reader_id TEXT NOT NULL,
+  at TEXT NOT NULL, revision INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS public_work_review_requests (
   room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
   input_json TEXT NOT NULL, outcome_json TEXT NOT NULL,
@@ -49,16 +53,17 @@ export class PublicWorkReviews {
   verifySchema({ allowAbsent = false } = {}) {
     const shapes = publicWorkReviewsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean).map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql,
       actual: this.db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-    // public_work_review_versions is the purely additive versioning sidecar
-    // (W3): an older database carries the review pair without it and
-    // read-only startup never creates it, so its absence is the
-    // pre-versioning state, not damage — a present sidecar is
+    // public_work_review_versions and public_work_review_reads are the
+    // purely additive sidecars (W3 versioning; the outcome-read journal):
+    // an older database carries the review pair without them and
+    // read-only startup never creates them, so their absence is the
+    // pre-sidecar state, not damage — a present sidecar is
     // shape-verified, an absent one is tolerated (the wake-queue
     // side-table pattern). The review pair itself stays all-or-nothing:
     // both absent is the pre-review state allowAbsent exists for; exactly
     // one absent, or any shape drift anywhere, is operator reconciliation.
-    const core = shapes.filter(shape => shape.name !== 'public_work_review_versions');
-    const sidecar = shapes.filter(shape => shape.name === 'public_work_review_versions');
+    const core = shapes.filter(shape => shape.name !== 'public_work_review_versions' && shape.name !== 'public_work_review_reads');
+    const sidecar = shapes.filter(shape => shape.name === 'public_work_review_versions' || shape.name === 'public_work_review_reads');
     if (sidecar.some(shape => shape.actual !== undefined && normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
     if (allowAbsent && core.every(shape => shape.actual === undefined)) return false;
     if (core.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
@@ -176,7 +181,8 @@ export class PublicWorkReviews {
   }
   contributorReview(secret, receiptId) {
     check(validId(receiptId), 'Invalid receipt ID');
-    return this.store.readTransaction(() => {
+    let seen = null;
+    const outcome = this.store.readTransaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
       if (!identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
       if (!this.hasTable('public_work_receipts')) fail(404, 'review_not_found', 'Contribution not found');
@@ -186,11 +192,28 @@ export class PublicWorkReviews {
       const followUp = this.store.publicWorkSuccessors?.link(receiptId);
       const saved = this.hasTable('public_work_reviews') && this.db.prepare('SELECT state_json FROM public_work_reviews WHERE receipt_id=?').get(receiptId);
       const current = saved ? JSON.parse(saved.state_json) : { revision: 0, state: 'pending' };
+      const roomRow = this.db.prepare(`SELECT t.room_id AS room_id FROM public_work_receipts r
+        JOIN public_work_tasks t ON t.offer_id=r.offer_id WHERE r.receipt_id=?`).get(receiptId);
+      seen = { roomId: roomRow?.room_id ?? null, readerId: identity.identityId, revision: current.revision };
       return { ...(followUp ? { followUp } : {}), receiptId, taskId: receipt.taskId, termsVersion: receipt.termsVersion, generation: receipt.generation,
         artifactSha256: receipt.artifact.sha256, review: { revision: current.revision, state: current.state,
           ...(current.decision ? { decision: current.decision.decision, reason: current.decision.reason, decidedAt: current.decision.at } : {}),
           ...(current.verification ? { verificationVerdict: current.verification.verdict, verificationReviewerKind: current.verification.reviewerKind } : {}) } };
     });
+    // Outcome-read journal (STRANGER-WAIT-CENSUS §2): until this journal
+    // existed, a participant's read of their own outcome was recorded
+    // nowhere, so a return visit was unmeasurable by construction. The
+    // insert runs after the read transaction returns and is best-effort:
+    // a journal failure must never fail or alter the read's response, so
+    // every failure mode (the sidecar absent on an older database, a
+    // read-only connection, a write error) is swallowed here and only here.
+    try {
+      if (seen && seen.roomId && this.hasTable('public_work_review_reads')) {
+        this.db.prepare('INSERT INTO public_work_review_reads VALUES (?,?,?,?,?)')
+          .run(receiptId, seen.roomId, seen.readerId, new Date(this.store.now()).toISOString(), seen.revision);
+      }
+    } catch { /* best-effort journal: the read above is the contract */ }
+    return outcome;
   }
   // #3546: acceptance is the public receipt's verified successor state.
   // The receipt gains state "verified", the executed checks that ran
