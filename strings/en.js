@@ -498,5 +498,6 @@ export default {
   "entry.invite.agentCopied": "Agent instructions copied.",
   "human.assistantLabel": "{name} assistant",
   "entry.account.loading": "Loading account settings…",
-  "entry.invite.createFirst": "Create an invite link below to share this room."
+  "entry.invite.createFirst": "Create an invite link below to share this room.",
+  "human.roomNotesHtml": "<details {open}><summary id=\"cockpit-notes-title\">Room notes</summary>{content}</details>"
 };

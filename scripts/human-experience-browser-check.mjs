@@ -11,6 +11,17 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
+
+async function configureAssistant(page) {
+  const reveal = !await page.locator('#assistant-setup').isVisible();
+  if (reveal) await page.locator('#ask-room').click();
+  await page.locator('#assistant-setup').click();
+  await page.locator('#room-assistant-setup select').selectOption('producer');
+  await page.locator('#room-assistant-setup button[type=submit]').click();
+  await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
+  if (reveal) await page.locator('#ask-room').click();
+}
+
 function deferredResultResponse() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -75,8 +86,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
-  await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
-  await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await configureAssistant(owner);
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
@@ -604,8 +614,7 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   const roomOptions = () => page.locator('#mention-list .mention-option').evaluateAll(n => n.map(o => o.textContent.trim()).filter(t => /^Room(?! owner)/.test(t)).length);
   assert.equal(await roomOptions(), 0);
   await input.fill('');
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
+  await configureAssistant(page);
   await input.fill('can you help? @Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
   assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'false');
@@ -631,8 +640,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask c
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await configureAssistant(page);
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What is the plan?');
   await page.locator('#message-form button[type=submit]').click();
@@ -798,8 +806,7 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await configureAssistant(page);
   const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
   await send('Second question for the room?');
@@ -842,8 +849,7 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await configureAssistant(page);
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What should we prioritize?');
   await page.locator('#message-form button[type=submit]').click();

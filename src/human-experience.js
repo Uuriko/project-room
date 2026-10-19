@@ -62,7 +62,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-attach'), $('#composer-options'), ask); $('.composer-row').append(composerActions);
-  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
+  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); paint(); $('#message-input').focus(); });
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
   $('#settings-dialog').append(advanced);
@@ -105,6 +105,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     finally { button.disabled = false; }
   };
   function paint() {
+    const relevant = selected || operation || rejectedOperation || error || projection?.assistant.coordinatorMemberId || projection?.runs?.length;
+    section.hidden = !human() || !relevant;
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = uiText('human.assistantLabel', { name: assistant.name || 'Room' });
@@ -199,7 +201,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < (projection?.runs?.some(run => run.status === 'working') ? 500 : 3000)) return;
     const stamp = key(); reading = true; lastRead = Date.now();
     try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
-    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
+    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; paint(); } }
     finally { reading = false; }
   }
   async function invoke({ rethrow = false } = {}) {
@@ -303,7 +305,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     // Ask Room from the @ list: same state the Ask Room button toggles on.
     selectAsk() {
       if (!human() || document.body.classList.contains('human-advanced') || !projection?.assistant.coordinatorMemberId) return false;
-      selected = true; ask.setAttribute('aria-pressed', 'true'); return true;
+      selected = true; ask.setAttribute('aria-pressed', 'true'); paint(); return true;
     },
     assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
     sync() {

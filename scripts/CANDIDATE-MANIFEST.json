@@ -91,7 +91,7 @@
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
     "src/human-experience.css": "sha256:037ed3fca5cde89a11ca77e4e2cbaeaf4a7d5e8a81f6b00fdbd94b346cdcb531",
-    "src/human-experience.js": "sha256:0924e336733019b40d161a5b5da41505872b8232530dc30c0581142d45cde4cb",
+    "src/human-experience.js": "sha256:4a4016d865864b274be59080acaea516d067aa1b13893971885f530fcdc2d5e0",
     "src/human-push-display.js": "sha256:e5ae3ec560fe7334442557e286e5d297f8b579a215f41c2702890ba49d8050f6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/inbox-client.js": "sha256:49c5a629886ab5fb6a304be3a5194a2e8b629a2f4a49ca4757522a186514fcdd",
@@ -109,7 +109,7 @@
     "src/open-questions-ui.js": "sha256:743343e5ffd7e705b37b0c0d5d469bdbaac88c404e0c6e0cd32e2f2022dc87a9",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
-    "src/owner-cockpit.js": "sha256:503eb4c2dc91f695104aaa67dd736b7caf1be1f9403bb86c73ecc90700863e9f",
+    "src/owner-cockpit.js": "sha256:5114ee14b04ca104c33883ca5040345ed5e7d593c0578c78e3c09f8c747140df",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:62d2d53f538d177fa485f6d708987ce2419dd7cba038ad95cf21862034421d9a",
@@ -151,8 +151,8 @@
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:8612e23cb2ad9333a033cc80aa96f030137c5fc4fceab372bc55dd5e3ce8e15a",
-    "strings/en.json": "sha256:55d0577362e38a58271bd99ea7371156790447e4a3b799ed4892c8bc0e79f771"
+    "strings/en.js": "sha256:75afb66fcd031067af430171d63d1671434ddfeff3d19a5a55e0081e97f9aa34",
+    "strings/en.json": "sha256:6bf71c6b8961164b5df4153e4c3d561869040b8043218a63c563ce04ea6d6603"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ea6161b091a3d0f8bab5b5f921534039fc784a339d650d38b11f487287b77c12",
