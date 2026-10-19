@@ -34,6 +34,7 @@
     "test:machine": "node --test machine/test/machine.test.mjs",
     "agent:inbox": "node scripts/agent-inbox.mjs",
     "agent:roster": "node scripts/room-roster.mjs",
+    "qa:seeds": "node scripts/qa-seeds/build-seed-packs.mjs",
     "qa3:authz-board": "node scripts/qa3/authz-board.mjs",
     "qa3:content-trust": "node scripts/qa3/content-trust.mjs",
     "qa3:public-scan-budget": "node scripts/qa3/public-scan-budget.mjs",
