@@ -1273,6 +1273,29 @@ export class AgentIdentities {
       && (typeof sponsorAccountId !== "string" || sponsorAccountId.length === 0 || sponsorAccountId.length > 128)) {
       fail(422, "invalid_link_code_request", "sponsorAccountId must be a non-empty string of at most 128 chars");
     }
+    // SECURITY-FIX-2 TM-8: sponsor binding is REQUIRED when the minter
+    // holds the sponsor position in the target room — the holder's
+    // identity is linked as the room's owner member, the member whose
+    // account acts as sponsor for agent connections. The intended
+    // redeemer is then the holder's own sponsor account, so the code is
+    // bound to it at mint whether or not the caller named one: a
+    // room-only code in that position would let any LATER holder of the
+    // sponsor position (ownership transfer, sponsor-account re-bind)
+    // redeem a leaked code and be issued the 30-day onboarding token as
+    // the holder. Naming a DIFFERENT sponsor is refused, and if no
+    // account is bound to the owner member the binding is required yet
+    // unresolvable — fail closed rather than mint a bearer code.
+    const position = this.minterSponsorPosition(roomId, identityId);
+    let boundSponsorAccountId = sponsorAccountId ?? null;
+    if (position.holdsPosition) {
+      if (!position.accountId) {
+        fail(422, "invalid_link_code_request", "This identity holds the sponsor position in the room but no sponsor account is bound to it; its link codes cannot be safely bound");
+      }
+      if (boundSponsorAccountId !== null && boundSponsorAccountId !== position.accountId) {
+        fail(422, "invalid_link_code_request", "This identity holds the sponsor position in the room; its link codes must bind to its own sponsor account");
+      }
+      boundSponsorAccountId = position.accountId;
+    }
     return this.store.transaction(() => {
       const now = this.store.now();
       // Sweep expired rows on every mint: consumed rows die with their TTL,
@@ -1285,11 +1308,27 @@ export class AgentIdentities {
       }
       const code = base64url(randomBytes(LINK_CODE_BYTES));
       this.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,room_id,sponsor_account_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,?,?,NULL)")
-        .run(legacyHash(code), identityId, roomId, sponsorAccountId ?? null, now, now + LINK_CODE_TTL_MS);
+        .run(legacyHash(code), identityId, roomId, boundSponsorAccountId, now, now + LINK_CODE_TTL_MS);
       return { identityId: identity.identityId, displayName: identity.displayName,
-        linkCode: code, roomId, ...(sponsorAccountId ? { sponsorAccountId } : {}),
+        linkCode: code, roomId, ...(boundSponsorAccountId ? { sponsorAccountId: boundSponsorAccountId } : {}),
         expiresAt: now + LINK_CODE_TTL_MS };
     });
+  }
+
+  // TM-8: does this identity hold the sponsor position in the room — is it
+  // linked as the room's owner member — and which account is bound to
+  // that member as sponsor (member_accounts)? accountId is null when the
+  // position is held but no account is bound to the member.
+  minterSponsorPosition(roomId, identityId) {
+    const row = this.db.prepare(
+      `SELECT ma.account_id AS accountId FROM identity_links il
+       JOIN rooms r ON r.id = il.room_id
+       LEFT JOIN member_accounts ma ON ma.room_id = il.room_id AND ma.member_id = il.member_id
+       WHERE il.room_id = ? AND il.identity_id = ?
+         AND json_extract(r.projection, '$.room.ownerId') = il.member_id
+       LIMIT 1`).get(roomId, identityId);
+    if (!row) return { holdsPosition: false, accountId: null };
+    return { holdsPosition: true, accountId: row.accountId ?? null };
   }
 
   // RC-2026-09-24-210: verify a presented link code and consume it
@@ -1319,6 +1358,21 @@ export class AgentIdentities {
     // sponsor must be the account actually enrolling.
     if (!row.roomId || row.roomId !== roomId) proofFailed();
     if (row.sponsorAccountId && row.sponsorAccountId !== sponsorAccountId) proofFailed();
+    // SECURITY-FIX-2 TM-8: a code stored WITHOUT a sponsor binding (minted
+    // before binding was required) still may not be redeemed by a second
+    // sponsor when the minter holds the sponsor position in the room —
+    // only the account bound to the minter's owner member may redeem it.
+    // RULING 28(a): the check fires only when a sponsor context is
+    // PRESENTED at redemption (the enrollment door passes the enrolling
+    // account). link() presents none — it is sponsor-less by design (see
+    // requireLinkHolderProof) and writes the identity_links row that
+    // confers the position BEFORE the proof is consumed, so gating the
+    // sponsor-less path on the position would fail the designed
+    // owner-member link closed for any holder-minted code.
+    if (!row.sponsorAccountId && sponsorAccountId !== undefined) {
+      const position = this.minterSponsorPosition(roomId, identityId);
+      if (position.holdsPosition && position.accountId !== sponsorAccountId) proofFailed();
+    }
     // A code minted before a revocation dies with the identity: revocation
     // stops the secret authenticating everywhere, and its delegations with it.
     const live = this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NULL").get(identityId);

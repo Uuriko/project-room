@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 
 function fixture(t) {
   let now = Date.now();
@@ -313,4 +315,116 @@ test("C2: a pre-binding legacy code row (NULL room) never redeems", t => {
   f.store.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,NULL)")
     .run(hash, identity.identityId, now, now + 10 * 60 * 1000);
   expectProofFailure(t, () => f.store.identities.consumeLinkCode(identity.identityId, code, { roomId: "commons" }));
+});
+
+// ------------------------------------------------------------------
+// SECURITY-FIX-2 TM-8: sponsor binding is REQUIRED when the minter
+// holds the sponsor position in the room (its identity is linked as
+// the room's owner member). The code is bound at mint to the account
+// bound to that member, so a later holder of the sponsor position —
+// a second sponsor — cannot redeem a leaked room-only code and be
+// issued the onboarding credential as the holder.
+// ------------------------------------------------------------------
+
+// Bind the holder identity to the fixture room's owner member: the
+// holder now holds the sponsor position in "commons". Returns the
+// sponsor account bound to that member (member_accounts).
+function makeSponsorHolder(f) {
+  const holder = f.store.identities.create("Sponsor Holder");
+  f.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES('commons',?,'owner',?)")
+    .run(holder.identityId, f.now());
+  const accountId = f.store.db.prepare(
+    "SELECT account_id AS accountId FROM member_accounts WHERE room_id='commons' AND member_id='owner'").get().accountId;
+  return { holder, accountId };
+}
+
+test("TM-8: minting by the room's sponsor-holder auto-binds the code to their sponsor account", t => {
+  const f = fixture(t);
+  const { holder, accountId } = makeSponsorHolder(f);
+  const minted = f.store.identities.mintLinkCode(holder.identityId, holder.secret, { roomId: "commons" });
+  assert.equal(minted.sponsorAccountId, accountId, "the mint response names the binding");
+  const row = f.store.db.prepare("SELECT sponsor_account_id AS sponsor FROM identity_link_codes").get();
+  assert.equal(row.sponsor, accountId, "the stored code is sponsor-bound, never room-only");
+  // The bound sponsor redeems; a second sponsor cannot.
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(holder.identityId, minted.linkCode,
+    { roomId: "commons", sponsorAccountId: "acct_second_sponsor" }));
+  const consumed = f.store.identities.consumeLinkCode(holder.identityId, minted.linkCode,
+    { roomId: "commons", sponsorAccountId: accountId });
+  assert.equal(consumed.identityId, holder.identityId);
+});
+
+test("TM-8: the sponsor-holder cannot mint a code naming a different sponsor", t => {
+  const f = fixture(t);
+  const { holder, accountId } = makeSponsorHolder(f);
+  assert.throws(
+    () => f.store.identities.mintLinkCode(holder.identityId, holder.secret,
+      { roomId: "commons", sponsorAccountId: "acct_second_sponsor" }),
+    { code: "invalid_link_code_request" });
+  // Naming their OWN sponsor account explicitly is the same binding.
+  const minted = f.store.identities.mintLinkCode(holder.identityId, holder.secret,
+    { roomId: "commons", sponsorAccountId: accountId });
+  assert.equal(minted.sponsorAccountId, accountId);
+});
+
+test("TM-8: a legacy unbound code row is still refused to a second sponsor when the minter holds the position", t => {
+  const f = fixture(t);
+  const { holder, accountId } = makeSponsorHolder(f);
+  // A code row minted before binding was required: room-bound, no sponsor.
+  const code = randomBytes(16).toString("base64url");
+  const hash = createHash("sha256").update(code).digest("hex");
+  const now = f.now();
+  f.store.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,room_id,sponsor_account_id,created_at,expires_at,consumed_at) VALUES(?,?,'commons',NULL,?,?,NULL)")
+    .run(hash, holder.identityId, now, now + 10 * 60 * 1000);
+  expectProofFailure(t, () => f.store.identities.consumeLinkCode(holder.identityId, code,
+    { roomId: "commons", sponsorAccountId: "acct_second_sponsor" }));
+  const consumed = f.store.identities.consumeLinkCode(holder.identityId, code,
+    { roomId: "commons", sponsorAccountId: accountId });
+  assert.equal(consumed.identityId, holder.identityId);
+});
+
+test("TM-8 (ruling 28a): an unbound code redeems when NO sponsor context is presented — the sponsor-less link() path", t => {
+  const f = fixture(t);
+  const { holder } = makeSponsorHolder(f);
+  // The same legacy unbound row as the second-sponsor pin above:
+  // room-bound, no sponsor binding, minter holding the position.
+  const code = randomBytes(16).toString("base64url");
+  const hash = createHash("sha256").update(code).digest("hex");
+  const now = f.now();
+  f.store.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,room_id,sponsor_account_id,created_at,expires_at,consumed_at) VALUES(?,?,'commons',NULL,?,?,NULL)")
+    .run(hash, holder.identityId, now, now + 10 * 60 * 1000);
+  // No sponsorAccountId is presented: the only sponsor-less caller is
+  // link() via requireLinkHolderProof, acting for a room member on the
+  // holder's own minted code. TM-8's contract governs redemption BY a
+  // sponsor, so the position check does not fire and the code redeems —
+  // the designed owner-member link path (ruling 28a).
+  const consumed = f.store.identities.consumeLinkCode(holder.identityId, code, { roomId: "commons" });
+  assert.equal(consumed.identityId, holder.identityId);
+});
+
+test("TM-8: a second sponsor in the same room cannot redeem the sponsor-holder's code at the connections door", t => {
+  const f = fixture(t);
+  const { holder, accountId } = makeSponsorHolder(f);
+  // The holder mints intending their own sponsor account; the code is
+  // bound to it at mint (TM-8), with no sponsor named by the caller.
+  const minted = f.store.identities.mintLinkCode(holder.identityId, holder.secret, { roomId: "commons" });
+  assert.equal(minted.sponsorAccountId, accountId);
+  // The sponsor position changes hands: a second human (a second sponsor
+  // account) becomes room owner before the code is redeemed.
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "human-two", displayName: "Human Two", kind: "human", permissions: ["manage_members"] } });
+  f.store.createAccount("human-two-acct");
+  f.store.bindHumanAccount("commons", "human-two", "human-two-acct");
+  const rooms = new AgentRooms(f.store);
+  rooms.transfer(f.session.token, "commons", { toMemberId: "human-two" }, f.session.session.sessionBinding);
+  const twoKey = f.store.issueAccessKey("commons", "human-two");
+  const twoSession = f.store.createSession(twoKey);
+  const twoRevision = f.store.room("commons").state.members["human-two"].revision;
+  // The second sponsor presents the leaked code: proof failure, nothing
+  // is created, and the onboarding token is never issued to them.
+  expectProofFailure(t, () => f.store.agentConnections.apply(twoSession.token, "commons",
+    f.createRequest({ identityId: holder.identityId, identityLinkCode: minted.linkCode, expectedOwnerRevision: twoRevision }),
+    twoSession.session.sessionBinding));
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connections").get().n, 0);
+  assert.equal(f.store.db.prepare("SELECT consumed_at FROM identity_link_codes").get().consumed_at, null,
+    "the refused redemption does not burn the holder's code");
 });
