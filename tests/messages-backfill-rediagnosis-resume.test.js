@@ -88,7 +88,7 @@ test("without a usable snapshot the re-diagnosis falls back to the full replay",
   parkedRoom(store, "aaa");
   setMessageId(store, "ev-a", "also bad@x");
   setMessageId(store, "ev-p", "p");
-  store.db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0 WHERE room_id='aaa'").run();
+  store.db.prepare("UPDATE messages_backfill_cursor SET state_seq=0 WHERE room_id='aaa'").run();
   append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
   const after = store.backfillMessages({ limit: 1000 });
   assert.equal(after.blocked.length, 1, "the full replay finds the earlier event");
@@ -109,4 +109,17 @@ test("a lifted park clears the room's integrity record before the room catches u
   assert.ok(lag > 0, `still catching up (lag ${lag})`);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n, 0);
   assert.deepEqual(store.integrityFailures().filter(row => row.step === "messages_backfill"), [], "lag is not a failure");
+});
+
+// Schema42 separates replay progress from certified message-row progress.
+test("re-diagnosis resumes from a snapshot ahead of certification", t => {
+  const store = open(t);
+  parkedRoom(store, "aaa");
+  store.db.prepare("UPDATE messages_backfill_cursor SET applied_seq=0, applied_event_id='' WHERE room_id='aaa'").run();
+  setMessageId(store, "ev-a", "also bad@x");
+  setMessageId(store, "ev-p", "p");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  const after = store.backfillMessages({limit:1000});
+  assert.deepEqual(after.blocked, []);
+  assert.equal(after.done, true);
 });
