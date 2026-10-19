@@ -322,9 +322,13 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
     data: { messageId: "mention-1", body: "hey @wakeagent, take a look when you are back" } });
 
   const pending = f.store.agentHeartbeats.pendingWakes(identity.identityId);
-  assert.equal(pending.length, 1, "one wake signal for the mention");
+  // WAKE0-1: the mention of an offline, armed agent also emits a wake
+  // intent (kind "wake", pointer messageId) — it rides the same page.
+  assert.equal(pending.length, 2, "the mention signal plus its wake intent");
   assert.equal(pending[0].kind, "mention");
   assert.equal(pending[0].messageId, "mention-1");
+  assert.equal(pending[1].kind, "wake");
+  assert.equal(pending[1].messageId, "wake:mention-1");
 
   const journal = f.store.agentPlugin.webhookJournalFor({ identityId: identity.identityId, subscriptionId: sub.subscriptionId });
   const wakeDeliveries = journal.filter(d => d.eventType === "agent.wake");
@@ -339,12 +343,17 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "dm-1", body: "direct ping", toMemberId: "wakeagent" } });
   const afterDm = f.store.agentHeartbeats.pendingWakes(identity.identityId);
-  assert.equal(afterDm.length, 2);
-  assert.equal(afterDm[1].kind, "dm");
+  // The DM adds its signal; the wake intent coalesces (still one row)
+  // and re-points at the DM, the latest cause.
+  assert.equal(afterDm.length, 3);
+  assert.equal(afterDm[1].kind, "wake");
+  assert.equal(afterDm[1].messageId, "wake:dm-1");
+  assert.equal(afterDm[2].kind, "dm");
 
-  // The next heartbeat delivers both signals.
+  // The next heartbeat delivers all three rows (WAKE0-2 will retire
+  // the intent on connect instead; this slice has no discharge yet).
   const hb = await (await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret)).json();
-  assert.deepEqual(hb.pendingWakes.map(s => s.messageId), ["mention-1", "dm-1"]);
+  assert.deepEqual(hb.pendingWakes.map(s => s.messageId), ["mention-1", "wake:dm-1", "dm-1"]);
 });
 
 test("fresh wakeable agents retain mentions while non-agent mentions queue nothing", async t => {
