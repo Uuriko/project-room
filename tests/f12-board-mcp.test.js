@@ -233,6 +233,18 @@ test("read-only HTTP, hosted MCP and SDK leave expired/live claims and lifecycle
   assert.ok(ordinary.body.swept.includes("expired"));
   assert.equal(ordinary.body.claims.find(claim => claim.id === "expired").state, "unclaimed");
   for (const kind of ["land", "deploy"]) assert.equal(ordinary.body.claims.find(claim => claim.id === `live-${kind}`).state, "done");
+  // RP-1: the ordinary list only PRESENTS the lapse — a read never
+  // persists the release, emits its event, or fires its wake (the
+  // land/deploy live closes above are a separate, older commit path).
+  // The stored board still holds the claim until a write-class op
+  // converges the room; the member-triggered sweep is that op.
+  assert.equal(f.store.workClaims.get(f.roomId, "expired").state, "claimed");
+  const signalsBefore = f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals").get().n;
+  const converged = await f.rest("/sweep", {});
+  assert.equal(converged.status, 200);
+  assert.ok(converged.body.released.includes("expired"));
+  assert.equal(f.store.workClaims.get(f.roomId, "expired").state, "unclaimed");
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals").get().n, signalsBefore + 1);
   assert.notEqual(durableEffects(f), before);
   assert.deepEqual((await readPage(f)).claims, ordinary.body.claims);
 });

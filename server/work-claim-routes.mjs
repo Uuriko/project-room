@@ -35,7 +35,7 @@ import { messageRepository } from "./message-repository.mjs";
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
@@ -47,6 +47,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { presentWithLapsedLeases, sweepExpiredWorkClaimLeases } from "./work-claim-expiry.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -390,26 +391,9 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
-// Evaluate lease expiry across the room's items; expired claims auto-release
-// (owner cleared, history stamped by releaseExpired). Returns the ids that
-// were released by this sweep.
-function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
-  // SEC-2: only claims whose lease has already lapsed go through the state
-  // machine; reading a large Board must not re-validate every done claim.
-  const entry = registry.list(roomId).filter(item => ACTIVE_CLAIM_STATES.includes(item.state)
-    && typeof item.leaseExpiresAt === "string" && Date.parse(item.leaseExpiresAt) <= nowMs);
-  if (entry.length === 0) return [];
-  const swept = releaseExpired(entry, nowMs);
-  const released = [];
-  // releaseExpired returns a normalized copy of every item, expired or not,
-  // so compare states: only a claim that actually lapsed counts as swept.
-  swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
-      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
-    }
-  });
-  return released;
-}
+// Lease expiry lives in server/work-claim-expiry.mjs (RP-1): the stored
+// sweep runs at store open and on write requests; reads present the pure
+// released form and never persist, emit, or wake.
 
 const verifiersOf = (store, roomId) => {
   const members = store.roomAuthority(roomId).members;
@@ -790,18 +774,31 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
-    const receipt = emitWorkClaimEvent(store, roomId, {
-      actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
-      atMs: nowMs, paths: before.files ?? []
-    });
-    // One wake per expiry. The message id includes the lapsed lease time, so
-    // a later claim that expires again wakes again, and a repeat sweep of
-    // this lapse coalesces.
-    enqueueClaimWake(store, roomId, before.owner,
-      `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
-      { reason: "lease_expired", actorId: before.owner });
-  });
+  // RP-1 (Fix Programme v2, cures RC-1): lease expiry is state maintenance
+  // and never rides a read (programme RP-RULE). Write requests run the
+  // stored sweep exactly as every request used to; the stored sweep also
+  // runs at store open, so leases that lapsed while the store was closed
+  // are already materialised. GET/HEAD requests persist nothing, emit no
+  // event, and fire no wake: the read branches below present lapsed
+  // claims in their pure released form (presentedList/presentedItem),
+  // byte-identical to the stored sweep's output, and the list's `swept`
+  // reports the lapses this presentation releases — the same ids a stored
+  // sweep at this instant would report.
+  const readRequest = req.method === "GET" || req.method === "HEAD";
+  const sweptIds = readRequest ? [] : sweepExpiredWorkClaimLeases(store, registry, roomId, nowMs);
+  let presentedCache = null;
+  const presented = () => {
+    const stored = registry.list(roomId);
+    if (!readRequest) return { items: stored, releasedIds: sweptIds };
+    if (presentedCache?.source !== stored) {
+      const view = presentWithLapsedLeases(stored, nowMs);
+      presentedCache = { source: stored, items: view.items, releasedIds: view.releasedIds };
+    }
+    return presentedCache;
+  };
+  const presentedList = () => presented().items;
+  const presentedItem = item => item == null ? item
+    : presented().items.find(entry => entry.id === item.id) ?? item;
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
@@ -856,8 +853,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+    return json(res, 200, { ...buildWorkClaimPage(presentedList(), roomId, caller,
+      url?.searchParams, nowMs), swept: presented().releasedIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -881,7 +878,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
       return true;
     };
-    const ranked = registry.list(roomId)
+    const ranked = presentedList()
       .filter(item => item.state === "done")
       .filter(matches)
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -943,7 +940,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     let duplicates;
     try {
-      duplicates = findDuplicates(registry.list(roomId), q, { limit });
+      duplicates = findDuplicates(presentedList(), q, { limit });
     } catch (error) {
       if (error instanceof DuplicateError) reject(422, error.code, error.message);
       throw error;
@@ -1019,7 +1016,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
     // settlement state as the board page.
-    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
+    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(presentedItem(load(claimIdOf(reject, workClaimId)))), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1542,7 +1539,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     load(id); // 404 when the claim does not exist
     let walk;
     try {
-      walk = walkProvenance(registry.list(roomId), id);
+      walk = walkProvenance(presentedList(), id);
     } catch (error) {
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;

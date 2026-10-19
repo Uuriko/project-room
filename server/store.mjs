@@ -101,6 +101,7 @@ import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
+import { sweepExpiredWorkClaimLeasesAtOpen } from "./work-claim-expiry.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -2120,6 +2121,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       } catch (error) {
         this.workItemBoardBackfill = { error: error?.message ?? String(error) };
         console.error("work-item board backfill failed at open", error);
+      }
+    }
+    // RP-1 (Fix Programme v2, cures RC-1): work-claim lease expiry is
+    // store-open maintenance, never a read (programme RP-RULE). Claims
+    // whose leases lapsed while the store was closed are released here —
+    // registry row, lease_expired event, and the former owner's one wake,
+    // exactly as the request-time sweep used to produce them on whichever
+    // board read arrived first — so the stored board is converged before
+    // the first request and reads stay pure. Mid-session lapses converge
+    // on the next board write (the handler's stored sweep) or the next
+    // open. A failing room never bricks the open: its error is reported
+    // in the result and the next open retries the room.
+    if (!this.readOnly) {
+      try {
+        this.workClaimLeaseSweep = sweepExpiredWorkClaimLeasesAtOpen(this, this.now());
+        if (this.workClaimLeaseSweep.errors.length > 0) {
+          console.error(`work-claim lease sweep at open: ${this.workClaimLeaseSweep.errors.length} room error(s)`, JSON.stringify(this.workClaimLeaseSweep.errors).slice(0, 2000));
+        }
+      } catch (error) {
+        this.workClaimLeaseSweep = { error: error?.message ?? String(error) };
+        console.error("work-claim lease sweep at open failed", error);
       }
     }
     configureWorkRepository(this.db, this.workEntities);
