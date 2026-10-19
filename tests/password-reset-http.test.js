@@ -42,14 +42,21 @@ const proofBody = (delivery, slot) => ({ email: delivery.to, code: delivery.code
 test("reset request is nonenumerating and actual delivered URL retains destination without signing in", async t => {
   const f = await fixture(t), slot = await f.openSlot();
   const returnTo = "/?room=commons#invite/" + "A".repeat(43);
-  for (const email of ["owner@example.com", "unknown@example.com"]) {
+  // FIX-MAGICLINK-ROOM (ruling 29a): the room hint survives only when the
+  // account named by the email belongs to that room. The owner account is
+  // bound to commons above, so its destination is retained in full; the
+  // unknown address names no account, so its decoy delivery carries the
+  // returnTo with the room stripped — fragment and reset code untouched
+  // either way, and the API response stays identical, so the
+  // non-enumeration property this test pins is unchanged.
+  for (const [email, room] of [["owner@example.com", "commons"], ["unknown@example.com", null]]) {
     const response = await f.post(requestPath, slot, { email, returnTo });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: "sent" });
     const delivery = f.sent.at(-1), link = new URL(delivery.link);
     assert.equal(delivery.purpose, "password-reset");
     assert.equal(link.origin, f.origin);
-    assert.equal(link.searchParams.get("room"), "commons");
+    assert.equal(link.searchParams.get("room"), room);
     assert.equal(link.hash, new URL(returnTo, f.origin).hash);
     assert.equal(link.searchParams.get("reset"), delivery.code);
     assert.equal(link.searchParams.has("magic"), false);

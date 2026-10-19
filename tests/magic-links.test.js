@@ -116,8 +116,8 @@ test("magicReturnToForAccount keeps the room hint only for the account's own roo
   const memberOfCommons = roomId => roomId === "commons";
   // A room the account belongs to: the target is untouched, byte for byte.
   assert.equal(magicReturnToForAccount("/?room=commons", memberOfCommons), "/?room=commons");
-  const join = "/?room=commons#join/" + "A".repeat(43) + "/work/task-1";
-  assert.equal(magicReturnToForAccount(join, memberOfCommons), join);
+  const joinTarget = "/?room=commons#join/" + "A".repeat(43) + "/work/task-1";
+  assert.equal(magicReturnToForAccount(joinTarget, memberOfCommons), joinTarget);
   // A room it does not belong to: the hint is silently dropped and the
   // rest of the target — account hint, invitation fragment — survives.
   assert.equal(magicReturnToForAccount("/?room=elsewhere", memberOfCommons), "/");
