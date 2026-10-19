@@ -281,11 +281,29 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
     () => { brief.aroundMore += brief.around.length; brief.around = []; },
     () => { brief.pickUp = brief.pickUp.slice(0, 1); },
+    () => { for (const item of brief.pickUp) delete item.claimAction; },
+    () => { delete brief.rules; brief.recentDecisions = []; },
   ];
   for (const step of shed) {
     if (briefBytes(brief) <= BRIEF_BYTES) break;
     step();
     brief.truncated = true;
   }
-  return brief;
+  if (briefBytes(brief) <= BRIEF_BYTES) return brief;
+  // Last resort (maximum-length ids repeat across room, you, next and full):
+  // a minimal brief that still says where to go. Ids and route strings are
+  // never cut; free text goes first.
+  return {
+    contentTrust: brief.contentTrust,
+    view: "brief",
+    truncated: true,
+    room: { slug: brief.room.slug },
+    you: brief.you ? { memberId: brief.you.memberId, permissions: brief.you.permissions } : null,
+    aroundCount: brief.around.length + brief.aroundMore,
+    quietMembers: brief.quietMembers,
+    openWorkTotal: brief.openWorkTotal,
+    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    full: brief.full,
+    eventCursor: brief.eventCursor
+  };
 }
