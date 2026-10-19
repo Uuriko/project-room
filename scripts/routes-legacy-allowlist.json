@@ -2203,10 +2203,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/rooms/{id}/orient"
-    },
-    {
-      "method": "GET",
       "path": "/api/rooms/{id}/outside-agents"
     },
     {
@@ -5818,10 +5814,6 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/opportunities"
-    },
-    {
-      "method": "GET",
-      "path": "/api/rooms/{id}/orient"
     },
     {
       "method": "GET",
