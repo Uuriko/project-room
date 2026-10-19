@@ -1,0 +1,113 @@
+{
+ "classes": {
+  "freshness.1": {
+   "title": "status claims",
+   "evidence": "F-01 run 1 (FIRST-RUN, base 2a699eb7): 10 findings, 10 TP / 0 FP = 0.0%, 3 samples independently re-read at the API. DS-2 run 2 (base eabb0011): the same 10 findings, ALL independently re-verified by the DS-2 lane \u2014 the 7 distinct PRs re-read at the API (3142/3140/3132 closed+merged; 2127/1994/2088/2105 closed, merged_at null). Two consecutive triaged runs at 0.0% FP, cumulative n=20 >= 10: the promotion rule is satisfied. The pre-fix extractor run (37.5% FP on this check) is recorded in FIRST-RUN and is why the rule exists; the guard stays armed \u2014 a future run triaged >30% FP demotes this class for that run.",
+   "kind": "statistical",
+   "mode": "blocking",
+   "since": "DS-2 (promoted 2026-10-19 on runs 1+2 evidence; FAIL inside F-01 since v1)",
+   "trigger": "Demotion: any triaged run with FP rate > 30% demotes for that run automatically (sweep FP guard); a second such run is a Docs Steward review of the class's blocking status."
+  },
+  "freshness.2": {
+   "title": "named paths",
+   "evidence": "F-01 run 1: 3 findings, 3 TP / 0 FP = 0.0%, but n=3 \u2014 below the volume the promotion rule needs. Deterministic existence check at its core; the FP risk is grammar (forward references), which the dated-exception mechanism absorbs. DS-2 run 2 (base eabb0011): the same 3 findings, paths verified absent from the tree by direct stat \u2014 3 TP / 0 FP. Cumulative triaged n=6 across two consecutive clean runs: still below the rule's n >= 10, so the class stays advisory \u2014 the rule working as designed, not an oversight.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "Cumulative triaged n >= 10 across consecutive runs at FP <= 30%."
+  },
+  "freshness.3": {
+   "title": "same pr",
+   "evidence": "F-01 run 1: 2 findings on a trailing sample of 10 merged PRs, 2 TP / 0 FP. At census this class produces landing-ledger register-row candidates, not gate failures \u2014 its blocking home is gate mode at batch close (author + landing seat), which is the pending CI-leg pattern, not this sweep.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "Blocking in gate mode when gate mode is adopted by the landing seat (documented pending; the repo-CI form waits for the workflow-scope grant)."
+  },
+  "freshness.4": {
+   "title": "stamp aging",
+   "evidence": "WARN/NOTE by design in F-01 v1. Its FAIL sub-class ('Latest' section stamp > 35 d) produced 0 findings in run 1 \u2014 FP rate UNMEASURABLE (no findings to triage). Run 1 total for the check: 1 NOTE, TP.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "FAIL sub-class: 2 triaged runs under the statistical rule once it produces findings."
+  },
+  "freshness.5": {
+   "title": "config claims",
+   "evidence": "0 findings in F-01 run 1 \u2014 FP rate UNMEASURABLE (no findings to triage). The one normative claim at base was true.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "2 triaged runs under the statistical rule once it produces findings."
+  },
+  "freshness.6": {
+   "title": "count method",
+   "evidence": "WARN by design in F-01 v1; 0 findings in run 1 \u2014 FP rate UNMEASURABLE. Known grammar gap (table-shaped counts unparsed) is an FN risk, not an FP risk.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "Re-charter at F-01 v2 grammar; statistical rule after that."
+  },
+  "freshness.7": {
+   "title": "discovery coverage",
+   "evidence": "Run 1: 0 FAIL findings, 1 coverage NOTE (TP, by design). FP rate of the FAIL sub-class UNMEASURABLE live; the pre-fix extractor produced 2/2 FP on this check, fixed before any FAIL use and recorded in FIRST-RUN \u2014 the class stays advisory until it earns promotion on post-fix evidence.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "F-01 v1",
+   "trigger": "2 triaged runs under the statistical rule once the FAIL sub-class produces findings."
+  },
+  "registry.dangling": {
+   "evidence": "DS-1 first validation: 0 dangling rows, 0 missing family members. Covers dangling rows + family members missing.",
+   "kind": "deterministic-structural",
+   "mode": "blocking",
+   "since": "DS-1 (validator v1 blocking set)"
+  },
+  "registry.expired-exceptions": {
+   "evidence": "Promoted at DS-2. A finding is a date comparison (exception.expires < today): certainly true when it fires. F-01 already raises FAIL for expired exceptions in its own rules config \u2014 the registry side now matches. DS-1 run: 0 findings.",
+   "kind": "deterministic-structural",
+   "mode": "blocking",
+   "since": "DS-2"
+  },
+  "registry.over-cap": {
+   "evidence": "DS-1: 5 findings, all factually true (byte counts vs caps), FP 0/5. Two resolve mechanically (INDEX via gen-doc-index at W-D1; openapi.yaml is exception-covered until AC-3). The ladder + B7 demote/trim is the cure path, not a red gate.",
+   "kind": "deterministic-measurement",
+   "mode": "advisory",
+   "since": "DS-1 (reported-only in validator v1)",
+   "trigger": "Re-evaluate after AC-3 (openapi.yaml exception expiry 2027-03-31) and the W-D1 INDEX landing."
+  },
+  "registry.past-ttl": {
+   "evidence": "0 findings at DS-1 and the class is FP-UNMEASURABLE as wired: validator v1 anchors the TTL clock at the registry seeded_at, so the class cannot fire against live time until a re-seed or the verified_at review ritual runs. No FP rate exists to measure.",
+   "kind": "statistical",
+   "mode": "advisory",
+   "since": "DS-1 (reported-only in validator v1)",
+   "trigger": "First quarterly review sets verified_at on live rows; then 2 triaged runs under the statistical rule."
+  },
+  "registry.schema-errors": {
+   "evidence": "DS-1 first validation: 0 findings. Deterministic schema check; FP not statistically estimable and not the promotion currency.",
+   "kind": "deterministic-structural",
+   "mode": "blocking",
+   "since": "DS-1 (validator v1 blocking set)"
+  },
+  "registry.topic-duplicates": {
+   "evidence": "DS-1 first validation: 0 topic duplicates.",
+   "kind": "deterministic-structural",
+   "mode": "blocking",
+   "since": "DS-1 (validator v1 blocking set)"
+  },
+  "registry.unregistered": {
+   "evidence": "Repo corpus: DS-1 found 75 unregistered files, every one a verified cut class (DELETE 9, EVICT 26, MERGE 34, programme merge sources 6), KEEP-GAP 0 \u2014 measured FP 0/75. Blocking on the repo corpus now would hold the gate red on known pre-cut state until the cut lands; the ladder carries these findings meanwhile. Workspace corpus: baseline is 0 unregistered sustained (programme S3.5 metric M: unregistered = 0 counts the system's own bypasses) and the join is deterministic, so any workspace finding is a true bypass \u2014 promoted to blocking at DS-2.",
+   "kind": "deterministic-join",
+   "mode": "advisory",
+   "mode_by_corpus": {
+    "repo": "advisory",
+    "workspace": "blocking"
+   },
+   "since": "DS-2 (workspace leg)",
+   "trigger": "Repo corpus promotes when the B1-B7 cut lands (post-cut mode: the validator's --strict semantics). Re-evaluate at W-D1 close."
+  }
+ },
+ "fp_threshold": 0.3,
+ "promotion_rule": "A statistical check class promotes advisory -> blocking only after 2 consecutive triaged runs with FP rate <= fp_threshold in EACH run and >= 10 triaged findings across the two runs. Deterministic structural classes (registry join, schema, date comparisons) block by design and are not subject to the statistical rule. If a triaged run shows a blocking class's FP rate > fp_threshold, the sweep demotes that class for that run (DEGRADED, exit 2) \u2014 the promotion guard. Changing a mode in this file is a Docs Steward act, recorded in the sweep report that evidences it.",
+ "tool": "docs-sweep promotion table (DS-2, Docs Programme)",
+ "version": 1
+}

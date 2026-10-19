@@ -1,0 +1,82 @@
+name: docs-sweep
+
+# Docs sweep — the Docs Programme's repo-CI leg (DS-2). One gate composed
+# from the DS-1 registry validator and the F-01 doc-freshness lint
+# (scripts/docs-sweep.mjs), run against the in-repo registry
+# (docs/doc-registry.json) and the checked-out tree.
+#
+# Severities are data, not code: scripts/docs-sweep-promotion.json marks
+# each finding class advisory or blocking from measured evidence (a class
+# promotes only after 2 consecutive triaged runs with FP <= 30% and
+# cumulative n >= 10; deterministic structural classes block by design).
+# This job fails ONLY on blocking findings — today: the deterministic
+# registry classes and freshness.1 (status claims vs the GitHub API;
+# promoted by DS-2 on two consecutive triaged runs at 0.0% FP, n=20).
+# Advisory findings print and never fail the job. Sweep exit 2 — a leg
+# could not run, or the FP guard demoted a class — is surfaced as a
+# warning: incompleteness is never read as green, and never a hard fail.
+#
+# What blocks: nothing, by itself. This check is NOT a required status
+# check, and this workflow does not ask for it to become one; that is a
+# branch-protection change (repo settings — the owner's act). The
+# standing freshness.1 findings (stale status claims in PROTOCOL.md and
+# INVARIANTS.md; cures chartered as T-05/T-07) will keep this job red
+# until those cures land. That is the gate working, and it is advisory
+# in effect because the check is not required.
+#
+# The FLAG -> DEMOTE -> DELETE ladder keeps its state with the fleet
+# census, so this job runs --no-state: CI holds no memory between runs.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Docs sweep (validated mode; severities per the promotion table)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          prs_args=()
+          if [ -n "$PR_NUMBER" ]; then prs_args=(--prs "$PR_NUMBER"); fi
+          node scripts/docs-sweep.mjs \
+            --registry docs/doc-registry.json \
+            --tree . \
+            --freshness-root . \
+            "${prs_args[@]}" \
+            --state-dir "$RUNNER_TEMP/docs-sweep-state" \
+            --no-state \
+            --summary "$RUNNER_TEMP/docs-sweep-summary.md"
+          code=$?
+          if [ -f "$RUNNER_TEMP/docs-sweep-summary.md" ]; then
+            cat "$RUNNER_TEMP/docs-sweep-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$code" -eq 1 ]; then
+            echo "::error::docs sweep: blocking findings (see step summary)"
+            exit 1
+          elif [ "$code" -eq 2 ]; then
+            echo "::warning::docs sweep INCOMPLETE or DEGRADED — a leg did not run or the FP guard demoted a class; this is not a clean pass (see step summary)"
+            exit 0
+          elif [ "$code" -ne 0 ]; then
+            echo "::error::docs sweep crashed (exit $code)"
+            exit 1
+          fi
+          echo "docs sweep: no blocking findings"
