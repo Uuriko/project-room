@@ -14,6 +14,6 @@ test("agent docs pages let inline code wrap so 390px phones do not scroll sidewa
   for (const [file, html] of pages) {
     const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || "";
     assert.match(style, /:not\(pre\)>code\{overflow-wrap:anywhere\}/, `${file} wraps inline code`);
-    assert.match(style, /pre\{overflow:auto;/, `${file} keeps pre blocks scrollable`);
+    assert.match(style, /pre\{[^}]*overflow:auto;/, `${file} keeps pre blocks scrollable`);
   }
 });
