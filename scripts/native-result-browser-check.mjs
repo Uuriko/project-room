@@ -252,6 +252,76 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     .map(value => ({ stage: value.stage, focus: value.focus })), [], "focused modal controls fit inside all clipping ancestors");
 });
 
+// Regression pin for the focus-rescue arming hole (the light journey's
+// failure specimen, run 39232683831): the reader-return restore focuses the
+// View result control with preventScroll while it sits below the fold, and
+// the read-basis re-render then replaces that node and restores focus to the
+// replacement, again with preventScroll. The renderMessages rescue that
+// scrolls a displaced focused control back on screen used to be gated on
+// the render-START snapshot (focusedOnScreen), so a render that started
+// with the control already off screen never rescued the restored control —
+// the settled UI left keyboard focus on an invisible control. This pin
+// forces that start state instead of racing it: the focused control is
+// scrolled below the fold with focus held, then a work mutation re-renders
+// the card and replaces the control's node.
+test("native result 320px: a card re-render rescues a focused View result control that starts off screen", { timeout: 30000 }, async t => {
+  const f = await setup(t, { review: true, viewport: { width: 320, height: 900 } });
+  const { page } = f;
+  const card = page.locator(`[data-work-record-id="${f.workItemId}"]`);
+  const read = card.locator("[data-read-result]");
+  await read.waitFor();
+  // Quiesce first: the app's initial snapshot renders can land after the
+  // first focus() and drop it, and a scroll forced mid-settle is clamped by
+  // the still-shifting layout. Poll until this control holds focus and its
+  // geometry is unchanged across two reads before forcing the start state.
+  let last = null, stable = 0;
+  await waitForState(page, "the View result control to hold focus in a settled layout", async () => {
+    await read.focus().catch(() => {});
+    const s = await page.evaluate(() => { const a = document.activeElement, b = a?.getBoundingClientRect?.();
+      return a?.dataset?.focusKey ? { y: Math.round(scrollY), top: Math.round(b.top), key: a.dataset.focusKey } : null; }).catch(() => null);
+    stable = s && s.key === `work-native-result:${f.workItemId}` && last && s.y === last.y && s.top === last.top ? stable + 1 : 0;
+    last = s;
+    return stable >= 1;
+  });
+  const displaced = await page.evaluate(() => {
+    const el = document.activeElement, r = el.getBoundingClientRect();
+    window.scrollTo({ top: Math.max(0, scrollY + r.top - (innerHeight + 60)), behavior: "instant" });
+    const now = el.getBoundingClientRect();
+    return { top: Math.round(now.top), h: innerHeight, scrollY: Math.round(scrollY), focused: document.activeElement === el };
+  });
+  assert.ok(displaced.focused && displaced.top >= displaced.h,
+    `precondition: the focused control starts off screen: ${JSON.stringify(displaced)}`);
+  const before = await read.elementHandle();
+  f.mutate(T.WORK_BLOCKED, { reason: "Synthetic pin update", nextAction: "Revisit later" });
+  // Settle means the swap actually landed: the pre-mutation node is
+  // disconnected and focus rests on a different, connected control with this
+  // work's focus key. (Checking the key alone would pass on the old node
+  // before the stream even delivers the mutation.)
+  const settled = await page.waitForFunction(({ old, id, key }) => new Promise(resolve => {
+    const ok = () => { const a = document.activeElement; return a && a !== old && !old.isConnected && a.dataset.focusKey === key
+      && a.closest("[data-work-record-id]")?.dataset.workRecordId === id && a.isConnected; };
+    if (!ok()) return resolve(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(ok())));
+  }), { old: before, id: f.workItemId, key: `work-native-result:${f.workItemId}` }, { timeout: 8000 }).then(() => true, () => false);
+  assert.ok(settled, "the re-render replaces the focused node and focus settles on the replacement control");
+  // Assert the final resting position, not a mid-burst sample: poll until
+  // the settled control is on screen and stays there across two reads.
+  const measure = () => page.evaluate(() => {
+    const el = document.activeElement, b = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(Math.max(0, Math.min(innerWidth - 1, b.left + b.width / 2)), Math.max(0, Math.min(innerHeight - 1, b.top + b.height / 2)));
+    return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: innerHeight, scrollY: Math.round(scrollY),
+      unobscured: hit === el || el.contains(hit) };
+  });
+  let after = await measure(), resting = 0;
+  await waitForState(page, "the settled focused control to rest on screen", async () => {
+    after = await measure();
+    resting = after.top < after.h && after.bottom > 0 && after.unobscured ? resting + 1 : 0;
+    return resting >= 2;
+  }, { timeout: 5000, interval: 300 }).catch(() => {});
+  assert.ok(after.top < after.h && after.bottom > 0 && after.unobscured,
+    `the settled focused control is on screen after the re-render: ${JSON.stringify({ displaced, after })}`);
+});
+
 test("native review refuses self-consistent text from a different pinned evidence version", { timeout: 25000 }, async t => {
   const f = await setup(t, { review: true });
   await f.page.route("**/work-result?**", async route => {
