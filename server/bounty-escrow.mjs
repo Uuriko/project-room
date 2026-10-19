@@ -1152,6 +1152,29 @@ export class BountyEscrow {
     return row.total;
   }
 
+  // ESCROW-GUARDS: the settlement-side mirror of _requireLane. Actions BY
+  // a deactivated member already refuse, but settlement CREDITS the
+  // claimant and nothing re-checked the recipient — a claimant deactivated
+  // mid-flight (identity unlink leaves the member record with
+  // active === false) was still paid. Earnings settlements call this and
+  // refuse with claimant_deactivated: the funds stay in escrow in the
+  // bounty's current state, the refusal surfaces on the keeper record
+  // (closeEpoch's summary.failed), and reactivating the membership
+  // unblocks the identical settlement. Deliberately NOT called on poster
+  // refunds or claim-bond returns: that money is another party's refund or
+  // the claimant's own collateral, and guarding it would let one member's
+  // deactivation wedge everyone else's money in the same transaction.
+  _requirePayableClaimant(bounty) {
+    const members = this._members(bounty.roomId);
+    if (members === null) return; // legacy string-lane mode: no membership source (as _requireLane)
+    const member = this._memberOf(bounty.roomId, bounty.claimant)
+      ?? this._memberOf(bounty.roomId, canonicalLane(bounty.claimant));
+    if (!member) fail("claimant_deactivated",
+      `claimant "${bounty.claimant}" is no longer a member of this room; settlement is held in escrow`);
+    if (member.active === false) fail("claimant_deactivated",
+      `claimant "${bounty.claimant}" is deactivated in this room; settlement is held in escrow until the membership is reactivated`);
+  }
+
   _requirePayable(roomId, accountId, amountMillis, what) {
     const payable = this._balanceMillis(roomId, accountId, "payable");
     if (payable < amountMillis) {
@@ -2593,6 +2616,12 @@ export class BountyEscrow {
     const awardFrom = this._disputeWasFromSubmitted(bounty)
       ? { account: bounty.poster, state: "locked" } : { account: worker, state: "attributed" };
     const settleKind = outcome === "upheld" ? "cancel" : outcome === "split" ? "split" : "release";
+    // ESCROW-GUARDS: split and release vest/pay the worker, so they refuse
+    // while the worker is deactivated — before the Phase-1 verdict is
+    // recorded, so the refusal is atomic and the decision can be re-taken
+    // after reactivation. Cancel pays the worker nothing (poster refund)
+    // and is never wedged by the worker's deactivation.
+    if (settleKind !== "cancel") this._requirePayableClaimant(bounty);
     const forfeited = typeof bondSnapshot === "number" && forfeitedBond >= bondSnapshot;
     const signed = [];
     const collect = movement => { if (movement.receipt) signed.push(movement.receipt); };
@@ -2836,6 +2865,11 @@ export class BountyEscrow {
   }
 
   _sweep(bounty, at, actor) {
+    // ESCROW-GUARDS: the sweep pays earnings (payout + fee + bond return +
+    // the paid transition move as one unit) — refuse it whole while the
+    // claimant is deactivated, so the bounty stays approved with the award
+    // vested and the keeper records claimant_deactivated for the operator.
+    this._requirePayableClaimant(bounty);
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     // Sweep what is actually approved (a split leaves only the worker's half
     // here); the 1% fee applies only on payouts that actually release.
