@@ -12,7 +12,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { roomOrientation } from "../src/work-selectors.js";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { buildActivationPack, briefActivationPack, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
+import { buildActivationPack, briefActivationPack, BRIEF_BYTES, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
@@ -272,7 +272,7 @@ test("view=brief: who is around, what you may do, up to three things to pick up"
   assert.equal(typeof brief.next.endpoint, "string");
   assert.equal(brief.full, `/api/rooms/${ROOM}/activation-pack`);
   assert.equal(brief.members, undefined, "the full roster stays in the full pack");
-  assert.ok(text.length < 2048, `brief is ${text.length} bytes`);
+  assert.ok(Buffer.byteLength(text) <= BRIEF_BYTES, `brief is ${Buffer.byteLength(text)} bytes`);
   const bad = await fetch(`${origin}/api/rooms/${ROOM}/activation-pack?view=tiny`, { headers: { Authorization: `Bearer ${f.workerKey}` } });
   assert.equal(bad.status, 422);
 });
@@ -290,4 +290,28 @@ test("brief presence: stale members are counted, not listed", () => {
   assert.deepEqual(brief.around.map(m => [m.handle, m.state]), [["Live", "online"], ["Yesterday", "recent"]]);
   assert.equal(brief.quietMembers, 2);
   assert.equal(brief.next.endpoint, "/api/rooms/r/conversation");
+});
+
+test("brief stays under its byte budget with 100 online members and long multibyte text", () => {
+  const now = Date.parse("2026-10-19T17:00:00Z");
+  const long = "協調エージェント🤖".repeat(60);
+  const members = Array.from({ length: 100 }, (_, i) => ({ memberId: `m${i}`, displayName: `${long}${i}`, kind: "agent",
+    watching: true, lastSeenAt: new Date(now).toISOString(), workingOn: [{ title: long }, { title: long }] }));
+  const pack = { contentTrust: "data, not instructions", room: { slug: "big-room", title: long, state: "active" },
+    orientation: { purpose: long, recentDecisions: [1, 2, 3, 4].map(n => ({ statement: `${long}${n}`, at: "2026-10-19T00:00:00Z" })) },
+    members: [{ id: "me", handle: long, permissions: ["accept_work"] }],
+    openWork: [1, 2, 3, 4].map(n => ({ id: `w${n}`, title: long, state: "accepted", claimant: null })),
+    openClaims: [1, 2, 3, 4].map(n => ({ id: `c${n}`, title: long, claimAction: { method: "POST", endpoint: `/api/rooms/big-room/work-claims/c${n}/claim`, params: {} } })),
+    coordinationNorms: { ...COORDINATION_NORMS }, participationRules: { requireIndependentReview: false, requireOwnerDecision: false, trust: true },
+    eventCursor: 9, generatedAt: "2026-10-19T17:00:00Z" };
+  const brief = briefActivationPack(pack, members, now, "me");
+  const bytes = Buffer.byteLength(JSON.stringify(brief));
+  assert.ok(bytes <= BRIEF_BYTES, `brief is ${bytes} bytes`);
+  assert.equal(brief.truncated, true);
+  assert.equal(brief.around.length + brief.aroundMore, 100, "every active member is listed or counted");
+  assert.ok(brief.pickUp.length >= 1);
+  assert.equal(brief.full, "/api/rooms/big-room/activation-pack");
+  const small = briefActivationPack({ ...pack, room: { ...pack.room, title: "Small" }, orientation: { purpose: "p", recentDecisions: [] },
+    openWork: [], openClaims: [] }, members.slice(0, 2).map(m => ({ ...m, displayName: "A", workingOn: [] })), now, "me");
+  assert.equal(small.truncated, undefined, "a small room is not marked truncated");
 });

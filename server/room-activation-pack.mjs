@@ -210,48 +210,82 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // things to pick up. Presence comes from store.presence(): watching or a
 // command within ONLINE_MS is online, within ACTIVE_MS is recent, older is
 // counted as quiet rather than listed.
+//
+// The brief is bounded, not just small on small rooms: at most BRIEF_AROUND
+// members are listed (the rest are counted in aroundMore), member-authored
+// text is clipped, and the serialized UTF-8 body is held to BRIEF_BYTES by
+// dropping lower-priority detail in a fixed order. `full` always points at
+// the unbounded pack.
 const BRIEF_ONLINE_MS = 15 * 60 * 1000;
 const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
 const BRIEF_ITEMS = 3;
+const BRIEF_AROUND = 8;
+export const BRIEF_BYTES = 2048;
+
+const clip = (value, max) => {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const chars = [...text];
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : text;
+};
+const briefBytes = value => Buffer.byteLength(JSON.stringify(value));
 
 export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = null) {
   const seen = value => (typeof value === "string" ? Date.parse(value) : typeof value === "number" ? value : NaN);
-  const around = [];
+  const listed = [];
   let quiet = 0;
   for (const member of Array.isArray(presenceMembers) ? presenceMembers : []) {
     if (!member || member.memberId === viewerId) continue;
     const age = nowMs - seen(member.lastSeenAt);
     const state = member.watching || age <= BRIEF_ONLINE_MS ? "online" : age <= BRIEF_ACTIVE_MS ? "recent" : null;
     if (!state) { quiet += 1; continue; }
-    around.push({ handle: member.displayName, kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
-      workingOn: Array.isArray(member.workingOn) ? member.workingOn.map(item => item.title ?? item.workItemId).slice(0, 2) : [] });
+    listed.push({ handle: clip(member.displayName, 40), kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
+      workingOn: Array.isArray(member.workingOn) ? member.workingOn.slice(0, 1).map(item => clip(item.title ?? item.workItemId, 60)) : [] });
   }
-  around.sort((a, b) => (a.state === b.state ? seen(b.lastSeenAt) - seen(a.lastSeenAt) : a.state === "online" ? -1 : 1));
+  listed.sort((a, b) => (a.state === b.state ? (seen(b.lastSeenAt) || 0) - (seen(a.lastSeenAt) || 0) : a.state === "online" ? -1 : 1));
+  const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
   const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
-    id: claim.id, title: claim.title, untrusted: true, claimAction: claim.claimAction }));
+    id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
-    .map(item => ({ id: item.id, title: item.title, state: item.state, untrusted: true }));
+    .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
   const firstClaim = claims[0]?.claimAction;
   const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
       : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
-  return {
+  const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
-    room: { slug: pack.room.slug, title: pack.room.title, state: pack.room.state },
-    purpose: pack.orientation?.purpose ?? "",
-    you: you ? { memberId: you.id, handle: you.handle, permissions: you.permissions } : null,
+    room: { slug: pack.room.slug, title: clip(pack.room.title, 80), state: pack.room.state },
+    purpose: clip(pack.orientation?.purpose ?? "", 280),
+    you: you ? { memberId: you.id, handle: clip(you.handle, 40), permissions: you.permissions } : null,
     around,
+    aroundMore: listed.length - around.length,
     quietMembers: quiet,
     pickUp: [...claims, ...unclaimed],
     openWorkTotal: pack.openWork.length,
-    recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS),
+    recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
+      .map(decision => ({ statement: clip(decision.statement, 140), at: decision.at ?? null })),
     rules: { ...pack.coordinationNorms, ...pack.participationRules },
     next,
     full: `${roomPath}/activation-pack`,
     eventCursor: pack.eventCursor,
     generatedAt: pack.generatedAt
   };
+  // Over budget (long ids, multibyte text): shed detail in a fixed order.
+  // Each step keeps the brief valid; `truncated` tells the reader to use `full`.
+  const shed = [
+    () => { for (const member of brief.around) member.workingOn = []; },
+    () => { brief.recentDecisions = []; },
+    () => { while (brief.around.length > 3) { brief.around.pop(); brief.aroundMore += 1; } },
+    () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
+    () => { brief.aroundMore += brief.around.length; brief.around = []; },
+    () => { brief.pickUp = brief.pickUp.slice(0, 1); },
+  ];
+  for (const step of shed) {
+    if (briefBytes(brief) <= BRIEF_BYTES) break;
+    step();
+    brief.truncated = true;
+  }
+  return brief;
 }
