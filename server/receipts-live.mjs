@@ -31,6 +31,15 @@ export { PUBLIC_RECEIPT_ID, LOT_RECEIPT_ID, projectPublicWorkReceipt };
 // Verify-at-read-time is part of this public receipts surface.
 export { verifyPublicReceipt } from "./receipt-verify.mjs";
 
+// Stage 0 public offload (D1 directory) lives beside this surface: the
+// projection publisher, its target adapters, and the dual-read compare
+// shape by which wiring day flips a surface. Nothing here is served from
+// the offload yet — the in-DO model above remains the only read source.
+export {
+  PUBLIC_OFFLOAD_SURFACES, PUBLIC_OFFLOAD_NAMED_DIVERGENCES, PUBLIC_OFFLOAD_FLIP_DEFAULTS,
+  resolvePublicOffloadConfig, readSourceFor, comparePublicAnswers, createDualReadComparator,
+} from "./public-offload.mjs";
+
 // Column presence. The schema carries public_receipts on every booted
 // store; this is only the legacy-database path (a table predating the
 // column). The steady-state read issues one indexed query.
