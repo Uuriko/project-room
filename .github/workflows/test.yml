@@ -6,8 +6,10 @@ on:
     branches: [main]
   merge_group:
     types: [checks_requested]
-  # Browser shards and the coverage ratchet run here nightly instead of on
-  # every main push (trunk-based pilot: main CI must stay under 10 minutes).
+  # Browser shards run here nightly instead of on every main push
+  # (trunk-based pilot: main CI must stay under 10 minutes). The coverage
+  # ratchet guards trunk instead: it runs on main pushes and nightly,
+  # not on pull requests (ruling 23, COVERAGE-TRUNK).
   schedule:
     - cron: "17 10 * * *"
   workflow_dispatch:
@@ -28,8 +30,8 @@ concurrency:
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
   # immediately. Shards run unless this job explicitly sets browser=false;
-  # the coverage suite re-run is skipped unless the diff can move module
-  # line coverage (coverage=false).
+  # the coverage output is kept for the classifier's own record; the
+  # coverage job no longer consumes it (trunk-only since ruling 23).
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -327,13 +329,15 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
-    needs: [changes]
-    # Skip only when the merge-base diff explicitly cannot move module line
-    # coverage (no measured source, test, or gate-file changes). A skipped or
-    # failed filter, and every main push, still runs the suite: the verdict
-    # can only be skipped when it provably cannot change.
-    # Main pushes skip coverage (the ~12 min long pole); nightly + PRs run it.
-    if: always() && !cancelled() && github.event_name != 'push' && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
+    # The ratchet guards trunk, not PRs (ruling 23, COVERAGE-TRUNK): it runs
+    # on pushes to main (this workflow's push trigger is main-only) and on
+    # the nightly schedule, and nowhere else. On pull requests the suite the
+    # ratchet measures still runs — sharded across the unit jobs above —
+    # only the per-module line-coverage measurement moves to trunk, where a
+    # dip is caught on the merge's own push run and fixed forward; a red
+    # coverage check on a main commit is that fix-forward signal. The
+    # changes classifier no longer gates this job.
+    if: github.event_name == 'push' || github.event_name == 'schedule'
     # Per-module coverage ratchet (backlog Q015): runs the root unit suite
     # with V8 coverage and fails when any module in coverage-thresholds.json
     # drops below its threshold. Zero dependencies; the script points TMPDIR
@@ -394,15 +398,20 @@ jobs:
           VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
           COVERAGE: ${{ needs.coverage.result }}
         run: |
+          if [ "$COVERAGE" = "skipped" ]; then
+            echo "coverage ratchet intentionally not run for event '${{ github.event_name }}': it guards trunk (main pushes + nightly) only, ruling 23" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           failed=0
           for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
-            # coverage=skipped is provably the intentional skip: the coverage
-            # job's if: only skips when the changes job succeeded with
-            # coverage=false (diff cannot move module line coverage). Every
-            # other path runs the suite.
+            # coverage=skipped is the intentional trunk-only skip (ruling
+            # 23): the coverage job's if: runs it only on pushes to main and
+            # on the nightly schedule, so on pull_request, merge_group, and
+            # workflow_dispatch runs it is skipped by construction. When
+            # coverage does execute, its result here is success or failure —
+            # and a failure still fails this gate.
             if [ "$name" = "coverage" ] && [ "$result" = "skipped" ]; then continue; fi
             # browser=success already covers the intentional main-push skip.
             if [ "$result" != "success" ]; then failed=1; fi
