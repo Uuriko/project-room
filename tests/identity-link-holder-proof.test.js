@@ -187,24 +187,28 @@ test("S2-1: a merely pending access request does not satisfy the holder-proof ga
 });
 
 test("S2-1: an approved request exempts only the permissions it asked for", async t => {
-  const { store, requests, ownerToken } = setupWithRequests(t);
+  const { store, ownerToken } = setupWithRequests(t);
   const agent = store.identities.create("Scoped Agent");
-  requests.request("commons", {
-    identityId: agent.identityId,
-    displayName: "Scoped Agent",
-    requestedPermissions: ["accept_work"],
-    requestId: "ar_s2_scoped"
-  }, agent.secret);
-  const decided = requests.decide(ownerToken, "commons", "ar_s2_scoped", { decision: "approve" });
-  assert.equal(decided.status, "approved");
-  store.identities.unlink(ownerToken, "commons", agent.identityId);
-  // Re-link within the approved scope: the standing approval is the proof.
+  // A standing approved row that has not been consumed: since TM-4
+  // every live approval path consumes or expires its rows at the
+  // link/unlink boundary, so this is the legacy shape — inserted
+  // directly, exactly as pre-TM-4 data presents it.
+  const insertStandingApproval = requestId => {
+    const now = store.now();
+    store.db.prepare(`INSERT INTO access_requests
+      (request_id, room_id, identity_id, display_name, requested_permissions, note, referred_by, status, created_at, decided_at, decided_by, decision_note)
+      VALUES (?, 'commons', ?, 'Scoped Agent', '["accept_work"]', NULL, NULL, 'approved', ?, ?, 'owner', 'standing approval')`)
+      .run(requestId, agent.identityId, now, now);
+  };
+  insertStandingApproval("ar_s2_scoped");
+  // Link within the approved scope: the standing approval is the proof.
   assert.doesNotThrow(() => store.identities.link(ownerToken, "commons",
     { identityId: agent.identityId, permissions: ["accept_work"] }));
   store.identities.unlink(ownerToken, "commons", agent.identityId);
-  // Re-link beyond the approved scope: the request never asked for
+  // Link beyond the approved scope: the request never asked for
   // 'steer', so the exemption does not cover it — a holder code is
   // required for the broader grant.
+  insertStandingApproval("ar_s2_scoped_2");
   assert.throws(
     () => store.identities.link(ownerToken, "commons",
       { identityId: agent.identityId, permissions: ["steer"] }),
@@ -249,8 +253,14 @@ test("S2-1: a holder code proves a broader grant while a request is pending", as
     { identityId: agent.identityId, permissions: ["steer"], identityLinkCode: code });
   assert.equal(linked.memberId, agent.identityId);
   assert.deepEqual(store.room("commons").state.members[agent.identityId].permissions, ["steer"]);
-  assert.equal(requestRow(store, "ar_s2_code").status, "approved",
+  // TM-4: the settled row lands in the stored 'consumed_by_link'
+  // status — the link was the grant, so the row must not exempt a
+  // later re-link — while public readers still see the admission as
+  // 'approved' (see the TM-4 block below).
+  assert.equal(requestRow(store, "ar_s2_code").status, "consumed_by_link",
     "a successful code-proven link still closes the pending request");
+  assert.equal(requests.status("ar_s2_code", agent.identityId).status, "approved",
+    "publicly the closed request still reads as approved");
 });
 
 test("C3: the HTTP route carries identityLinkCode and enforces the gate", async t => {
@@ -278,4 +288,98 @@ test("C3: the HTTP route carries identityLinkCode and enforces the gate", async 
   const linked = await post({ identityId: agent.identityId, permissions: [], identityLinkCode });
   assert.equal(linked.status, 201);
   assert.deepEqual(linkRows(store, agent.identityId), [{ roomId: "commons" }]);
+});
+
+// ------------------------------------------------------------------
+// TM-4 (HUNT threat model I-T2): an approved access request was a
+// PERPETUAL link() exemption — approved rows were minted as a side
+// effect of linking itself, were never revoked by unlink(), and never
+// expired, so one historical consented link licensed every future
+// re-link of the pair with no holder involvement. The exemption is
+// now one-shot and link-bound: a link consumes the pair's approved
+// join rows (stored status 'consumed_by_link', publicly still read as
+// 'approved'), unlink() expires any unconsumed approved rows, and an
+// approved row older than the request TTL no longer exempts.
+// ------------------------------------------------------------------
+
+test("TM-4: an approval admits once — unlink retires it, re-link needs fresh proof", async t => {
+  const { store, requests, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("One-Shot Agent");
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "One-Shot Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_tm4_oneshot"
+  }, agent.secret);
+  const decided = requests.decide(ownerToken, "commons", "ar_tm4_oneshot", { decision: "approve" });
+  assert.equal(decided.status, "approved");
+  assert.deepEqual(linkRows(store, agent.identityId), [{ roomId: "commons" }]);
+  // The link consumed the approval it executed.
+  assert.equal(requestRow(store, "ar_tm4_oneshot").status, "consumed_by_link");
+  assert.equal(requests.status("ar_tm4_oneshot", agent.identityId).status, "approved",
+    "publicly the fulfilled request still reads approved");
+  store.identities.unlink(ownerToken, "commons", agent.identityId);
+  // The charter case: link → unlink → re-link without fresh proof.
+  assert.throws(
+    () => store.identities.link(ownerToken, "commons",
+      { identityId: agent.identityId, permissions: ["accept_work"] }),
+    proofRequired);
+  assert.deepEqual(linkRows(store, agent.identityId), []);
+  // A NEW approved request admits again.
+  requests.request("commons", {
+    identityId: agent.identityId,
+    displayName: "One-Shot Agent",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_tm4_oneshot_2"
+  }, agent.secret);
+  const decided2 = requests.decide(ownerToken, "commons", "ar_tm4_oneshot_2", { decision: "approve" });
+  assert.equal(decided2.status, "approved");
+  assert.deepEqual(linkRows(store, agent.identityId), [{ roomId: "commons" }]);
+});
+
+test("TM-4: unlink expires an unconsumed approved row for the pair", async t => {
+  const { store, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Standing Approval Agent");
+  // Legacy shape (pre-TM-4 data): an approved join row on record for a
+  // pair that is not currently linked, inserted directly because every
+  // live approval path now consumes or expires its rows.
+  const now = store.now();
+  store.db.prepare(`INSERT INTO access_requests
+    (request_id, room_id, identity_id, display_name, requested_permissions, note, referred_by, status, created_at, decided_at, decided_by, decision_note)
+    VALUES (?, 'commons', ?, 'Standing Approval Agent', '["accept_work"]', NULL, NULL, 'approved', ?, ?, 'owner', 'approved before one-shot consumption existed')`)
+    .run("ar_tm4_standing", agent.identityId, now, now);
+  // The standing row admits once, within its scope…
+  assert.doesNotThrow(() => store.identities.link(ownerToken, "commons",
+    { identityId: agent.identityId, permissions: ["accept_work"] }));
+  assert.equal(requestRow(store, "ar_tm4_standing").status, "consumed_by_link",
+    "the admitting link consumed the standing approval");
+  // …and a second standing row (another legacy approval) is expired by
+  // unlink rather than left behind to license the next re-link.
+  store.db.prepare(`INSERT INTO access_requests
+    (request_id, room_id, identity_id, display_name, requested_permissions, note, referred_by, status, created_at, decided_at, decided_by, decision_note)
+    VALUES (?, 'commons', ?, 'Standing Approval Agent', '["accept_work"]', NULL, NULL, 'approved', ?, ?, 'owner', 'second legacy approval')`)
+    .run("ar_tm4_standing_2", agent.identityId, now, now);
+  store.identities.unlink(ownerToken, "commons", agent.identityId);
+  assert.equal(requestRow(store, "ar_tm4_standing_2").status, "expired",
+    "unlink expires unconsumed approved rows for the pair");
+  assert.throws(
+    () => store.identities.link(ownerToken, "commons",
+      { identityId: agent.identityId, permissions: ["accept_work"] }),
+    proofRequired);
+});
+
+test("TM-4: an approved row older than the request TTL does not exempt", async t => {
+  const { store, ownerToken } = setupWithRequests(t);
+  const agent = store.identities.create("Stale Approval Agent");
+  const now = store.now();
+  const stale = now - 8 * 24 * 60 * 60 * 1000; // REQUEST_TTL_MS is 7 days
+  store.db.prepare(`INSERT INTO access_requests
+    (request_id, room_id, identity_id, display_name, requested_permissions, note, referred_by, status, created_at, decided_at, decided_by, decision_note)
+    VALUES (?, 'commons', ?, 'Stale Approval Agent', '["accept_work"]', NULL, NULL, 'approved', ?, ?, 'owner', 'stale legacy approval')`)
+    .run("ar_tm4_stale", agent.identityId, stale, stale);
+  assert.throws(
+    () => store.identities.link(ownerToken, "commons",
+      { identityId: agent.identityId, permissions: ["accept_work"] }),
+    proofRequired, "an approval older than the request TTL is not holder proof");
+  assert.deepEqual(linkRows(store, agent.identityId), []);
 });

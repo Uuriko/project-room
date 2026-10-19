@@ -16,6 +16,7 @@ import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
 import { permissionRequestContents } from "./member-permission-requests.mjs";
+import { REQUEST_TTL_MS } from "./access-requests.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -743,6 +744,7 @@ export class AgentIdentities {
             data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
         this.requireLinkHolderProof(roomId, identityId, identityLinkCode, { permissions, decidedRequestId });
+        this.consumeApprovedAccessRequests(roomId, identityId);
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
@@ -770,25 +772,12 @@ export class AgentIdentities {
         data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
       this.requireLinkHolderProof(roomId, identityId, identityLinkCode, { permissions, decidedRequestId });
+      this.consumeApprovedAccessRequests(roomId, identityId);
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
-  }
-
-  // SECURITY-FIX C3 (HUNT-ADVERSARY P3, issue #942): has this (room,
-  // identity) pair an approved access request on record? Filing a request
-  // requires the identity's own secret (#2912), and approval is recorded
-  // by decide() — which flips the row to 'approved' before it drives
-  // link() — or by the room's auto-approve rule, so an approved row IS
-  // holder proof for this binding and the approval path needs no link
-  // code. Fixtures without the access-request table have no such record.
-  hasApprovedAccessRequest(roomId, identityId) {
-    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
-    if (!table) return false;
-    return Boolean(this.db.prepare(
-      "SELECT 1 FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'").get(roomId, identityId));
   }
 
   // True when requestId names an access request for exactly this
@@ -808,26 +797,70 @@ export class AgentIdentities {
 
   // The permissions holder consent on record actually covers: the
   // union of requestedPermissions across approved JOIN requests for
-  // the (room, identity) pair. Returns null when no approved request
-  // is on record at all (the caller then falls through to the link
+  // the (room, identity) pair. Returns null when no live approved
+  // request is on record (the caller then falls through to the link
   // code). Permission-upgrade rows are not join consent and never
   // widen the set; a row whose stored contents no longer parse is
   // skipped, which only ever narrows the bound (fail closed).
+  // TM-4: an approved row older than the request TTL no longer
+  // exempts, even if never consumed — consent does not keep forever
+  // (mirrors maybeExpire's pending-row rule in access-requests.mjs).
   approvedAccessRequestPermissions(roomId, identityId) {
     const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
     if (!table) return null;
     const rows = this.db.prepare(
-      "SELECT requested_permissions, status FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'"
+      "SELECT requested_permissions, status, created_at FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'"
     ).all(roomId, identityId);
-    if (!rows.length) return null;
+    const live = rows.filter(row => this.store.now() - row.created_at <= REQUEST_TTL_MS);
+    if (!live.length) return null;
     const covered = new Set();
-    for (const row of rows) {
+    for (const row of live) {
       let contents;
       try { contents = permissionRequestContents(row); } catch { continue; }
       if (contents.upgrade) continue;
       for (const permission of contents.permissions) covered.add(permission);
     }
     return covered;
+  }
+
+  // TM-4: retire the pair's approved JOIN rows once a link has been
+  // proven and is committing — an approval admits once. The rows move
+  // to the stored 'consumed_by_link' status (publicly still read as
+  // 'approved'), so neither this link's own approval nor any standing
+  // one can exempt a later re-link. Permission-upgrade rows are not
+  // join consent and are left to their own lifecycle. Called inside
+  // the link transaction, after requireLinkHolderProof passes.
+  consumeApprovedAccessRequests(roomId, identityId) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return 0;
+    const rows = this.db.prepare(
+      "SELECT request_id, requested_permissions, status FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'"
+    ).all(roomId, identityId);
+    let consumed = 0;
+    for (const row of rows) {
+      let contents;
+      try { contents = permissionRequestContents(row); } catch { continue; }
+      if (contents.upgrade) continue;
+      consumed += this.db.prepare(
+        "UPDATE access_requests SET status='consumed_by_link' WHERE request_id=?").run(row.request_id).changes;
+    }
+    return consumed;
+  }
+
+  // TM-4: unlink() retires the pair's unconsumed approved rows, so a
+  // membership that ended takes its standing approvals with it — a
+  // later re-link needs a fresh decision (or a holder code), never a
+  // residue of the previous admission. Applies to every approved row
+  // for the pair; consumed rows are already retired and stay as the
+  // audit record of the admission they served.
+  expireApprovedAccessRequests(roomId, identityId) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return 0;
+    return this.db.prepare(
+      `UPDATE access_requests SET status='expired', decided_at=?, decision_note=?
+       WHERE room_id=? AND identity_id=? AND status='approved'`
+    ).run(this.store.now(), "approved request expired on unlink; a fresh approval is required to re-link",
+      roomId, identityId).changes;
   }
 
   // The direct-link gate, evaluated inside link() BEFORE
@@ -865,11 +898,17 @@ export class AgentIdentities {
   // record their own decision (access-request approve) pass
   // settleAccessRequests: false. Fixtures without the access-request table
   // are unchanged.
+  // TM-4: settled rows land in 'consumed_by_link', not 'approved' — the
+  // link IS the grant these rows asked for, so they are consumed by it;
+  // leaving them 'approved' would mint a standing exemption as a side
+  // effect of linking (the original TM-4 hole). Public readers still
+  // see 'approved' (access-requests.mjs rowToRequest), and the decision
+  // note records that no decide() decision ever happened.
   closePendingAccessRequests(roomId, identityId, decidedBy) {
     const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
     if (!table) return 0;
     return this.db.prepare(
-      `UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=?
+      `UPDATE access_requests SET status='consumed_by_link', decided_at=?, decided_by=?, decision_note=?
        WHERE room_id=? AND identity_id=? AND status='pending'`
     ).run(this.store.now(), decidedBy, "closed because this identity was linked directly", roomId, identityId).changes;
   }
@@ -892,6 +931,10 @@ export class AgentIdentities {
           data: { memberId: link.memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } }, expectedSessionBinding);
       }
       this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND identity_id=?").run(roomId, identityId);
+      // TM-4: the pair's unconsumed approved requests expire with the
+      // membership — they were consent to admit THIS membership, not a
+      // standing licence to re-admit.
+      this.expireApprovedAccessRequests(roomId, identityId);
       refreshDirectoryIdentity(this.store, identityId);
       return { roomId, identityId, memberId: link.memberId, unlinked: true };
     });

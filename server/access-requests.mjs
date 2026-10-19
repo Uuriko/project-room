@@ -98,7 +98,19 @@ const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
 // Public callers still see 'pending'; direct identity grants intentionally do
 // not settle these rows, because changed membership requires a fresh review.
 const UPGRADE_PENDING_STATUS = "pending_upgrade";
+// TM-4: an approved join request whose admission has happened. The
+// approval was one-shot: the link that consumed it (decide()'s own
+// link, a direct link it exempted, or a direct link that settled it
+// from pending) retires the row to this stored status so it can never
+// exempt a later re-link. Public callers still see 'approved' — the
+// decision WAS approve; consumption is lifecycle, not a new decision.
+const CONSUMED_BY_LINK_STATUS = "consumed_by_link";
 const isPending = status => status === "pending" || status === UPGRADE_PENDING_STATUS;
+// The public spelling of a stored status: stored lifecycle detail
+// (pending_upgrade, consumed_by_link) never leaks into responses or
+// error messages — callers see the decision-level fact.
+const publicStatus = status => status === UPGRADE_PENDING_STATUS ? "pending"
+  : status === CONSUMED_BY_LINK_STATUS ? "approved" : status;
 const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
@@ -123,7 +135,7 @@ const rowToRequest = row => row ? Object.freeze({
   // "Who referred you?" free text, answered at request time; resolved to a
   // member id only at approval, so the stored text is never an attribution.
   referredBy: row.referred_by ?? null,
-  status: row.status === UPGRADE_PENDING_STATUS ? "pending" : row.status,
+  status: publicStatus(row.status),
   createdAt: row.created_at,
   decidedAt: row.decided_at,
   decidedBy: row.decided_by,
@@ -650,9 +662,15 @@ export class AccessRequests {
     this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
     if (!STATUSES.includes(status)) fail(422, "invalid_request", `status must be one of ${STATUSES.join(", ")}`);
     this.expireOld(roomId);
+    // Stored statuses behind each public one: 'pending' also matches
+    // pending_upgrade rows, 'approved' also matches consumed_by_link
+    // rows (TM-4) — both are the same public fact with a stored
+    // lifecycle distinction.
+    const stored = status === "pending" ? ["pending", UPGRADE_PENDING_STATUS]
+      : status === "approved" ? ["approved", CONSUMED_BY_LINK_STATUS] : [status];
     const rows = this.db.prepare(
-      "SELECT * FROM access_requests WHERE room_id=? AND status IN (?,?) ORDER BY created_at ASC")
-      .all(roomId, status, status === "pending" ? UPGRADE_PENDING_STATUS : status);
+      `SELECT * FROM access_requests WHERE room_id=? AND status IN (${stored.map(() => "?").join(",")}) ORDER BY created_at ASC`)
+      .all(roomId, ...stored);
     return Object.freeze(rows.map(rowToRequest));
   }
 
@@ -669,7 +687,7 @@ export class AccessRequests {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
-      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
+      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${publicStatus(live.status)}`);
       const now = this.store.now();
       if (this.upgradeBasis(row)) {
         return this.memberPermissions.review(token, roomId, row, { decision, permissions, note }, auth, expectedSessionBinding);
@@ -787,7 +805,7 @@ export class AccessRequests {
       if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
       if (live.status === "cancelled") return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
+      if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${publicStatus(live.status)}`);
       const now = this.store.now();
       this.db.prepare("UPDATE access_requests SET status='cancelled', decided_at=?, decision_note=? WHERE request_id=?")
         .run(now, "withdrawn by requester", requestId);
