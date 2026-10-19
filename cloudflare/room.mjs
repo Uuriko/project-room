@@ -26,7 +26,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
-import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
+import { runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
 import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
@@ -61,7 +61,9 @@ function cronDeadline() {
 // the Worker entry module, so its export surface is the runtime's
 // handler/RPC surface and cannot carry test-only exports — workerd
 // rejects a non-function entry at startup.
-const RETENTION_CURSOR_KEY = 'retention-table-index';
+// The pre-S-4 'retention-table-index' storage key rotated one table per
+// tick; every table now drains every tick, so the key is no longer read or
+// written. Values already stored under it are inert.
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -443,33 +445,50 @@ export class ProjectRoom extends DurableObject {
     await yieldToQueuedRequests();
     return fillPublicReadModel(this.store, { limit: 20, deadline: cronDeadline() });
   }
-  // Scans only disposable web-fetch/research logs. The deletion flag is
-  // explicit; authoritative room and security audit journals are excluded.
+  // Drains the disposable web-fetch/research logs: every age-ruled table
+  // in the retention registry, every tick, looping batches until the tick
+  // budget runs out (HUNT-SOAK S-4). The deletion flag is explicit;
+  // authoritative room and security audit journals are never deleted here
+  // — the receipt records their registry dispositions.
   async planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
-    const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
-    const tableIndex = Number.isSafeInteger(stored) ? stored : 0;
+    const deadline = cronDeadline();
     const receipt = runLiveStoreRetention({ store: this.store, env: this.env,
-      now: new Date().toISOString(), tableIndex, deadline: cronDeadline(),
+      now: new Date().toISOString(), deadline,
       record: plan => { this.lastRetentionPlan = plan; } });
-    await this.ctx.storage.put(RETENTION_CURSOR_KEY, (tableIndex + 1) % RETENTION_TABLES.length);
     // Delivered and dead-letter webhook rows are a cache. Pending and failed
     // rows stay until dispatch finishes them. Expired OAuth grants and abuse
     // buckets are the same kind of cache: a room that has never saved one
-    // has no table.
+    // has no table. The prunes share the tick budget: each is re-called
+    // while it reports a full batch.
     let webhookDeliveries = { deleted: 0 };
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
     try {
-      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
-      oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
-      abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
+      let webhooks = this.store.agentPlugin.pruneWebhookDeliveries();
+      webhookDeliveries = { deleted: webhooks.deleted };
+      while (webhooks.moreMayRemain && Date.now() < deadline) {
+        webhooks = this.store.agentPlugin.pruneWebhookDeliveries();
+        webhookDeliveries.deleted += webhooks.deleted;
+      }
+      let oauth = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 500 });
+      oauthProvider = { pruned: oauth.pruned };
+      while (oauth.pruned >= 500 && Date.now() < deadline) {
+        oauth = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 500 });
+        oauthProvider.pruned += oauth.pruned;
+      }
+      let abuse = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 500 });
+      abuseRateBuckets = { pruned: abuse.pruned };
+      while (abuse.pruned >= 500 && Date.now() < deadline) {
+        abuse = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 500 });
+        abuseRateBuckets.pruned += abuse.pruned;
+      }
     } finally {
       console.info(JSON.stringify({
-        event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
+        event: 'room.retention', tables: receipt.tables.join(','), deleted: receipt.deleted,
         dryRun: receipt.dryRun ? 1 : 0, budgetExceeded: receipt.budgetExceeded ? 1 : 0,
-        eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
+        eligible: Object.values(receipt.categories ?? {}).reduce((sum, c) => sum + (c.eligible ?? 0), 0),
         webhookDeleted: webhookDeliveries?.deleted ?? 0,
         oauthPruned: oauthProvider?.pruned ?? 0,
         abuseRatePruned: abuseRateBuckets?.pruned ?? 0

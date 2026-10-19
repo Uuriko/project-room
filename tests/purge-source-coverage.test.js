@@ -23,63 +23,20 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PURGE_TABLES } from "../server/purge-registry.mjs";
 import { EXECUTOR_DELETIONS, EXEMPTIONS, UNRESOLVED } from "./purge-source-coverage-dispositions.mjs";
+import { enumerateSourceTables } from "./source-table-enumeration.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const serverDir = join(repoRoot, "server");
 
-// A real DDL statement names the table and opens its column list; requiring
-// the "(" keeps comment prose ("the CREATE TABLE above") and regex literals
-// from enumerating phantom tables.
-const STRICT_DDL = /CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(["'`\[]?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\(/g;
-// DDL that names its table through an interpolated const:
-//   CREATE TABLE IF NOT EXISTS ${permit} (
-// The const must resolve to a string literal in the same file; an
-// unresolvable one is an enumeration failure, never a silent skip.
-const DYNAMIC_DDL = /CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
-
-function serverFiles() {
-  const out = [];
-  (function walk(dir) {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else out.push(path);
-    }
-  })(serverDir);
-  return out;
-}
-
-function enumerateSourceTables() {
-  const tables = new Map(); // name -> [repo-relative files]
-  const unresolvable = [];
-  for (const file of serverFiles()) {
-    const text = readFileSync(file, "utf8");
-    const rel = relative(repoRoot, file);
-    for (const match of text.matchAll(STRICT_DDL)) {
-      if (!tables.has(match[2])) tables.set(match[2], []);
-      tables.get(match[2]).push(rel);
-    }
-    for (const match of text.matchAll(DYNAMIC_DDL)) {
-      const ident = match[1];
-      const constPattern = new RegExp(`(?:export\\s+)?const\\s+${ident}\\s*=\\s*['"\`]([A-Za-z_][A-Za-z0-9_]*)['"\`]`);
-      const resolved = constPattern.exec(text);
-      if (!resolved) {
-        unresolvable.push(`${rel}: CREATE TABLE names its table through \${${ident}}, which does not resolve to a string-literal const in the same file`);
-        continue;
-      }
-      if (!tables.has(resolved[1])) tables.set(resolved[1], []);
-      tables.get(resolved[1]).push(`${rel} (dynamic \${${ident}})`);
-    }
-  }
-  return { tables, unresolvable };
-}
-
-const { tables: sourceTables, unresolvable } = enumerateSourceTables();
+// The enumeration itself (STRICT_DDL / DYNAMIC_DDL + the server/** walker)
+// lives in tests/source-table-enumeration.mjs, shared with
+// tests/retention-source-coverage.test.js so the purge and retention
+// registries are always dispositioned against the same enumerated set.
+const { tables: sourceTables, unresolvable } = enumerateSourceTables(repoRoot);
 const registryTables = new Set(PURGE_TABLES.map(row => row.table));
 const executorTables = new Set(Object.keys(EXECUTOR_DELETIONS));
 const exemptTables = new Set(Object.keys(EXEMPTIONS));

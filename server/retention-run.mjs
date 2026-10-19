@@ -4,18 +4,31 @@
 // The scheduled tick never passes a deleter and never scans the live store.
 import { createRetention } from "./retention.mjs";
 import { retentionDecisions } from "./audit-retention.mjs";
+import { RETENTION_AGE_DRAIN_TABLES, retentionDispositionFor } from "./retention-registry.mjs";
 
 export const RETENTION_DELETION_ENV = "ROOM_RETENTION_ALLOW_DELETION";
 const DEFAULT_POLICIES = Object.freeze({ events: 30, aggregates: 365 });
-// One table per cron tick, in this order. These logs are telemetry.
-// Room events, unread activity, pending webhook deliveries, and invitation
-// journals are not in this list and are never deleted here.
-export const RETENTION_TABLES = Object.freeze([
-  Object.freeze({ table: "web_fetch_log", days: 30, idColumn: "request_id" }),
-  Object.freeze({ table: "web_research_log", days: 30, idColumn: "request_id" })
-]);
+// The tables the scheduled tick drains itself are the age-ruled rows of
+// server/retention-registry.mjs — the registry is the decision record for
+// every table, this list is only its drain subset. These logs are
+// telemetry. Room events, unread activity, pending webhook deliveries, and
+// invitation journals are never deleted here; the receipt names their
+// recorded dispositions instead (RECEIPT_EXCLUDED_TABLES below).
+export const RETENTION_TABLES = RETENTION_AGE_DRAIN_TABLES;
 export const DISPOSABLE_LOG_DAYS = Object.freeze(Object.fromEntries(RETENTION_TABLES.map(spec => [spec.table, spec.days])));
-export const RETENTION_BATCH_LIMIT = 100;
+// Rows deleted per batch inside one table's drain. A tick loops batches
+// until the table is empty or the tick's deadline passes, so this is a
+// transaction-size knob, not a per-tick ceiling (HUNT-SOAK S-4: the old
+// shape — one table per tick, 100 rows — capped each log at
+// <=1,200 drained rows/day no matter how fast rows arrived).
+export const RETENTION_BATCH_LIMIT = 500;
+// The tables the pre-registry receipt named as a bare "excluded" list.
+// They stay named in the receipt, now carrying the disposition the
+// retention registry records for each of them.
+const RECEIPT_EXCLUDED_TABLES = Object.freeze([
+  "events", "commands", "account_access_events",
+  "membership_invitation_events", "activity_events", "agent_webhook_deliveries"
+]);
 
 class RetentionRunError extends Error {
   constructor(message) { super(message); this.name = "RetentionRunError"; this.code = "invalid_retention_run"; }
@@ -85,48 +98,81 @@ export function scheduledRetentionTick({ env, now, record, deleteRecord } = {}) 
 
 export { RetentionRunError };
 
-// Store-backed retention applies one disposable log per call. Room events,
-// commands, account_access_events, invitations, unread activity, and pending
-// or failed webhook deliveries are excluded. The batch stops at `limit` rows
-// or when `deadline` passes. A row is deleted only when its integer timestamp
-// is older than that table's policy. Set ROOM_RETENTION_ALLOW_DELETION=0 to
-// plan without deleting.
-export function runLiveStoreRetention({ store, env, now, limit = RETENTION_BATCH_LIMIT, tableIndex = 0, deadline = Infinity, record } = {}) {
+// Store-backed retention drains every age-ruled table in the retention
+// registry on every call. Per table it loops batches of `limit` rows until
+// no eligible rows remain or `deadline` passes; the deadline is the job's
+// budget (server/jobs.mjs JOB_BUDGET_MS via ctx.deadline, the worker's
+// cron deadline), so a backlog drains across consecutive ticks instead of
+// being capped per tick (HUNT-SOAK S-4). A row is deleted only when its
+// integer timestamp is older than that table's policy. Room events,
+// commands, account_access_events, invitations, unread activity, and
+// pending or failed webhook deliveries are never deleted here — the
+// receipt records their registry dispositions. Each table drains in its
+// own transaction: a failure rolls that table's drain back, never a table
+// that already finished. Set ROOM_RETENTION_ALLOW_DELETION=0 to plan
+// without deleting.
+export function runLiveStoreRetention({ store, env, now, limit = RETENTION_BATCH_LIMIT, deadline = Infinity, record } = {}) {
   const db = store?.db;
   if (!db || typeof db.prepare !== "function" || typeof store.transaction !== "function") fail("A live store with a transaction adapter is required");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > RETENTION_BATCH_LIMIT) fail("Invalid retention batch limit");
-  if (!Number.isSafeInteger(tableIndex)) fail("Invalid retention table");
   if (!(deadline === Infinity || Number.isFinite(deadline))) fail("Invalid retention deadline");
   const clock = now === undefined ? Date.now() : Date.parse(now);
   if (!Number.isSafeInteger(clock) || clock < 0) fail("Invalid retention clock");
-  const spec = RETENTION_TABLES[(tableIndex % RETENTION_TABLES.length + RETENTION_TABLES.length) % RETENTION_TABLES.length];
   const apply = liveRetentionApplies(env);
-  // One table, one transaction. A failure rolls this table's batch back.
-  return store.transaction(() => {
+  const categories = {};
+  let deletedTotal = 0;
+  let budgetExceeded = false;
+  for (const spec of RETENTION_TABLES) {
     const cutoff = clock - spec.days * 86400000;
-    const rows = db.prepare(`SELECT ${spec.idColumn} AS id FROM ${spec.table} WHERE created_at<? ORDER BY created_at,${spec.idColumn} LIMIT ?`).all(cutoff, limit);
+    const eligible = db.prepare(`SELECT count(*) AS n FROM ${spec.table} WHERE created_at<?`).get(cutoff).n;
     let deleted = 0;
-    let budgetExceeded = false;
-    if (apply) {
-      const erase = db.prepare(`DELETE FROM ${spec.table} WHERE ${spec.idColumn}=? AND created_at<?`);
-      for (const row of rows) {
-        if (Date.now() > deadline) { budgetExceeded = true; break; }
-        deleted += erase.run(row.id, cutoff).changes;
-      }
+    let batches = 0;
+    let tableBudgetExceeded = false;
+    if (apply && eligible > 0) {
+      const outcome = store.transaction(() => {
+        let gone = 0;
+        let runs = 0;
+        let exceeded = false;
+        const erase = db.prepare(`DELETE FROM ${spec.table} WHERE ${spec.idColumn}=? AND created_at<?`);
+        while (gone < eligible) {
+          const rows = db.prepare(`SELECT ${spec.idColumn} AS id FROM ${spec.table} WHERE created_at<? ORDER BY created_at,${spec.idColumn} LIMIT ?`).all(cutoff, limit);
+          if (!rows.length) break;
+          runs += 1;
+          let batchGone = 0;
+          for (const row of rows) {
+            if (Date.now() > deadline) { exceeded = true; break; }
+            batchGone += erase.run(row.id, cutoff).changes;
+          }
+          gone += batchGone;
+          if (exceeded || batchGone === 0 || rows.length < limit) break;
+        }
+        return { gone, runs, exceeded };
+      });
+      deleted = outcome.gone;
+      batches = outcome.runs;
+      tableBudgetExceeded = outcome.exceeded;
     }
-    const receipt = Object.freeze({
-      dryRun: !apply, liveStoreScanned: true, deleted, table: spec.table,
-      deletionRequested: true, deletionApplied: apply, budgetExceeded,
-      batchLimit: limit, recordedAt: new Date(clock).toISOString(),
-      excluded: Object.freeze(["events", "commands", "account_access_events", "membership_invitation_events", "activity_events", "agent_webhook_deliveries"]),
-      categories: Object.freeze({
-        [spec.table]: Object.freeze({
-          cutoff: new Date(cutoff).toISOString(), eligible: rows.length, deleted,
-          moreMayRemain: budgetExceeded || rows.length === limit
-        })
-      })
+    if (tableBudgetExceeded) budgetExceeded = true;
+    deletedTotal += deleted;
+    categories[spec.table] = Object.freeze({
+      cutoff: new Date(cutoff).toISOString(), eligible, deleted, batches,
+      moreMayRemain: eligible - deleted > 0
     });
-    if (typeof record === "function") record(receipt);
-    return receipt;
+  }
+  const receipt = Object.freeze({
+    dryRun: !apply, liveStoreScanned: true, deleted: deletedTotal,
+    tables: Object.freeze(RETENTION_TABLES.map(spec => spec.table)),
+    deletionRequested: true, deletionApplied: apply, budgetExceeded,
+    batchLimit: limit, recordedAt: new Date(clock).toISOString(),
+    excluded: Object.freeze(RECEIPT_EXCLUDED_TABLES.map(table => {
+      const row = retentionDispositionFor(table);
+      return Object.freeze({
+        table, disposition: row.disposition,
+        reason: row.reason ?? row.rule.detail
+      });
+    })),
+    categories: Object.freeze(categories)
   });
+  if (typeof record === "function") record(receipt);
+  return receipt;
 }
