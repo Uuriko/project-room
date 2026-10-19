@@ -47,6 +47,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { CLAIM_FOLLOW_POLICIES, claimFollowTotals, followClaim, getClaimFollow, listClaimFollows, markClaimFollowRead, setClaimFollowPolicy } from "./claim-follows.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -751,6 +752,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // in this same transaction. A pull request that closes does the same.
     const prior = action === "released" || action === "pr_closed" ? registry.get(roomId, item.id) : null;
     registry.set(roomId, item);
+    // CD-06: an explicit discussion follow (a note on the claim) is recorded
+    // here, not only in the event hook — a coalesced note-only event emits
+    // no room event, and the author's follow must not be coalesced away.
+    if (extra.followVia === "comment") {
+      try { followClaim(store.db, { roomId, memberId: extra.actorId ?? caller, claimId: item.id, via: "comment", at: nowMs }); }
+      catch { /* follow bookkeeping never blocks a claim write */ }
+    }
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: extra.actorId ?? caller,
       item,
@@ -765,7 +773,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       verdict: extra.verdict,
       attention: extra.attention,
       attentionMemberId: extra.attentionMemberId,
-      coalesce: extra.coalesce === true
+      coalesce: extra.coalesce === true,
+      followVia: extra.followVia ?? null
     });
     if (extra.wakeMemberId && extra.wakeReason) {
       const stamp = extra.wakeStamp ?? receipt?.sequence ?? nowMs;
@@ -858,6 +867,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
       url?.searchParams, nowMs), swept: sweptIds });
+  }
+  // CD-06 (CV-3): the caller's claim follow records for this room, with the
+  // totals CD-01's needs-me totals section aggregates across rooms.
+  if (workClaimRoute === "follows" && req.method === "GET") {
+    return json(res, 200, { roomId, memberId: caller,
+      follows: listClaimFollows(store.db, { roomId, memberId: caller }),
+      totals: claimFollowTotals(store.db, { roomId, memberId: caller }) });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -1016,10 +1032,34 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
+    const item = load(claimIdOf(reject, workClaimId));
+    // CD-06 (CV-3): reading the claim advances the reader's follow record —
+    // lastReadSeq moves to the claim's latest event, counters zero. Only an
+    // existing record moves; reading never subscribes anyone.
+    markClaimFollowRead(store.db, { roomId, memberId: caller, claimId: item.id,
+      seq: access.authority?.sequence ?? 0, at: nowMs });
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
     // settlement state as the board page.
-    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
+    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(item), caller)));
+  }
+  // CD-06 (CV-3): the per-claim attention override. Muting sets policy only —
+  // the record, its counters and its history are never deleted.
+  if (workClaimRoute === "follow" && req.method === "POST") {
+    requireWriter();
+    const data = body(req);
+    if (!shape(data, { required: ["policy"], optional: [] })) invalidInput(reject, "{policy}");
+    if (!CLAIM_FOLLOW_POLICIES.includes(data.policy)) invalidInput(reject, "policy must be follow, mute or inherit");
+    const item = load(claimIdOf(reject, workClaimId));
+    const record = setClaimFollowPolicy(store.db, { roomId, memberId: caller, claimId: item.id,
+      policy: data.policy, at: nowMs, seq: access.authority?.sequence ?? 0 });
+    return json(res, 200, { follow: record });
+  }
+  if (workClaimRoute === "follow-read" && req.method === "POST") {
+    const item = load(claimIdOf(reject, workClaimId));
+    const record = markClaimFollowRead(store.db, { roomId, memberId: caller, claimId: item.id,
+      seq: access.authority?.sequence ?? 0, at: nowMs });
+    return json(res, 200, { follow: record ?? getClaimFollow(store.db, { roomId, memberId: caller, claimId: item.id }) });
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1299,7 +1339,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const result = data.requestId !== undefined && (sendBackCall || (verifyCall && policy !== "self_attested")) && item.owner !== caller
       ? runPure(reject, () => bindReviewerRequestOutcome(item, acked, caller, data.requestId, data.readingAck)) : acked;
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
+    // CD-06: a note is a discussion post on the claim — its author follows.
+    commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state,
+      followVia: typeof data.note === "string" && data.note ? "comment" : null });
     return json(res, 200, result);
   }
   if (workClaimRoute === "review" && req.method === "POST") {

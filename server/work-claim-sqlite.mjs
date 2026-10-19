@@ -56,6 +56,20 @@ export const workClaimSchema = `
     config_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS claim_follows (
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    policy TEXT NOT NULL DEFAULT 'follow',
+    unread_count INTEGER NOT NULL DEFAULT 0,
+    mention_count INTEGER NOT NULL DEFAULT 0,
+    last_read_seq INTEGER NOT NULL DEFAULT 0,
+    last_event_seq INTEGER NOT NULL DEFAULT 0,
+    created_via TEXT NOT NULL DEFAULT 'manual',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, member_id, claim_id)
+  );
 `;
 
 const parse = text => {
