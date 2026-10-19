@@ -150,7 +150,11 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   assert.equal(JSON.stringify(joined.connect).includes(joined.mcpToken.credential), false);
   assert.equal(joined.starter.claimId, "starter");
   assert.equal(joined.starter.title, "Starter task");
-  const roomToken = joined.mcpToken.credential;
+  // The page says to save identitySecret, the durable credential (#3380):
+  // the rest of the walk must work with it alone.
+  assert.match(page.text, /Save the response field identitySecret/);
+  assert.equal(typeof joined.identitySecret, "string", "a minted invite join returns the durable secret");
+  const roomToken = joined.identitySecret;
   const listed = await send(origin, "/mcp", {
     method: "POST", token: roomToken, body: { jsonrpc: "2.0", id: "1", method: "tools/list" },
   });
