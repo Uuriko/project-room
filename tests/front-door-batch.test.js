@@ -121,7 +121,9 @@ test("B-10: mailer-less signup copy states the signed-in truth", async () => {
 
 test("#3794: creating an invite link surfaces that link and its access level", () => {
   const links = read("src/share-links.js");
-  assert.match(links, /growthUrl\.value = inviteUrl/);
+  // #4071: the created link surfaces through the growth pair's one writer
+  // (both the URL field and the message field), not a URL-field-only write.
+  assert.match(links, /paintGrowthInvite\(inviteUrl, kitTemplate\.replaceAll\("\{url\}", inviteUrl\)\)/);
   assert.match(links, /uiText\("share\.linkReady"/);
 });
 
