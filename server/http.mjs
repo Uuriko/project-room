@@ -23,7 +23,7 @@ import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
-import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
+import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
@@ -41,7 +41,8 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -172,6 +173,14 @@ function warnEmailGatesRelaxed() {
   if (emailGatesRelaxedWarned) return;
   emailGatesRelaxedWarned = true;
   console.warn("No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer");
+}
+const bootConfigWarningsShown = new Set();
+function warnBootConfigOnce(warning) {
+  if (bootConfigWarningsShown.has(warning)) return;
+  bootConfigWarningsShown.add(warning);
+  // Same channel and prefix server.mjs used when the gate lived there, so
+  // boot logs keep one shape after the move (BG-1).
+  console.error(`[boot-config] ${warning}`);
 }
 function warnMissingSecurityContact() {
   if (securityContactWarned) return;
@@ -333,8 +342,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   fetchPullRequest = null,
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
+  // (server/boot-config.mjs) runs here, in the shared boot path every entry
+  // converges on — the node entry (server.mjs), the Worker entry
+  // (cloudflare/room.mjs) and every fixture boot — instead of only in
+  // server.mjs, whose fixture boots never saw it. Production entries pass
+  // `production: true` and throw on broken critical config before any side
+  // effect; other boots surface the gate's warnings once per process (the
+  // mailer warning below follows the same once-per-process rule). The
+  // Worker entry's card is additionally covered at build time by
+  // scripts/sign-agent-card.mjs, which fails closed without the key.
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
@@ -3721,7 +3742,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4408,24 +4429,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
         return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
-      }
-      // ORIENT — jill lane RC-2026-09-28 (ryska's 404): the URL outside
-      // agents guess by analogy with /activation-pack. Read-only,
-      // member-scoped orientation: contract version, authenticated member
-      // and scope, room summary, evaluated-through sequence, and a bounded
-      // list of open work records with their next steps. Rides the standard
-      // room credential funnel above; unknown rooms answer 404
-      // room_not_found from the store.
-      if (route === "orient" && req.method === "GET") {
-        const params = url.searchParams;
-        const allowed = new Set(["focus", "q", "maxTokens", "auth", "binding"]);
-        if ([...params.keys()].some(key => !allowed.has(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_orient", "focus, q, and maxTokens are the orient query parameters");
-        }
-        return json(res, 200, buildOrient(store, roomId, viewerId, {
-          focus: params.get("focus"), q: params.get("q"), maxTokens: params.get("maxTokens"),
-          token: selected.token, binding: fence, boardList: memoizeBoardList(store)
-        }));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.

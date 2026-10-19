@@ -1,7 +1,9 @@
-// QA4 Q4-SEC-1: the orient ?q= search corpus and the pinned lists on orient
-// and the activation pack read projection messages directly. They must apply
-// the same DM filter as every other read (RC-2026-09-19-070): only the two
-// parties see a targeted message, the room owner included.
+// QA4 Q4-SEC-1: the orient ?q= search corpus and the pinned lists on the
+// orient payload and the activation pack read projection messages directly.
+// They must apply the same DM filter as every other read
+// (RC-2026-09-19-070): only the two parties see a targeted message, the
+// room owner included. The standalone /orient endpoint was deleted
+// (register D1); the builder is exercised directly, the pack over HTTP.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -9,6 +11,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { buildOrient } from "../server/orient.mjs";
 
 const DM_BODY = "qa4dm-orient-secret-8k";
 const PUBLIC_BODY = "qa4public-orient-note-2m";
@@ -34,24 +37,23 @@ async function seed(t) {
 test("orient ?q= never searches another member's DM", async t => {
   const f = await seed(t);
   for (const [who, sees] of [["owner", false], ["guest", false], ["producer", true], ["reviewer", true]]) {
-    const res = await f.get(`/api/rooms/commons/orient?q=${encodeURIComponent("qa4dm orient secret")}`, f.keys[who]);
-    assert.equal(res.status, 200, who);
-    assert.equal((await res.text()).includes(DM_BODY), sees, `${who} ${sees ? "should" : "must not"} see the DM`);
+    const payload = buildOrient(f.store, "commons", who, { q: "qa4dm orient secret" });
+    assert.equal(JSON.stringify(payload).includes(DM_BODY), sees, `${who} ${sees ? "should" : "must not"} see the DM`);
   }
   // Positive control: public text is still searchable by a bystander.
-  const pub = await (await f.get(`/api/rooms/commons/orient?q=${encodeURIComponent("qa4public orient note")}`, f.keys.guest)).text();
+  const pub = JSON.stringify(buildOrient(f.store, "commons", "guest", { q: "qa4public orient note" }));
   assert.ok(pub.includes(PUBLIC_BODY));
 });
 
-test("pinned DMs stay out of a bystander's activation pack and orient", async t => {
+test("pinned DMs stay out of a bystander's activation pack", async t => {
   const f = await seed(t);
   f.send("producer", T.MESSAGE_PINNED, { messageId: "qa4-dm" });
   f.send("owner", T.MESSAGE_PINNED, { messageId: "qa4-public" });
-  for (const path of ["/api/rooms/commons/activation-pack", "/api/rooms/commons/orient?q=pinned"]) {
+  for (const path of ["/api/rooms/commons/activation-pack"]) {
     const bystander = await (await f.get(path, f.keys.guest)).text();
     assert.equal(bystander.includes(DM_BODY), false, `${path} leaked a pinned DM`);
-    assert.ok(path.includes("orient") || bystander.includes(PUBLIC_BODY), `${path} lost the public pin`);
+    assert.ok(bystander.includes(PUBLIC_BODY), `${path} lost the public pin`);
     const party = await (await f.get(path, f.keys.reviewer)).text();
-    if (path.includes("activation-pack")) assert.ok(party.includes(DM_BODY), "the addressee still sees their pinned DM");
+    assert.ok(party.includes(DM_BODY), "the addressee still sees their pinned DM");
   }
 });

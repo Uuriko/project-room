@@ -240,7 +240,7 @@ export class ProjectRoom extends DurableObject {
   probeStorage() {
     if (this.paused || !this.store) return { ok: false };
     const row = this.store.db.prepare("SELECT 1 AS ok").get();
-    return { ok: row?.ok === 1 };
+    return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer' };
   }
 
   async syncGmailMailboxes() {
@@ -691,7 +691,7 @@ export default {
         start: async () => {
           const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
           if (!result?.ok) throw new Error('storage probe failed');
-          return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+          return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         },
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),

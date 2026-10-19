@@ -353,3 +353,11 @@ Item-backed board acceptance controls open canonical work; API attempts to appro
 through board bundles return a conflict with the canonical context/command paths.
 Native board deliveries retain their existing workflow. See
 [cutover qualification](WORK-CUTOVER-PLAN.md).
+
+### Result reader extraction (2026-10-19)
+
+The reference census now has 58 files. `src/result-reader.js` owns the
+read-only result view previously embedded in `src/app.js`: selected receipt,
+current/earlier labeling, and discussion eligibility. It reads the existing
+authorized work-items projection through an accessor; it introduces no writer,
+board mapping, or second state store. The application retains work mutations.

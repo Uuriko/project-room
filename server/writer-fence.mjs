@@ -31,7 +31,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 export const unfencedAdditiveTables = Object.freeze([
   "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
-  "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
+  "public_work_reviews", "public_work_review_requests", "public_work_review_versions", // Private review projections/journals/version history never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
@@ -370,6 +370,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Durable live work claims: additive, verified on open, included in recovery.
   "work_claims",
   "work_claim_config",
+  // Claim-history spill (W3 data preservation): the append-only store for
+  // history stamps the SEC-2 cap trims out of work_claims rows. Purely
+  // additive and intentionally NOT fenced, same rationale as the claim
+  // rows themselves — the registry verifies its own schema on open.
+  "work_claim_history",
   // human_push_subscriptions (browser push for human members): one row per
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,
