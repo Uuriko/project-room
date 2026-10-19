@@ -41,6 +41,24 @@ export const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${W
 export const DIVERGENCE_REPAIR_NOTE = "divergence repair: board reopened to match the work item; was done";
 
 const MAX_CLAIM_HISTORY = 200; // mirrors withHistory in server/work-claims.mjs
+const isDivergenceRepairStamp = stamp => typeof stamp?.note === "string" && stamp.note.startsWith("divergence repair:");
+// Apply the MAX_CLAIM_HISTORY cap to a board row's history. Event-derived
+// stamps drop oldest-first and are counted in `dropped`; divergence-repair
+// stamps are exempt — they are board-native (no journal event re-derives
+// them), so dropping one would destroy the only record of a repair and
+// fold the loss silently into the generic historyOmitted counter.
+function capBoardHistory(history) {
+  if (history.length <= MAX_CLAIM_HISTORY) return { history, dropped: 0 };
+  const kept = [...history];
+  let dropped = 0;
+  while (kept.length > MAX_CLAIM_HISTORY) {
+    const index = kept.findIndex(stamp => !isDivergenceRepairStamp(stamp));
+    if (index === -1) break; // only repair stamps remain: they stay, over cap
+    kept.splice(index, 1);
+    dropped += 1;
+  }
+  return { history: kept, dropped };
+}
 const MAX_CHAIN = 20;
 const MAX_REVIEWS = 50;
 const MAX_EVIDENCE_REFS = 16;
@@ -438,13 +456,14 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
   // order) so a repaired row is a fixed point of re-mapping — without
   // this, the next sync/backfill would silently drop the reopen record.
   for (const stamp of existing?.history ?? []) {
-    if (typeof stamp?.note !== "string" || !stamp.note.startsWith("divergence repair:")) continue;
+    if (!isDivergenceRepairStamp(stamp)) continue;
     if (history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) continue;
     const at = isoOrNull(stamp.at) ?? iso(nowMs);
     const index = history.findIndex(entry => entry.at > at);
     history.splice(index === -1 ? history.length : index, 0, { at, agentId: typeof stamp.agentId === "string" && stamp.agentId ? stamp.agentId : "system", action: stamp.action, note: stamp.note });
   }
-  if (history.length > MAX_CLAIM_HISTORY) { const dropped = history.length - MAX_CLAIM_HISTORY; history = history.slice(dropped); historyOmitted += dropped; }
+  const cappedHistory = capBoardHistory(history);
+  history = cappedHistory.history; historyOmitted += cappedHistory.dropped;
   const reviews = reviewsForWorkItem(item, facts);
   const attestations = attestationsForWorkItem(item, facts);
   const evidence = evidenceForWorkItem(item);
@@ -672,10 +691,9 @@ function reworkRepairRow(mapped, item, facts, nowMs) {
     action: `state:${mapped.state}`, note: DIVERGENCE_REPAIR_NOTE,
   };
   if (mapped.history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) return mapped;
-  const history = [...mapped.history, stamp];
-  const dropped = Math.max(0, history.length - MAX_CLAIM_HISTORY);
-  const row = { ...mapped, history: history.slice(dropped) };
-  const omitted = (mapped.historyOmitted ?? 0) + dropped;
+  const capped = capBoardHistory([...mapped.history, stamp]);
+  const row = { ...mapped, history: capped.history };
+  const omitted = (mapped.historyOmitted ?? 0) + capped.dropped;
   if (omitted > 0) row.historyOmitted = omitted; else delete row.historyOmitted;
   return row;
 }
