@@ -216,3 +216,39 @@ test("accounting degrades to zeros on a database with no wake tables at all", t 
   assert.equal(acct.stock.signalsPending, null, "missing store tables read as unknown, not as zero-loss proof");
   assert.equal(acct.attempts.emitted, 0);
 });
+
+// LAB-MUTATION WD-01: the ack UPDATE's delivered_at IS NULL guard is the
+// discharge idempotence fence — a signal is discharged exactly once, and
+// a repeat ack changes nothing. Removing the guard survived both wake
+// suites: the re-ack re-stamped the signal and double-counted the ack.
+test("WD-01: acking the same signal twice discharges it exactly once", t => {
+  const { hb, db, advance } = unit(t);
+  hb.heartbeat(beat("ai_once"));
+  hb.enqueueWake({ agentId: "ai_once", kind: "mention", roomId: "r1", messageId: "m1" });
+  const [pending] = hb.pendingWakes("ai_once");
+  assert.deepEqual(hb.ackWakes({ agentId: "ai_once", signalIds: [pending.signalId], door: "rest" }).acknowledged,
+    [pending.signalId]);
+  const stampedAt = db.prepare("SELECT delivered_at FROM agent_wake_signals WHERE signal_id=?").get(pending.signalId).delivered_at;
+  assert.ok(Number.isSafeInteger(stampedAt), "the first ack stamps delivery");
+  advance(30_000);
+  assert.deepEqual(hb.ackWakes({ agentId: "ai_once", signalIds: [pending.signalId], door: "rest" }).acknowledged,
+    [], "a repeat ack acknowledges nothing — the discharge already happened");
+  assert.equal(db.prepare("SELECT delivered_at FROM agent_wake_signals WHERE signal_id=?").get(pending.signalId).delivered_at,
+    stampedAt, "the delivery stamp does not move on a repeat ack");
+  const acct = hb.accounting();
+  assert.equal(acct.byStore.signals.ackedByDoor.rest, 1, "the ack is counted once, not once per attempt");
+  assert.equal(acct.stock.signalsAcked, 1);
+});
+
+// LAB-MUTATION WD-03: recordWakeEvent's store/event allowlist is the
+// only thing keeping unlisted kinds out of the accounting the cockpit
+// reconciles from. Neutralising the check survived both wake suites.
+test("WD-03: recordWakeEvent records only allowlisted stores and events", t => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  assert.equal(recordWakeEvent(db, { at: 5, store: "signals", event: "emitted" }), true, "control: a listed pair records");
+  assert.equal(recordWakeEvent(db, { at: 6, store: "ledger", event: "emitted" }), false, "an unlisted store is refused");
+  assert.equal(recordWakeEvent(db, { at: 7, store: "signals", event: "exploded" }), false, "an unlisted event is refused");
+  assert.deepEqual(db.prepare("SELECT store, event, n FROM agent_wake_counters").all().map(row => ({ ...row })),
+    [{ store: "signals", event: "emitted", n: 1 }], "refused events leave no counter row");
+});

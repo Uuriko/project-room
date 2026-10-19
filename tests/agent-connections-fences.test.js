@@ -202,3 +202,36 @@ test("CAL-M14: a history with a renumbered operation (generations 1, 2, 4) is re
   }
   f.refused(() => f.store.agentConnections.verify(), 503, "connection_integrity_error");
 });
+
+// ----------------------------------------------------------- IV-03 ---
+
+test("IV-03: the honest two-operation history verifies (positive control)", t => {
+  const f = fixture(t);
+  f.create("agent-fp-ok");
+  f.rotate("agent-fp-ok", { expectedGeneration: 1 });
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
+});
+
+test("IV-03: an operation whose stored fingerprint no longer matches its request is refused by verifyHistory", t => {
+  const f = fixture(t);
+  f.create("agent-fp-forged");
+  f.rotate("agent-fp-forged", { expectedGeneration: 1 });
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
+  // Forge: rewrite ONLY the fingerprint column of the generation-2
+  // operation, leaving request_json untouched. The request still
+  // replays to itself, so the fingerprint comparison is the one leg of
+  // verifyHistory that can catch this — LAB-MUTATION IV-03 dropped
+  // exactly that comparison and every agent-connections suite stayed
+  // green (the binding leg is pinned; the fingerprint leg was not).
+  // Trigger drop/recreate follows the CAL-M14 seam above.
+  const db = f.store.db;
+  const triggerSql = db.prepare("SELECT sql FROM sqlite_master WHERE name='agent_connection_operations_no_update'").get().sql;
+  db.exec("DROP TRIGGER agent_connection_operations_no_update");
+  try {
+    db.prepare("UPDATE agent_connection_operations SET fingerprint=? WHERE room_id='commons' AND member_id='agent-fp-forged' AND generation=2")
+      .run(createHash("sha256").update("a request body that was never journaled").digest("hex"));
+  } finally {
+    db.exec(triggerSql);
+  }
+  f.refused(() => f.store.agentConnections.verify(), 503, "connection_integrity_error");
+});
