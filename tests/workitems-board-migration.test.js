@@ -689,3 +689,70 @@ test("delivery and review survive a work command, restart and another board tran
   assert.deepEqual(resumed.delivery, board.delivery);
   assert.deepEqual(resumed.reviews, board.reviews);
 });
+
+test("sync: DCP-1 — a claim-taking event against a foreign active board row is refused (D-1)", async (t) => {
+  const f = fixture(t);
+  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  f.send(f.ownerKey, "propose-foreign", "work.proposed", {
+    workItemId: "task-foreign", title: "Foreign-held task", definitionOfDone: "x",
+    accountableMemberId: "worker", mode: "write",
+  });
+  f.mutate(f.workerKey, "accept-foreign", "work.accepted", "task-foreign");
+  // Board-first hold by a different member, planted the way a REST board
+  // claim leaves it: an active registry row the item never named.
+  const foreign = claimWork(createWork({ id: "task-foreign", title: "Foreign-held task" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
+  f.store.workClaims.set("commons", foreign);
+  const before = f.store.workClaims.get("commons", "task-foreign");
+  assert.equal(before.state, "claimed");
+  assert.equal(before.owner, "owner");
+  // The event-door acquire by the worker is the second claim: refused
+  // with the registry's conflict vocabulary, and the whole command
+  // rolls back — no projection claim, board row byte-identical.
+  assert.throws(
+    () => f.mutate(f.workerKey, "claim-foreign", "claim.acquired", "task-foreign", {
+      repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+      expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+    }),
+    error => error.code === "work_claim_conflict" && error.status === 409);
+  assert.equal(f.item("task-foreign").claim, null);
+  assert.deepEqual(f.store.workClaims.get("commons", "task-foreign"), before);
+});
+
+test("sync: DCP-1 — renew against a foreign row is refused; release is not (the skip survives)", async (t) => {
+  const f = fixture(t);
+  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  f.send(f.ownerKey, "propose-legacy", "work.proposed", {
+    workItemId: "task-legacy", title: "Legacy double-hold", definitionOfDone: "x",
+    accountableMemberId: "worker", mode: "write",
+  });
+  f.mutate(f.workerKey, "accept-legacy", "work.accepted", "task-legacy");
+  f.mutate(f.workerKey, "claim-legacy", "claim.acquired", "task-legacy", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+    expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+  });
+  // Control: renewing against the worker's OWN board row succeeds.
+  f.mutate(f.workerKey, "renew-own", "claim.renewed", "task-legacy", {
+    expiresAt: new Date(Date.now() + 5 * H).toISOString(),
+  });
+  const expiryAfterOwnRenew = f.item("task-legacy").claim.expiresAt;
+  // The legacy double-hold state: the board row is now an active claim
+  // held by a different member while the projection claim is the worker's.
+  const foreign = claimWork(createWork({ id: "task-legacy", title: "Legacy double-hold" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
+  f.store.workClaims.set("commons", foreign);
+  // A renew asserts the worker's hold against the foreign row: refused,
+  // and the rollback leaves the projection claim's expiry untouched.
+  assert.throws(
+    () => f.mutate(f.workerKey, "renew-foreign", "claim.renewed", "task-legacy", {
+      expiresAt: new Date(Date.now() + 9 * H).toISOString(),
+    }),
+    error => error.code === "work_claim_conflict" && error.status === 409);
+  assert.equal(f.item("task-legacy").claim.expiresAt, expiryAfterOwnRenew);
+  assert.equal(f.store.workClaims.get("commons", "task-legacy").owner, "owner");
+  // A release is not claim-taking: it is NOT refused, and the foreign
+  // board hold survives it untouched (pre-DCP-1 behaviour, preserved).
+  f.mutate(f.workerKey, "release-legacy", "claim.released", "task-legacy");
+  assert.notEqual(f.item("task-legacy").claim?.status, "active");
+  const after = f.store.workClaims.get("commons", "task-legacy");
+  assert.equal(after.state, "claimed");
+  assert.equal(after.owner, "owner");
+});

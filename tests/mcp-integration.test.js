@@ -50,6 +50,7 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.match(compact.brief, /Suggested tool focus: work/);
   assert.equal(compact.brief.includes("Please prepare an agenda"), false);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(selected).length);
+  assert.match(compact.briefVersion, /^[a-f0-9]{64}$/);
   const batch = (await mcp.call("room_read_work", { workItemIds: batchIds })).result.structuredContent;
   const withoutReadTime = item => ({ ...item, brief: item.brief.replace(/Evaluated: [^\n]+/, "Evaluated: <fresh read>") });
   assert.deepEqual(batch.items.map(item => item.workItemId), batchIds);
