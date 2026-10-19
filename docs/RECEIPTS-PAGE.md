@@ -88,7 +88,15 @@ exception as the receipt card.
   off, or operator unpublish — the same switches that hide the other
   shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
-  records it. A non-owner cannot change it.
+  records it. A non-owner cannot change it. The settings toggle says what
+  public means at the moment of consent, and it is the truth for every
+  receipt shape on this page: a public receipt can be viewed by anyone
+  with the link, it is listed in the site's sitemap (`/sitemap.xml`
+  carries every public receipt), and it can be indexed by search
+  engines — the receipt pages are served with `X-Robots-Tag: all`
+  whenever the URL has no query string, and `robots.txt` allows all
+  crawlers, AI crawlers included. There is no noindex anywhere on these
+  surfaces.
 - The room title is shown when the room is in the public directory or has
   a public face. Otherwise the page omits the title. A private room's
   claims and work items never appear while the setting is off.
