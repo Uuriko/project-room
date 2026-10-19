@@ -1,3 +1,4 @@
+import { hydrateWorkItems } from "./work-repository.mjs";
 // Public pages read these tables and nothing from rooms.projection.
 // Rows are written when an owner opts in, updated in the same transaction
 // as the change, and removed when they opt out. The cron backfill copies
@@ -647,7 +648,7 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
       last = row.id;
       rooms += 1;
       try {
-        const state = JSON.parse(row.projection);
+        const state = hydrateWorkItems(store.db, row.id, JSON.parse(row.projection));
         if (state?.room?.id) syncRoomPublication(store, { roomId: state.room.id, state, previous: null, auth: null });
       } catch { /* a corrupt projection is not a public page */ }
     }

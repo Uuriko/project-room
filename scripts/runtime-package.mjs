@@ -2,13 +2,13 @@
 // This verifier is standalone: it can be copied outside the source checkout.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-export const publicAssets = ["src/entry.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/bounty-board.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
+export const publicAssets = ["src/work-reducers.js", "src/message-reducers.js", "src/entry.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/result-reader.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/bounty-board.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
 // (scripts/build-agent-docs.mjs renders them from the committed docs/agents/*.md
 // sources) — decision #32: generated output is never committed — so an
 // exact-commit package can never contain them, and they are not part of this
@@ -56,6 +56,7 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
 optional.push("scripts/build-ui-strings.mjs", "src/strings.js", "strings/en.js", "strings/en.json");
+optional.push("client/work-brief.mjs");
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)
@@ -73,15 +74,15 @@ optional.push("src/curiosity-rank.mjs"); // curiosity sort for room_list_work (i
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
 optional.push("src/error-copy.js"); // Human error copy (imported by src/client.js, src/friend-bond.js, src/operator-ui.js)
-optional.push("src/room-layout.js", "src/member-display-names.js");
+optional.push("src/room-layout.js", "src/member-display-names.js", "src/result-reader.js");
 optional.push("src/needs-attention.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/owner-cockpit.js"); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
 optional.push("src/emoji.js", "src/legacy-reaction-aliases.js"); // Historical source packages only.
 optional.push("src/emoji-catalog.js"); // Historical source packages only; removed from current public assets.
 optional.push("src/display-name-guard.js"); // Member display-name admission (imported by src/events.js and re-exported by server/display-name-guard.mjs)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
-optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
-optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "client/codex-stdio.mjs", "client/room-assistant-client.mjs", "scripts/run-codex-room.mjs", "docs/CODEX-ROOM-HOST.md");
+optional.push("client/room-digest.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
+optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "client/shared-attachment-context.mjs", "client/codex-stdio.mjs", "client/room-assistant-client.mjs", "scripts/run-codex-room.mjs", "docs/CODEX-ROOM-HOST.md");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
 optional.push("client/request-notices.mjs");
@@ -338,7 +339,7 @@ optional.push("server/member-permission-requests.mjs", "server/routes/member-per
 optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENTS-1: fleet read model and its RT route (imported by server/routes/table.mjs and server/orient.mjs)
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
-optional.push("server/routes/typing.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
+optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
@@ -402,9 +403,10 @@ optional.push("src/human-experience.js", "src/human-experience.css", "server/roo
 
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
-optional.push("src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
+optional.push("src/work-reducers.js", "src/message-reducers.js", "src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
 optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
+optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
@@ -423,10 +425,38 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38"].includes(schema?.[1]) && typeof pkg.engines?.node === "string",
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42"].includes(schema?.[1]) && typeof pkg.engines?.node === "string",
     `unsupported store schema ${schema?.[1] ?? "unparseable"} or missing package.json engines.node`);
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
+}
+
+// Shared by exact-package verification and the cheap working-tree preflight.
+export function verifyRuntimeImports(files) {
+  // Check this codebase's literal imports, including dynamic literal imports.
+  // This is not a complete JavaScript dependency parser; cold runtime tests and
+  // source review remain required, especially if a computed loader is added.
+  for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
+    // Quoted actions such as "import" or "source.import" are not declarations.
+    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
+      const specifier = match[1];
+      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
+      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
+      check(specifier.startsWith(".") && files.has(resolved),
+        `${path} imports ${JSON.stringify(specifier)} (resolves to ${resolved}), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs`);
+    }
+  }
+}
+
+export function verifyRuntimeSource(directory) {
+  const files = new Map();
+  for (const path of allowed) {
+    if (existsSync(join(directory, path))) files.set(path,
+      /\.m?js$/.test(path) ? readFileSync(join(directory, path)) : null);
+  }
+  for (const path of required) check(files.has(path), `required runtime source is missing: ${path}`);
+  verifyRuntimeImports(files);
+  return { files: files.size };
 }
 
 export function createRuntimePackage({ repository, commit, destination }) {
@@ -521,19 +551,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
   const absentAssets = expectedAssets.filter(path => !files.has(path));
   check(absentAssets.length === 0, `runtime public assets missing from packaged files: ${absentAssets.join(", ")}`);
-  // Check this codebase's literal imports, including dynamic literal imports.
-  // This is not a complete JavaScript dependency parser; cold runtime tests and
-  // source review remain required, especially if a computed loader is added.
-  for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
-    // Quoted actions such as "import" or "source.import" are not declarations.
-    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
-      const specifier = match[1];
-      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
-      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
-      check(specifier.startsWith(".") && files.has(resolved),
-        `${path} imports ${JSON.stringify(specifier)} (resolves to ${resolved}), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs`);
-    }
-  }
+  verifyRuntimeImports(files);
   const actualRuntime = runtimeMetadata(files);
   check(same(manifest.runtime, actualRuntime),
     `runtime manifest metadata differs from recomputed: manifest ${JSON.stringify(manifest.runtime)} vs computed ${JSON.stringify(actualRuntime)}`);

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomAgentClient } from "./room-agent.mjs";
+import { createWorkBrief } from "./work-brief.mjs";
 
 // The caller selects a private local file and one configured host. This is not
 // a watcher or permission to run arbitrary room messages. SQLite serializes
@@ -68,8 +69,19 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     messages.push(...context.page.items);
   }
   if (!context.current.answerBasis || !context.preparation) throw new Error("Request is not ready or service lacks prepared context");
+  if (context.preparation.work && context.request.workItemId) {
+    const selected = await client.workContext(context.request.workItemId, { signal });
+    if (selected.viewer.id !== connection.memberId || selected.roomId !== connection.roomId
+      || selected.work.id !== context.request.workItemId) throw new Error("Linked work context identity changed");
+    context = { ...context, preparation: { ...context.preparation, work: selected.work, workBrief: await createWorkBrief(selected),
+      workBriefBoundary: "Separately observed linked work context. This conversation does not authorize work transitions; revalidate work before acting." } };
+  }
   if (Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation })) > 262144)
     throw new Error("Request exceeds the automatic preparation limit; inspect it directly");
+  signal?.throwIfAborted();
+  // Preparation is only for new work: a saved answer must remain deliverable
+  // even when its original execution backend is no longer available.
+  if (execute.prepare) await execute.prepare({ signal });
   signal?.throwIfAborted();
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;

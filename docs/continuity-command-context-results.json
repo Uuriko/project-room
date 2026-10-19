@@ -1,0 +1,862 @@
+{
+  "baselineRevision": "f1948f32",
+  "candidateSourceSha256": {
+    "server/message-command-service.mjs": "63c38e9b28d2b3a08ab9da1c3cb1accc374f4080be62b3e10d076c30129a0593",
+    "server/messages-store.mjs": "733c1931577f2cae26171e67c4357a4732f7c2ea4ec88339c62b1fd6af81cb7e"
+  },
+  "interpretation": "Local synthetic in-memory SQLite; 12 timed samples, two warmups, fixed-head rollback excluding rollback cost. Structural query/binding-byte reduction established; mixed latency results do not establish a general speedup. Bound bytes are not disk/WAL bytes or end-to-end task cost.",
+  "before": {
+    "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+    "runtime": "v24.19.0",
+    "platform": "darwin",
+    "results": [
+      {
+        "messages": 1000,
+        "setupTimings": {
+          "initializeMs": 42.00691699999999,
+          "replayMs": 81.42958300000001,
+          "parityMs": 14.871332999999993,
+          "archiveMs": 12.160042000000033
+        },
+        "workingSet": 8,
+        "projectionBytes": 6304,
+        "samples": 12,
+        "modes": {
+          "entity": {
+            "medianMs": 0.6588330000000155,
+            "p95Ms": 1.1061669999999708,
+            "maxPreparedStatements": 21,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 15929,
+              "resultBytes": 4544,
+              "resultRows": 19,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.009624999999971351
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0012079999999627944
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.0017080000000078144
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.0014579999999568827
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.008125000000006821
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.007791999999994914
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.008332999999993262
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.002124999999978172
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.011124999999992724
+                },
+                "UPDATE rooms SET projection=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.008417000000008557
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.0038329999999859865
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0018340000000307555
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.007582999999954154
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.003958000000011452
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.015625
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.006957999999997355
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.0061249999999972715
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.046499999999980446
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.0019580000000019027
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.010249999999984993
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0008330000000000837
+                }
+              },
+              "projectionBytes": 7129
+            }
+          },
+          "references": {
+            "medianMs": 0.6230839999999489,
+            "p95Ms": 1.2332499999999982,
+            "maxPreparedStatements": 22,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 9737,
+              "resultBytes": 4750,
+              "resultRows": 28,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.007999999999981355
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0015000000000213731
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.0019169999999917309
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.0015420000000290202
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.00858299999998735
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.008041999999989002
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.00904099999996788
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.002459000000044398
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.011750000000006366
+                },
+                "UPDATE rooms SET projection=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.007749999999987267
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.004249999999956344
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.002124999999978172
+                },
+                "SELECT message_id FROM messages WHERE room_id=?\n      AND message_id IN (SELECT value FROM json_each(?))\n      AND record_json IS NOT NULL AND reducer_extras_json IS NOT NULL": {
+                  "calls": 1,
+                  "ms": 0.014875000000017735
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.00887500000004593
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.004250000000013188
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.005249999999989541
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0072499999999990905
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.005083000000013271
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.035540999999966516
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.001541000000031545
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.011833000000024185
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0007909999999924366
+                }
+              },
+              "projectionBytes": 1030
+            }
+          }
+        }
+      },
+      {
+        "messages": 10000,
+        "setupTimings": {
+          "initializeMs": 2650.989375,
+          "replayMs": 3536.399208,
+          "parityMs": 187.1064580000002,
+          "archiveMs": 175.70116599999983
+        },
+        "workingSet": 8,
+        "projectionBytes": 6322,
+        "samples": 12,
+        "modes": {
+          "entity": {
+            "medianMs": 0.7578340000000026,
+            "p95Ms": 1.6798749999998108,
+            "maxPreparedStatements": 21,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 15984,
+              "resultBytes": 4563,
+              "resultRows": 19,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.008833999999296793
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0017079999997804407
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.002207999999882304
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.0020409999997355044
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.012166999999863037
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.011332999999467575
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.014000000000123691
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0031249999992724042
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.016667000000779808
+                },
+                "UPDATE rooms SET projection=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.008333000000675383
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.005333000000064203
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0026250000000800355
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.010540999999648193
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.005708000000595348
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.011959000000388187
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.00708299999951123
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.00708299999951123
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.044249999999919964
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.002082999999402091
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.014167000000270491
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0010000000002037268
+                }
+              },
+              "projectionBytes": 7147
+            }
+          },
+          "references": {
+            "medianMs": 0.8090420000007725,
+            "p95Ms": 1.0493750000005093,
+            "maxPreparedStatements": 22,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 9792,
+              "resultBytes": 4777,
+              "resultRows": 28,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.009457999999540334
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0018329999993511592
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.0025420000001759036
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.0020000000004074536
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.012083000000529864
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.011375000000043656
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.014333000000078755
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0033750000002328306
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.0163749999992433
+                },
+                "UPDATE rooms SET projection=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.0148750000007567
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.005458999999973457
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.002959000000373635
+                },
+                "SELECT message_id FROM messages WHERE room_id=?\n      AND message_id IN (SELECT value FROM json_each(?))\n      AND record_json IS NOT NULL AND reducer_extras_json IS NOT NULL": {
+                  "calls": 1,
+                  "ms": 0.01724999999987631
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.011124999999992724
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.005541000000448548
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.0070420000001831795
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.014791000000514032
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.0071250000000873115
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.043791000000055647
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.0022499999995488906
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.014959000000089873
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0010840000004463946
+                }
+              },
+              "projectionBytes": 1040
+            }
+          }
+        }
+      }
+    ]
+  },
+  "after": {
+    "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+    "runtime": "v24.19.0",
+    "platform": "darwin",
+    "results": [
+      {
+        "messages": 1000,
+        "setupTimings": {
+          "initializeMs": 48.02425000000002,
+          "replayMs": 90.29095900000004,
+          "parityMs": 15.809750000000008,
+          "archiveMs": 15.851166999999975
+        },
+        "workingSet": 8,
+        "projectionBytes": 6304,
+        "samples": 12,
+        "modes": {
+          "entity": {
+            "medianMs": 0.65300000000002,
+            "p95Ms": 1.4242909999999824,
+            "maxPreparedStatements": 20,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 8570,
+              "resultBytes": 4544,
+              "resultRows": 19,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.008166000000016993
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0014999999999645297
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.002207999999995991
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.0017500000000154614
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.010084000000006199
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.009374999999977263
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.012999999999976808
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0028750000000172804
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.013708000000008269
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.008667000000002645
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0037499999999681677
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.01516700000001947
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.005749999999977717
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.010124999999959527
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.008249999999975444
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.011375000000043656
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.046208000000035554
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.0024999999999977263
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.014000000000010004
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.001167000000009466
+                }
+              },
+              "projectionBytes": 7129
+            }
+          },
+          "references": {
+            "medianMs": 0.7015830000000278,
+            "p95Ms": 1.3095409999999674,
+            "maxPreparedStatements": 21,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 2378,
+              "resultBytes": 4750,
+              "resultRows": 28,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.008540999999979704
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0017920000000231084
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.0024169999999799074
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.001791999999966265
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.010250000000041837
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.00970799999998917
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.015416999999956715
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0030409999999960746
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.01429200000001174
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.00533300000000736
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.002583000000015545
+                },
+                "SELECT message_id FROM messages WHERE room_id=?\n      AND message_id IN (SELECT value FROM json_each(?))\n      AND record_json IS NOT NULL AND reducer_extras_json IS NOT NULL": {
+                  "calls": 1,
+                  "ms": 0.01383400000003121
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.010041999999998552
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.00487500000002683
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.006334000000038031
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.00591700000001083
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.005999999999971806
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.03662499999995816
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.0018749999999840838
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.013125000000002274
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0009999999999763531
+                }
+              },
+              "projectionBytes": 1030
+            }
+          }
+        }
+      },
+      {
+        "messages": 10000,
+        "setupTimings": {
+          "initializeMs": 1457.624542,
+          "replayMs": 3796.8175420000007,
+          "parityMs": 178.74045899999965,
+          "archiveMs": 156.16949999999997
+        },
+        "workingSet": 8,
+        "projectionBytes": 6322,
+        "samples": 12,
+        "modes": {
+          "entity": {
+            "medianMs": 0.7292919999999867,
+            "p95Ms": 1.2694579999997586,
+            "maxPreparedStatements": 20,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 8607,
+              "resultBytes": 4563,
+              "resultRows": 19,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.009208999999827938
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0016660000001138542
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.0023339999997915584
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.001999999999497959
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.009500000000116415
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.01074999999946158
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.012625000000298314
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0033750000002328306
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.016332999999576714
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.005250000000160071
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0028330000004643807
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.011250000000472937
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.005957999999736785
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.014208000000508036
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.007292000000234111
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.006542000000081316
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.04533300000002782
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.002124999999978172
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.018082999999933236
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0010839999995368998
+                }
+              },
+              "projectionBytes": 7147
+            }
+          },
+          "references": {
+            "medianMs": 0.7524160000002666,
+            "p95Ms": 1.1013330000005226,
+            "maxPreparedStatements": 21,
+            "maxRoomReplays": 0,
+            "profile": {
+              "boundBytes": 2415,
+              "resultBytes": 4777,
+              "resultRows": 28,
+              "queries": {
+                "SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,\n      m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch\n      FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash\n      LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id\n      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?": {
+                  "calls": 1,
+                  "ms": 0.009833000000071479
+                },
+                "SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'": {
+                  "calls": 1,
+                  "ms": 0.0019579999998313724
+                },
+                "SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?": {
+                  "calls": 1,
+                  "ms": 0.002666999999746622
+                },
+                "SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?": {
+                  "calls": 1,
+                  "ms": 0.001959000000169908
+                },
+                "SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.009833000000071479
+                },
+                "SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,\n    json_extract(projection, '$.messagesArchive.count') AS count,\n    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.011416999999710242
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.012334000000009837
+                },
+                "SELECT body FROM events WHERE room_id=? AND sequence=?": {
+                  "calls": 1,
+                  "ms": 0.0037080000001878943
+                },
+                "SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))": {
+                  "calls": 1,
+                  "ms": 0.017291000000113854
+                },
+                "SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c\n    JOIN rooms r ON r.id=c.room_id JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n    WHERE r.id=? AND r.sequence=? AND c.applied_seq=r.sequence\n      AND c.parity_at_seq=r.sequence AND c.applied_event_id=e.id\n      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id=r.id)": {
+                  "calls": 1,
+                  "ms": 0.005416999999397376
+                },
+                "SELECT seq FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0028339999998934218
+                },
+                "SELECT message_id FROM messages WHERE room_id=?\n      AND message_id IN (SELECT value FROM json_each(?))\n      AND record_json IS NOT NULL AND reducer_extras_json IS NOT NULL": {
+                  "calls": 1,
+                  "ms": 0.017041999999491964
+                },
+                "INSERT INTO events VALUES(?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.012000000000625732
+                },
+                "INSERT INTO commands VALUES(?,?,?,?,?)": {
+                  "calls": 1,
+                  "ms": 0.0059999999994033715
+                },
+                "UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?": {
+                  "calls": 1,
+                  "ms": 0.006749999999556167
+                },
+                "SELECT * FROM messages WHERE room_id=? AND message_id=?": {
+                  "calls": 1,
+                  "ms": 0.0070420000001831795
+                },
+                "UPDATE messages_backfill_cursor SET applied_seq=?, applied_event_id=?, parity_at_seq=?\n    WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?\n      AND EXISTS (SELECT 1 FROM rooms r JOIN events e ON e.room_id=r.id AND e.sequence=r.sequence\n        WHERE r.id=? AND r.sequence=? AND e.id=?)": {
+                  "calls": 1,
+                  "ms": 0.006957999999940512
+                },
+                "SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'": {
+                  "calls": 1,
+                  "ms": 0.04616600000008475
+                },
+                "SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs\n    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')\n    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry\n      WHERE json_extract(entry.value,'$.sourceMessageId')=?)": {
+                  "calls": 1,
+                  "ms": 0.0020839999997406267
+                },
+                "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?": {
+                  "calls": 1,
+                  "ms": 0.017917000000124972
+                },
+                "SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,\n              s.events_json AS eventsJson\n       FROM agent_webhook_subs s\n       WHERE s.enabled = 1": {
+                  "calls": 1,
+                  "ms": 0.0009999999992942321
+                }
+              },
+              "projectionBytes": 1040
+            }
+          }
+        }
+      }
+    ]
+  }
+}
