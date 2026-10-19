@@ -786,9 +786,11 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   if (Date.now() > deadline) return starved();
   if (!closeDeployedClaims(store, nowMs, skippedInvalid, deadline)) return starved();
   // #1526 B2: sweep lapsed leases before polling, exactly like the HTTP board
-  // path (sweepRoom in server/work-claim-routes.mjs). A claim whose lease
-  // lapsed is auto-released (lease_expired event, flake signal) so the tick
-  // can never settle a dead round as done — the cron and HTTP paths agree.
+  // path (sweepExpiredWorkClaimLeases in server/work-claim-expiry.mjs, run at
+  // store open and on board writes; board reads present the released form
+  // without persisting it — RP-1). A claim whose lease lapsed is
+  // auto-released (lease_expired event, flake signal) so the tick can never
+  // settle a dead round as done — the cron and HTTP paths agree.
   const leases = sweepExpiredClaimLeases(store, nowMs, skippedInvalid, deadline);
   if (!leases.complete) return starved();
   const staleProgress = {};
@@ -971,12 +973,14 @@ function validateRegistryRotation(store, nowMs, skipped, deadline) {
   }
 }
 
-// #1526 B2: the HTTP board path sweeps lapsed leases at the top of every
-// request (sweepRoom in server/work-claim-routes.mjs); the per-minute cron
-// never did, so a lapsed round could be settled pr_merged by the tick while
-// the same facts on the HTTP path released it first (claim_flaked). Sweep
-// here with the same semantics — auto-release, lease_expired event, one
-// wake per expiry — so both settlement paths read the same world.
+// #1526 B2: the HTTP board path materialises lapsed leases at store open
+// and at the top of every write request (sweepExpiredWorkClaimLeases in
+// server/work-claim-expiry.mjs; since RP-1, board reads only present the
+// released form); the per-minute cron never did, so a lapsed round could
+// be settled pr_merged by the tick while the same facts on the HTTP path
+// released it first (claim_flaked). Sweep here with the same semantics —
+// auto-release, lease_expired event, one wake per expiry — so both
+// settlement paths read the same world.
 function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infinity) {
   // #3698: candidates are selected in SQL — active claims carrying a lease
   // expiry the JS predicate below could call expired. Stored expiries are

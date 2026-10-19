@@ -19,8 +19,10 @@ import { messageRepository } from "./message-repository.mjs";
 // naming a reviewer who never attested is rejected (QA-Sec 2026-09-19).
 //
 // Production uses the store-owned SQLite registry. The in-memory registry
-// remains a pure-test fixture only. Lease expiry is evaluated
-// on ordinary work-claims requests; the explicit work-claims-read projection
+// remains a pure-test fixture only. Lease expiry is materialised at store
+// open and on ordinary work-claims write requests
+// (server/work-claim-expiry.mjs, RP-1); read requests present the released
+// form without persisting it, and the explicit work-claims-read projection
 // preserves stored lease state without housekeeping. Expired claims ordinarily
 // auto-release with a stamped history entry even if nobody calls /sweep.
 // Per-room lease/policy defaults are configured through the registry
