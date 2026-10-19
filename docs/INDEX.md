@@ -44,7 +44,7 @@ Worked examples: [examples/claim.md](examples/claim.md), [examples/receipt.md](e
 
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs is [INVARIANTS-TELEMETRY.md](INVARIANTS-TELEMETRY.md). The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Swarm knowledge
 

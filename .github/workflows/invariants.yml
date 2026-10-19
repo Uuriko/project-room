@@ -5,11 +5,16 @@
 #   1. runs `node scripts/invariants-ci.mjs`, which executes the suite under
 #      `node --test`, emits one JSONL results file per the INVARIANTS
 #      telemetry contract (A14: docs/INVARIANTS-TELEMETRY.md,
-#      $INVARIANTS_RESULTS_FILE pointed at a per-SHA path), renders a markdown
-#      table, and exits 1 when any invariant fails or errors;
-#   2. uploads the JSONL as an artifact;
-#   3. posts the table as a PR comment (replacing the previous bot comment so
-#      one push = one comment).
+#      $INVARIANTS_RESULTS_FILE pointed at a per-SHA path) plus the raw TAP
+#      stream ($INVARIANTS_TAP_FILE), renders a markdown table, and exits 1
+#      when any invariant fails or errors;
+#   2. uploads the JSONL and the raw TAP as one artifact;
+#   3. verifies the artifact actually exists in the run's artifact listing
+#      (an upload step reporting success is not proof — see #4263);
+#   4. posts the table as a PR comment keyed by run id + attempt. Prior
+#      comments that reported FAIL are never deleted: failing tables are
+#      evidence, and the old delete-then-post design destroyed them on
+#      re-run (#4263). Only superseded non-FAIL comments are tidied away.
 #
 # This is a standalone workflow so it stays fast and never waits on the slow
 # unit/browser suites. Promotion to a branch-protection "required" check is a
@@ -40,10 +45,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # PR comment with the results table.
+      actions: read # Post-upload artifact existence check.
     env:
       # Per-SHA results path per the INVARIANTS telemetry contract
       # (docs/INVARIANTS-TELEMETRY.md, A14). results/ is gitignored.
       INVARIANTS_RESULTS_FILE: results/invariants-${{ github.sha }}.jsonl
+      INVARIANTS_TAP_FILE: results/invariants-${{ github.sha }}.tap
       INVARIANTS_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -55,25 +62,51 @@ jobs:
       - name: Run invariant suite (gate)
         id: invariants
         run: node scripts/invariants-ci.mjs --report-out "$RUNNER_TEMP/invariants-report.md"
-      - name: Upload results JSONL
+      - name: Upload results JSONL + raw TAP
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ env.INVARIANTS_RESULTS_FILE }}
+          path: |
+            ${{ env.INVARIANTS_RESULTS_FILE }}
+            ${{ env.INVARIANTS_TAP_FILE }}
           if-no-files-found: error
+      - name: Verify results artifact exists
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # #4263: run 39163358115 attempt 1's upload step concluded success
+          # and the artifact did not exist; nothing noticed for a day. Verify
+          # against the run's artifact listing and fail loudly if absent.
+          for i in 1 2 3 4 5 6; do
+            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+                -q '.artifacts[].name' 2>/dev/null | grep -qx "$ARTIFACT_NAME"; then
+              echo "artifact verified: $ARTIFACT_NAME"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::results artifact $ARTIFACT_NAME not found in run ${{ github.run_id }} artifact listing after upload"
+          exit 1
       - name: Comment results on PR
         if: always() && github.event_name == 'pull_request'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMENT_KEY: invariants-ci run=${{ github.run_id }} attempt=${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          # One push = one comment: remove this bot's previous invariants
-          # comment before posting the fresh table.
-          for id in $(gh api "repos/Uuriko/project-room/issues/$PR_NUMBER/comments" --paginate \
-              -q '.[] | select(.body | contains("<!-- invariants-ci -->")) | .id' 2>/dev/null); do
-            gh api -X DELETE "repos/Uuriko/project-room/issues/comments/$id" >/dev/null 2>&1 || true
+          # Key the comment by run id + attempt (#4263). Delete only prior
+          # invariants comments that did NOT report failure — a FAIL table
+          # (heading or ❌ row) is evidence and survives every re-run.
+          { echo "<!-- $COMMENT_KEY -->"; cat "$RUNNER_TEMP/invariants-report.md"; } \
+            > "$RUNNER_TEMP/invariants-comment.md"
+          for id in $(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" --paginate \
+              -q '.[] | select(.body | contains("<!-- invariants-ci")) | select(.body | contains("Invariant harness — FAIL") | not) | select(.body | contains("❌") | not) | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$id" >/dev/null 2>&1 || true
           done
-          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room \
-            --body-file "$RUNNER_TEMP/invariants-report.md" || echo "comment failed"
+          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" \
+            --body-file "$RUNNER_TEMP/invariants-comment.md" || echo "comment failed"
