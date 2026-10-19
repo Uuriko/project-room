@@ -4,9 +4,15 @@ Each person on the team runs this once on their machine. Codex then uses the sam
 
 ## Command
 
+Replace the URL below with your room URL or invitation. This saves the room connection and configures Codex in one command.
+
+```sh
+room setup codex --room "<invite-or-room-url>"
 ```
-room setup codex
-```
+
+If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
+
+Already connected on this machine? Run `room setup codex` to use the saved connection.
 
 ## What it writes
 

@@ -12,10 +12,15 @@ export function faceRun(runs) {
 }
 export function askFaceStatus(run, now = Date.now(), assistant = null) {
   if (!run) return null;
-  if (run.stopOutcome === 'attempt_revoked') return { key: 'unknown', text: uiText('human.face.connectionInterrupted') };
+  if (run.stopOutcome === 'attempt_revoked' || run.displayStatus === 'unknown') return { key: 'unknown', text: uiText('human.face.connectionInterrupted') };
   const waited = Math.max(0, now - (run.createdAt ?? now));
+  // Server observations take precedence over the browser clock. Retain the
+  // local timer only for older responses without a derived display status.
+  const observed = run.displayStatus ?? run.status;
   // R366-1: a paused assistant will not claim; say so instead of "may be offline".
-  const key = run.status === 'queued' ? (assistant?.availability === 'paused' ? 'host_paused' : waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
+  const key = run.status === 'queued' && assistant?.availability === 'paused' ? 'host_paused'
+    : observed === 'queued' ? (run.displayStatus == null && waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked')
+    : observed === 'unknown' ? 'stalled' : observed;
   const textKey = ({ asked: 'asked', host_paused: 'hostPaused', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
   return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
 }
