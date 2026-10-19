@@ -281,9 +281,21 @@ jobs:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs | tee "$RUNNER_TEMP/live-smoke.json"
+      # #3897: recovery must also run when the job is CANCELLED between the
+      # canonical upload and the entry upload (operator cancel, runner loss,
+      # job timeout), not only when a step fails. The
+      # (failure() || cancelled()) term is load-bearing, and always() alone
+      # would be wrong: deploy-recovery.mjs decides per Worker from live
+      # state and leaves a Worker still on the snapshot version untouched,
+      # but it must only be invoked when a skew is possible - the snapshot
+      # (steps.pre) succeeded and the canonical upload (steps.prod) was
+      # attempted. A successful deploy must never trigger recovery. Note
+      # the honest limit: if the runner is killed outright, no step runs at
+      # all; the uploaded pre-deploy snapshot artifact is the fallback for
+      # a manual recover in that case.
       - name: Recover only when prior code meets the schema floor
         id: rollback
-        if: failure() && steps.pre.outcome == 'success' && steps.prod.outcome != 'skipped'
+        if: always() && (failure() || cancelled()) && steps.pre.outcome == 'success' && steps.prod.outcome != 'skipped'
         env:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
