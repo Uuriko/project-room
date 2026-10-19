@@ -32,11 +32,7 @@ function bridgeWakeScript() {
   return match[1].replace(/\\"/g, "\"").replace(/\\n/g, "\n");
 }
 
-// Quarantined under the repo flake flow (tests/quarantine.json): the ambient
-// typing heartbeat can race into this test's no-replayed-writes ledger under
-// hosted load (browser timing race). Repair by 2026-11-02.
-const QUARANTINED_WAKE_FLAKE = process.env.QUARANTINE_RUN !== "1";
-test("macOS wake signal: bounded revalidation for a live session, stale access dropped for a dead one", { timeout: 90000, skip: QUARANTINED_WAKE_FLAKE ? "quarantined: tests/quarantine.json (browser timing race; repair by 2026-11-02)" : false }, async t => {
+test("macOS wake signal: bounded revalidation for a live session, stale access dropped for a dead one", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-native-wake-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -74,17 +70,30 @@ test("macOS wake signal: bounded revalidation for a live session, stale access d
   assert.equal(await typingResponse.finished(), null, "the draft's typing beacon finishes before the wake ledger starts");
 
   // The room is open and the draft's typing beacon has completed, so every
-  // entry below is wake traffic, with no writes exempted from the ledger.
+  // entry below is wake-window traffic. The ledger counts REPLAYABLE writes
+  // only: every non-GET request except the ephemeral typing beacon
+  // (POST /api/rooms/<id>/typing). That beacon is ambient presence the
+  // composer emits autonomously while a draft sits in it (client-throttled
+  // to one beat per 4s, src/client.js sendTyping), and on the server it is
+  // in-memory only — never persisted, never in the event log
+  // (server/typing.mjs) — so a wake can neither replay it nor be charged
+  // with it. A re-triggered beat raced this ledger under hosted load
+  // (three specimens in the former tests/quarantine.json entry: the typing
+  // POST was the only non-GET in the ledger at the wake #1 assertion).
+  // The wake itself is still charged with every other write: any replayed
+  // send, approval or work execution fails the assertions below.
+  const TYPING_PATH = /^\/api\/rooms\/[^/]+\/typing$/;
   const ledger = [];
   page.on("request", request => ledger.push({ method: request.method(), path: new URL(request.url()).pathname }));
-  const sessionGets = () => ledger.filter(entry => entry.method === "GET" && entry.path === "/api/session").length;
-  const writes = () => ledger.filter(entry => entry.method !== "GET").length;
+  const wakeTraffic = () => ledger.filter(entry => !TYPING_PATH.test(entry.path));
+  const sessionGets = () => wakeTraffic().filter(entry => entry.method === "GET" && entry.path === "/api/session").length;
+  const writes = () => wakeTraffic().filter(entry => entry.method !== "GET").length;
   const wakeScript = bridgeWakeScript();
 
   // Two wakes against the live session: exactly one session revalidation
   // each, a fixed bounded set of lifecycle reads, and no write replayed.
   for (const expected of [1, 2]) {
-    const before = ledger.length;
+    const before = wakeTraffic().length;
     const restored = page.waitForResponse(response => response.url().endsWith("/api/session")
       && response.request().method() === "GET" && response.ok());
     await page.evaluate(wakeScript);
@@ -92,7 +101,7 @@ test("macOS wake signal: bounded revalidation for a live session, stale access d
     await page.waitForTimeout(500);
     assert.equal(sessionGets(), expected, `wake #${expected} revalidates the session exactly once`);
     assert.equal(writes(), 0, `wake #${expected} replays no writes (no duplicate send, approval, or work execution); ledger: ${JSON.stringify(ledger)}`);
-    assert.ok(ledger.length - before <= 16, `wake #${expected} traffic stays bounded (${ledger.length - before} requests)`);
+    assert.ok(wakeTraffic().length - before <= 16, `wake #${expected} traffic stays bounded (${wakeTraffic().length - before} requests)`);
   }
   assert.equal(await page.locator("#message-input").inputValue(), "draft that must survive wake",
     "the unsent composer draft survives wake revalidation");

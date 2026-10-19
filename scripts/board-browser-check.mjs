@@ -756,11 +756,21 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-// Quarantined under the repo flake flow (tests/quarantine.json): this journey
-// times out at its 120 s cap under hosted load and flips to green on rerun
-// (browser timing race). Repair by 2026-11-02.
-const QUARANTINED_BOARD_FLAKE = process.env.QUARANTINE_RUN !== "1";
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKE ? "quarantined: tests/quarantine.json (browser timing race; repair by 2026-11-02)" : false }, async t => {
+// Timeout budget: this is the heaviest board journey in the file — two
+// route-held phases, two viewport passes with axe, and a held refresh
+// race. Measured locally on 2 cores: unloaded passes take 9–12s; under
+// CPU oversubscription (load ~13–15 on 2 cores) completed passes take
+// ~54s and two of four passes were censored by the 8s boot wait at ~18s
+// (the #main visibility wait inside signInFixture — repaired below with
+// a boot-only allowance). Hosted specimens were censored by the old
+// 120s cap outright (runs 38830513362 and 38809251611, the latter in a
+// 139-test job whose duration was 325s). Post-repair, four of four
+// oversubscribed passes complete at 61–75s, none censored. 240s is
+// ~2x the worst hosted-censored duration and ~3x the worst measured
+// loaded pass. It is a cap, not a wait: every in-page wait keeps its
+// original 8s default and no assertion changes — the same pricing
+// shape as the waiting-prerequisites test above.
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 240000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
@@ -781,11 +791,19 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
   });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
-  page.setDefaultTimeout(8000);
+  // Boot allowance: the 8s default also governs the cold boot + sign-in
+  // restore, and under load that sequence exceeds it (measured above:
+  // two of four oversubscribed passes died at the #main wait inside
+  // signInFixture while the same boot completes in ~2s unloaded). 30s
+  // covers the boot only; once #main is visible the default returns to
+  // 8s for every in-page wait in the journey — the same shape as the
+  // waiting-prerequisites repair above.
+  page.setDefaultTimeout(30000);
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  page.setDefaultTimeout(8000);
   await post(page, origin, "/work-claims", { id: "link-draft", title: "Attach the draft", files: ["draft.js"] }, 201);
   await post(page, origin, "/work-claims/link-draft/claim", {});
   await post(page, origin, "/work-claims/link-draft/update", { state: "in_progress" });
