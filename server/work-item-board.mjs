@@ -1047,6 +1047,21 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
     }
   }
 
+  // Holder refusal (DCP-1 / D-1): the registry row is the holder
+  // authority — a claim-taking event by a member who is not the primary
+  // row's active holder would mint a second hold in the projection
+  // while the board keeps the first, and the divergence skip below
+  // would let it pass silently (the diverged board_native row is
+  // exactly the board-first claim). Refuse inside the transaction so
+  // the command rolls back with nothing written. The skip stays for
+  // every non-claim-taking type: a release by the projection holder
+  // still leaves a foreign board hold untouched, and the diverged row
+  // itself is never rewritten here.
+  const claimTaking = incoming.type === "claim.acquired" || incoming.type === "claim.renewed";
+  if (claimTaking && current && SYNC_ACTIVE.has(current.state) && current.owner && current.owner !== actorId) {
+    refuse(409, "work_claim_conflict", `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`);
+  }
+
   const events = roomEvents(store, roomId);
   const { rows, diverged } = planWorkItemBoardBackfill({
     items: Object.values(state.workItems ?? {}), events, existing, nowMs,
