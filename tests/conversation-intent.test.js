@@ -54,3 +54,11 @@ test('unconfigured agents do not intercept ordinary messages', () => {
   for (const unavailable of [null, {}, { ...assistant, availability: 'not_connected' }]) assert.equal(route({ body: '@Room help' }, { assistant: unavailable }), null);
   for (const availability of ['paused', 'awaiting_host']) assert.deepEqual(route({ body: '@Room help' }, { assistant: { ...assistant, availability } }), { action: 'invoke' });
 });
+
+
+test('a participant without steering permission can discuss a finished result without an implicit invocation', () => {
+  const result = { id: 'result', authorId: 'agent' };
+  const context = { messages: [source, result], runs: [{ ...run, status: 'done', resultMessageId: result.id }], canInvoke: false };
+  assert.equal(route({ replyToId: result.id }, context), null);
+  assert.deepEqual(route({ body: '@Room revise', replyToId: result.id }, context), { action: 'invoke' }, 'explicit requests still receive the server permission decision');
+});

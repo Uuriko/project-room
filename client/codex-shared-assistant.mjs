@@ -7,6 +7,24 @@ import { withAttachmentReferences, withAttachmentText } from "./shared-attachmen
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const stops = new Set(["pause_requested", "cancel_requested"]);
 
+// A direct reply is an explicit context selection, not permission to crawl a room.
+export async function sharedReplyContext(message, readMessage) {
+  if (!message.replyToId) return undefined;
+  const unavailable = { messageId: message.replyToId, contentStatus: "unavailable" };
+  let referenced;
+  try { referenced = await readMessage(message.replyToId); }
+  catch (error) {
+    if ([403, 404].includes(error.status)) return unavailable;
+    throw error; // A transient failure must not silently change the execution basis.
+  }
+  if (!referenced || referenced.deletedAt || referenced.toMemberId || referenced.id !== message.replyToId
+    || (referenced.channelId ?? "general") !== (message.channelId ?? "general")) return unavailable;
+  const characters = Array.from(referenced.body ?? "");
+  return { messageId: referenced.id, memberId: referenced.authorId, revision: referenced.revision ?? 0,
+    channelId: referenced.channelId ?? "general", contentStatus: "quoted", body: characters.slice(0, 8000).join(""),
+    truncated: characters.length > 8000 };
+}
+
 // Best-effort public answer previews. The final result still uses atomic publish.
 // Full snapshots are bounded/throttled; no tool arguments or private reasoning.
 export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds, isCurrent = async () => true, emit = () => {}, intervalMs = 500 }) {
@@ -130,18 +148,28 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
           state: "working", summary: "Working on the shared request." });
       }
     } });
-  const inputs = async current => withAttachmentReferences(await Promise.all(current.inputs.map(async entry => {
-    const message = await room.message(entry.sourceMessageId);
-    if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
-    // Preserve the conversation links a human sees when replying. References
-    // are context, not authority: do not expand them into ambient room history
-    // or treat a linked work item as permission to act on it.
-    return { messageId: entry.sourceMessageId, memberId: entry.memberId, body: message.body,
-      ...Object.fromEntries(["replyToId", "workItemId", "channelId"]
-        .filter(field => typeof message[field] === "string" && message[field])
-        .map(field => [field, message[field]])),
-      conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
-  })), await room.files());
+  const inputs = async current => {
+    // Reuse reads within this observation, but never across observations: a
+    // changed or withdrawn reference must invalidate the execution basis.
+    const reads = new Map();
+    const readMessage = id => {
+      if (!reads.has(id)) reads.set(id, room.message(id));
+      return reads.get(id);
+    };
+    for (const entry of current.inputs) readMessage(entry.sourceMessageId);
+    const selected = await Promise.all(current.inputs.map(async entry => {
+      const message = await readMessage(entry.sourceMessageId);
+      if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
+      const replyContext = await sharedReplyContext(message, readMessage);
+      return { messageId: entry.sourceMessageId, memberId: entry.memberId, body: message.body,
+        ...(replyContext ? { replyContext } : {}),
+        ...Object.fromEntries(["replyToId", "workItemId", "channelId"]
+          .filter(field => typeof message[field] === "string" && message[field])
+          .map(field => [field, message[field]])),
+        conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
+    }));
+    return withAttachmentReferences(selected, await room.files());
+  };
   if (run.status === "resume_requested") {
     const prior = record.prior_result ? JSON.parse(record.prior_result) : null;
     if (prior?.resumeRevision !== run.revision) {

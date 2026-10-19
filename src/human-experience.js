@@ -41,7 +41,7 @@ export function soloUnaddressed({ body, replyToId, members, messages, selfId, as
   const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
   return !source || source.authorId === selfId || source.authorId === assistantId;
 }
-export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted }) {
+export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted, replyToResult }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -59,11 +59,12 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   const face = document.createElement('div'); face.id = 'assistant-face'; face.hidden = true;
   const faceRequest = document.createElement('p'); faceRequest.className = 'assistant-face-request';
   const faceStatus = document.createElement('p'); faceStatus.className = 'assistant-face-status'; faceStatus.setAttribute('role', 'status'); faceStatus.setAttribute('aria-live', 'polite'); faceStatus.tabIndex = -1;
+  const faceProgress = document.createElement('p'); faceProgress.className = 'assistant-face-progress'; faceProgress.hidden = true;
   const faceActions = document.createElement('div'); faceActions.className = 'assistant-face-actions';
   const faceAnswer = document.createElement('p'); faceAnswer.id = 'assistant-answer'; faceAnswer.className = 'assistant-run-result';
   faceAnswer.style.whiteSpace = 'pre-wrap'; faceAnswer.hidden = true;
   const answerText = document.createTextNode(''); faceAnswer.append(answerText);
-  face.append(faceRequest, faceStatus, faceAnswer, faceActions);
+  face.append(faceRequest, faceStatus, faceProgress, faceAnswer, faceActions);
   $('#assistant-activity').before(face);
   const faceButton = (label, data) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = label; Object.assign(button.dataset, data); return button; };
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'assistant-context'; ask.className = 'button ghost'; ask.hidden = true;
@@ -173,11 +174,10 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         // Original prompt and Open result stay reachable while the row is folded.
         sourceDeleted ? '' : ["<button type=\"button\" class=\"text-button\" data-assistant-message=\"", esc(run.sourceMessageId), "\">Original prompt</button>"].join(''),
         !sourceDeleted && run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '',
+        resultMessage && !resultMessage.deletedAt && !resultMessage.toMemberId ? `<button type="button" class="text-button" data-assistant-reply="${esc(resultMessage.id)}">${esc(uiText('human.replyResult'))}</button>` : '',
         pauseButton, stopButton, "</summary>",
         "<div class=\"assistant-run-detail\">",
-        "<p>", esc(statusLabel), "</p>",
-        resultMessage?.body ? ["<p class=\"assistant-run-result\"><strong>", uiText("human.askResult"), "</strong> ", esc(resultMessage.body.slice(0,400)), "</p>"].join('') : '',
-        (sourceDeleted ? [] : run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''),
+        (sourceDeleted ? [] : run.activity ?? []).filter((a, index, list) => a.summary !== statusLabel && (index === 0 || a.summary !== list[index - 1].summary)).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''),
         inputs,
         editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">", uiText("human.addToThisAsk"), "</button>"].join('') : '',
         editable && run.status !== 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-conflict=\"true\" data-revision=\"", run.revision, "\">Change direction</button>"].join('') : '',
@@ -186,8 +186,11 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     }).join('');
     const current = faceRun(contextualRuns.filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current, Date.now(), projection.assistant);
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
+    const resultMessage = current?.resultMessageId && getState().messages.find(message => message.id === current.resultMessageId);
+    const replyable = current?.status === 'done' && resultMessage && !resultMessage.deletedAt && !resultMessage.toMemberId
+      && !getState().room.archivedAt && !getState().channels?.[resultMessage.channelId ?? 'general']?.archivedAt;
     const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
-    const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, faceControls, faceSource?.body?.slice(0, 120)]) : '';
+    const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, Boolean(replyable), faceControls, faceSource?.body?.slice(0, 120)]) : '';
     if (face._key !== faceKey) {
       face._key = faceKey;
       face.dataset.attemptId = current?.attemptId ?? '';
@@ -196,14 +199,19 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (current) {
         faceRequest.textContent = faceSource?.body?.slice(0, 120) || uiText('human.face.sharedRequest');
         if (current.resultMessageId) faceActions.append(faceButton(uiText('human.face.openResult'), { assistantMessage: current.resultMessageId }));
+        if (replyable) faceActions.append(faceButton(uiText('human.replyResult'), { assistantReply: current.resultMessageId }));
         if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.addToThisAsk'), { contributeRun: current.id, revision: String(current.revision) }));
         if (faceControls && current.status === 'needs_input') faceActions.append(faceButton(uiText('human.resolveDirection'), { contributeRun: current.id, resolve: 'true', revision: String(current.revision) }));
         if (faceControls && !CLOSED.includes(current.status)) faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
         // R5-1: keep keyboard focus on the same control (or the card) across a repaint.
-        if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun) || faceStatus).focus({ preventScroll: true });
+        if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun && button.dataset.assistantMessage === focusedData.assistantMessage && button.dataset.assistantReply === focusedData.assistantReply) || faceStatus).focus({ preventScroll: true });
       }
     }
     if (current && faceStatus.dataset.faceStatus !== status.key) { faceStatus.dataset.faceStatus = status.key; faceStatus.textContent = status.text; }
+    const progress = current && !CLOSED.includes(current.status) ? [...(current.activity ?? [])].reverse().find(entry => entry.summary?.trim())?.summary?.trim() : '';
+    const progressText = progress && progress !== status?.text ? progress : '';
+    if (faceProgress.textContent !== progressText) faceProgress.textContent = progressText;
+    faceProgress.hidden = !progressText;
     const draft = current && current.answerDraft && current.answerDraft.attemptId === current.attemptId && !CLOSED.includes(current?.status) ? current.answerDraft : null;
     const answer = draft?.body ?? '';
     // Keep one stable text node on the card; no per-token live announcements,
@@ -283,6 +291,8 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     // Controls in a run's summary row must not toggle the fold.
     if (event.target.closest('summary button')) event.preventDefault();
     if (event.target.closest('[data-assistant-message], [data-contribute-run]')) activity.open = false;
+    const reply = event.target.closest('[data-assistant-reply]');
+    if (reply) { if (replyToResult?.(reply.dataset.assistantReply)) activity.open = false; return; }
     const message = event.target.closest('[data-assistant-message]'); if (message) { openMessage(message.dataset.assistantMessage); return; }
     const context = event.target.closest('[data-contribute-run]');
     if (context) {
@@ -398,7 +408,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         }
       }
       if (contribution) return { ...contribution };
-      const routed = conversationIntent({ content, messages: getState().messages, runs: projection?.runs, assistant: projection?.assistant, selfId: getSession().member.id, ownerId: getState().room.ownerId });
+      const routed = conversationIntent({ content, messages: getState().messages, runs: projection?.runs, assistant: projection?.assistant, selfId: getSession().member.id, ownerId: getState().room.ownerId, canInvoke: getState().members[getSession().member.id]?.permissions.includes("steer") });
       if (routed || content.replyToId) return routed;
       const solo = askAvailable(projection?.assistant) && Object.values(getState().members).filter(m => m.active !== false && m.kind === 'human').length === 1
         && soloUnaddressed({ ...content, members: getState().members, messages: getState().messages, selfId: getSession().member.id, assistantId: projection.assistant.coordinatorMemberId });

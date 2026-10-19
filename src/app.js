@@ -1288,10 +1288,8 @@ $("#account-room-form").addEventListener("submit", async event => {
     if (accountClient.session !== owned) return;
     if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) { endAccountAccess(); return; }
     if (error.code === "room_exists") delete form.dataset.roomId; // A lost response created it under another shape; the next attempt gets a fresh id.
-    setFormStatus(status, error.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
-      : error.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
-      : error.status === 429 ? "Too many rooms just now. Try again in a minute."
-        : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
+    setFormStatus(status, accountRoomCreateFailure(error), true);
+    if (error.code === "email_unverified") openAccountSettings();
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
 $("#choose-room").addEventListener("click", () => workspaceUI.showRoomList(true));
@@ -1356,6 +1354,13 @@ function setConnectionStatus(text) {
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
+}
+function accountRoomCreateFailure(error) {
+  if (["email_unverified", "pilot_limit"].includes(error?.code)) return uiText(`error.${error.code}`);
+  return error?.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
+    : error?.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
+    : error?.status === 429 ? "Too many rooms just now. Try again in a minute."
+      : error?.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.";
 }
 function setFormStatus(status, text, error = false) {
   if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
@@ -3720,7 +3725,8 @@ function workCard(i, now, drafts, messages = []) {
   const loops = coordinationLoops(i, messages);
   const loopNotice = loops.length ? `<p class="loop-warning" data-loop-kind="${esc(loops[0].kind)}"><strong>Possible coordination loop.</strong> ${esc(loops[0].label)}</p>` : "";
   const nextFor = next.memberId ? ` for ${esc(name(next.memberId))}` : "";
-  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
+  const quietNext = session.member.kind === "human" && !document.body.classList.contains("human-advanced") && ["in_progress", "complete"].includes(next.action);
+  const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
@@ -3744,7 +3750,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -4054,8 +4060,23 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
+function replyToSharedResult(messageId) {
+  const message = state?.messages.find(entry => entry.id === messageId);
+  if (!message || message.deletedAt || message.toMemberId || isRoomArchived(state)
+    || state.channels?.[messageChannelId(message)]?.archivedAt || busy || requestReading
+    || pendingMessage || composerFiles.some(file => file.status === "uploading")) return false;
+  setActiveChannel(messageChannelId(message));
+  revealMessage(message.id);
+  switchThread(conversation.rootById.get(message.id), true);
+  if (pendingMessage || $("#message-to-select").value) return false;
+  replyToId = message.id;
+  updateReply(); saveComposer(); persistDrafts();
+  $("#message-input").focus();
+  return true;
+}
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
   getConversation: () => ({ channelId: activeChannelId, threadId: currentThreadId, rootOf: id => conversation?.rootById.get(id) }),
+  replyToResult: replyToSharedResult,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
   startContribution: (sourceMessageId, intent) => {
@@ -6233,15 +6254,9 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
 const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult } = installResultReader({
   client, getState: () => state, getSession: () => session, sameSession,
   isBusy: () => busy,
-  canDiscuss: () => !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
+  canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) {
-    revealMessage(message.id);
-    switchThread(conversation.rootById.get(message.id), true);
-    // An uncertain send owns its exact reply target until resolved.
-    if (!pendingMessage) replyToId = message.id;
-    updateReply(); saveComposer(); persistDrafts();
-  },
+  onDiscuss(message) { replyToSharedResult(message.id); },
   onOriginal(messageId) {
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }

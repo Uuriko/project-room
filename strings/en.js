@@ -508,5 +508,7 @@ export default {
   "human.askNoAssistant": "Draft kept. No assistant is connected. Connect one in settings, or send this as a message.",
   "entry.account.loading": "Loading account settings…",
   "entry.invite.createFirst": "Create an invite link below to share this room.",
-  "human.roomNotesHtml": "<details {open}><summary id=\"cockpit-notes-title\">Room notes</summary>{content}</details>"
+  "human.roomNotesHtml": "<details {open}><summary id=\"cockpit-notes-title\">Room notes</summary>{content}</details>",
+  "human.replyResult": "Reply",
+  "human.workOwner": "Assigned to {name}"
 };

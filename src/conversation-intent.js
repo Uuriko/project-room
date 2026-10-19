@@ -7,7 +7,7 @@ export function addressesAssistant(body, name = 'Room') {
 
 // Routing is not authorization. The server still validates visibility,
 // authorship, conversation membership and the observed run revision.
-export function conversationIntent({ content, messages = [], runs = [], assistant, selfId, ownerId }) {
+export function conversationIntent({ content, messages = [], runs = [], assistant, selfId, ownerId, canInvoke = true }) {
   if (content.toMemberId || !assistant?.coordinatorMemberId || assistant.availability === 'not_connected') return null;
   const addressed = addressesAssistant(content.body, assistant.name || 'Room');
   const target = messages.find(message => message.id === content.replyToId);
@@ -21,7 +21,7 @@ export function conversationIntent({ content, messages = [], runs = [], assistan
     || run.resultMessageId === target.id || run.inputs?.some(input => input.sourceMessageId === target.id)));
   if (linked.length !== 1) return addressed ? { action: 'invoke' } : null;
   const run = linked[0];
-  if (CLOSED.has(run.status)) return { action: 'invoke' };
+  if (CLOSED.has(run.status)) return addressed || canInvoke ? { action: 'invoke' } : null;
   if (run.status === 'cancel_requested') return null;
   if (run.status === 'needs_input') {
     if (selfId !== run.initiatorId && selfId !== ownerId) return null;

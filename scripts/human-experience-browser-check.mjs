@@ -63,8 +63,10 @@ async function holdResultResponse(page, body, { offline = false, roomId = 'commo
   };
 }
 
-test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 60000 }, async t => {
+test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  const peerMember = f.store.room('commons').state.members.guest;
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.access_changed',data:{memberId:'guest',expectedMemberRevision:peerMember.revision,permissions:[...new Set([...peerMember.permissions,'steer'])],active:true}});
   for (const [type,data] of [
     ['work.proposed',{workItemId:'human-result-task',title:'Write a short result',definitionOfDone:'A readable result is saved',accountableMemberId:'owner',mode:'read',independentVerificationRequired:false,ownerDecisionRequired:false}],
     ['work.accepted',{workItemId:'human-result-task',expectedRevision:0}],
@@ -109,6 +111,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
   run=(await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'working',summary:'Comparing mobile readability.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Comparing mobile readability.'));
+  for (const page of pages) await page.locator('#assistant-face .assistant-face-progress').getByText('Comparing mobile readability.', { exact: true }).waitFor();
   const post = await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{Authorization:`Bearer ${f.keys.producer}`,'Content-Type':'application/json'},body:JSON.stringify({id:'public-result-command',type:'message.posted',data:{messageId:'public-result',body:'Recommendation: choose the simpler mobile layout.'}})});assert.ok(post.ok);
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
@@ -265,7 +268,41 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
   await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
-  mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
+  // A completed answer can be revised through ordinary chat by the other person.
+  const previous = (await api('producer')).runs.find(item => item.id === run.id);
+  await peer.locator('#assistant-activity').evaluate(node => { node.open = true; });
+  await peer.locator('#assistant-runs [data-assistant-reply="public-result"]').click();
+  await peer.locator('#message-input').fill('Make the recommendation one sentence.');
+  await peer.locator('#message-form button[type=submit]').click();
+  await peer.waitForFunction(() => document.querySelector('#message-input').value === '');
+  let followup = (await api('producer')).runs.find(item => ![run.id, recovery.id].includes(item.id));
+  assert.ok(followup, 'replying to a completed result starts a new execution');
+  const followupMessage = f.store.room('commons').state.messages.find(message => message.id === followup.sourceMessageId);
+  assert.equal(followupMessage.replyToId, 'public-result');
+  assert.equal(followupMessage.authorId, 'guest');
+  assert.equal((await api('producer')).runs.find(item => item.id === run.id).revision, previous.revision, 'completed execution is not reopened');
+  followup = (await api('producer', { action:'claim', runId:followup.id, attemptId:'followup-host', expectedRevision:followup.revision })).result;
+  const publication = { action:'publish', requestId:'followup-publication', runId:followup.id, attemptId:'followup-host', expectedRevision:followup.revision,
+    body:'Choose the simpler mobile layout.', summary:'Revised recommendation ready.', appliedInputMessageIds:followup.inputs.map(input => input.sourceMessageId) };
+  const delivered = await api('producer', publication);
+  assert.equal((await api('producer', publication)).result.resultMessageId, delivered.result.resultMessageId);
+  await peer.reload();
+  await peer.locator('#main').waitFor({ state:'visible' });
+  await peer.locator('#assistant-face [data-assistant-reply]').waitFor();
+  await peer.locator('#assistant-face [data-assistant-message]').click();
+  await peer.locator(`[data-message-record-id="${delivered.result.resultMessageId}"]`).waitFor();
+  mkdirSync('test-results/chat-result',{recursive:true});
+  for (const width of [390,1280]) {
+    await peer.setViewportSize({width,height:900});
+    for (const theme of ['dark','light']) {
+      await peer.evaluate(value => document.documentElement.dataset.theme=value, theme);
+      await peer.locator(`[data-message-record-id="${delivered.result.resultMessageId}"]`).scrollIntoViewIfNeeded();
+      const faceBounds = await peer.locator('#assistant-face').boundingBox();
+      assert.ok(faceBounds.width > 200, 'inline progress occupies the message content column, not the avatar column');
+      await peer.screenshot({path:`test-results/chat-result/${width}-${theme}.png`,fullPage:false});
+      assert.equal(await peer.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
+    }
+  }
   assert.deepEqual(errors,[]);
 });
 
@@ -663,7 +700,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask c
   run = (await api('producer',{action:'publish',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision,summary:'Plan ready.',body:'The plan is to ship the fence first.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   assert.equal(run.status,'done');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('The plan is to ship the fence first.'));
-  assert.equal(await page.locator('#assistant-runs .assistant-run-result').count(),1);
+  assert.equal(await page.locator('#assistant-runs .assistant-run-resultline').count(),1);
   await page.waitForFunction(()=>document.querySelector('.assistant-face-status').dataset.faceStatus === 'done');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors,[]);
