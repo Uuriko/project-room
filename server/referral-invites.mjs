@@ -36,6 +36,7 @@
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
+import { storeProjectionCapBytes } from "./storage-limits.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
@@ -479,7 +480,7 @@ export class ReferralInvites {
       try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (Buffer.byteLength(projection) > storeProjectionCapBytes(this.store)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));
       this.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);

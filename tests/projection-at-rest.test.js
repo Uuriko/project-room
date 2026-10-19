@@ -200,20 +200,25 @@ const lineNumberAt = (source, index) => source.slice(0, index).split("\n").lengt
 // after each cap token for the first pilot_limit fail and check its message.
 // Cap uses that do not reject with a 409 (continue, return, headroom math)
 // have no such fail in the window and are not offenders.
+// CAP-PROBE-BINDING: cap tokens include the probe-derived forms
+// (this.projectionCapBytes, storeProjectionCapBytes(...)) — since the write
+// paths enforce the derived cap, a scanner that only knew the constant's
+// name would go blind to exactly the checks it exists to audit.
 const CAP_FAIL_PATTERN = /fail\(\s*409\s*,\s*["']pilot_limit["']\s*,\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)(?:\s*\+\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`))*)/;
 const RECOVERY_PATTERN = /room owner|ask its owner|try again later/i;
+const CAP_TOKEN_PATTERN = /PILOT_LIMITS\.projectionBytes|[Pp]rojectionCapBytes/g;
 
 function projectionCapOffenders(label, source) {
   const offenders = [];
   const reported = new Set();
-  let index = source.indexOf("PILOT_LIMITS.projectionBytes");
-  while (index !== -1) {
+  let token;
+  while ((token = CAP_TOKEN_PATTERN.exec(source)) !== null) {
+    const index = token.index;
     const fail = CAP_FAIL_PATTERN.exec(source.slice(index, index + 1000));
     if (fail && !RECOVERY_PATTERN.test(fail[1]) && !reported.has(index + fail.index)) {
       reported.add(index + fail.index);
       offenders.push(`${label}:${lineNumberAt(source, index + fail.index)}`);
     }
-    index = source.indexOf("PILOT_LIMITS.projectionBytes", index + 1);
   }
   return offenders;
 }
@@ -283,6 +288,10 @@ test("the source pins catch multi-line code, not just single-line statements", (
   assert.deepEqual(projectionCapOffenders("fixture.mjs", wrappedCapWithRecovery), []);
   const nonRejection = "if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;";
   assert.deepEqual(projectionCapOffenders("fixture.mjs", nonRejection), []);
+  const derivedCap = "if (Buffer.byteLength(projection) > storeProjectionCapBytes(this.store)) fail(409, \"pilot_limit\", \"Room storage limit reached\");";
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", derivedCap), ["fixture.mjs:1"]);
+  const derivedCapWithRecovery = "if (Buffer.byteLength(projection) > this.projectionCapBytes) fail(409, \"pilot_limit\", \"Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.\");";
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", derivedCapWithRecovery), []);
   const multilineWrite = [
     "db.prepare(\"UPDATE rooms SET sequence=?, projection=? WHERE id=?\")",
     "  .run(sequence, JSON.stringify(state), roomId);",

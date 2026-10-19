@@ -20,6 +20,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // `import { ServiceError } from "./store.mjs"` resolves to the exact same
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
+import { PROJECTION_CAP_CEILING_BYTES, probedValueLimitBytes, projectionCapForValueLimit } from "./storage-limits.mjs";
 import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
@@ -442,7 +443,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
 // Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
 // headroom; a larger guard does not establish the deployed storage ceiling.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: PROJECTION_CAP_CEILING_BYTES });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -1396,6 +1397,14 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
+    // CAP-PROBE-BINDING (deep-map storage P1): the projection cap this
+    // store enforces is derived once, here, from the runtime's measured
+    // value limit (storage-limits.mjs). Every projection write path in
+    // this class and in the sibling services compares against
+    // projectionCapBytes, never against a restated constant, so a runtime
+    // whose limit moves meets the app's named refusal first.
+    this.valueLimitBytes = probedValueLimitBytes(this.db);
+    this.projectionCapBytes = projectionCapForValueLimit(this.valueLimitBytes);
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
     this.delegation = new MembershipDelegation(this);
@@ -2080,6 +2089,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       phases.checksum = { ms: 0, rowsRead: 0 };
     }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
+    this.refuseOversizedWritableOpen();
     // Decision #10: backfill projection work items onto the work-claims
     // board (server/work-item-board.mjs). Runs in both integrity modes —
     // a deferred (Durable Object) database holds one room, so the pass is
@@ -3457,7 +3467,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (Buffer.byteLength(projection) > this.projectionCapBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -3481,6 +3491,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   storedProjection(roomId, state) {
     return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
+  }
+  // Deep-map storage P1: a writable open refuses when the largest stored
+  // projection already passes this runtime's measured value limit — that
+  // room can never be written here again, and its first write would meet
+  // the platform's own refusal instead of this named one. A read-only
+  // open returns earlier in the constructor and never reaches here, so
+  // export and repair tooling can still read the room. An unmeasurable
+  // limit (null) never refuses: unknown is not a guess.
+  refuseOversizedWritableOpen() {
+    if (this.valueLimitBytes == null) return;
+    let largest = null;
+    try {
+      largest = this.db.prepare("SELECT id, LENGTH(CAST(projection AS BLOB)) AS bytes FROM rooms ORDER BY bytes DESC LIMIT 1").get();
+    } catch { return; } // No rooms table yet: nothing stored, nothing to refuse.
+    if (!largest || Number(largest.bytes) <= this.valueLimitBytes) return;
+    const roomId = largest.id;
+    const bytes = Number(largest.bytes);
+    this.db.close();
+    throw new Error(`Room ${roomId}'s stored projection is ${bytes} bytes, past this runtime's measured storage value limit of ${this.valueLimitBytes} bytes; refusing a writable open. Open the store read-only to archive or export the room, or run a runtime build whose limit fits it.`);
   }
   // A body row can only go missing through a write outside storedProjection.
   // The event log is still the source of truth: replay it and refill.
@@ -4376,7 +4405,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (Buffer.byteLength(projection) > this.projectionCapBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -5988,7 +6017,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (Buffer.byteLength(projection) > this.projectionCapBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
@@ -6214,7 +6243,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       });
       const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
       const projection = this.storedProjection(roomId, applied);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      if (Buffer.byteLength(projection) > this.projectionCapBytes) break;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
@@ -6290,7 +6319,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { resumed = compact(applyEvent(next, incoming)); }
       catch { continue; }
       const projection = this.storedProjection(roomId, resumed);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
+      if (Buffer.byteLength(projection) > this.projectionCapBytes) continue;
       seq += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
       next = resumed;
