@@ -63,8 +63,8 @@ Update PR4260 with final scope and evidence. Coordinate stack integration, requi
 - [x] Bounded, attributed, visibility-checked reply context for agents.
 - [x] Two-person/agent continuation and failure/recovery checks.
 - [x] Phone/desktop visual inspection and keyboard checks.
-- [ ] Final qualification and source publication.
-- [ ] Coordinated integration/deployment, or precise outstanding gates recorded.
+- [x] Local qualification and source publication; hosted qualification pending.
+- [x] Outstanding integration/deployment gates recorded below.
 
 
 ## Implementation evidence
@@ -78,3 +78,5 @@ The initial browser pass found two obsolete duplicate-result assertions and a re
 Released carrier4245 account-creation error recovery and typed invitation name preservation are selectively composed from55532407, with both test files retained. The obsolete Ask Room mode and email workspace are not restored. Other independent storage/onboarding carriers retain their own owners and source history.
 
 Frozen-source qualification at bc5433b9: full unit suite 11,384 passed, 31 skipped, zero failures (482.4 seconds); affected suite 2,203 passed, one skipped; lint passed with 290 warnings. Final complete browser replay passed after screenshot/layout corrections. These receipts cover unchanged runtime source; subsequent documentation and canonical screenshot updates do not represent new runtime qualification. Hosted exact-head checks and coordinated production deployment remain outstanding. Live MERGE-SLOT and ROLE-DEPLOYER were both unclaimed at the prepublication check; neither is held by this source lane.
+
+Published PR4260 targets main and preserves 4243/4244 ancestry. Hosted qualification must pass on the final head before merge; capture run39307447185 is queued to generate Linux-canonical visual baselines for inspection. If those PNGs change, commit the reviewed captures and qualify the final head. Production remains unchanged. Remaining delivery steps: inspect hosted failures, complete visual baseline update, acquire/read back MERGE-SLOT for integration, and coordinate ROLE-DEPLOYER plus postdeployment checks. No background automation was created. Real-human, physical-device, live-provider and notarized Mac distribution limitations remain explicitly deferred.
