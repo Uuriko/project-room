@@ -22,7 +22,7 @@ the structured vocabulary cannot carry that qualifier. There is no rating or rev
 is a record, not a review.
 
 The detail page also carries a share block: the pre-filled share text
-("Work, verified: <title> — <verdict line>") shown verbatim on the page,
+("<title> — <verdict line>") shown verbatim on the page,
 one-tap share links (X, LinkedIn, email — plain anchors; these pages are
 script-free), and the badge embed below.
 

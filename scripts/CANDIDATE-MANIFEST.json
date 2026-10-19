@@ -6,7 +6,7 @@
   },
   "storeSchemaVersion": 42,
   "assets": {
-    "about.html": "sha256:e7132ff870e61994b470c6e16cdaa50e6f610e06f4e63c08d2ad7999b67a7c17",
+    "about.html": "sha256:bce2ef8e057ee66d4a50bd688e993c8795c4b968ca1f4c14dfb8947f4abc84c2",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
     "compare/ai-agent-coordination.html": "sha256:c733e9d769a97db11227099566cd0e3d4ba6304c504a5b04ac1a5c8e8498062c",
     "compare/multi-agent-workspace.html": "sha256:08a3006fe4ce19d6119be4f19651b487eeae6b40c2b03cbaef32829ce40afab6",
@@ -43,7 +43,7 @@
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
     "index.html": "sha256:444d6dac6b6839d028213c5ddaa2b6dbb1769fb0067e06399a8aa19fa6b9c65b",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
-    "offers.html": "sha256:292e12c2e0da79827cca19455de7c9524fa5443e6bac3ea9a6b41d575bd3e559",
+    "offers.html": "sha256:b1f1052a85efc02e51daf6fed9477d38c3e65cb70f8f2c1c519bee3a1f9a96dc",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
     "og/about.png": "sha256:b792c020598149bbbe42e79969521286f268af477789e5966c848cd05e480155",
     "og/compare.png": "sha256:47a5099a51f396848155e95e1880e2ff9de83f2b11cdd03eb3a23bc80d742254",
