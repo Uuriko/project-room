@@ -457,7 +457,11 @@ export async function loadWeakenedRouteModule(kind) {
   // The copy lives in tests/chaos/.weak/, three levels below the repo root's
   // server/ and src/ trees — re-point every relative import. The "../"
   // rewrite runs FIRST: "../../../" starts with "../", so running "./"
-  // first would double-rewrite the already-rewritten specifiers.
+  // first would double-rewrite the already-rewritten specifiers. The
+  // routes module's own ./ imports ride along in their real form —
+  // including server/work-claim-expiry.mjs (RP-1's lease-expiry module:
+  // the stored sweep the routes module runs on writes), which the copy
+  // therefore exercises unchanged.
   source = source.replaceAll(`from "../`, `from "../../../`);
   source = source.replaceAll(`from "./`, `from "../../../server/`);
   const weakDir = join(HERE, ".weak");
