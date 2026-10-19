@@ -164,7 +164,29 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ vars.PW_CACHE_SALT }}-${{ steps.pw.outputs.version }}-${{ env.ImageVersion }}-chromium
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      - name: Install Playwright Chromium (binary cached) and its OS deps
+        run: |
+          # CI-DIET 08 (C-1/C-2): cache block copied from test.yml; the
+          # --with-deps apt pass only has to succeed once per runner
+          # image, proven by the marker inside the cached dir. On a
+          # proven hit, install the browser payload only. Poison mode is
+          # loud: a lying marker dies on a missing library at first
+          # launch - bust the cache via the PW_CACHE_SALT repo variable.
+          if [ -f "$HOME/.cache/ms-playwright/.deps-ok-${ImageVersion}" ]; then
+            npx playwright install chromium
+          else
+            npx playwright install --with-deps chromium
+            touch "$HOME/.cache/ms-playwright/.deps-ok-${ImageVersion}"
+          fi
       - name: Onboarding probe gate on staging
         id: predeploy
         env:
