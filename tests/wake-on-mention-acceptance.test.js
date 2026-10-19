@@ -32,6 +32,7 @@ import {
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
 import { enqueueClaimWake } from "../server/work-claim-events.mjs";
+import { listMentionReceipts } from "../server/mention-receipts.mjs";
 
 const ROOM = "commons";
 const WAKE_URL = "https://agent.example.test/wake";
@@ -298,4 +299,171 @@ test("fabric: a deployed DB with the pre-wake CHECK converges without losing row
   assert.deepEqual({ ...kept }, { kind: "mention", messageId: "m-old" }, "existing rows survive convergence");
   db.prepare("INSERT INTO agent_wake_signals VALUES ('ws_new','ai_unit','wake','commons','wake:m-old',2,NULL)").run();
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals").get().n, 2);
+});
+
+// ---- WAKE0-2: delivery + discharge (spec §2.3, §2.4, §2.6) ----
+
+const deliveriesFor = (f, agentId) => f.store.db.prepare(
+  "SELECT event_id AS eventId, target_url AS targetUrl, payload_json AS payload FROM agent_webhook_deliveries WHERE agent_id=? AND event_type='agent.wake'"
+).all(agentId).map(row => ({ ...row, signal: JSON.parse(row.payload)?.data?.signal ?? null }));
+
+const deliveredViaWakeDoor = f => f.store.db.prepare(
+  "SELECT COALESCE(SUM(n),0) AS n FROM agent_wake_counters WHERE event='delivered' AND kind='wake' AND door='wake'"
+).get()?.n ?? 0;
+
+const receiptFor = (f, memberId) =>
+  listMentionReceipts(f.store, f.keys.owner, ROOM).receipts.find(r => r.memberId === memberId);
+
+function armedOfflineBob(f, advance) {
+  const bob = addMember(f, "bob");
+  registerHost(f, bob, { wakeUrl: WAKE_URL });
+  armSubscription(f, bob);
+  goOffline(advance);
+  return bob;
+}
+
+test("§4 S2: the wake intent is delivered — a journaled agent.wake ping carries the wake signal", () => {
+  // Contract: §2.3 — deliverWakePing carries the wake signal through the
+  // same journaled delivery as the underlying mention (event-push door),
+  // including the wakeUrl fan-out. Regression: the intent row existing
+  // but no ping ever journaled for it — the runtime is never summoned,
+  // which is the whole Step-0 gap.
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  mention(f, "m-s2", "@bob canary check");
+  const [intent] = wakeRows(f, bob.identityId);
+  const deliveries = deliveriesFor(f, bob.identityId);
+  const wakePings = deliveries.filter(d => d.signal?.kind === "wake");
+  assert.ok(wakePings.length >= 1, "a journaled ping carries the wake signal");
+  assert.ok(wakePings.some(d => d.eventId === intent.signalId), "the ping's event id is the wake row's signal id");
+  assert.ok(wakePings.some(d => d.signal?.messageId === "wake:m-s2"), "the ping payload is the wake pointer");
+  assert.ok(wakePings.some(d => d.targetUrl === WAKE_URL), "the wakeUrl fan-out carries the wake ping too");
+  assert.ok(deliveries.some(d => d.signal?.kind === "mention"), "the underlying mention ping still journals");
+});
+
+test("§2.3: the DM and claim causes deliver their wake pings through the same door", () => {
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  // Claim first, while no intent stands: the claim's emission journals
+  // its own wake ping carrying the claim pointer.
+  const result = enqueueClaimWake(f.store, ROOM, "bob", "work-claim:TASK-10:assigned:1",
+    { reason: "assigned", actorId: "owner" });
+  assert.equal(result?.enqueued, true);
+  assert.ok(deliveriesFor(f, bob.identityId).some(d => d.signal?.kind === "wake" && d.signal?.messageId === "wake:work-claim:TASK-10:assigned:1"),
+    "the claim's wake intent is journaled for delivery");
+  // A DM while the intent stands coalesces onto the SAME row: the
+  // journal dedupes by signal id (one outstanding intent, one journaled
+  // summons per subscription), and the row the ping names now carries
+  // the DM as its latest cause.
+  f.store.dmConsents.request(ROOM, "owner", "bob", "wake0 test");
+  f.store.dmConsents.decide(ROOM, "bob", "owner", "approve");
+  f.store.command(f.keys.owner, ROOM, {
+    id: randomUUID(), type: "message.posted",
+    data: { messageId: "dm-2", body: "direct ping", toMemberId: "bob" },
+  });
+  const [intent] = wakeRows(f, bob.identityId);
+  assert.equal(intent.messageId, "wake:dm-2", "the intent re-pointed at the DM");
+  assert.ok(deliveriesFor(f, bob.identityId).some(d => d.signal?.kind === "wake" && d.eventId === intent.signalId),
+    "the journaled summons names the standing intent");
+});
+
+test("§4 S3: connecting discharges the intent on the heartbeat door — wake rows only", () => {
+  // Contract: §2.4 — discharge-on-connect. The runtime's arrival retires
+  // the summons; the underlying mention keeps its own ack lifecycle.
+  // Regression: intents staying outstanding after arrival (stale
+  // receipts, blocked coalesce), or discharge swallowing real signals.
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  mention(f, "m-s3", "@bob come back");
+  f.store.agentHeartbeats.heartbeat({ agentId: bob.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL });
+  const [intent] = wakeRows(f, bob.identityId);
+  assert.notEqual(intent.deliveredAt, null, "the intent is discharged on connect");
+  assert.equal(signalsOf(f, bob.identityId, "mention")[0].deliveredAt, null,
+    "the mention signal is NOT discharged — it leaves only through ack");
+  assert.equal(deliveredViaWakeDoor(f), 1, "the discharge is accounted delivered through the wake door");
+  const pendingKinds = f.store.agentHeartbeats.pendingWakes(bob.identityId, {}).map(s => s.kind);
+  assert.ok(!pendingKinds.includes("wake"), "the discharged intent never rides a pending page");
+  assert.ok(pendingKinds.includes("mention"), "the mention still rides the page for ack");
+});
+
+test("§4 S3: connecting discharges the intent on the poll door too", () => {
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  mention(f, "m-s3p", "@bob come back via poll");
+  const poll = f.store.agentHeartbeats.notePoll({ agentId: bob.identityId, roomId: ROOM, hostId: "host-1" });
+  assert.notEqual(wakeRows(f, bob.identityId)[0].deliveredAt, null, "the poll discharges the intent");
+  assert.ok(!poll.pendingWakes.some(s => s.kind === "wake"), "the discharging poll does not serve the intent on its own page");
+  assert.equal(deliveredViaWakeDoor(f), 1);
+});
+
+test("§4 S4: another agent's connect does not discharge the intent", () => {
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  const carol = addMember(f, "carol");
+  registerHost(f, carol, { wakeUrl: WAKE_URL });
+  mention(f, "m-s4", "@bob only you");
+  f.store.agentHeartbeats.heartbeat({ agentId: carol.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL });
+  f.store.agentHeartbeats.notePoll({ agentId: carol.identityId, roomId: ROOM, hostId: "host-1" });
+  assert.equal(wakeRows(f, bob.identityId)[0].deliveredAt, null, "bob's intent survives carol's activity");
+  assert.equal(deliveredViaWakeDoor(f), 0);
+});
+
+test("§2.4/N1: expiry is lazy — the timeout flip alone does not discharge; the receipt reads expired; connect discharges", () => {
+  // Contract: §4 N1 + §2.4 — when the mention times out the intent is
+  // expired FOR THE RECEIPT, but the row itself is discharged by the
+  // wake surface (connect / resolution), not by the mention surface's
+  // flip. Regression: flipExpiredMentions mutating wake rows (the
+  // surfaces corrupting each other's lifecycles), or receipts hiding
+  // the expiry.
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  f.store.setMentionTimeout(f.keys.owner, ROOM, 60_000, null);
+  mention(f, "m-n1", "@bob time-sensitive");
+  advance(61_000);
+  const receipt = receiptFor(f, "bob");
+  assert.equal(receipt.state, "timed_out");
+  assert.equal(receipt.wakeState, "expired", "the receipt computes the intent's expiry");
+  assert.equal(wakeRows(f, bob.identityId)[0].deliveredAt, null,
+    "N1: the flip + a receipt read leave the intent row outstanding");
+  f.store.agentHeartbeats.heartbeat({ agentId: bob.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL });
+  assert.notEqual(wakeRows(f, bob.identityId)[0].deliveredAt, null, "connect discharges the expired intent");
+});
+
+test("§2.6: receipts show the wake state — summoned, then discharged after connect", () => {
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  mention(f, "m-r1", "@bob receipt check");
+  assert.equal(receiptFor(f, "bob").wakeState, "summoned");
+  f.store.agentHeartbeats.heartbeat({ agentId: bob.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL });
+  assert.equal(receiptFor(f, "bob").wakeState, "discharged");
+});
+
+test("§2.6: a mention that produced no intent shows no wake state", () => {
+  const { f } = setup();
+  const bob = addMember(f, "bob");
+  registerHost(f, bob, { wakeUrl: WAKE_URL });
+  armSubscription(f, bob);
+  mention(f, "m-r0", "@bob you are online, no summons");
+  assert.equal(receiptFor(f, "bob").wakeState, null);
+});
+
+test("§2.4: resolution discharges — a reply to the mention retires the intent without a heartbeat", () => {
+  // Contract: the mention_states transition to responded discharges the
+  // intent at the transition — the runtime answered, so the summons is
+  // moot even though it never heartbeated. Regression: the intent
+  // outliving its own resolution (a later connect would re-summon for
+  // work already done).
+  const { f, advance } = setup();
+  const bob = armedOfflineBob(f, advance);
+  mention(f, "m-res", "@bob please do the thing");
+  const bobKey = f.store.issueAccessKey(ROOM, "bob");
+  f.store.command(bobKey, ROOM, {
+    id: randomUUID(), type: "message.posted",
+    data: { messageId: "r-res", body: "on it", replyToId: "m-res" },
+  });
+  assert.notEqual(wakeRows(f, bob.identityId)[0].deliveredAt, null, "the reply discharged the intent");
+  const receipt = receiptFor(f, "bob");
+  assert.equal(receipt.state, "responded");
+  assert.equal(receipt.wakeState, "discharged");
+  assert.equal(deliveredViaWakeDoor(f), 1);
 });

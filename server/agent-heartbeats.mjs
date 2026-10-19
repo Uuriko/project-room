@@ -599,6 +599,11 @@ export class AgentHeartbeats {
         : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
+    // WAKE0-2: discharge-on-connect (spec §2.4) — the runtime arrived,
+    // so its outstanding wake intents are moot. Runs BEFORE the page is
+    // composed so a discharged intent never rides (or double-counts on)
+    // the very page its arrival produced.
+    this.dischargeWakeIntents(agentId);
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
     const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
@@ -1104,6 +1109,9 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
+    // WAKE0-2: the poll door discharges on connect exactly like the
+    // heartbeat door (§2.4), before its page is composed.
+    this.dischargeWakeIntents(agentId);
     const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll" });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more,
@@ -1304,6 +1312,54 @@ export class AgentHeartbeats {
     const { enqueued, signal } = this.enqueueWake({ agentId, kind: "wake", roomId, messageId: pointer });
     return Object.freeze({ emitted: enqueued, coalesced: !enqueued,
       reason: enqueued ? "emitted" : "coalesced", signal });
+  }
+
+  // WAKE0-2: discharge-on-connect (wake-step0-spec.md §2.4). A runtime
+  // that connects — heartbeat or wake poll — has arrived; every
+  // outstanding wake intent for the agent is moot, including one whose
+  // triggering mention has already expired (expiry is evaluated on this
+  // surface: the mention surface's timeout flip deliberately does NOT
+  // mutate wake rows — §4 N1 — it only lets receipts compute "expired").
+  // Wake rows only: the underlying signals keep their own ack lifecycle
+  // and still ride the page this connect composes. Each discharged row
+  // is accounted `delivered` through the wake door; the cause (connect /
+  // resolved / expired) stays derivable from mention_states + presence,
+  // so no reason column is spent on it. Runs before page composition on
+  // both connect doors (see heartbeat() and notePoll()).
+  dischargeWakeIntents(agentId) {
+    checkAgentId(agentId);
+    const rows = this.db.prepare(`SELECT signal_id AS signalId, room_id AS roomId FROM agent_wake_signals
+      WHERE agent_id=? AND kind='wake' AND delivered_at IS NULL ORDER BY created_at ASC`).all(agentId);
+    if (rows.length === 0) return Object.freeze({ discharged: 0 });
+    const at = this.now();
+    const mark = this.db.prepare(
+      "UPDATE agent_wake_signals SET delivered_at=? WHERE signal_id=? AND delivered_at IS NULL");
+    let discharged = 0;
+    for (const row of rows) {
+      if (mark.run(at, row.signalId).changes !== 1) continue;
+      discharged += 1;
+      recordWakeEvent(this.db, { at, roomId: row.roomId, store: "signals",
+        event: "delivered", kind: "wake", subjectId: agentId, door: "wake" });
+    }
+    return Object.freeze({ discharged });
+  }
+
+  // WAKE0-2: pointer-scoped discharge for the resolution hook (§2.4) —
+  // the triggering mention was answered, so the summons it caused is
+  // moot even though the runtime never heartbeated. Scoped to the exact
+  // pointer: an intent coalescing re-pointed at a LATER trigger is not
+  // discharged by an older mention resolving.
+  dischargeWakeIntent({ agentId, roomId = null, messageId }) {
+    checkAgentId(agentId);
+    const at = this.now();
+    const info = this.db.prepare(`UPDATE agent_wake_signals SET delivered_at=?
+      WHERE agent_id=? AND room_id IS ? AND message_id=? AND kind='wake' AND delivered_at IS NULL`)
+      .run(at, agentId, roomId, messageId);
+    if (info.changes === 1) {
+      recordWakeEvent(this.db, { at, roomId, store: "signals",
+        event: "delivered", kind: "wake", subjectId: agentId, door: "wake" });
+    }
+    return Object.freeze({ discharged: info.changes });
   }
 
   // Queue a wake for every agent that has registered at least one host.

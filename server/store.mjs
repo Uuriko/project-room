@@ -6178,10 +6178,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        const { woken, signal, wakeSignal } = this.agentHeartbeats.wakeIfOffline({
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
-        if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
+        if (woken && signal) {
+          this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
+          // WAKE0-2: the DM's wake intent rides the same delivery (§2.3).
+          if (wakeSignal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal: wakeSignal });
+        }
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription (the inbox pull carries the
         // body). Fire-and-forget; never fails the command.
@@ -6206,7 +6210,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             // WAKE0-1: bond proposals are wake-causing events (spec
             // §2.1, M4) — the emission rule evaluates a wake intent for
             // the party through the same helper as mentions and DMs.
-            this.agentHeartbeats.maybeEmitWakeIntent({ agentId: partyId, roomId, messageId: bondMessageId });
+            // WAKE0-2: a live intent is journaled through deliverWakePing
+            // like every other cause (§2.3); bond parties are identity
+            // ids on this branch (pushNotify below addresses them so).
+            const bondWake = this.agentHeartbeats.maybeEmitWakeIntent({ agentId: partyId, roomId, messageId: bondMessageId });
+            if (bondWake?.signal) this.agentPlugin.deliverWakePing({ identityId: partyId, signal: bondWake.signal });
             this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
               roomId, id: bondMessageId, ts: this.now() });
           }
@@ -6460,10 +6468,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+      const { woken, signal, wakeSignal } = this.agentHeartbeats.wakeIfOffline({
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
+        // WAKE0-2: the wake intent rides the same journaled agent.wake
+        // delivery as the underlying signal (§2.3) — one door, the
+        // bridge distinguishes the summons by the signal's kind.
+        if (wakeSignal) this.agentPlugin.deliverWakePing({ identityId: identityId, signal: wakeSignal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
@@ -6496,10 +6508,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         try { parsed = JSON.parse(row.body); } catch { parsed = null; }
         return (parsed?.data?.messageId || row.eventId) === replyToId;
       });
-      if (answered) this.db.prepare(
-        `UPDATE mention_states SET state='responded', decided_at=?
-         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
-      ).run(nowMs, roomId, answered.eventId, senderMemberId);
+      if (answered) {
+        const flip = this.db.prepare(
+          `UPDATE mention_states SET state='responded', decided_at=?
+           WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
+        ).run(nowMs, roomId, answered.eventId, senderMemberId);
+        // WAKE0-2: resolution discharge (§2.4) — the mention was
+        // answered, so the wake intent it caused is moot; discharge it
+        // at the transition, pointer-scoped to this trigger (a coalesced
+        // intent re-pointed at a later trigger keeps standing).
+        if (flip.changes > 0) {
+          const agentId = identityIdForWakeMember(this.db, roomId, senderMemberId);
+          if (agentId) {
+            let parsed = null;
+            try { parsed = JSON.parse(answered.body); } catch { parsed = null; }
+            const triggerId = parsed?.data?.messageId || answered.eventId;
+            this.agentHeartbeats.dischargeWakeIntent({ agentId, roomId, messageId: `wake:${triggerId}` });
+          }
+        }
+      }
       // An in-thread reply notifies the agent who wrote the replied-to
       // message: without a row here the reply surfaced nowhere for that
       // agent - no mention inbox entry and no wake. Targeted DMs already

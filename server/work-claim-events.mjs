@@ -144,6 +144,11 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     const wake = typeof store.agentHeartbeats.maybeEmitWakeIntent === "function"
       ? store.agentHeartbeats.maybeEmitWakeIntent({ agentId, roomId, messageId })
       : null;
+    // WAKE0-2: the claim's wake intent rides the same journaled
+    // agent.wake delivery as the claim signal (§2.3).
+    if (wake?.signal && identityId && store.agentPlugin?.deliverWakePing) {
+      store.agentPlugin.deliverWakePing({ identityId, signal: wake.signal });
+    }
     return Object.freeze({ ...result, wakeSignal: wake?.signal ?? null });
   } catch (error) {
     // #3345: the swallow stays (a wake must never roll back the claim),
