@@ -83,7 +83,7 @@ function startFakeHerdr(socketPath) {
 before(async () => {
   // A unix socket path is capped near 104-108 bytes (sun_path). Under a deep TMPDIR (a long worktree path) the
   // socket below would fail to listen with EINVAL, so fall back to /tmp when the full path would not fit.
-  const shortEnough = join(tmpdir(), 'herdr-bridge-unknown-err-XXXXXX', 'sockets', 'a.sock').length <= 100;
+  const shortEnough = Buffer.byteLength(join(tmpdir(), 'herdr-bridge-unknown-err-XXXXXX', 'sockets', 'a.sock')) <= 100;
   dir = mkdtempSync(join(shortEnough ? tmpdir() : '/tmp', 'herdr-bridge-unknown-err-'));
   mkdirSync(join(dir, 'sockets'), { recursive: true });
   const socketPath = join(dir, 'sockets', 'a.sock');
