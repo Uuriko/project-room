@@ -13707,7 +13707,12 @@ paths:
         to timed_out in the read. 403 mention_forbidden when a non-owner
         queries another member. `view=receipts` is the sender's copy of
         mentions they sent: each row was delivered, and read/acked is true
-        once the mentioned member acknowledged it or answered it.
+        once the mentioned member acknowledged it or answered it. Receipts
+        also carry wakeState (WAKE0-2): the wake-on-mention intent the
+        mention caused — summoned while it stands, discharged once the
+        mentioned runtime connected or the mention was answered, expired
+        when the mention timed out first — or null when the mention
+        caused no intent.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
@@ -13725,7 +13730,7 @@ paths:
           description: receipts returns the caller's sent mentions and whether each was read or acked
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] } or, for view=receipts, { roomId, senderId, receipts: [{ messageEventId, memberId, displayName, delivered, state, read, acked, createdAt, timeoutAt, decidedAt }] }" }
+        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] } or, for view=receipts, { roomId, senderId, receipts: [{ messageEventId, memberId, displayName, delivered, state, wakeState, read, acked, createdAt, timeoutAt, decidedAt }] }" }
         '403': { description: mention_forbidden }
   /api/rooms/{roomId}/open-questions:
     get:

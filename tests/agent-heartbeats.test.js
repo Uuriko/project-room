@@ -332,8 +332,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
   const journal = f.store.agentPlugin.webhookJournalFor({ identityId: identity.identityId, subscriptionId: sub.subscriptionId });
   const wakeDeliveries = journal.filter(d => d.eventType === "agent.wake");
-  // Subscription URL + the registered wakeUrl (same ping, same sender).
-  assert.equal(wakeDeliveries.length, 2, "the wake ping is journaled pending for the subscriber and its wakeUrl");
+  // WAKE0-2: BOTH the mention signal and its wake intent journal a ping
+  // — subscription URL + the registered wakeUrl for each (same sender).
+  assert.equal(wakeDeliveries.length, 4, "the mention ping and the wake-intent ping are journaled for the subscriber and its wakeUrl");
   assert.ok(wakeDeliveries.every(d => d.state === "pending"));
   assert.equal(wakeDeliveries[0].attempts, 0, "journal entries are secret-safe and carry no payload data");
   assert.equal(wakeDeliveries[0].data, undefined);
@@ -350,10 +351,11 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   assert.equal(afterDm[1].messageId, "wake:dm-1");
   assert.equal(afterDm[2].kind, "dm");
 
-  // The next heartbeat delivers all three rows (WAKE0-2 will retire
-  // the intent on connect instead; this slice has no discharge yet).
+  // The next heartbeat delivers the two signals: WAKE0-2's
+  // discharge-on-connect retires the wake intent BEFORE the page is
+  // composed, so the intent never rides the page its arrival produced.
   const hb = await (await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret)).json();
-  assert.deepEqual(hb.pendingWakes.map(s => s.messageId), ["mention-1", "wake:dm-1", "dm-1"]);
+  assert.deepEqual(hb.pendingWakes.map(s => s.messageId), ["mention-1", "dm-1"]);
 });
 
 test("fresh wakeable agents retain mentions while non-agent mentions queue nothing", async t => {

@@ -144,10 +144,13 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
   f.say("urgent @reviewer");
   await f.store.agentHeartbeats.flushPushes();
   const eBeat = await f.post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, reviewer.secret);
-  // WAKE0-1: reviewer is wakeable-with-push and stale, so the mention
-  // also emits a wake intent — the page carries mention + intent (2).
-  assert.equal(eBeat.value.pendingWakes.length, 2, "the durable signal survived the dead doorbell");
-  await f.post("/api/agent-heartbeats/ack", { signalIds: eBeat.value.pendingWakes.map(w => w.signalId) }, reviewer.secret);
+  // WAKE0-1/2: reviewer is wakeable-with-push and stale, so the mention
+  // also emitted a wake intent — and this heartbeat's discharge-on-
+  // connect retired it before the page composed, so the page carries
+  // the mention alone (the intent is in the emitted/acked-stock tally
+  // below as a discharged row, never as an ack).
+  assert.equal(eBeat.value.pendingWakes.length, 1, "the durable signal survived the dead doorbell");
+  await f.post("/api/agent-heartbeats/ack", { signalIds: [eBeat.value.pendingWakes[0].signalId] }, reviewer.secret);
 
   // Phase F — truncation parity at 55 pending, then ack-and-repeat drain.
   // (Posts are spread in fake time: the chat flood guard is real and a
@@ -182,15 +185,17 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
     stock: acct.stock, failures: acct.failures.byReason, loss: acct.loss,
   }, null, 1));
   // Signals tally: A1 + C2 + D1 + E2 (mention + its WAKE0-1 wake
-  // intent) + F55 = 61 emitted, all acked.
+  // intent) + F55 = 61 emitted. 60 were acked; the intent was
+  // discharged on connect (WAKE0-2), so it closes the stock count
+  // without ever entering the ack tally.
   assert.equal(s.emitted, 61);
   assert.equal(s.coalesced, 0);
   assert.equal(s.failed, 0, "fabric loss: no owed attempt errored on a swallowing path");
   assert.equal(s.suppressed_no_identity, 1, "exactly the ghost's claim wake");
-  assert.equal(ackedTotal, 61, "every emitted signal was acked");
+  assert.equal(ackedTotal, 60, "every acked signal was acked (the discharged intent is not an ack)");
   assert.equal(acct.stock.signalsPending, 0);
   assert.equal(acct.stock.signalsAcked, 61);
-  assert.equal(s.ackedByDoor.rest, 60);
+  assert.equal(s.ackedByDoor.rest, 59);
   assert.equal(s.ackedByDoor.mcp, 1);
   assert.ok(s.deliveredByDoor.heartbeat >= 51 && s.deliveredByDoor.poll >= 57 && s.deliveredByDoor.mcp >= 51,
     "deliveries counted on every pull door");
