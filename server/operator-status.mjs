@@ -78,8 +78,26 @@ export function operatorStatus(store, options = {}) {
     // without this an operator sees which room is red but not which event
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
-    messagesBackfillBlocks: messagesBackfillBlocks(store)
+    messagesBackfillBlocks: messagesBackfillBlocks(store),
+    // Rooms the patrol parked (guardian census F5): stored state the
+    // patrol cannot process, named with the cursor, the head it parked
+    // at, and the error class — the projection-repair list for
+    // /api/operator/projection/plan. Operator-token gated for the same
+    // reason as the backfill blocks: room ids stay off public surfaces.
+    patrolBlocks: patrolBlocksView(store)
   };
+}
+
+function patrolBlocksView(store, limit = 25) {
+  try {
+    if (typeof store.patrolBlocks !== "function") return [];
+    return store.patrolBlocks().slice(0, limit).map(block => ({
+      ...block, error: typeof block.error === "string" ? block.error.slice(0, 240) : null
+    }));
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
 }
 
 function messagesBackfillBlocks(store, limit = 25) {
