@@ -994,7 +994,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     });
     await page.goto(`${origin}/?account=1`);
     await signInFixture(page, accountKey);
-    await page.locator("#inbox-panel").waitFor({ state: "visible" });
+    await page.locator("#account-rooms-panel").waitFor({ state: "visible" });
     const chooseRoom = async roomId => {
       await clickChrome(page, await page.locator("#main").isVisible() ? "#choose-room" : "#nav-rooms");
       await page.locator(`[data-account-room="${roomId}"]`).click();

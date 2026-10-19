@@ -38,8 +38,8 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
       await ensureSidebarOpen(page);
       assert.equal(await page.locator(width > 940 ? '#sidebar-workspace #workspace-nav' : '.app-shell > #workspace-nav').isVisible(), true);
       await ensureSidebarClosed(page);
-      await page.locator('#nav-inbox').click();
-      await page.locator('#inbox-panel').waitFor();
+      await clickChrome(page, '#nav-rooms');
+      await page.locator('#account-rooms-panel').waitFor();
       assert.equal(await page.locator('.app-shell > #workspace-nav').isVisible(), true);
       await page.locator('#nav-rooms').click();
       if (await page.locator('#account-rooms-panel').isVisible()) await page.locator('#account-rooms-list button').first().click();

@@ -3,7 +3,7 @@ import { installAccountSetup } from './account-setup-ui.js';
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from "./inbox-send-ui.js";
 import { installQuarantineReview } from "./inbox-quarantine-ui.js";
-import { validId } from "./events.js";
+import { validId } from "../../../src/events.js";
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);

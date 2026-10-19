@@ -16,7 +16,7 @@
 //    ids }; the test supplies a stub document, fake elements, and a fake api.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installInboxDirectSend } from "../src/inbox-send-ui.js";
+import { installInboxDirectSend } from "../archive/deferred-email/src/inbox-send-ui.js";
 
 const IDS = { form: "ds-form", channel: "ds-channel", to: "ds-to", subject: "ds-subject", body: "ds-body", send: "ds-send", status: "ds-status" };
 const receipt = { contractVersion: 1, send: { id: "send-1", status: "sent", channel: "gmail" } };

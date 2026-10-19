@@ -12,6 +12,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
   let resultView = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
+  function usableText(view) {
+    return view && view === resultView && view.loaded && !view.withdrawn && !view.error
+      && sameSession(view.generation, view.roomId, view.memberId)
+      && !getState().messages.find(message => message.id === view.textMessageId)?.deletedAt;
+  }
   function mountResultReader() {
     if (!resultView) return;
     const host = resultView.fromResults
@@ -46,6 +51,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-discuss").disabled = !canDiscuss();
     retry.hidden = !view.error && !view.retrying;
     retry.disabled = !view.error;
+    for (const action of ["result-copy-text", "result-download"]) {
+      resultElement(action).hidden = !usableText(view);
+      resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying);
+    }
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
   function closeResult(restore = true) {
@@ -54,6 +63,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
+    resultElement("result-use-status").textContent = "";
+    resultElement("result-copy-text").hidden = true;
+    resultElement("result-download").hidden = true;
     clearResultComparison(resultElement("result-diff"));
     if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
       if (view.fromResults) {
@@ -65,6 +77,32 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
+  resultElement("result-copy-text").textContent = uiText("result.copyText");
+  resultElement("result-download").textContent = uiText("result.download");
+  resultElement("result-copy-text").addEventListener("click", async () => {
+    const view = resultView;
+    if (!usableText(view) || view.copying) return;
+    view.copying = true; resultStatus();
+    resultElement("result-use-status").textContent = "";
+    try {
+      await navigator.clipboard.writeText(view.body);
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copied");
+    } catch {
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copyFailed");
+    } finally {
+      view.copying = false;
+      if (resultView === view) resultStatus();
+    }
+  });
+  resultElement("result-download").addEventListener("click", () => {
+    const view = resultView;
+    if (!usableText(view)) return;
+    const url = URL.createObjectURL(new Blob([view.body], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = "result.txt";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
   resultElement("result-discuss").textContent = uiText("result.discuss");
   resultElement("result-discuss").addEventListener("click", () => {
     const message = resultDiscussionMessage(resultView);
@@ -97,6 +135,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
       view.discussionId = message?.id; view.body = value.result.text.body;
+      view.textMessageId = value.result.text.messageId;
       const original = getState().messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
       view.originalId = original?.id; resultElement("result-original").hidden = !original;
       view.loaded = true; view.retrying = false;
@@ -124,6 +163,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
+      resultElement("result-copy-text").hidden = true;
+      resultElement("result-download").hidden = true;
+      resultElement("result-use-status").textContent = "";
       const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
       mountResultReader(); resultReader.hidden = false;

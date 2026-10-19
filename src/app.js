@@ -45,8 +45,7 @@ import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
-import { installInbox } from "./inbox-ui.js";
-import { nameBeforeFirstRoom } from "./account-setup-ui.js";
+import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
@@ -120,8 +119,7 @@ if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
 $("#static-hero")?.remove();
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
-  const target = !$("#inbox-panel").hidden ? "#inbox-heading"
-    : !$("#main").hidden ? "#conversation-title"
+  const target = !$("#main").hidden ? "#conversation-title"
     : $("#auth-panel").hidden ? "#connection-status"
     : "#auth-title";
   $(target).focus();
@@ -327,7 +325,7 @@ let openQuestionsUI = null;
 let retentionUI = null;
 let bountyBoardUI = null;
 let instructionsUI = null;
-let inboxUI = null;
+let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
@@ -476,7 +474,7 @@ const client = new RoomClient({
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
-    inboxUI?.sync();
+    workspaceUI?.sync();
     if (firstSnapshot) {
       // JDOT-MEMBER-PERMS-UI begin
       // render() synchronizes the existing attention card for owners/admins.
@@ -563,7 +561,7 @@ const client = new RoomClient({
       clearPrivateWorkspace({ preservePending: leavingPage });
       if (pendingSignout || endedContext === "account-switch") clearBrowserSessionHints();
     }
-    else inboxUI?.detachRoom();
+    else workspaceUI?.detachRoom();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
@@ -593,7 +591,7 @@ const client = new RoomClient({
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
       if (sessionExpired && form.id === "message-form") continue;
-      if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
+      form.reset();
     }
     if (!humanAuthBusy) signinUI?.clear();
     showSigninMethods();
@@ -763,13 +761,9 @@ portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: m
   notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
 } });
 resultCopyUI = installResultCopy({ client, getState: () => state });
-inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onOpenWork: id => revealWork(id),
-  onAccountEnded: endAccountAccess, onRooms: () => loadAccountRooms(),
-  onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); },
-  onShared: async (receipt, isCurrent) => {
-  try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
-  catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
-} });
+workspaceUI = installWorkspaceNavigation({ account: accountClient, getRoom: () => state,
+  onRooms: () => loadAccountRooms(),
+  onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // Account-session restore flight: declared before the sign-in UI mounts.
 // The magic-link auto-redeem runs synchronously during mount (page load
@@ -917,7 +911,7 @@ async function openAccountSettings() {
   setSessionMenuOpen(false);
   const owned = accountClient.session;
   if (!owned?.authenticated) return;
-  inboxUI.showRoomList();
+  workspaceUI.showRoomList();
   const details = $("#account-settings");
   details.open = true;
   await mountAccountSettings();
@@ -947,7 +941,7 @@ function filterAccountRooms() {
 $("#account-rooms-search").addEventListener("input", filterAccountRooms);
 function clearPrivateWorkspace(options) {
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
-  inboxUI?.reset(options); roomListVersion++;
+  workspaceUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
   $("#account-rooms-search").value = ""; $("#account-rooms-filter-status").textContent = "";
   accountSettingsUI.reset();
@@ -974,7 +968,7 @@ function showRoomAccessNotice() {
   status.textContent = ROOM_ACCESS_NOTICE;
   status.hidden = false;
 }
-async function openRememberedRoomOrInbox() {
+async function openRememberedRoomOrList() {
   const roomId = rememberedRoomId();
   if (!roomId) { showAccountWorkspace(); return false; }
   try {
@@ -1007,7 +1001,7 @@ async function openPersonalRoomAfterSignup() {
   const roomId = body?.room?.id;
   if (!roomId) { showAccountWorkspace(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
+  try { await client.restore(roomId); workspaceUI.showRooms(); workspaceUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
@@ -1019,8 +1013,8 @@ async function landAfterSignIn() {
     rememberedRoom: rememberedRoomId()
   });
   if (!target.explicit) {
-    if (target.roomId) await openRememberedRoomOrInbox();
-    // ?account=1 is the inbox. A sign-in with no room and no account home
+    if (target.roomId) await openRememberedRoomOrList();
+    // ?account=1 opens the room list. A sign-in without a room target
     // opens that account's room after the name step.
     else if (accountHomeFromLocation()) showAccountWorkspace();
     else await openPersonalRoomAfterSignup();
@@ -1067,7 +1061,7 @@ function showAccountWorkspace() {
     setConnectionStatus("Room not open");
     $(".connection-bar").hidden = true;
   }
-  inboxUI.sync();
+  workspaceUI.sync();
   if (!state && startRoomIntent && !initialInvitationFragment && !initialJoinFragment && consumeStartRoomIntent()) {
     startRoomFlight = openStartedRoom().finally(() => { startRoomFlight = null; });
     return;
@@ -1079,21 +1073,21 @@ function showAccountWorkspace() {
   }
   // --- end GR2 ---
   if (!state) {
-    if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
-    else inboxUI.open();
+    if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) workspaceUI.showRoomList();
+    else workspaceUI.open();
   }
 }
 async function openStartedRoom() {
   const owned = accountClient.session;
-  try { await inboxUI.askSetupName?.(); } catch { /* setup is optional; the room still opens */ }
+  try { await workspaceUI.askSetupName?.(); } catch { /* setup is optional; the room still opens */ }
   if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
   const roomId = body?.room?.id;
-  if (!roomId) { inboxUI.open(); return; }
+  if (!roomId) { workspaceUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
-  catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
+  try { await client.restore(roomId); workspaceUI.showRooms(); workspaceUI.refreshSetup?.(); }
+  catch { if (accountClient.session === owned && !state) { workspaceUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
   if (accountCheckFlight || !accountClient.session?.authenticated || signoutLoading || invitationIsCommitting() || leavingPage) return accountCheckFlight;
@@ -1161,7 +1155,7 @@ async function loadAccountRooms(more = false) {
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
 const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
-  askName: () => inboxUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
+  askName: () => workspaceUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a
@@ -1192,6 +1186,15 @@ async function ensureDefaultRoom() {
 }
 async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
+  if (state?.room.id === roomId && session?.roomId === roomId) {
+    // Returning to the same live session must not discard its drafts or retries.
+    const url = new URL(location.href);
+    url.searchParams.set("room", roomId); url.searchParams.delete("account");
+    url.hash = "#pr-view/rooms";
+    if (url.href !== location.href) history.pushState(null, "", url.pathname + url.search + url.hash);
+    workspaceUI.showRooms();
+    return;
+  }
   if (state) saveComposer();
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
@@ -1203,7 +1206,7 @@ async function openAccountRoom(roomId) {
   try { await client.restore(roomId); }
   catch {
     if (accountClient.session !== owned) return;
-    showAccountWorkspace(); inboxUI.showRoomList();
+    showAccountWorkspace(); workspaceUI.showRoomList();
     $("#account-rooms-status").textContent = "Couldn’t open that room. Refresh rooms to retry.";
   }
 }
@@ -1291,7 +1294,7 @@ $("#account-room-form").addEventListener("submit", async event => {
         : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
-$("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
+$("#choose-room").addEventListener("click", () => workspaceUI.showRoomList(true));
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
@@ -1793,7 +1796,7 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
   try {
     const restored = await client.restore(roomId);
     if (!restored) throw new Error("The browser account changed before the Room could open");
-    inboxUI.showRooms();
+    workspaceUI.showRooms();
     Object.assign(invitation, { phase: "idle", preview: null, redemptionId: null, opener: null, openerSelection: null });
     notice(message);
     queueMicrotask(() => $("#conversation-title").focus({ preventScroll: true }));
@@ -3046,14 +3049,14 @@ document.addEventListener("click", event => {
   if (resume && state && !busy && !requestReading) {
     const saved = drafts.entries.get(resume.dataset.resumeCredit);
     if (!saved?.mode?.resultEventId || !validReplyDraft(saved.mode, state)) return;
-    inboxUI?.showRooms(); switchThread(saved.threadId); setRequestMode(saved.mode);
+    workspaceUI?.showRooms(); switchThread(saved.threadId); setRequestMode(saved.mode);
     $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" }); return;
   }
   const button = event.target.closest("[data-ask-credit]");
   if (!button || !state || busy || requestReading) return;
   const question = creditQuestion(state, button.dataset.askCredit, session.member.id, button.dataset.resultEvent);
   if (!question) { notice("Result changed. Open it again."); return; }
-  inboxUI?.showRooms();
+  workspaceUI?.showRooms();
   switchThread(question.replyToId ? conversation.rootById.get(question.replyToId) : null);
   setRequestMode(question.mode, question);
   $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
@@ -3089,7 +3092,7 @@ function revealMessage(id) {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   if ($("#activity-dialog")?.open) $("#activity-dialog").close();
   if ($("#later-dialog")?.open) $("#later-dialog").close();
-  inboxUI?.showRooms();
+  workspaceUI?.showRooms();
   const message = conversation.byId.get(id);
   if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
@@ -3111,7 +3114,7 @@ function revealMessage(id) {
 }
 function focusRecord(node) {
   if (!node) return;
-  inboxUI?.showRooms();
+  workspaceUI?.showRooms();
   node.focus({ preventScroll: true });
   node.scrollIntoView({ block: "nearest", behavior: "instant" });
 }
@@ -3125,7 +3128,7 @@ function revealWorkTimeline(id) {
   if (!state?.workItems[id] || busy) return null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-  inboxUI?.showRooms();
+  workspaceUI?.showRooms();
   switchThread(null);
   const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
   if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
@@ -3318,7 +3321,7 @@ async function restoreWorkOrigin(ticket) {
   const epoch = ++workNavigationEpoch;
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
-  inboxUI?.showRooms();
+  workspaceUI?.showRooms();
   // #3795: a claim record's destination is the board itself; returning to an
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
@@ -3379,7 +3382,7 @@ function returnToCurrentRoom() {
   history.replaceState(workHistoryState(), "", destination.pathname + destination.search + destination.hash);
   updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
-  if (workNavigationContext()) { inboxUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
+  if (workNavigationContext()) { workspaceUI?.showRooms(); switchThread(null); focusRecord($("#conversation-title")); }
   syncWorkReturnControl();
 }
 function replayWorkNavigation() {
@@ -3495,14 +3498,14 @@ function revealLocationHash() {
     // whose existing room-switch flow confirms pending writing and access.
     if (state && requestedRoom && requestedRoom !== session.roomId && hash === "#pr-view/rooms") {
       history.replaceState(null, "", "?account=1#pr-view/rooms");
-      inboxUI?.showRoomList();
+      workspaceUI?.showRoomList();
       return;
     }
-    if (hash === "#pr-view/room-list") { inboxUI?.showRoomList(); return; }
-    if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
+    if (hash === "#pr-view/room-list") { workspaceUI?.showRoomList(); return; }
+    if (hash === "#pr-view/inbox") { workspaceUI?.showRoomList(); return; }
     if (hash === "#pr-view/rooms") {
-      if (accountHomeFromLocation()) inboxUI?.showRoomList();
-      else inboxUI?.showRooms();
+      if (accountHomeFromLocation()) workspaceUI?.showRoomList();
+      else workspaceUI?.showRooms();
       return;
     }
   }
@@ -3855,7 +3858,7 @@ function restoreInvitationSignin() {
 }
 function confirmInvitationSignin() {
   if (invitationIsCommitting() || !invitation.secret) return false;
-  const hasDraft = drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft()
+  const hasDraft = drafts.hasText() || portableWorkUI?.hasDraft()
     || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending()
     || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
   return !hasDraft || window.confirm("Signing in clears unsent drafts and private setup. Continue?");
@@ -4121,7 +4124,6 @@ $("#account-profile-dialog").addEventListener("close", () => {
 $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;
-    if (inboxUI.hasPending() && !window.confirm("Log out and clear unsent drafts? Saved replies stay.")) return;
     recovery.clear();
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
@@ -4142,7 +4144,7 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Log out and clear drafts and the pending retry? The action may already be saved." : "Log out and clear unsent drafts and private setup on this device?")) return;
   }
   recovery.clear();
@@ -4912,7 +4914,7 @@ $("#clear-search").addEventListener("click", () => {
 // Resolve the current target again on selection; an open menu is not authority.
 function ownsRoomActions(context = roomActionsContext) {
   return Boolean(state && session && client.session === session && client.generation === roomGeneration
-    && client.ownsAccountSession() && !$("#main").hidden && $("#inbox-panel").hidden
+    && client.ownsAccountSession() && !$("#main").hidden
     && (!context || context.session === session && context.generation === client.generation));
 }
 function revealPeopleChrome() {
@@ -4941,7 +4943,6 @@ function roomActionEntries() {
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
-    { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", always: true },
     { id: "landing", label: "Landing queue", words: "land merge pull request review queue", always: true },
     { id: "referrals", label: "Referrals", words: "referral invite share link leaderboard", always: true },
@@ -5100,11 +5101,6 @@ function chooseRoomAction(id) {
     notice("The owner connects assistants from People. Instinct and Muse can Use my AI without a key.");
     return;
   }
-  if (id === "how-inbox") {
-    if (!$("#workspace-nav").hidden) { $("#nav-inbox").click(); return; }
-    notice("Sign in with Google or email to open your Inbox.");
-    return;
-  }
   if (id === "catch-up") { openCatchUp(); return; }
   if (id === "activity") { closeRoomActions(false); openActivity(); return; }
   if (id === "later") { closeRoomActions(false); openLater(); return; }
@@ -5163,11 +5159,12 @@ const READER_SCROLL_MS = 1000;
 let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
-const noteReaderScroll = () => { readerScrollAt = performance.now(); };
+const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
 addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
 $("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
+$("#message-list").addEventListener("focusin", () => timelinePin.clear());
 for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
@@ -5282,7 +5279,9 @@ $("#pinned-list").addEventListener("click", e => {
 // newest message (assistant panel, pill, composer) keeps it there (R68-1).
 if (globalThis.ResizeObserver) new ResizeObserver(() => {
   const list = $("#message-list");
-  if (timelinePin.holds(list.dataset.view, list)) stickPinnedTimeline(list);
+  // Layout can clamp the offset more than once before this callback. Reader
+  // input and focused navigation release ownership; intermediate pixels don't.
+  if (timelinePin.tracks(list.dataset.view)) stickPinnedTimeline(list);
 }).observe($("#message-list"));
 // The pin moving the list is not the reader scrolling, so it never marks
 // anything read: its scroll event is skipped, and where the move hid a layout
@@ -5787,7 +5786,7 @@ async function startRoomFromTemplate(slug) {
   clearTemplateRoom();
 }
 async function showAgentInvitePicker(agentId) {
-  inboxUI.showRoomList();
+  workspaceUI.showRoomList();
   const box = $("#acq-invite");
   const status = $("#acq-invite-status");
   const rooms = $("#acq-invite-rooms");
@@ -7853,7 +7852,7 @@ shareLinksUI = installShareLinks({ client, accountClient,
     configureAuthPanel(roomMode ? null : roomId);
     const restored = await client.restore(roomMode ? null : roomId);
     if (!restored) throw new Error("Browser identity changed. Reopen the invitation.");
-    inboxUI.showRooms();
+    workspaceUI.showRooms();
   }
 });
 configureAuthPanel();
@@ -7954,7 +7953,7 @@ const ready = (async () => {
     let account = null;
     try { account = await ensureAccountSession(); } catch { account = null; }
     if (account?.authenticated) {
-      const opened = await openRememberedRoomOrInbox();
+      const opened = await openRememberedRoomOrList();
       if (opened) return;
       syncSessionMenu();
       return;

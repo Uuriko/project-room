@@ -334,7 +334,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null, gmailAuth = null, directSendFetch = null,
+  googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
@@ -381,7 +381,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
-  const gmail = gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
+  const gmail = enableDeferredInbox && gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
   // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
   // honestly (mail_not_configured) and never pretend a code was sent.
   const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
@@ -1236,6 +1236,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // 405 Allow on a known path. The inbox mount and the auth group keep
       // their own session and method checks. Anything else falls through
       // to the legacy chain below until that chain is empty.
+      // The private email workspace is excluded from v1. Preserve stored data
+      // and isolated compatibility fixtures without exposing import/send flows.
+      if (!enableDeferredInbox && (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")
+        || url.pathname.startsWith("/api/auth/gmail/"))) reject(404, "not_found", "Not found");
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.

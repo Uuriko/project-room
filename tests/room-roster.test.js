@@ -201,7 +201,7 @@ test("Add agent markup lists the four roster names", () => {
   }
   assert.match(html, /Muse app or WhatsApp/);
   assert.match(html, /id="agent-access-hint"/);
-  assert.match(html, /id="inbox-heading"/);
+  assert.doesNotMatch(html, /id="inbox-heading"/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
   assert.match(html, /id="room-tools"/);
@@ -236,7 +236,7 @@ test("Add agent markup lists the four roster names", () => {
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
-  assert.match(app, /How to open Inbox/);
+  assert.doesNotMatch(app, /How to open Inbox/);
   assert.match(app, /#auth-title.*PROJECT ROOM/);
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);

@@ -86,13 +86,51 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-copy-text").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "inline reading does not trap keyboard navigation");
   await f.page.keyboard.press("Shift+Tab");
-  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
   assert.equal(await f.page.locator(`[data-read-result='${f.workItemId}']`).evaluate(el => el === document.activeElement), true);
+});
+
+test("exact result copy preserves text, reports failure and ignores a late completion after closing", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete();
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
+  await f.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async text => { window.copiedResult = text; throw new Error("Permission denied"); }
+    } });
+  });
+  await f.page.locator("#result-copy-text").click();
+  await f.page.getByText("Could not copy. Retry or download the text.", { exact: true }).waitFor();
+  assert.equal(await f.page.evaluate(() => window.copiedResult), f.body);
+  await f.page.evaluate(() => { navigator.clipboard.writeText = text => {
+    window.copiedResult = text; return new Promise(resolve => { window.finishCopy = resolve; });
+  }; });
+  await f.page.locator("#result-copy-text").click();
+  assert.equal(await f.page.locator("#result-copy-text").isDisabled(), true);
+  await f.page.locator("#close-result").click();
+  await f.page.evaluate(() => window.finishCopy());
+  assert.equal(await f.page.locator("#result-use-status").textContent(), "");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
+  await f.page.evaluate(() => { navigator.clipboard.writeText = async text => { window.copiedResult = text; }; });
+  await f.page.locator("#result-copy-text").click();
+  await f.page.getByText("Copied", { exact: true }).waitFor();
+  assert.equal(await f.page.evaluate(() => window.copiedResult), f.body);
+  const downloaded = f.page.waitForEvent("download");
+  await f.page.locator("#result-download").click();
+  const download = await downloaded;
+  assert.equal(download.suggestedFilename(), "result.txt");
+  const chunks = []; for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+  assert.equal(Buffer.concat(chunks).toString("utf8"), f.body);
 });
 
 test("native result uncertain save resumes exact text and command", { timeout: 25000 }, async t => {
@@ -382,7 +420,7 @@ test("a room session that ends under a live account says so and points back to t
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${origin}/?account=1`);
   await signInFixture(page, f.store.issueAccountAccessKey("admin-account"), { returnTo: `${origin}/?account=1` });
-  await page.locator("#inbox-panel").waitFor();
+  await page.locator("#account-rooms-panel").waitFor();
   await clickChrome(page, "#nav-rooms");
   await page.locator('[data-account-room="commons"]').click();
   await page.locator("#main").waitFor({ state: "visible" });

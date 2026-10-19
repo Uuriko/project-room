@@ -134,6 +134,12 @@ export async function clickChrome(page, selector) {
   await control.click();
 }
 
+export async function returnToRoom(page, roomId = "commons") {
+  await clickChrome(page, "#nav-rooms");
+  await page.locator(`[data-account-room="${roomId}"]`).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+}
+
 // Work cards expose one primary action; secondary actions use the native More
 // disclosure. Use real input so visibility, focus, and keyboard behavior matter.
 export async function clickWorkAction(card, action, { keyboard = false } = {}) {
