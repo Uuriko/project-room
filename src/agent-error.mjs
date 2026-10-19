@@ -806,6 +806,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+    // The needs-attention rollup refusal names the rollup, not invites: the
+    // generic owner_required hint below (guest invite / Add agent) describes
+    // a different operation and sends the caller to the wrong fix
+    // (UT-HUMAN F4). Key on the refusal's own message, the same shape as the
+    // work_claims_not_permitted branch above.
+    if (reasonCode === "owner_required" && /attention rollup/i.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "owner_required",
+        hint: "Only the room owner can view the attention rollup.",
+        next: [tool("room_check_access"), command("Ask the room owner to open the needs-attention rollup and act on its items; this identity cannot read it.")]
+      };
+    }
     return {
       status: "action_required",
       reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
