@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "sourceRevision": "1a479e63d3380c95f48a5eb2a679988d70a4b052",
+  "base": "e073d685",
+  "status": "locally-qualified-with-disclosed-baseline-failures",
+  "changes": [
+    "Explicit fail-closed notarized Mac packaging; public signing deferred by John",
+    "PWA notification same-origin boundary and cache ownership",
+    "Authoritative Durable Object email policy in readiness; production smoke rejects unknown/relaxed/edge-only policy",
+    "Optional WebKit execution of the existing human/agent browser rehearsal"
+  ],
+  "focused": {
+    "macDistribution": 10,
+    "pwa": 12,
+    "healthAndDeploy": 61,
+    "workers": 8,
+    "allPassed": true,
+    "rollbackAndProductionSmoke": 90
+  },
+  "affected": {
+    "tests": 303,
+    "passed": 303,
+    "failed": 0,
+    "durationMs": 15937.5575
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 291
+  },
+  "openapi": "passed",
+  "native": {
+    "developmentBuildRevision": "e5df66f9dbd64b21b230e0bf2fe26f7a2b08b80f",
+    "sourceDirty": false,
+    "localToolsGroupsPassed": 6,
+    "authLifecyclePassed": true,
+    "actualProviderAccountUsed": false,
+    "providerAuthorizations": 1,
+    "desktopRedemptions": 1,
+    "embeddedProviderRequests": 0,
+    "actualAccountSnapshots": 15,
+    "firstUsePassed": true,
+    "closeReopenDraftPassed": true,
+    "htmlExportContentVerified": true,
+    "attachmentBytesVerified": [
+      0,
+      1,
+      127,
+      128,
+      255,
+      10
+    ],
+    "childFrameAndDataDownloadsRefused": true,
+    "publicSigning": "deferred-by-user"
+  },
+  "priorSimulatedAcceptance": {
+    "source": "1d03bf6871a39300036656edf9418cfd9ef32052",
+    "browserPassed": 50,
+    "mobileAccessibilityPassed": 18,
+    "realHumanParticipants": false,
+    "physicalPhone": false
+  },
+  "observedEarlierAffectedFailure": {
+    "test": "openQuestionRetention does not scan every DM per open question",
+    "measuredMs": 1131,
+    "context": "PWA-only affected run under concurrent broad qualification; algorithm unchanged",
+    "isolatedFollowup": {
+      "tests": 24,
+      "passed": 24,
+      "failed": 0
+    },
+    "thresholdWeakened": false
+  },
+  "fullSuite": {
+    "status": "completed-with-failures",
+    "log": "/tmp/cross-platform-full.log",
+    "sourceRevision": "1a479e63d3380c95f48a5eb2a679988d70a4b052",
+    "subsequentChanges": "Optional browser test engine selection and Mac distribution architecture verification; targeted WebKit28 and packaging10 pass. Web/server/Worker runtime unchanged.",
+    "tests": 11237,
+    "passed": 11203,
+    "failed": 26,
+    "skipped": 8,
+    "durationMs": 514279.932625,
+    "baselineFailures": 24,
+    "newFailures": 2,
+    "newFailureCause": "Rollback workflow fixtures lacked the newly required authoritative readiness policy.",
+    "repair": "Valid readiness fixtures updated; six fail-closed workflow cases added; combined rollback/production smoke follow-up passed 90/90. No production check relaxed."
+  },
+  "webkitRoleRehearsal": {
+    "tests": 28,
+    "passed": 28,
+    "failed": 0,
+    "durationMs": 168439.853458,
+    "command": "ROOM_BROWSER_ENGINE=webkit node --test scripts/human-experience-browser-check.mjs",
+    "physicalPhone": false
+  },
+  "deployment": "not-deployed",
+  "externalDeferrals": [
+    "Developer ID and notarized public Mac distribution (explicit user decision)",
+    "Real-human study",
+    "Physical iPhone/Android and actual Mac sleep/wake"
+  ],
+  "finalTargetedSourceRevision": "f5ac5301cea47dd7d3031ad73b91db40eb2297a1",
+  "contract": "Non-unit contract gates passed. Its local unit run completed with only the 24 previously recorded Mac host-policy baseline failures.",
+  "contractUnitFollowup": {
+    "tests": 11244,
+    "passed": 11212,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 378427.519917,
+    "log": "/tmp/cross-platform-contract-full.log",
+    "baselineFailures": 24,
+    "newFailures": 0,
+    "provenance": "Command started on f9dd98ae; rollback fixture repair was applied during execution before those tests loaded. Completed source is 617d939b; focused rollback/smoke run independently passed 90/90. Not represented as a clean immutable-head run."
+  },
+  "pwaBrowser": {
+    "tests": 3,
+    "passed": 3,
+    "failed": 0,
+    "durationMs": 5851.770292,
+    "sourceRevision": "617d939b",
+    "log": "/tmp/cross-platform-pwa-browser.log"
+  }
+}

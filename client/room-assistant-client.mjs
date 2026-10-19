@@ -19,6 +19,8 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
     assistant: () => call("GET", "/assistant"),
     act: input => call("POST", "/assistant", input),
     message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
+    files: async () => (await call("GET", "/files")).files ?? [],
+    file: async id => (await call("GET", `/files/${encodeURIComponent(id)}`)).attachment,
     recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],
     members: async () => (await call("GET", ""))?.state?.members ?? {},
     post: (messageId, body, extra = {}) => call("POST", "/commands", { id: stable("cmd", messageId), type: "message.posted", data: { messageId, body, ...extra } })
