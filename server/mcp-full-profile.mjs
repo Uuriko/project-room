@@ -552,7 +552,10 @@ function callTrustTool(store, roomId, auth, name, rest) {
     // key pinning: the tier still holds, the key binding does not.
     return {
       roomId, identityId, self,
-      level: attestation ? "verified" : "unverified",
+      // TM-1: the level is the CONFERRED tier (attester must be anchored);
+      // an unanchored attestation is returned as provenance but its level
+      // reads "unverified".
+      level: store.agentPlugin.verificationLevel(identityId),
       attestation: attestation ?? null,
       keyFingerprint: attestation?.keyFingerprint ?? null,
       keyBinding: attestation?.keyFingerprint ? "pinned" : "unpinned",

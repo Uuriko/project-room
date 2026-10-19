@@ -523,8 +523,24 @@ test("auto-approve: verified-only rooms never auto-approve the unverified", asyn
   }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /verified/);
-  // A verified identity in the same room is approved inline.
-  store.agentPlugin.verifyIdentity({ identityId: identity.identityId, verifiedBy: "owner" });
+  // A verified identity in the same room is approved inline. TM-1: the
+  // attestation must come from an ANCHORED attester to confer the tier —
+  // a bare member-id stand-in attester confers nothing. SF2-TM1-FIXUP:
+  // anchoring is the paid-settlement leg ONLY (the vouching/operator
+  // leg was removed — no operator-verification register exists), so
+  // this attester is anchored by a paid settlement with a distinct
+  // operator outside the pair.
+  const attester = store.identities.create("Anchored attester");
+  const outside = store.identities.create("Outside operator");
+  store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+    .run("commons", attester.identityId, attester.identityId, Date.now());
+  store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+    .run("commons", outside.identityId, outside.identityId, Date.now());
+  store.db.prepare(`INSERT INTO bounty_records
+    (bounty_id, room_id, title, criteria, amount_millis, poster, claimant, state, state_changed_ms, deadline_ms, created_at, updated_at)
+    VALUES ('b_ar_anchor', 'commons', 'anchor settlement', 'work done', 5000, ?, ?, 'paid', 0, 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
+    .run(attester.identityId, outside.identityId);
+  store.agentPlugin.verifyIdentity({ identityId: identity.identityId, verifiedBy: attester.identityId });
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_verified"
