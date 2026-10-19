@@ -145,6 +145,8 @@ const PROBES = {
   // honest zeros on an empty store.
   "GET /api/public/front-door": [undefined, 200],
   "HEAD /api/public/front-door": [undefined, 200],
+  "GET /.well-known/agent-skills/connect/SKILL.md": [undefined, 200],
+  "HEAD /.well-known/agent-skills/connect/SKILL.md": [undefined, 200],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
