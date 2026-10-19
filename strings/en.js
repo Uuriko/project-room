@@ -470,5 +470,14 @@ export default {
   "share.linkReady": "{fragmentA} link ready — the link shown above is the one to share.",
   "share.linkCreated": "{fragmentA} link created — copy this link to share it.",
   "join.stepTwo": "Account created — you’re signed in. Step 2 of 2: confirm the name people in this room will see, then choose “Join room” to finish.",
-  "people.status.signed_out_for_good": "Signed out for good"
+  "people.status.signed_out_for_good": "Signed out for good",
+  "composer.file.choose": "Choose file again",
+  "composer.file.chooseLabel": "Choose {name} again",
+  "composer.file.retry": "Retry",
+  "composer.file.retryLabel": "Retry {name}",
+  "composer.file.countLimit": "Attach up to 20 files at a time. Remove a file to add another.",
+  "composer.file.reselect": "Choose the file again to finish attaching it.",
+  "composer.file.retryError": "Couldn’t attach that file. Retry or remove it.",
+  "composer.file.requestMode": "Send attachments in chat before requesting a reply. Your draft is kept.",
+  "composer.file.unresolved": "Retry or remove the failed attachment before sending. Your draft is kept."
 };

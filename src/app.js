@@ -400,6 +400,7 @@ document.addEventListener("keydown", event => {
 let recovery;
 let leavingPage = false;
 let composerFiles = [];
+let composerReselectId = null;
 let roomFilesByMessage = new Map();
 const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
@@ -2632,13 +2633,25 @@ function renderComposerFiles() {
     const name = fileChipLabel(file.filename);
     const label = document.createElement("span");
     label.textContent = file.status === "uploading" ? `Uploading ${name}…` : file.status === "error" ? `${name} failed` : name;
+    if (file.status === "error") {
+      const retry = document.createElement("button");
+      const canRetry = Boolean(file.commitMessageId || file.source);
+      retry.type = "button";
+      retry.textContent = uiText(canRetry ? "composer.file.retry" : "composer.file.choose");
+      retry.setAttribute("aria-label", uiText(canRetry ? "composer.file.retryLabel" : "composer.file.chooseLabel", { name }));
+      retry.addEventListener("click", () => {
+        if (canRetry) void retryComposerFile(file);
+        else { composerReselectId = file.id; $("#composer-file").click(); }
+      });
+      chip.append(retry);
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove ${name}`);
     remove.textContent = "×";
     remove.addEventListener("click", () => {
       composerFiles = composerFiles.filter(entry => entry.id !== file.id);
-      renderComposerFiles();
+      renderComposerFiles(); saveComposer();
     });
     chip.append(label, remove);
     host.append(chip);
@@ -2669,57 +2682,68 @@ async function refreshRoomFiles() {
     if (state) renderMessages();
   } catch { /* The last chips stay until the next successful read. */ }
 }
+function composerFileOwner(file) {
+  const authSession = client.session, generation = client.generation, roomId = state?.room?.id;
+  const draftOwner = drafts, key = composerKey(), draft = drafts.get(key);
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && authSession?.roomId === roomId
+    && client.ownsAccountSession() && drafts === draftOwner
+    && drafts.entries.get(key) === draft && composerKey() === key && (!file || composerFiles.includes(file)));
+  return { authSession, owns };
+}
 async function attachComposerFiles(fileList) {
   if (!state || !client.session || isRoomArchived(state)) return;
-  // Bind the batch before any await: room changes must stop later files,
-  // and removed entries must not receive late success or error updates.
-  const authSession = client.session, generation = client.generation, roomId = state.room.id;
-  const draftOwner = drafts, key = composerKey(), draft = drafts.get(key);
-  const uploadPath = client.path("/files");
-  const owns = () => Boolean(state && session === authSession && client.session === authSession
-    && client.generation === generation && state.room?.id === roomId && authSession.roomId === roomId
-    && client.ownsAccountSession()
-    && drafts === draftOwner && drafts.entries.get(key) === draft && composerKey() === key);
+  const batch = composerFileOwner();
   for (const file of [...(fileList ?? [])]) {
-    if (!owns()) return;
-    if (file.size > COMPOSER_FILE_BYTES) {
-      setComposerError("That file is larger than 1 MB.");
-      continue;
-    }
-    const id = crypto.randomUUID();
-    const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
+    if (!batch.owns()) return;
+    if (composerFiles.length >= 20) { setComposerError(uiText("composer.file.countLimit")); break; }
+    if (file.size > COMPOSER_FILE_BYTES) { setComposerError("That file is larger than 1 MB."); continue; }
+    const entry = { id: crypto.randomUUID(), filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "error", source: file };
     composerFiles = [...composerFiles, entry];
-    renderComposerFiles();
-    const ownsEntry = () => owns() && composerFiles.includes(entry);
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (!ownsEntry()) continue;
-      const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
-      await client.request(uploadPath, { method: "POST", data: payload, authSession, authMode: authSession.authMode });
-      if (!ownsEntry()) continue;
-      entry.status = "staged";
-    } catch (error) {
-      if (!ownsEntry()) continue;
-      entry.status = "error";
-      setComposerError(attachFailureCopy(error));
-    }
-    renderComposerFiles();
+    await retryComposerFile(entry);
   }
+}
+async function retryComposerFile(file) {
+  if (!state || !client.session || isRoomArchived(state) || !composerFiles.includes(file) || file.status === "uploading") return;
+  const { authSession, owns } = composerFileOwner(file);
+  const path = client.path(file.commitMessageId ? `/files/${encodeURIComponent(file.id)}/commit` : "/files");
+  file.status = "uploading"; renderComposerFiles(); saveComposer();
+  try {
+    let data;
+    if (file.commitMessageId) data = { messageId: file.commitMessageId };
+    else {
+      if (!file.source) throw new Error(uiText("composer.file.reselect"));
+      const bytes = new Uint8Array(await file.source.arrayBuffer());
+      if (!owns()) return;
+      data = attachmentFromBytes({ id: file.id, filename: file.filename, mediaType: file.mediaType, bytes });
+    }
+    await client.request(path, { method: "POST", data, authSession, authMode: authSession.authMode });
+    if (!owns()) return;
+    if (file.commitMessageId) {
+      composerFiles = composerFiles.filter(entry => entry !== file);
+      renderComposerFiles(); saveComposer(); await refreshRoomFiles(); return;
+    }
+    file.status = "staged";
+  } catch (error) {
+    if (!owns()) return;
+    file.status = "error"; setComposerError(attachFailureCopy(error));
+  }
+  if (owns()) { renderComposerFiles(); saveComposer(); }
 }
 async function commitComposerFiles(messageId) {
   const pending = composerFiles.filter(file => file.status === "staged");
-  if (!pending.length || !messageId) return;
+  if (!messageId || !pending.length) return;
+  // Bind the whole batch before the first request so a reload cannot attach
+  // later files to a different message while an earlier commit is in flight.
   for (const file of pending) {
-    try {
-      await client.request(client.path(`/files/${encodeURIComponent(file.id)}/commit`), { method: "POST", data: { messageId } });
-      composerFiles = composerFiles.filter(entry => entry.id !== file.id);
-    } catch (error) {
-      file.status = "error";
-      setComposerError(error?.message || "Couldn’t attach that file to the message.");
-    }
+    file.commitMessageId = messageId;
+    file.status = "error";
   }
-  renderComposerFiles();
-  await refreshRoomFiles();
+  saveComposer();
+  for (const file of pending) {
+    if (!composerFiles.includes(file)) return;
+    await retryComposerFile(file);
+  }
 }
 function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
   const author = state.members[m.authorId];
@@ -2809,7 +2833,9 @@ function confirmSharedSubmission({ command, fileIds }, result) {
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
-  composerFiles = draft.files ?? []; renderComposerFiles();
+  composerFiles = draft.files ?? [];
+  for (const file of composerFiles) if (file.status === "uploading") file.status = "error";
+  renderComposerFiles();
   $("#message-input").value = draft.body;
   const select = $("#message-to-select");
   if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
@@ -4165,11 +4191,15 @@ $("#message-form").addEventListener("submit", e => {
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
   if (composerOverLimit()) { renderComposerLength(); return; }
-  if (requestMode) { submitRequest(e.currentTarget); return; }
+  if (requestMode) {
+    if (composerFiles.length) { setComposerError(uiText("composer.file.requestMode")); return; }
+    submitRequest(e.currentTarget); return;
+  }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const askRoom = humanExperience.intent(content);
   if (!content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
+  if (composerFiles.some(file => file.status === "error" || file.commitMessageId)) { setComposerError(uiText("composer.file.unresolved")); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
   // message in the channel (server-side, same event). Only offered for
   // public thread replies — never for DMs or top-level messages.
@@ -4186,6 +4216,8 @@ $("#message-form").addEventListener("submit", e => {
   const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
+  const fileDraftOwner = drafts, fileDraft = drafts.get(draftKey);
+  const ownsSendingDraft = () => drafts === fileDraftOwner && composerKey() === draftKey && drafts.entries.get(draftKey) === fileDraft;
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
@@ -4202,11 +4234,14 @@ $("#message-form").addEventListener("submit", e => {
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
+    if (!ownsSendingDraft()) return;
     await commitComposerFiles(data.messageId);
+    if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
     drafts.clear(draftKey);
     $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
     $("#also-send-to-channel").checked = false;
+    if (composerFiles.length) saveComposer();
     persistDrafts();
     if (assistantDraft) {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
@@ -4215,9 +4250,12 @@ $("#message-form").addEventListener("submit", e => {
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
-$("#composer-attach")?.addEventListener("click", () => $("#composer-file")?.click());
+$("#composer-attach")?.addEventListener("click", () => { composerReselectId = null; $("#composer-file")?.click(); });
+$("#composer-file")?.addEventListener("cancel", () => { composerReselectId = null; });
 $("#composer-file")?.addEventListener("change", event => {
   const input = event.currentTarget;
+  if (composerReselectId && input.files?.length) composerFiles = composerFiles.filter(file => file.id !== composerReselectId);
+  composerReselectId = null;
   void attachComposerFiles(input.files);
   input.value = "";
 });
