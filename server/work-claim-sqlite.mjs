@@ -153,6 +153,28 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     return { ...item, history: history.slice(excess), historyOmitted: omitted + excess };
   };
 
+  // The reunion read (W3): a stored item whose history was trimmed past the
+  // SEC-2 cap carries the newest window plus historyOmitted; the spilled
+  // prefix lives in work_claim_history under lifetime seqs [0, omitted).
+  // Reunite only a complete, contiguous prefix: a short or gapped spill
+  // means out-of-band loss, and the stored shape (window + counter) is the
+  // honest read — never fabricate stamps. get() serves it directly; read
+  // paths that compose a view over list() rows (the stored shape — e.g.
+  // work-claim-routes' presentedItem) run the view through this same
+  // reunion via the registry surface below, so every plain read of a claim
+  // serves the full documented history.
+  const reuniteSpilledHistory = (roomId, item) => {
+    if (!item) return item;
+    const omitted = omittedOf(item.historyOmitted);
+    if (omitted === 0 || !spillAvailable()) return item;
+    const spilled = selectSpill.all(roomId, item.id, omitted);
+    if (spilled.length !== omitted || !spilled.every((entry, index) => entry.seq === index)) return item;
+    const reunited = { ...item };
+    reunited.history = [...spilled.map(entry => JSON.parse(entry.stamp_json)), ...(Array.isArray(item.history) ? item.history : [])];
+    delete reunited.historyOmitted;
+    return reunited;
+  };
+
   const rawConfig = roomId => {
     const row = selectConfig.get(roomId);
     return row ? parse(row.config_json) : {};
@@ -182,20 +204,9 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     get(roomId, id) {
       const row = selectOne.get(roomId, id);
       if (!row) return null;
-      const item = decodeItem(row.item_json);
-      const omitted = omittedOf(item.historyOmitted);
-      if (omitted > 0 && spillAvailable()) {
-        const spilled = selectSpill.all(roomId, id, omitted);
-        // Reunite only a complete, contiguous prefix [0, omitted): a short
-        // or gapped spill means out-of-band loss, and the stored shape
-        // (window + counter) is the honest read — never fabricate stamps.
-        if (spilled.length === omitted && spilled.every((entry, index) => entry.seq === index)) {
-          item.history = [...spilled.map(entry => JSON.parse(entry.stamp_json)), ...(Array.isArray(item.history) ? item.history : [])];
-          delete item.historyOmitted;
-        }
-      }
-      return item;
+      return reuniteSpilledHistory(roomId, decodeItem(row.item_json));
     },
+    reuniteSpilledHistory,
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());

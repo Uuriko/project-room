@@ -799,8 +799,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return presentedCache;
   };
   const presentedList = () => presented().items;
-  const presentedItem = item => item == null ? item
-    : presented().items.find(entry => entry.id === item.id) ?? item;
+  const presentedItem = item => {
+    if (item == null) return item;
+    const entry = presented().items.find(candidate => candidate.id === item.id) ?? item;
+    if (!readRequest) return entry;
+    // W3 claim-history spill: a plain read reunites the spilled prefix —
+    // load() serves registry.get(), which reunites, but the presented view
+    // is built over list() rows (the stored capped window + counter), so
+    // run the view through the same reunion or a spilled claim's GET would
+    // serve the stored window instead of the full documented history.
+    return typeof registry.reuniteSpilledHistory === "function"
+      ? registry.reuniteSpilledHistory(roomId, entry)
+      : entry;
+  };
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
