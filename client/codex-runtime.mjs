@@ -35,7 +35,10 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     state TEXT NOT NULL, PRIMARY KEY(attempt_id,input_id));
     CREATE TABLE IF NOT EXISTS codex_runtime_outputs (
     attempt_id TEXT NOT NULL, item_id TEXT NOT NULL, text TEXT NOT NULL,
-    PRIMARY KEY(attempt_id,item_id));`);
+    PRIMARY KEY(attempt_id,item_id));
+    CREATE TABLE IF NOT EXISTS codex_runtime_contexts (
+    attempt_id TEXT PRIMARY KEY, input_digest TEXT NOT NULL, input_bytes INTEGER NOT NULL,
+    work_brief_version TEXT);`);
   if (!db.prepare("PRAGMA table_info(codex_runtime_outputs)").all().some(column => column.name === "phase"))
     db.exec("ALTER TABLE codex_runtime_outputs ADD COLUMN phase TEXT");
   const get = id => db.prepare("SELECT * FROM codex_runtime_attempts WHERE id=?").get(id);
@@ -99,6 +102,13 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     return { status: get(id).state };
   };
   const interrupt = async binding => stopOwned(await checked(binding, "interrupt"));
+  const contextObservation = async binding => {
+    const id = await checked(binding, "read");
+    const saved = db.prepare("SELECT * FROM codex_runtime_contexts WHERE attempt_id=?").get(id);
+    return saved ? { status: "recorded", inputDigest: saved.input_digest, inputBytes: saved.input_bytes,
+      workBriefVersion: saved.work_brief_version, authorityGranted: false }
+      : { status: "unavailable", authorityGranted: false };
+  };
   const steer = async (binding, inputId, text) => {
     const id = await checked(binding, "steer"), saved = get(id);
     if (!saved?.turn_id || saved.state !== "inProgress") throw new Error("Runtime turn is not accepting input");
@@ -136,8 +146,17 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const envelope = binding.kind === "shared-assistant"
       ? { version: 1, kind: "project-room-shared-assistant", context: { trust: "untrusted-room-data", ...structuredClone(cleanInput) } }
       : createHostEnvelope(cleanInput);
+    const prompt = JSON.stringify(envelope);
+    const workBriefVersion = envelope.context.preparation?.workBrief?.version ?? null;
+    if (workBriefVersion !== null && !/^[a-f0-9]{64}$/.test(workBriefVersion)) throw new Error("Invalid work brief version");
     await ready(); input.signal?.throwIfAborted();
-    db.prepare("INSERT INTO codex_runtime_attempts(id,binding,state) VALUES(?,?,'starting')").run(id, JSON.stringify(binding));
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare("INSERT INTO codex_runtime_attempts(id,binding,state) VALUES(?,?,'starting')").run(id, JSON.stringify(binding));
+      db.prepare("INSERT INTO codex_runtime_contexts VALUES(?,?,?,?)").run(id,
+        createHash("sha256").update(prompt).digest("hex"), Buffer.byteLength(prompt), workBriefVersion);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
     const started = previous
       ? await rpc.request("thread/resume", { threadId: previous.thread_id, cwd, ...selectedPolicy })
       : await rpc.request("thread/start", { cwd, ...selectedPolicy });
@@ -178,7 +197,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     try {
       await checked(binding, "start");
       input.signal?.throwIfAborted();
-      const value = await rpc.request("turn/start", { threadId: started.thread.id, input: textInput(JSON.stringify(envelope)) });
+      const value = await rpc.request("turn/start", { threadId: started.thread.id, input: textInput(prompt) });
       recordTurn(id, value?.turn);
       for (const event of early) receive(event);
       if (terminal.has(value.turn.status)) receive({ method: "turn/completed", params: { threadId: started.thread.id, turn: value.turn } });
@@ -186,7 +205,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       return await completed;
     } finally { clearTimeout(timer); unsubscribe(); input.signal?.removeEventListener("abort", abort); }
   };
-  return Object.assign(execute, { steer, interrupt, reconcile });
+  return Object.assign(execute, { steer, interrupt, reconcile, contextObservation });
 }
 
 // Connected entry point for runRequestOnce/runRequestQueue. Rechecks the Room

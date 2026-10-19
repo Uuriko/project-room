@@ -2,7 +2,7 @@
 
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
-Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md).
+Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 
 Planning: [total Project Room backlog](PROJECT-ROOM-TOTAL-BACKLOG.md) — source coverage, execution tasks, all brainstorm proposals, native acceptance checks, and captured open issues/PRs.
 
