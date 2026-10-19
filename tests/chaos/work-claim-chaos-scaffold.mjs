@@ -78,7 +78,7 @@ const permitSchema = version =>
 // journal (read-your-writes inside a transaction).
 export class WorkClaimDoStorage {
   constructor() {
-    const [claimsSchema, configSchema] = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+    const [claimsSchema, configSchema, historySchema] = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
     this.claimsSchema = claimsSchema.trim();
     this.schemas = {
       room_runtime_version:
@@ -86,12 +86,14 @@ export class WorkClaimDoStorage {
       room_writer_permit: permitSchema(STORE_SCHEMA_VERSION),
       work_claims: this.claimsSchema,
       work_claim_config: configSchema.trim(),
+      work_claim_history: historySchema.trim(),
     };
     this.state = {
       room_runtime_version: new Map([[1, { version: STORE_SCHEMA_VERSION }]]),
       room_writer_permit: new Map([[1, { version: 0 }]]), // 0 = idle, no writer holds it
       work_claims: new Map(), // claimKey -> { room_id, claim_id, item_json, updated_at }
       work_claim_config: new Map(), // roomId -> { room_id, config_json, updated_at }
+      work_claim_history: new Map(), // claimKey + seq -> { room_id, claim_id, seq, stamp_json }
     };
     this.journal = null; // null when no transaction is active
     this.mutatingOps = 0; // INSERT/UPDATE/DELETE counter (kill targeting)
@@ -227,6 +229,37 @@ export class WorkClaimDoStorage {
       this.#journalize({ kind: 'upsert', table: 'work_claim_config', key: room_id, row,
         sql: 'INSERT INTO work_claim_config',
         apply: () => this.state.work_claim_config.set(room_id, row) });
+      return [];
+    }
+    // work_claim_history spill (W3): append-only rows keyed by lifetime seq
+    if (q === 'SELECT SEQ, STAMP_JSON FROM WORK_CLAIM_HISTORY WHERE ROOM_ID=? AND CLAIM_ID=? AND SEQ<? ORDER BY SEQ ASC') {
+      const prefix = claimKey(args[0], args[1]) + "\0";
+      return [...this.#liveRows('work_claim_history').entries()]
+        .filter(([key, row]) => key.startsWith(prefix) && row.seq < args[2])
+        .sort((a, b) => a[1].seq - b[1].seq)
+        .map(([, row]) => ({ seq: row.seq, stamp_json: row.stamp_json }));
+    }
+    if (q.startsWith('INSERT OR IGNORE INTO WORK_CLAIM_HISTORY')) {
+      const [room_id, claim_id, seq, stamp_json] = args;
+      const key = claimKey(room_id, claim_id) + "\0" + seq;
+      this.lastChanges = this.#liveRows('work_claim_history').has(key) ? 0 : 1;
+      if (this.lastChanges) {
+        const row = { room_id, claim_id, seq, stamp_json };
+        this.#journalize({ kind: 'upsert', table: 'work_claim_history', key, row,
+          sql: `INSERT INTO work_claim_history(${claim_id}#${seq})`,
+          apply: () => this.state.work_claim_history.set(key, row) });
+      }
+      return [];
+    }
+    if (q === 'DELETE FROM WORK_CLAIM_HISTORY WHERE ROOM_ID=? AND CLAIM_ID=?') {
+      const prefix = claimKey(args[0], args[1]) + "\0";
+      const keys = [...this.#liveRows('work_claim_history').keys()].filter(key => key.startsWith(prefix));
+      this.lastChanges = keys.length;
+      for (const key of keys) {
+        this.#journalize({ kind: 'delete', table: 'work_claim_history', key,
+          sql: `DELETE FROM work_claim_history(${args[1]})`,
+          apply: () => this.state.work_claim_history.delete(key) });
+      }
       return [];
     }
     throw new Error(`work-claim chaos fake: unsupported SQL: ${q}`);

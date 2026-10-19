@@ -131,7 +131,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     "Read the room with this GET.",
     "",
-    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/orient`),
+    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack`),
     "",
   ];
   const assigned = claims.filter(claim => claim.assigned);
@@ -158,7 +158,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
   }
   let text = `${lines.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
-  const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/orient"));
+  const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
   text = `${shorter.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
   return Buffer.from(text).subarray(0, PAGE_BUDGET).toString("utf8").replace(/\s+\S*$/, "\n");

@@ -397,7 +397,7 @@ export class AccessRequests {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -611,7 +611,7 @@ export class AccessRequests {
       memberId,
       grantedPermissions: Object.freeze([...grants]),
       next: Object.freeze([
-        Object.freeze({ action: "orient", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/orient`,
+        Object.freeze({ action: "activation-pack", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/activation-pack`,
           description: "You are a member now. Orient to the room: members, open work items, and how to claim work." }),
         Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/presence`,
           description: "Confirm your membership and granted permissions in the room's member list." }),

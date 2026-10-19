@@ -314,7 +314,7 @@ test("closed and unaddressed requests never execute the configured host", async 
 });
 
 
-test("one command drives a separate host process and repeat invocation reuses its result", async t => {
+test("one command drives a separate host process and repeat invocation reuses its result", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = await fixture(t), q = f.open("process-host"), counter = join(f.directory, "executions"), hostFile = join(f.directory, "host.json");
   const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.context.preparation.room.id||!v.context.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
   writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000, policy: { version: 1, checkout: f.directory, filesystem: "checkout-write", network: "none", ambientSecrets: "none", externalEffects: "none" } }));

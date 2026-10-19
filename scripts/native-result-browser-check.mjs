@@ -410,3 +410,21 @@ test("a room session that ends under a live account says so and points back to t
   await waitForState(page, "the unsent draft to be restored on reopen", async () => await page.evaluate(() => document.querySelector("#message-input").value === "A draft that must survive.").catch(() => false));
   assert.deepEqual(errors, []);
 });
+
+for (const responseKind of ["wrong-completion", "missing-result"]) test(`native result: ${responseKind} cannot masquerade as the selected result`, { timeout: 25000 }, async t => {
+  const f = await setup(t); f.complete();
+  await f.page.route("**/work-result?**", async route => {
+    const response = await route.fetch(), value = await response.json();
+    if (responseKind === "wrong-completion") value.result.receipt.eventId = "another-completion-with-identical-text";
+    await route.fulfill({ response, json: responseKind === "missing-result" ? { ...value, result: null } : value });
+  });
+  await f.page.locator("#message-input").fill("Keep this draft while reviewing.");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-retry").waitFor({ state: "visible" });
+  assert.equal(await f.page.locator("#result-body").textContent(), "");
+  assert.equal(await f.page.locator("#result-discuss").isVisible(), false);
+  await f.page.unroute("**/work-result?**");
+  await f.page.locator("#result-retry").click();
+  await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
+});

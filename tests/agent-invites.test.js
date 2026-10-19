@@ -10,6 +10,7 @@ import { createHash, scryptSync } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 const slowHash = code => scryptSync(code, "project-room-agent-invite-v2", 32, { N: 16384, r: 8, p: 1 }).toString("hex");
@@ -159,11 +160,11 @@ test("redeem folds the Crockford confusables so a transcribed code still works",
 });
 
 test("minting is owner-only and can never grant administration", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   // An agent member cannot mint.
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   const denied = await mint(origin, id.json.secret, { permissions: ["accept_work"] });
   assert.equal(denied.status, 403);
@@ -254,10 +255,10 @@ test("unknown, revoked, and expired codes fail distinctly", async t => {
 });
 
 test("revocation is owner-only and cannot burn a used code", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
   const denied = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: minted.json.inviteId }, id.json.secret);
@@ -299,17 +300,17 @@ test("list is the audit trail: creation, redemption, revocation, expiry", async 
   // Non-owners cannot read the audit.
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   assert.equal((await get(origin, "/api/rooms/commons/agent-invites", id.json.secret)).status, 403);
 });
 
 test("an agent with invite_member (no manage_members/decide) mints; a peer redeems and checks", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   const inviter = await post(origin, "/api/agent-identities", { displayName: "Inviter Bot" });
   assert.equal(inviter.status, 201);
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: inviter.json.identityId, permissions: ["invite_member"] }, ownerKey);
+    { identityId: inviter.json.identityId, permissions: ["invite_member"], identityLinkCode: mintHolderLinkCode(store, { identityId: inviter.json.identityId, secret: inviter.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201, JSON.stringify(linked.json));
   const minted = await mint(origin, inviter.json.secret, { profile: "contribute", expiresInMinutes: 60, displayName: "Peer Bot" });
   assert.equal(minted.status, 201, JSON.stringify(minted.json));

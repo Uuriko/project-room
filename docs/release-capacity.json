@@ -1,0 +1,11 @@
+{
+  "size": 8000,
+  "bodiesAtRest": true,
+  "status": "passed",
+  "seedFailures": 0,
+  "projectionBytes": 1487641,
+  "restartFidelity": true,
+  "replayFidelity": true,
+  "exactRetry": true,
+  "messageCount": 8001
+}
