@@ -19,6 +19,7 @@ import { AGENT_FLEET_ROUTES } from "./agents.mjs";
 import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
 import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
+import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
@@ -53,7 +54,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...DEMO_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...PR_WEBHOOK_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...PR_WEBHOOK_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -94,13 +95,13 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "conversation", group: "room", method: "GET", path: "/api/rooms/{roomId}/conversation" }),
   Object.freeze({ id: "return-brief", group: "room", method: "GET", path: "/api/rooms/{roomId}/return-brief" }),
   Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
+  Object.freeze({ id: "digest", group: "room", method: "GET", path: "/api/rooms/{roomId}/digest" }),
   Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
   Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
   Object.freeze({ id: "pins", group: "room", method: "GET", path: "/api/rooms/{roomId}/pins" }),
   // QA4 Q4-SEC-1: summary reads that carry pinned or recent message bodies.
   Object.freeze({ id: "activation-pack", group: "room", method: "GET", path: "/api/rooms/{roomId}/activation-pack" }),
-  Object.freeze({ id: "orient-search", group: "room", method: "GET", path: "/api/rooms/{roomId}/orient?q={needle}" }),
   Object.freeze({ id: "stream", group: "room", method: "GET", path: "/api/rooms/{roomId}/stream?after=0", stream: true }),
   Object.freeze({ id: "agent-inbox", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-inbox", auth: "agent" }),
   Object.freeze({ id: "work-result", group: "receipt", method: "GET", path: "/api/rooms/{roomId}/work-result?workItemId={workItemId}" }),

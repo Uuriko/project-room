@@ -54,7 +54,7 @@ async function door(t, prefix, failure) {
   const requests = [];
   const responses = new Map([
     ["/api/health", { status: "ok" }],
-    ["/api/ready", { status: "ready" }],
+    ["/api/ready", { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" }],
     ...versionPaths.map(path => [path, { sourceRevision: revision }]),
     ...["/terms", "/privacy", "/"].map(path => [path, "<!doctype html><title>Room</title>"]),
     [cardPath, fixtureCard],
@@ -125,6 +125,9 @@ for (const withSha of [false, true]) {
   });
 
   const failures = [
+    { path: "/api/ready", status: 200, body: { status: "ready", emailVerification: "relaxed-no-mailer", emailVerificationScope: "durable-object" } },
+    { path: "/api/ready", status: 200, body: { status: "ready", emailVerification: "enforced", emailVerificationScope: "worker" } },
+    { path: "/api/ready", status: 200, body: { status: "ready" } },
     { path: "/api/health", status: 503, body: { status: "ok" } },
     { path: "/api/health", status: 200, body: { status: "degraded" } },
     { path: "/api/ready", status: 503, body: { status: "ready" } },

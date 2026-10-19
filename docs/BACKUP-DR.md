@@ -145,6 +145,41 @@ paths should key on the audit rows instead. **Operator step:** if the
 deployed `ROOM_BACKUP_TOKEN` is shorter than 32 characters it must be
 rotated to a ≥32-character value or the doors stay closed.
 
+## Corrupt-projection maintenance procedure (operator)
+
+A room whose stored projection no longer parses does **not** block boot
+(#4126): the node server quarantines the room — the boot log carries a
+`corrupt projection quarantined: room <id> (...)` line and the record is
+readable as `store.corruptRoomReports()` — while every healthy room boots
+and serves. The corrupt room's own reads keep failing loudly until it is
+repaired. A `projection_checkpoints` row that no longer parses is ignored
+the same way: rebuilds fall back to a full event-history replay.
+
+1. **Repair in-server first.** With the server up, run the operator
+   projection repair (`POST /api/operator/projection/plan`, then
+   `.../execute` with the plan's digests): it rebuilds the room's
+   materialisation from its journal without touching events or
+   checkpoints, and clears the room's patrol park. The quarantine record
+   clears on the next repair pass once the bytes parse again.
+2. **Maintenance connection (only when the in-server door cannot run).**
+   The writer fence refuses writes from a raw connection by design; the
+   sanctioned escape hatch is to register the writer function on your
+   maintenance connection, then make the one targeted repair:
+
+   ```js
+   import { DatabaseSync } from "node:sqlite";
+   import { registerWriter } from "../server/writer-fence.mjs";
+   const db = new DatabaseSync("<store path>");
+   registerWriter(db);
+   // Exactly one targeted fix, e.g. drop a torn checkpoint so the next
+   // boot replays the full history:
+   db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run("<room id>");
+   db.close();
+   ```
+
+   Never edit `events`. If the journal itself is torn, the room's path is
+   the restore runbook above, not SQL surgery.
+
 ## What was deliberately not done
 
 - Enabling R2 and provisioning tokens need the Cloudflare account; they are
