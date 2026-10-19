@@ -41,9 +41,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-draft.mjs');
   paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
-  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add(); paths.add();
-  paths.add(); paths.add();
-  paths.add();
+  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs');
+
   paths.add('src/room-roster.js');
   paths.add('src/account-settings-ui.js');
   paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)

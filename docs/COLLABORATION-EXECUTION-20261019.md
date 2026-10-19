@@ -114,3 +114,6 @@ and explicit compatibility fixtures preserve existing records and migration
 coverage. The agent coordination inbox is unchanged.
 
 Validation: room-only plus sign-in/recovery browser checks 22/22; account/start-room/layout browser checks 11/11; removal/coverage checks 11/11; room-roster/copy/walkthrough checks 16/16. Lint passes with 289 existing warnings. Initial broad runs exposed obsolete email assertions and historical package assumptions; repaired and being revalidated, not represented as a green release. Public deployment remains pending coordinated integration.
+
+
+Final local removal checkpoint: affected suite 2165 pass, 1 skip, 2 cold-package failures; compatibility suite 46 pass, 1 cold-package failure. All three failures traced to empty entries left in the fixture asset list and pass in the corrected focused run (3/3). No other failures in these runs. Final room-only/accessibility browser run 7/7; runtime preflight passes. These are composed local receipts, not a claim of a fresh full-suite or hosted release pass. The earlier full suite (11331 pass, 43 fail, 31 skip) predates the metadata/packaging fixes and is superseded only for the explicitly rerun checks. No deploy performed.
