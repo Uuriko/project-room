@@ -6,6 +6,7 @@ import {
 import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
+import { appendOperatorAction } from "./operator-actions.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { workItemBoardDivergence } from "./work-item-board.mjs";
@@ -120,12 +121,35 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     if (!token) reject(401, "unauthenticated", "Sign in required");
     const auth = store.authenticateAccountSession(token);
     protectWrite(req, auth, false);
-    if (!operatorAccountId) reject(403, "operator_unconfigured", "The operator account is not configured");
-    if (auth.account.id !== operatorAccountId) reject(403, "forbidden", "Operator access required");
+    // C7 (adversary P7): a takedown is an operator action — it lands in the
+    // central append-only operator_actions audit (the same ledger purge and
+    // archive write), not only in this door's own public_unpublish table.
+    // Every authenticated attempt is recorded: the outcome rows make
+    // takedowns visible, the refused rows make attempts visible. Attempts
+    // that never authenticate have no actor to record and stay unlogged.
+    const audit = (result, detail, targetKind = null, targetId = null) => appendOperatorAction(store, {
+      action: "unpublish", targetKind, targetId, result,
+      counts: { byAccount: auth.account.id, ...(detail ? { detail } : {}) },
+    });
+    if (!operatorAccountId) {
+      audit("refused", "operator_unconfigured");
+      reject(403, "operator_unconfigured", "The operator account is not configured");
+    }
+    if (auth.account.id !== operatorAccountId) {
+      audit("refused", "forbidden");
+      reject(403, "forbidden", "Operator access required");
+    }
     const data = await readBody(req);
-    if (!exact(data, ["kind", "id"])) reject(422, "invalid_unpublish", "Send kind and id");
+    if (!exact(data, ["kind", "id"])) {
+      audit("refused", "invalid_unpublish");
+      reject(422, "invalid_unpublish", "Send kind and id");
+    }
     const result = unpublishPublic(store.db, { kind: data.kind, id: data.id, byAccount: auth.account.id, now: store.now() });
-    if (!result.ok) reject(result.status, result.code, result.message);
+    if (!result.ok) {
+      audit("refused", result.code, data.kind, data.id);
+      reject(result.status, result.code, result.message);
+    }
+    audit("ok", null, result.kind, result.id);
     json(res, 200, { unpublished: true, kind: result.kind, id: result.id });
     return true;
   }
