@@ -71,7 +71,7 @@ test("a re-review archives the displaced verdict instead of destroying it", () =
   const registry = setup(db);
   let item = claimedClaim(registry, "claim-rereview");
   item = review(registry, item, REVIEWER, "approve", "first pass: looks right", BASE + 2000);
-  item = review(registry, item, REVIEWER, "changes_requested", "second look: found a gap", BASE + 3000);
+  review(registry, item, REVIEWER, "changes_requested", "second look: found a gap", BASE + 3000);
 
   // Read model preserved: only the latest record per member is live.
   const live = registry.get(ROOM, "claim-rereview");
@@ -110,7 +110,7 @@ test("versions accumulate across reviewers, each in recording order", () => {
   item = review(registry, item, REVIEWER, "approve", "v1 approve", BASE + 2000);
   item = review(registry, item, SECOND, "comment", "v1 comment", BASE + 3000);
   item = review(registry, item, REVIEWER, "changes_requested", "v2 changes", BASE + 4000);
-  item = review(registry, item, SECOND, "approve", "v2 approve", BASE + 5000);
+  review(registry, item, SECOND, "approve", "v2 approve", BASE + 5000);
 
   const live = registry.get(ROOM, "claim-multi");
   assert.equal(live.reviews.length, 2, "one live record per member");
@@ -144,14 +144,14 @@ test("claim deletion removes the archive with the claim", () => {
   const registry = setup(db);
   let item = claimedClaim(registry, "claim-reused");
   item = review(registry, item, REVIEWER, "approve", "first life", BASE + 2000);
-  item = review(registry, item, REVIEWER, "comment", "first life, revised", BASE + 3000);
+  review(registry, item, REVIEWER, "comment", "first life, revised", BASE + 3000);
   assert.equal(archiveRows(db, "claim-reused").length, 1);
   registry.delete(ROOM, "claim-reused");
   assert.equal(archiveRows(db, "claim-reused").length, 0);
 
   // A later claim reusing the id inherits none of the predecessor's verdicts.
   let fresh = claimedClaim(registry, "claim-reused");
-  fresh = review(registry, fresh, REVIEWER, "approve", "second life", BASE + 4000);
+  review(registry, fresh, REVIEWER, "approve", "second life", BASE + 4000);
   const history = registry.reviewHistory(ROOM, "claim-reused");
   assert.equal(history.length, 1);
   assert.equal(history[0].summary, "second life");
@@ -166,7 +166,7 @@ test("a database without the archive table behaves exactly as before", () => {
 
   let item = claimedClaim(registry, "claim-legacy");
   item = review(registry, item, REVIEWER, "approve", "first pass", BASE + 2000);
-  item = review(registry, item, REVIEWER, "comment", "second pass", BASE + 3000);
+  review(registry, item, REVIEWER, "comment", "second pass", BASE + 3000);
   const live = registry.get(ROOM, "claim-legacy");
   assert.equal(live.reviews.length, 1);
   assert.equal(live.reviews[0].verdict, "comment");
@@ -181,7 +181,7 @@ test("the archive survives closing and reopening the database file", () => {
     const registry = setup(db);
     let item = claimedClaim(registry, "claim-durable");
     item = review(registry, item, REVIEWER, "approve", "before restart", BASE + 2000);
-    item = review(registry, item, REVIEWER, "changes_requested", "after restart", BASE + 3000);
+    review(registry, item, REVIEWER, "changes_requested", "after restart", BASE + 3000);
     db.close();
 
     const reopened = new DatabaseSync(filename);
