@@ -56,6 +56,56 @@ export const workClaimSchema = `
     config_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  -- Alarm-path probe indexes (S-2): the job registry's due probes
+  -- (claimDueAt / autolinkDueAt in server/jobs.mjs, staleSweepDueAt in
+  -- server/claim-pr-sync.mjs) run inside the Worker's per-request alarm
+  -- re-arm, so they may not scan work_claims decoding every row's JSON.
+  -- Each index is partial on the probe's own predicate — repeated
+  -- VERBATIM, because the planner only answers a query from a partial
+  -- index when the query's WHERE implies the index's WHERE — and keyed
+  -- on the exact expressions the probe aggregates, so a probe reads
+  -- precomputed values out of the index and never touches the table.
+  -- Drift between a probe's SQL and these predicates silently falls
+  -- back to a full scan; tests/alarm-probe-cheap.test.js pins the query
+  -- plans so the drift fails loudly there instead. Additive like the
+  -- share-link schemas: IF NOT EXISTS re-applies on every schema exec,
+  -- so verifySchema below shape-checks the tables only.
+  CREATE INDEX IF NOT EXISTS work_claims_pr_poll_due ON work_claims (
+    COALESCE(json_extract(item_json, '$.data.pullRequest.nextPollAt'), json_extract(item_json, '$.pullRequest.nextPollAt'), 0)
+  ) WHERE (
+    json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
+    AND typeof(json_extract(item_json, '$.data.pullRequest.url')) = 'text'
+    AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL
+  ) OR (
+    json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
+    AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
+    AND json_extract(item_json, '$.pullRequest.outcome') IS NULL
+  );
+  CREATE INDEX IF NOT EXISTS work_claims_autolink_due ON work_claims (room_id) WHERE (
+    json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
+    AND typeof(json_extract(item_json, '$.data.repo')) = 'text'
+    AND (
+      json_extract(item_json, '$.data.pullRequests') IS NULL
+      OR json_array_length(json_extract(item_json, '$.data.pullRequests')) = 0
+    )
+    AND json_extract(item_json, '$.data.pullRequest.url') IS NULL
+  ) OR (
+    json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
+    AND typeof(json_extract(item_json, '$.repo')) = 'text'
+    AND (
+      json_extract(item_json, '$.pullRequests') IS NULL
+      OR json_array_length(json_extract(item_json, '$.pullRequests')) = 0
+    )
+    AND json_extract(item_json, '$.pullRequest.url') IS NULL
+  );
+  CREATE INDEX IF NOT EXISTS work_claims_stale_activity ON work_claims (
+    room_id,
+    (MAX(
+      COALESCE(json_extract(item_json, '$.data.updatedAt'), json_extract(item_json, '$.updatedAt'), ''),
+      COALESCE(json_extract(item_json, '$.data.history[#-1].at'), json_extract(item_json, '$.history[#-1].at'), '')
+    )),
+    (COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
+  ) WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed';
 `;
 
 const parse = text => {
@@ -89,7 +139,15 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     transaction,
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-      const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+      // Table shapes are operator-reconciled; the schema's indexes are
+      // additive and self-healing (CREATE INDEX IF NOT EXISTS re-applies
+      // on every schema exec), so only table definitions are
+      // shape-checked here — each cut at its terminating ";" because a
+      // table chunk can run on into the comment and index text that
+      // follows it in the schema string.
+      const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+        .filter(sql => sql.startsWith("CREATE TABLE"))
+        .map(sql => sql.split(";")[0]);
       const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
       if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
       if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");

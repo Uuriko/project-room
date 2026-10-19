@@ -1161,25 +1161,51 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
 // instead of re-waking every scheduler tick. Null when no opted-in room
 // holds a candidate. The sweep re-checks every item with isDormantClaim;
 // this probe only decides whether the job wakes.
-export function staleSweepDueAt(store, _nowMs) {
-  if (!store?.db || !store.workClaims) return null;
-  let row;
-  try {
-    row = store.db.prepare(`SELECT MIN(CAST(ROUND(unixepoch(activity, 'subsec') * 1000) AS INTEGER)) AS activityMs
+// S-2: the activity minimum is computed per opted-in room over the
+// work_claims_stale_activity index (server/work-claim-sqlite.mjs): the
+// index is partial on the unclaimed predicate — repeated verbatim in
+// the query below — and keyed on (room_id, activity, tags), so a
+// room's walk streams precomputed activities in order and stops at the
+// first candidate instead of decoding every unclaimed row in the
+// store. The candidate set is exactly the set the aggregate form read:
+// the unixepoch parseability filter drops the same rows the MIN
+// dropped (an activity string SQLite cannot parse converts to NULL,
+// and MIN ignores NULLs), so unknown-age items still never schedule a
+// wake, and never-sweep items are skipped in activity order.
+const STALE_ACTIVITY_EXPR = `MAX(
+    COALESCE(json_extract(item_json, '$.data.updatedAt'), json_extract(item_json, '$.updatedAt'), ''),
+    COALESCE(json_extract(item_json, '$.data.history[#-1].at'), json_extract(item_json, '$.history[#-1].at'), '')
+  )`;
+const STALE_TAGS_EXPR = `COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]')`;
+
+function staleSweepActivityMs(db) {
+  const rooms = db.prepare("SELECT room_id FROM work_claim_config WHERE json_extract(config_json, '$.staleSweep') = 1").all();
+  let best = null;
+  for (const { room_id } of rooms) {
+    const row = db.prepare(`SELECT CAST(ROUND(unixepoch(activity, 'subsec') * 1000) AS INTEGER) AS activityMs
       FROM (
-        SELECT MAX(
-            COALESCE(json_extract(item_json, '$.data.updatedAt'), json_extract(item_json, '$.updatedAt'), ''),
-            COALESCE(json_extract(item_json, '$.data.history[#-1].at'), json_extract(item_json, '$.history[#-1].at'), '')
-          ) AS activity
+        SELECT ${STALE_ACTIVITY_EXPR} AS activity
         FROM work_claims
-        JOIN work_claim_config ON work_claim_config.room_id = work_claims.room_id
-        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1
+        WHERE room_id = ?
           AND COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'
+          AND unixepoch(${STALE_ACTIVITY_EXPR}, 'subsec') IS NOT NULL
           AND NOT EXISTS (
-            SELECT 1 FROM json_each(COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
+            SELECT 1 FROM json_each(${STALE_TAGS_EXPR})
             WHERE LOWER(CAST(value AS TEXT)) = 'never-sweep'
           )
-      )`).get();
+        ORDER BY activity ASC
+        LIMIT 1
+      )`).get(room_id);
+    if (row?.activityMs != null && (best == null || row.activityMs < best)) best = row.activityMs;
+  }
+  return best;
+}
+
+export function staleSweepDueAt(store, _nowMs) {
+  if (!store?.db || !store.workClaims) return null;
+  let activityMs;
+  try {
+    activityMs = staleSweepActivityMs(store.db);
   } catch {
     // Fail soft like the scheduler's other due probes (jobs.mjs read()):
     // a probe error must never disable the whole claim-prs job, pull
@@ -1187,8 +1213,8 @@ export function staleSweepDueAt(store, _nowMs) {
     // a real store, so a regression there fails loudly in tests instead.
     return null;
   }
-  if (!row || row.activityMs == null) return null;
-  let due = Number(row.activityMs) + STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
+  if (activityMs == null) return null;
+  let due = activityMs + STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
   const last = lastStaleSweep.get(store);
   if (typeof last === "number" && Number.isFinite(last)) due = Math.max(due, last + STALE_SWEEP_INTERVAL_MS);
   return due;

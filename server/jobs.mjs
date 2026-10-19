@@ -75,7 +75,15 @@ function landDueAt(store, now) {
   return Number(open.due);
 }
 
-function claimDueAt(store, now) {
+// S-2: these two probes run inside the per-request alarm re-arm, so
+// they are answered from the partial expression indexes in
+// workClaimSchema (server/work-claim-sqlite.mjs), never by scanning
+// work_claims. The predicates below are repeated verbatim in the index
+// definitions — the planner only uses a partial index when the query's
+// WHERE implies the index's WHERE — so any edit here must land in the
+// schema in the same change. tests/alarm-probe-cheap.test.js pins the
+// query plans and fails if a probe falls back to a full table scan.
+export function claimDueAt(store, now) {
   const row = read(store, `SELECT MIN(COALESCE(
       json_extract(item_json, '$.data.pullRequest.nextPollAt'),
       json_extract(item_json, '$.pullRequest.nextPollAt'),
@@ -99,8 +107,10 @@ function claimDueAt(store, now) {
 // plan-pr-autolink: the discovery poll runs when a live claim declares a
 // repo but carries no PR link yet. It stays quiet while the webhook is
 // fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
-// only decides whether the job wakes at all.
-function autolinkDueAt(store, now) {
+// only decides whether the job wakes at all. Index-backed like
+// claimDueAt above (work_claims_autolink_due); keep the predicate in
+// step with server/work-claim-sqlite.mjs.
+export function autolinkDueAt(store, now) {
   const row = read(store, `SELECT COUNT(*) AS n
     FROM work_claims
     WHERE (
@@ -493,11 +503,13 @@ export const JOBS = Object.freeze([
     runtimes: Object.freeze(["worker", "node"]),
     // #3530: the keeper is due only when the public board's claimable
     // supply is exactly zero and at least one anchored starter seed has
-    // a fully submitted latest round to advance.
+    // a fully submitted latest round to advance. The gate asks the
+    // cheap probe (S-2): starterPoolStatus() materializes every board
+    // packet and belongs to run()/operator surfaces, not to the
+    // per-request alarm path this registry feeds.
     enabled(_env, store) {
       if (!store?.publicWorkClaims) return false;
-      const status = store.publicWorkClaims.starterPoolStatus();
-      return status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
+      return store.publicWorkClaims.starterPoolReseedDue();
     },
     disabledReason: () => "Public-work starter pool has claimable tasks or no seed round is due",
     async run(store, ctx) {
