@@ -9,12 +9,25 @@
 # A v* tag publishes and sets the version from the tag. workflow_dispatch
 # publishes the file as committed. The version must be greater than the
 # latest version the registry already reports.
+#
+# The push trigger is path-filtered to the files that can change the
+# publish outcome: server.json (the gate step below diffs exactly this
+# file), the validator it runs, and this workflow (the mcp-publisher pin).
+# Path filters are not evaluated for pushes of tags, so v* tag publishes
+# are unaffected. Before this filter, every main push created a run that
+# exited through the gate as publish=false (LAB-CITIER / HUNT-TELEMETRY
+# T-7: 146 runs in the 2026-10-16->19 window, 0 of 592 commits in that
+# window touched these paths).
 name: mcp-registry-publish
 
 on:
   push:
     tags: ["v*"]
     branches: [main]
+    paths:
+      - "server.json"
+      - "scripts/server-json-check.mjs"
+      - ".github/workflows/mcp-registry-publish.yml"
   workflow_dispatch:
 
 # Burst merges push main many times. Keep one run and at most one pending
