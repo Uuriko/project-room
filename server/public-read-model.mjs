@@ -5,7 +5,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // rooms that opted in before the tables existed. It never runs from the
 // Durable Object constructor.
 import { createHash } from "node:crypto";
-import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
+import { publicPage, joinLink, publicName, publicTask, publicReceipts, ownMember } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
@@ -199,6 +199,29 @@ function startHref(ownerName) {
   return url.href;
 }
 
+// The name a start href may carry for a member. credit() resolves the
+// member's name, but checks only that the member is active; a display
+// name is public only under that member's own publicName opt-in — the
+// predicate the room page's names list applies (memberIndex below).
+// Without the opt-in the href carries no name at all: the form the lot
+// receipt path already uses, startHref(null).
+function consentedCreditName(state, memberId) {
+  const credited = credit(state, memberId);
+  if (!credited) return null;
+  const member = ownMember(state?.members, memberId);
+  if (!member || publicName(member).enabled !== true) return null;
+  return credited.name;
+}
+
+// A room's stored receipt rows must not keep a start-href name the
+// owner's current consent does not allow (an earlier projection wrote
+// it, or consent was just turned off). One UPDATE covers every receipt
+// source for the room; lot receipts have no public_receipts row.
+function scrubUnconsentedStartHrefs(store, roomId) {
+  store.db.prepare("UPDATE public_receipts SET start_href=? WHERE origin_room_id=? AND start_href LIKE '%ref=%'")
+    .run(startHref(null), roomId);
+}
+
 function isListed(store, roomId) {
   if (typeof roomId !== "string" || !roomId) return false;
   if (store.db.prepare("SELECT 1 FROM room_directory_settings WHERE room_id=? AND discoverable=1").get(roomId)) return true;
@@ -248,8 +271,7 @@ function optedInRows(store, state) {
   if (!roomId || publicReceipts(state).enabled !== true) return [];
   const listed = isListed(store, roomId);
   const room = listedRoomFields(state, listed);
-  const owner = credit(state, state.room?.ownerId);
-  const href = startHref(owner?.name);
+  const href = startHref(consentedCreditName(state, state.room?.ownerId));
   const rows = [];
   let claims = [];
   try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
@@ -350,7 +372,7 @@ function touchPublicWorkListing(store, state) {
   if (!roomId) return;
   const listed = isListed(store, roomId);
   const title = listed ? cleanName(state.room?.title) : null;
-  const href = startHref(listed ? credit(state, state.room?.ownerId)?.name : null);
+  const href = startHref(listed ? consentedCreditName(state, state.room?.ownerId) : null);
   store.db.prepare(`UPDATE public_receipts SET room_id=?, room_title=?, start_href=?
     WHERE origin_room_id=? AND source='public-work'`).run(roomId, title, href, roomId);
 }
@@ -463,7 +485,19 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const mirrorSetting = previous === null
     || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
       || recordedWas.revision !== recorded.revision));
-  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
+  // Every room command lands here, a name-consent toggle included. When
+  // the owner has not opted in to public naming, stored receipt rows for
+  // the room must not keep a start-href name an earlier projection
+  // wrote — even in a room whose only public trace is public-work
+  // receipts, where the page and receipts settings are both off and the
+  // projections below never run. The check costs one indexed lookup and
+  // only when consent is off.
+  const ownerMember = state.room?.ownerId ? ownMember(state.members, state.room.ownerId) ?? null : null;
+  const ownerNamePublic = !!ownerMember && ownerMember.active !== false
+    && publicName(ownerMember).enabled === true;
+  const namedHrefsRemain = !ownerNamePublic && !!store.db.prepare(
+    "SELECT 1 FROM public_receipts WHERE origin_room_id=? AND start_href LIKE '%ref=%' LIMIT 1").get(roomId);
+  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting && !namedHrefsRemain) return;
   const write = () => {
     if (mirrorSetting) {
       if (hasRecorded) {
@@ -475,6 +509,7 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
     }
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
+    if (namedHrefsRemain) scrubUnconsentedStartHrefs(store, roomId);
     if (pageOn) upsertPublicRoom(store, state, auth);
     else if (pageWas) store.db.prepare("DELETE FROM public_rooms WHERE slug=?").run(roomId);
     refreshLinkedDirectory(store, roomId);
@@ -529,7 +564,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
     try {
       const state = store.room(roomId).state;
       roomTitle = cleanName(state?.room?.title);
-      ownerName = credit(state, state?.room?.ownerId)?.name ?? null;
+      ownerName = consentedCreditName(state, state?.room?.ownerId);
     } catch { /* the room is gone; the receipt still publishes without its title */ }
   }
   const hashes = hashList([
@@ -634,9 +669,12 @@ function saveCursor(store, phase, cursor, done) {
 export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, deadline = Infinity } = {}) {
   const cap = Number.isInteger(limit) && limit > 0 && limit <= 100 ? limit : PUBLIC_BACKFILL_BATCH;
   const cursor = backfillCursor(store);
-  if (cursor.done) return { done: true, rooms: 0, receipts: 0, cards: 0 };
+  // "hrefs" is the terminal phase. A store whose backfill finished
+  // before the phase existed sits at done under an earlier phase name
+  // and still owes the href sweep below.
+  if (cursor.done && cursor.phase === "hrefs") return { done: true, rooms: 0, receipts: 0, cards: 0 };
   const expired = () => Date.now() >= deadline;
-  if (cursor.phase === "rooms") {
+  if (!cursor.done && cursor.phase === "rooms") {
     const rows = store.db.prepare("SELECT id, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(cursor.cursor ?? "", cap);
     let rooms = 0;
     let last = cursor.cursor ?? "";
@@ -656,7 +694,7 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
     else saveCursor(store, "rooms", last, false);
     return { done: false, rooms, receipts: 0, cards: 0 };
   }
-  if (cursor.phase === "receipts") {
+  if (!cursor.done && cursor.phase === "receipts") {
     const rows = store.db.prepare(`SELECT receipt_id, artifact_sha256, receipt_json FROM public_work_receipts
       WHERE receipt_id > ? ORDER BY receipt_id LIMIT ?`).all(cursor.cursor ?? "", cap);
     let receipts = 0;
@@ -674,6 +712,35 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
     else saveCursor(store, "receipts", last, false);
     return { done: false, rooms: 0, receipts, cards: 0 };
   }
+  // Terminal sweep: rooms whose owner has not opted in to public naming
+  // lose any start-href name an earlier projection stored. The cursor
+  // holds a room id in this phase; a store arriving from a finished
+  // pre-hrefs backfill (done under an earlier phase name) starts over.
+  if (cursor.phase === "hrefs" || cursor.done) {
+    const from = cursor.phase === "hrefs" ? (cursor.cursor ?? "") : "";
+    const rows = store.db.prepare("SELECT id, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(from, cap);
+    let rooms = 0;
+    let last = from;
+    for (const row of rows) {
+      if (expired()) {
+        saveCursor(store, "hrefs", last, false);
+        return { done: false, rooms, receipts: 0, cards: 0, budgetExceeded: true };
+      }
+      last = row.id;
+      rooms += 1;
+      try {
+        const state = JSON.parse(row.projection);
+        const ownerId = state?.room?.ownerId;
+        const member = typeof ownerId === "string" ? ownMember(state?.members, ownerId) ?? null : null;
+        if (state?.room?.id && (!member || member.active === false || publicName(member).enabled !== true)) {
+          scrubUnconsentedStartHrefs(store, state.room.id);
+        }
+      } catch { /* a corrupt projection is not a public page */ }
+    }
+    const finished = rows.length < cap;
+    saveCursor(store, "hrefs", last, finished);
+    return { done: finished, rooms, receipts: 0, cards: 0 };
+  }
   const rows = store.db.prepare(`SELECT agent_id FROM agent_directory_cards
     WHERE visibility='public' AND withdrawn=0 AND agent_id > ? ORDER BY agent_id LIMIT ?`).all(cursor.cursor ?? "", cap);
   let cards = 0;
@@ -687,9 +754,9 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
     cards += 1;
     try { syncDirectoryCard(store, row.agent_id); } catch { /* skip a bad card */ }
   }
-  if (rows.length < cap) saveCursor(store, "directory", last, true);
+  if (rows.length < cap) saveCursor(store, "hrefs", "", false);
   else saveCursor(store, "directory", last, false);
-  return { done: rows.length < cap, rooms: 0, receipts: 0, cards };
+  return { done: false, rooms: 0, receipts: 0, cards };
 }
 
 // An unpublished room or receipt stays out of listings, detail reads, and the sitemap.

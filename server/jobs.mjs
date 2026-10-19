@@ -125,9 +125,11 @@ function autolinkDueAt(store, now) {
 }
 
 function backfillPending(store) {
-  const row = read(store, "SELECT done FROM public_read_model_backfill WHERE id=1");
+  const row = read(store, "SELECT done, phase FROM public_read_model_backfill WHERE id=1");
   if (!row) return true;
-  return Number(row.done) !== 1;
+  // "hrefs" is the backfill's terminal phase; a store finished under an
+  // earlier phase name still owes that sweep.
+  return Number(row.done) !== 1 || row.phase !== "hrefs";
 }
 
 function gmailOn(env) {
