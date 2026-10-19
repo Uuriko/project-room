@@ -36,6 +36,17 @@ function signals(value) {
       out.workRevision = row.workRevision;
     }
     if (row.kind === 'work' && out.roomId && out.workItemId) out.nextRead = { tool: 'room_read_work', arguments: { roomId: out.roomId, workItemId: out.workItemId } };
+    // WAKE0-3a: a step-0 wake intent surfaces as an intent, not as the
+    // underlying mention. The ping that carried it was a content-free
+    // pointer; the work is read through the room's own doors after the
+    // runtime connects, and the intent discharges on that connect — so
+    // the client names the cause message and the discharge stamp when
+    // the server reports one, and never presents the intent as handled.
+    if (row.kind === 'wake') {
+      out.intent = true;
+      if (typeof out.messageId === 'string' && out.messageId.startsWith('wake:')) out.causeMessageId = out.messageId.slice('wake:'.length);
+      if (Number.isFinite(row.deliveredAt)) out.deliveredAt = row.deliveredAt;
+    }
     return out;
   });
 }

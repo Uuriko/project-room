@@ -464,7 +464,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "ee7cd04ef6fbed00",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1274,7 +1274,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "cfbd879003bd7093",
+      "inputSchema": "335805222d3d2303",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2110,7 +2110,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "ee7cd04ef6fbed00",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2254,7 +2254,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "cfbd879003bd7093",
+      "inputSchema": "335805222d3d2303",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

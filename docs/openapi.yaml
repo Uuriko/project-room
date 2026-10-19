@@ -10985,7 +10985,7 @@ paths:
               type: object
               required: [url, events]
               properties:
-                url: { type: string, format: uri, description: 'https only, public hosts only — IP literals, localhost, and private/link-local/reserved ranges are rejected (SSRF guard, 422)' }
+                url: { type: string, format: uri, description: 'https only, public hosts only — IP literals, localhost, and private/link-local/reserved ranges are rejected (SSRF guard, 422). Exception: a wake-only subscription (events exactly ["agent.wake"]) may target a host the deployment operator armed for wake targets via the ROOM_WAKE_TARGET_ALLOWLIST config (self-host bridge on loopback/private, http allowed); arming is operator-side only, never through this API.' }
                 events: { type: array, items: { type: string }, minItems: 1 }
                 secret: { type: string, description: "optional caller-supplied signing secret" }
       responses:
@@ -11205,7 +11205,12 @@ paths:
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
         bodies) to the push `url` with the `X-Room-Notification-Token` header.
         The push `url` must be https and resolve to a public address (SSRF
-        guard, checked at subscribe time); `token` is a 1-500 char opaque
+        guard, checked at subscribe time) — with one operator-side
+        exception: a deployment may arm specific hosts for wake targets
+        through the `ROOM_WAKE_TARGET_ALLOWLIST` deployment config, and an
+        armed host may be an http loopback/private self-host target (the
+        bridge a hosted runtime runs locally). Arming is never available
+        through this API; unarmed hosts keep the strict refusal. `token` is a 1-500 char opaque
         string that is stored but never echoed; `authentication`, when
         present, must be exactly `{ schemes: ["bearer"], credentials }`. Three
         consecutive failed push deliveries suspend the subscription; the

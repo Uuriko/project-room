@@ -30,7 +30,7 @@ import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
-import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { buildWakePing, WAKE_PING_EVENT, validateWakeTargetUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
@@ -1017,8 +1017,10 @@ export class AgentPluginStore {
 
   // Await this before subscribeWebhook. A private answer throws 422
   // webhook_url_not_public and the caller must not store the URL.
-  assertWebhookUrl(url) {
-    return assertSubscriptionWebhookUrl(url, this.webhookLookup ? { lookup: this.webhookLookup } : {});
+  // WAKE0-3a: callers pass the subscription's events — a wake-only
+  // (agent.wake) subscription takes the operator-allowlist gate.
+  assertWebhookUrl(url, { events } = {}) {
+    return assertSubscriptionWebhookUrl(url, { ...(this.webhookLookup ? { lookup: this.webhookLookup } : {}), events });
   }
 
   // HTTP and MCP await assertWebhookUrl before this write. The pure
@@ -1169,7 +1171,11 @@ export class AgentPluginStore {
           "SELECT * FROM agent_webhook_deliveries WHERE idempotency_key=?").get(idempotencyKey);
         if (existing) return Object.freeze({ ...this.deliveryView(existing), duplicate: true });
       }
-      if (url !== null) validateWebhookUrl(url);
+      // WAKE0-3a: a non-null target override is a delivery target chosen
+      // for a wake ping (the host's wakeUrl in deliverWakePing), so it
+      // validates wake-scoped; subscription URLs are validated at
+      // subscribe time, not here.
+      if (url !== null) validateWakeTargetUrl(url);
       const delivery = this.webhooks.buildDelivery(subscriptionId, { eventType, data });
       const sub = this.subs.get(subscriptionId);
       const now = this.store.now();
@@ -1491,7 +1497,12 @@ export class AgentPluginStore {
       eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload?.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
-    const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
+    // WAKE0-3a: an agent.wake delivery is a wake delivery — its target
+    // (the subscription URL, or the host wakeUrl in target_url) resolves
+    // through the operator allowlist so a self-host bridge can receive
+    // it. Room-event deliveries stay on the strict resolver.
+    const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers,
+      wakeTarget: row.event_type === WAKE_PING_EVENT });
     return this.mutate(() => {
       // #3251: re-read and verify ownership before writing the outcome.
       // The drain-start snapshot (row.attempts, row.state) is stale by
