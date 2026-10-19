@@ -33,6 +33,7 @@ import { generateEd25519KeyPair } from "../server/agent-key-registry.mjs";
 import { issueSpendGrant, revokeSpendGrant } from "../server/spend-grants.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { issueSignedEvidence, verifySignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const graph = JSON.parse(readFileSync(new URL("./fixtures/capability-graph.json", import.meta.url), "utf8"));
 const blindKinds = graph.nodes.filter(n => n.restore_resurrects && !n.reconcile_named).map(n => n.id);
@@ -317,7 +318,7 @@ for (const kind of blindKinds) {
   test(`matrix: ${kind} withdrawn after the backup is named on restore`, async (t) => {
     const ctx = boot(t);
     const X = ctx.store.identities.create(`Matrix ${kind}`);
-    ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+    linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
     const memberId = memberIdOf(ctx.store, X.identityId);
     const planted = await PLANTS[kind].plant(ctx, X, memberId);
     const restored = await backupAndRestore(ctx);
@@ -338,7 +339,7 @@ for (const kind of blindKinds) {
 test("Fixture A anchor: spend grant, claim key and tier demotion are named; delegation control names exactly one", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Graph Agent A");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
   const memberId = memberIdOf(ctx.store, X.identityId);
   ctx.store.delegation.grant(ctx.owner, "commons", { identityId: X.identityId });
   issueSpendGrant(ctx.store.db, "commons", memberId, { grantedBy: ctx.ownerMemberId, capCents: "5000", perTxCapCents: "1000" });
@@ -377,7 +378,7 @@ test("Fixture A anchor: spend grant, claim key and tier demotion are named; dele
 test("C-D anchor: all five planted classes are named (was: one of five)", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Restore Agent");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work", "steer"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work", "steer"] });
   ctx.store.delegation.grant(ctx.owner, "commons", { identityId: X.identityId });
   ctx.store.ownerDelegates.grant(ctx.owner, "commons", { identityId: X.identityId });
   const issued = ctx.store.agentPlugin.issueApiKey({
@@ -419,7 +420,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
 test("quiet restore: a backup taken after the mutations reconciles clean", async (t) => {
   const ctx = boot(t);
   const X = ctx.store.identities.create("Quiet Agent");
-  ctx.store.identities.link(ctx.owner, "commons", { identityId: X.identityId, permissions: ["accept_work"] });
+  linkWithProof(ctx.store, ctx.owner, "commons", X, { permissions: ["accept_work"] });
   const memberId = memberIdOf(ctx.store, X.identityId);
   // A spread of classes, including the two-direction login-binding check
   // and an explicit tier row, all in their final state BEFORE the backup.
