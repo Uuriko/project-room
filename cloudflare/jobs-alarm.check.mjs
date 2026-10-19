@@ -101,6 +101,37 @@ test("a webhook due in 30 seconds waits for the alarm", { timeout: 60_000 }, asy
   }
 });
 
+test("a webhook already past due arms the alarm at ~now, not +60 s", async () => {
+  const mf = await start();
+  try {
+    // Seeded 30 s in the past: before the L12 fix the arm pushed this out a
+    // full cadence (now + 60 s); the tail must now be ~0 (a 1 s epsilon).
+    const seeded = await call(mf, "/probe/seed-due?name=invite-only-pilot&delayMs=-30000");
+    assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
+    assert.ok(seeded.body.due < Date.now());
+    // A plain DO fetch arms the alarm in its finally (waitUntil) without
+    // running due jobs, which is the path that used to inherit the tail.
+    // The delivery is seeded in the invite-only-pilot object, the one the
+    // probe's arm-via-fetch invokes.
+    const arm = await call(mf, "/probe/arm?name=invite-only-pilot");
+    assert.equal(arm.status, 200, JSON.stringify(arm.body));
+    // Poll tightly and keep the FIRST armed value: the platform will fire
+    // the ~now alarm about a second later and re-arm for whatever is next.
+    let alarmAt = null;
+    for (let attempt = 0; attempt < 50 && alarmAt == null; attempt += 1) {
+      const armed = await call(mf, "/probe/alarm-at?name=invite-only-pilot");
+      alarmAt = armed.body.alarmAt;
+      if (alarmAt == null) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(typeof alarmAt, "number", "the fetch path must arm an alarm for the past-due delivery");
+    const tailMs = alarmAt - Date.now();
+    assert.ok(tailMs < 10_000, `past-due arm tail ${tailMs} ms must be ~0, not the old ~60 s push-out`);
+    assert.ok(alarmAt > Date.now() - 10_000, `alarm ${alarmAt} is implausibly far in the past`);
+  } finally {
+    await mf.dispose();
+  }
+});
+
 test("a thrown alarm is rescheduled", async () => {
   const mf = await start();
   try {
