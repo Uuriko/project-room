@@ -38,11 +38,23 @@ try {
   store.delegation.grant(owner, "commons", { identityId: delegate.identityId });
   send(T.MESSAGE_POSTED, { messageId: randomUUID(), body: "history before the backup" });
 
+  const workCommand = { id: "restore-work-proposal", type: T.WORK_PROPOSED, data: {
+    workItemId: "restore-work", title: "Keep canonical work", definitionOfDone: "Preserve exact task state and receipt",
+    accountableMemberId: "owner"
+  } };
+  const workReceipt = store.command(owner, "commons", workCommand);
+  const workBefore = structuredClone(store.room("commons").state.workItems["restore-work"]);
+  const workRows = store.db.prepare("SELECT * FROM work_entities ORDER BY room_id,work_id").all();
+  assert.equal(workRows.length, 1, "the rehearsal must capture a populated canonical repository");
+
   const backupResult = await backupRoom(filename, backupDest);
   const watermark = JSON.parse(readFileSync(backupResult.watermark, "utf8"));
   assert.equal(watermark.version, 1);
   assert.equal(watermark.events, store.db.prepare("SELECT count(*) AS n FROM events").get().n, "watermark pins the event count");
   assert.ok(watermark.backedUpAt <= Date.now());
+
+  send(T.WORK_ACCEPTED, { workItemId: "restore-work", expectedRevision: 0 });
+  assert.notDeepEqual(store.room("commons").state.workItems["restore-work"], workBefore);
 
   // The live timeline moves on: every one of those grants is withdrawn.
   store.delegation.revoke(owner, "commons", { identityId: delegate.identityId });
@@ -59,6 +71,9 @@ try {
   // looks current again - prove that, then prove the reconcile catches it.
   const restored = new RoomStore(backupResult.filename, { readOnly: true });
   try {
+    assert.deepEqual(restored.db.prepare("SELECT * FROM work_entities ORDER BY room_id,work_id").all(), workRows);
+    assert.deepEqual(restored.room("commons").state.workItems["restore-work"], workBefore,
+      "restore preserves the captured task, not a later live mutation");
     const eventsAfter = restored.db.prepare("SELECT count(*) AS n FROM events").get().n;
     assert.equal(eventsAfter, watermark.events, "restored history matches the watermark");
     assert.ok(restored.db.prepare("SELECT body FROM events WHERE body LIKE '%history before the backup%'").get(), "restored history is readable");
@@ -104,6 +119,16 @@ try {
     for (const row of report.stale) console.log(`  stale ${row.kind}: ${row.id} - ${row.detail}`);
     console.log(`  checked: ${JSON.stringify(report.checked)}`);
   } finally { restored.close(); }
+  // This is a disposable offline database, never reopened for traffic.
+  const retryStore = new RoomStore(backupResult.filename);
+  try {
+    const sequence = retryStore.room("commons").sequence;
+    const retry = retryStore.command(owner, "commons", workCommand);
+    assert.equal(retry.event.id, workReceipt.event.id);
+    assert.equal(retryStore.room("commons").sequence, sequence, "exact retry creates no new work event");
+    assert.deepEqual(retryStore.room("commons").state.workItems["restore-work"], workBefore);
+    console.log("  canonical work: exact payload and command receipt survive backup, reopen and retry");
+  } finally { retryStore.close(); }
   store.close();
 } finally {
   rmSync(directory, { recursive: true, force: true });
