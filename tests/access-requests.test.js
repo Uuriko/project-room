@@ -523,8 +523,14 @@ test("auto-approve: verified-only rooms never auto-approve the unverified", asyn
   }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /verified/);
-  // A verified identity in the same room is approved inline.
-  store.agentPlugin.verifyIdentity({ identityId: identity.identityId, verifiedBy: "owner" });
+  // A verified identity in the same room is approved inline. TM-1: the
+  // attestation must come from an ANCHORED attester (here: an attester
+  // itself attested by an operator outside the pair) to confer the tier —
+  // a bare member-id stand-in attester confers nothing.
+  const attester = store.identities.create("Anchored attester");
+  const outside = store.identities.create("Outside operator");
+  store.agentPlugin.verifyIdentity({ identityId: attester.identityId, verifiedBy: outside.identityId });
+  store.agentPlugin.verifyIdentity({ identityId: identity.identityId, verifiedBy: attester.identityId });
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_verified"
