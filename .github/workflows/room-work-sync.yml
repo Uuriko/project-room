@@ -17,6 +17,7 @@ jobs:
   sync:
     if: github.event.pull_request.merged == true && contains(github.event.pull_request.body, 'Room-Work:')
     runs-on: ubuntu-latest
+    timeout-minutes: 5 # observed p90 under 20s; default is 360
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
