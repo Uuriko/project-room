@@ -141,7 +141,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
       // Table shapes are operator-reconciled; the schema's indexes are
       // additive and self-healing (CREATE INDEX IF NOT EXISTS re-applies
-      // on every schema exec), so only CREATE TABLE definitions are
+      // on every schema exec), so only table definitions are
       // shape-checked here — each cut at its terminating ";" because a
       // table chunk can run on into the comment and index text that
       // follows it in the schema string.
