@@ -370,6 +370,7 @@ optional.push("server/boot-options.mjs"); // imported by server.mjs: default boo
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/boot-config.mjs"); // imported by server.mjs: fail-loud critical-config boot gate (RC-2026-09-27-2732)
 optional.push("server/messages-store.mjs"); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+optional.push("server/messages-archive.mjs"); // SPILL-1: archive trigger + tick shared by the messages-archive job (imported by server/jobs.mjs)
 optional.push("server/message-redaction.mjs"); // PRIV-1: rewrite deleted message text out of the log (imported by server/store.mjs and server/account-deletion.mjs)
 optional.push("server/history-visibility.mjs"); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)
 optional.push("server/pins.mjs");

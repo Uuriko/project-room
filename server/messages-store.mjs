@@ -1127,11 +1127,61 @@ function idsNamedAfter(db, roomId, afterSeq, candidates) {
   return named;
 }
 
+// The stored projection size of one room in bytes, or null when the room
+// does not exist. LENGTH() over the TEXT projection counts characters, and
+// projections are JSON text whose non-ASCII bodies would undercount bytes,
+// so measure the blob cast — the same measure usage-summary uses.
+export function roomProjectionBytes(store, roomId) {
+  const row = store?.db?.prepare("SELECT length(CAST(projection AS BLOB)) AS bytes FROM rooms WHERE id=?").get(roomId);
+  return row ? Number(row.bytes) || 0 : null;
+}
+
+export const ARCHIVE_CERTIFY_EVENT_CAP = 4_000;
+export const ARCHIVE_CERTIFY_BUDGET_MS = 15_000;
+const ARCHIVE_CERTIFY_CALLS = 20;
+
+// Replay the room's messages table to its head and certify it there — the
+// precondition archiveRoomMessages enforces (cursor at head, parity at
+// head). Returns { ok: true } or { ok: false, detail } naming the step
+// that stopped it; the detail never carries message text. Shared by the
+// operator archive door and the messages-archive job so both certify in
+// exactly the same bounded way. The catch-up is bounded by calls and by
+// events, not by the wall clock alone: inside a Durable Object Date.now()
+// advances only across I/O and the backfill is synchronous SQLite work, so
+// the clock reads the same at the end of the catch-up as at its start.
+// 4,000 events at the slowest replay rate measured (~4.3 ms/event) is
+// ~17 s, inside the Durable Object's 30 s CPU limit; a room further
+// behind is caught up by repeating the call, which keeps every committed
+// chunk (each call resumes from the cursor).
+export function certifyRoomMessagesAtHead(store, roomId, { deadline = Date.now() + ARCHIVE_CERTIFY_BUDGET_MS, eventCap = ARCHIVE_CERTIFY_EVENT_CAP } = {}) {
+  if (!Number.isInteger(eventCap) || eventCap < 1) throw new TypeError("eventCap must be a positive integer");
+  let events = 0;
+  for (let call = 0; call < ARCHIVE_CERTIFY_CALLS && events < eventCap && !messagesBackfillCaughtUp(store.db, roomId); call += 1) {
+    const result = store.backfillMessages({ limit: Math.min(1000, eventCap - events), deadline });
+    events += Number.isInteger(result.events) && result.events > 0 ? result.events : 0;
+    if ((result.blocked ?? []).some(block => block.roomId === roomId)) return { ok: false, detail: "backfill_blocked" };
+    if (result.done || result.budgetExceeded) break;
+  }
+  if (!messagesBackfillCaughtUp(store.db, roomId)) return { ok: false, detail: "backfill_not_caught_up" };
+  try {
+    const parity = store.checkMessagesParity({ roomId });
+    if (!parity.ok) return { ok: false, detail: "backfill_not_caught_up" };
+  } catch (error) {
+    if (!String(error?.message ?? "").startsWith("messages parity failed for ")) throw error;
+    return { ok: false, detail: "parity_failed" };
+  }
+  return { ok: true };
+}
+
 // Move old messages out of rooms.projection into the messages table only. Keeps
 // the newest `keepNewest` messages and everything retainedByState. Needs a
 // certified messages table (parity at the room head). dryRun reports what
 // would move and changes nothing. Returns { ok, ... } and never throws for
-// "not ready" conditions.
+// "not ready" conditions. A result that would move messages also carries the
+// moving set's oldest/newest timestamps (oldestAt/newestAt), the projection
+// size before the move (projectionBytesBefore) and the size the projection
+// would have after it (resultingProjectionBytes), so a dry-run report can
+// state the effect on the room's projection cap without a second pass.
 export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true, belowCursor = false } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
   if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
@@ -1189,7 +1239,20 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     const retainedIds = ordered.filter(message => seqOf(message) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
     // Every message at or below the cut that is not moving is explicitly retained.
     const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
-    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq, ...scope };
+    // The moving set is seq-ordered, so its ends are the oldest and newest
+    // messages that would move. The resulting size removes exactly the freed
+    // bytes and adds back the archive marker the real run writes in their
+    // place — the same marker object built below.
+    const stamps = moving.map(message => message.createdAt).filter(value => typeof value === "string").sort();
+    const projectionBytesBefore = Buffer.byteLength(head.projection);
+    const markerBytes = Buffer.byteLength(JSON.stringify({ throughSeq, count: marker.count + moving.length, retainedIds }));
+    const priorMarkerBytes = state.messagesArchive ? Buffer.byteLength(JSON.stringify(state.messagesArchive)) : 0;
+    const resultingProjectionBytes = projectionBytesBefore - freedBytes - priorMarkerBytes + markerBytes;
+    const result = {
+      ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq,
+      oldestAt: stamps[0] ?? null, newestAt: stamps[stamps.length - 1] ?? null,
+      projectionBytesBefore, resultingProjectionBytes, ...scope
+    };
     // Spot-check before anything moves (dry run too): every moving message has a
     // table row equal to its projection record, and a sample is tied back to its
     // posting event in the log.
