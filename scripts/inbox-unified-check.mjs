@@ -239,11 +239,25 @@ test("share a Telegram excerpt into the room exactly like an email excerpt", { t
   await p.locator("#inbox-share-confirm:not([disabled])").waitFor();
   assert.equal(await p.locator("#inbox-excerpt-preview").textContent(), "Shared message excerpt\n\n" + excerpt);
   await f.capture("telegram-share");
+  // Pin this share's requestId to one whose excerpt id (excerpt-sha256([account, requestId]), server/inbox.mjs)
+  // contains "4200" for the fixture account, so the privacy check below meets a colliding id on every run
+  // instead of about one run in a thousand.
+  const collidingRequestId = "00000000-0000-4000-8000-0000000000f2";
+  await p.evaluate(id => { const next = crypto.randomUUID.bind(crypto); let pinned = id; crypto.randomUUID = () => { const value = pinned ?? next(); pinned = null; return value; }; }, collidingRequestId);
   await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
   await p.locator("#main").waitFor({ state: "visible" });
   const record = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.excerpt'").get();
   const receipt = JSON.parse(record.receipt_json), posted = f.store.room("commons").state.messages.find(m => m.id === receipt.messageId);
   assert.equal(posted.body, "Shared message excerpt\n\n" + excerpt);
-  assert.equal(JSON.stringify(posted).includes("4200"), false, "the private budget line stays private");
+  assert.equal(JSON.parse(record.receipt_json).messageId, posted.id);
+  assert.match(posted.id, /4200/, "the pinned request gives an excerpt id containing 4200");
+  // Whole-message privacy: only the message schema's fields, and no fragment of the private line in any of them.
+  // Bare "4200" is not a private fragment on its own: the id is random hex and contains it about 0.1% of the time.
+  const allowedFields = ["id", "authorId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "createdAt"];
+  const privacyFindings = message => [...Object.keys(message).filter(key => !allowedFields.includes(key)).map(key => "field " + key),
+    ...["Private budget", "budget: 4200"].filter(fragment => JSON.stringify(message).includes(fragment))];
+  assert.deepEqual(privacyFindings(posted), [], "the private budget line stays private");
+  assert.deepEqual(privacyFindings({ ...posted, body: posted.body + "\n\nPrivate budget: 4200." }), ["Private budget", "budget: 4200"], "the check still sees a leaked line");
+  assert.deepEqual(privacyFindings({ ...posted, source: "budget: 4200" }), ["field source", "budget: 4200"], "the check still sees an extra field");
   assert.equal(JSON.stringify(f.store.room("commons").state).includes("-1001000000001"), false, "chat ids never reach the room");
 });
