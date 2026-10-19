@@ -150,4 +150,61 @@ describe("operator archive below the backfill cursor", { concurrency: false }, (
     assert.deepEqual({ archived: flagged.archived, throughSeq: flagged.throughSeq, freedBytes: flagged.freedBytes },
       { archived: plain.archived, throughSeq: plain.throughSeq, freedBytes: plain.freedBytes });
   });
+
+  test("below-cursor planning never invokes global backfill or changes its evidence", async t => {
+    const f = await serve(t);
+    f.post(KEEP + 60);
+    f.catchUp();
+    f.park();
+    f.post(30, "later");
+    const evidence = () => ({
+      cursor: f.store.db.prepare("SELECT * FROM messages_backfill_cursor ORDER BY room_id").all(),
+      blocks: f.store.db.prepare("SELECT * FROM messages_backfill_blocks ORDER BY room_id").all(),
+      snapshots: f.store.db.prepare("SELECT * FROM message_replay_snapshots ORDER BY room_id").all()
+    });
+    const before = evidence();
+    f.store.backfillMessages = () => { throw new Error("global backfill must not execute"); };
+    const plan = await f.call(REQUEST);
+    assert.equal(plan.status, 200, JSON.stringify(plan.body));
+    assert.deepEqual(evidence(), before);
+    const stale = await f.call({ ...REQUEST, dryRun: false,
+      expect: { ...plan.body.expect, archived: plan.body.archived + 1 } });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error.code, "plan_changed");
+    assert.deepEqual(evidence(), before);
+    assert.equal(f.store.room("commons").state.messagesArchive, undefined);
+  });
+
+  test("a mismatched moving row refuses both planning and execution without publishing a marker", async t => {
+    const f = await serve(t);
+    f.post(KEEP + 60);
+    f.catchUp();
+    f.park();
+    f.post(30, "later");
+    const before = f.bytes();
+    f.store.db.prepare("UPDATE messages SET body='synthetic wrong body' WHERE room_id='commons' AND message_id='m-0'").run();
+    for (const data of [REQUEST, { ...REQUEST, dryRun: false, expect: { archived: 90, throughSeq: 92 } }]) {
+      const refusal = await f.call(data);
+      assert.equal(refusal.status, 409, JSON.stringify(refusal.body));
+      assert.match(refusal.body.error.message, /archive_spot_check_failed/);
+      assert.equal(f.bytes(), before);
+      assert.equal(f.store.room("commons").state.messagesArchive, undefined);
+      assert.ok(f.ids().has("m-0"));
+    }
+  });
+
+  test("an invalid cursor event anchor refuses below-cursor compaction", async t => {
+    const f = await serve(t);
+    f.post(KEEP + 60);
+    f.catchUp();
+    f.park();
+    f.post(30, "later");
+    f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='not-the-stored-event' WHERE room_id='commons'").run();
+    const before = f.bytes();
+    const refusal = await f.call(REQUEST);
+    assert.equal(refusal.status, 409, JSON.stringify(refusal.body));
+    assert.match(refusal.body.error.message, /messages_cursor_unusable/);
+    assert.equal(f.bytes(), before);
+    assert.equal(f.store.room("commons").state.messagesArchive, undefined);
+  });
 });
