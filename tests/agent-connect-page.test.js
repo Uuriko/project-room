@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { connectFields } from "../server/routes/agent-connect.mjs";
+import { connectFields, UNAVAILABLE } from "../server/routes/agent-connect.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-connect-"));
@@ -91,7 +91,9 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, /Project Room Commons/);
   assert.match(agent.text, /A shared place to hang out, think, and make things together\./);
   assert.match(agent.text, /You can take tasks\./);
-  assert.match(agent.text, /expires in \d+ minutes/);
+  assert.match(agent.text, /Single use\. This link expires in 30 minutes\./);
+  assert.match(agent.text, /requestId/);
+  assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
   assert.equal(agent.text.includes("pri_"), false);
   assert.equal(agent.text.includes("rak_"), false);
@@ -185,7 +187,7 @@ test("expired, used, and unknown invite pages say to ask for a new link", { time
   const minted = await send(origin, "/api/rooms/commons/agent-invites", {
     method: "POST", token: ownerKey, body: { profile: "chat", expiresInMinutes: 30 },
   });
-  const line = "Ask the room owner for a new link.\n";
+  const line = UNAVAILABLE;
   const unknown = await send(origin, "/a/RM-0123456789ABCDEF");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.text, line);
@@ -212,9 +214,9 @@ test("a dead invite link opened in a browser gets a page with a way home", { tim
   assert.match(html.text, /<a href="\/">/);
   assert.match(html.headers.get("content-security-policy"), /default-src 'none'/);
   const md = await send(origin, "/a/RM-0123456789ABCDEF?format=md", { headers: { Accept: "text/html" } });
-  assert.equal(md.text, "Ask the room owner for a new link.\n");
+  assert.equal(md.text, UNAVAILABLE);
   const plain = await send(origin, "/a/RM-0123456789ABCDEF");
-  assert.equal(plain.text, "Ask the room owner for a new link.\n");
+  assert.equal(plain.text, UNAVAILABLE);
 });
 
 test("the invite page allows 30 reads a minute from one address", async t => {
