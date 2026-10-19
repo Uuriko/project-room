@@ -117,3 +117,44 @@ deployment. The pinned Codex 0.162.1 sandbox CLI requires a named permission
 profile and differs from newer documentation; the attempted isolated probe
 refused before executing. This is evidence of an uncompleted qualification, not a
 sandbox pass. No credentials were used and no policy fallback was introduced.
+
+## Native Mac boundary receipt — October 18, 2026
+
+Pinned Codex 0.162.1, SHA-256
+`74c6a6d263f40d65f99c27a815275f5b4ed0bcc2baecc396b4cf3255498bdfc0`.
+A disposable App Server used Room's existing legacy sandbox settings,
+approval_policy=never, shell_environment_policy.inherit=none, a fresh private
+HOME/CODEX_HOME and no credentials. Its command/exec qualification API executed
+synthetic commands directly; Room's production RPC allowlist remains unchanged.
+
+| Configured mode | Workspace write | Outside write | Live loopback connection |
+| --- | --- | --- | --- |
+| read-only | blocked | blocked | blocked |
+| workspace-write | allowed | blocked | blocked |
+
+An unsandboxed control connected to the same listener before each check.
+Observed command statuses were 1/1/7 and 0/1/7 respectively (touch/touch/curl).
+The test launcher terminated each process group and removed disposable files.
+
+This qualifies those command boundaries on this exact runtime and Mac.
+It does not establish outside-read isolation, provider authentication, model
+execution, app approval UX, physical-device behavior or an end-to-end model turn.
+No new backend, VM, setup dashboard or automatic credential migration is needed.
+Retain these receipts while runtime and policy are unchanged; run supported
+Linux integration in CI and keep provider qualification separately tracked.
+
+The earlier hosted contract failure was a missing documentation reachability
+link. The Codex host guide now links this plan; no runtime change was needed.
+
+The separate existing provider qualification also passed on the pinned runtime:
+one synthetic model turn produced and published ROOM-QUALIFIED-42 in a local Room;
+after stopping and reopening the host, retry returned the same result without a
+second model start. Runtime input evidence survived restart (2690 bytes).
+This used the existing dedicated qualification profile, not operator credentials.
+No production Room was accessed. Physical sleep and interrupted in-flight model
+recovery remain outside this receipt.
+
+Hosted Linux unit shards 1/3, 2/3 and 3/3 passed for f0a7f687 in Actions run
+39203782981, including the mandatory real Linux sandbox tests. The follow-up
+changes only documentation linkage and this receipt; runtime source is unchanged.
+Remaining browser/release gates must still pass before merge or deployment.
