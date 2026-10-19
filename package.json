@@ -9,7 +9,7 @@
   "description": "Executable v0 contract for a shared human and agent project room",
   "scripts": {
     "start": "node server.mjs",
-    "pretest": "node scripts/check-deps.mjs && node scripts/build-agent-docs.mjs",
+    "pretest": "node scripts/verify-preflight.mjs && node scripts/build-agent-docs.mjs",
     "test": "node --test",
     "verify:affected": "node scripts/verify-affected.mjs",
     "test:quarantined": "node scripts/run-quarantined-tests.mjs",
@@ -41,7 +41,8 @@
     "qa3:board-growth": "node scripts/qa3/board-growth.mjs",
     "detect-flaky": "node scripts/flaky-detect.mjs",
     "fuzz:mime": "node scripts/fuzz-mime.mjs",
-    "test:contributor": "node --test --test-concurrency=1 scripts/selfhost-onboarding-browser-check.mjs scripts/contribution-journey-check.mjs tests/github-work-sync.test.js tests/claim-autolink-http.test.js"
+    "test:contributor": "node --test --test-concurrency=1 scripts/selfhost-onboarding-browser-check.mjs scripts/contribution-journey-check.mjs tests/github-work-sync.test.js tests/claim-autolink-http.test.js",
+    "bench:room": "node scripts/bench/compare.mjs"
   },
   "engines": {
     "node": ">=24.19.0"

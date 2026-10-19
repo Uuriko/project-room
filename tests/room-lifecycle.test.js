@@ -31,7 +31,7 @@ const access = (actorId, memberId, permissions, active = false) => event({ type:
   data: { memberId, expectedMemberRevision: 0, permissions, active } });
 
 test("reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 38);
+  assert.equal(STORE_SCHEMA_VERSION, 42);
   assert.deepEqual([...ROOM_KINDS], ["personal", "organization"]);
   assert.ok(COMMAND_TYPES.includes(T.ROOM_ARCHIVED)); assert.equal(classifyCommand(T.ROOM_ARCHIVED), "act");
   const state = seed("r").reduce(applyEvent, emptyRoomState());
@@ -191,7 +191,7 @@ test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps ev
   assert.deepEqual(migrated.map(row => row.id), rooms.map(row => row.id), "every room survives the migration");
   assert.deepEqual(migrated.map(row => row.sequence), rooms.map(row => row.sequence), "no room's sequence moves");
   for (const [index, row] of migrated.entries()) {
-    const after = JSON.parse(row.projection), before = JSON.parse(rooms[index].projection);
+    const after = structuredClone(current.room(row.id).state), before = JSON.parse(rooms[index].projection);
     assert.deepEqual(Object.keys(after).filter(key => !(key in before)), ["channels"],
       `${row.id}: the default channel is the only projection key a v27 room gains`);
     assert.deepEqual(Object.keys(after.channels), ["general"]);

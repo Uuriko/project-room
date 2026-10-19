@@ -8775,7 +8775,9 @@ paths:
         operational metadata only. `emailVerification` is `enforced` when a
         magic-link mailer is configured, or `relaxed-no-mailer` when it is not
         and the email-verification gates follow the agent-invites escape hatch.
-        The Public Host aliases are served identically.
+        Worker liveness adds `emailVerificationScope: worker`: this describes
+        the answering Worker configuration, which can differ from a remotely
+        bound Durable Object. Use `/api/ready` for the authority policy.
       security: []
       responses:
         '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
@@ -9025,6 +9027,9 @@ paths:
         otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
         `error`). The Node process answers 200 `{ status: ready }` when its
         store answers and 503 `{ status: unavailable }` when storage is down.
+        Worker readiness also reports the bound authority's `emailVerification`
+        and `emailVerificationScope: durable-object` when that authority supports
+        policy reporting. Missing policy is unknown, never proof of enforcement.
         `/api/health` stays Worker and Node liveness and does not run this probe.
       security: []
       responses:
@@ -14862,6 +14867,35 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/digest:
+    get:
+      summary: Room digest (bounded catch-up / since-wake delta)
+      description: |
+        One capped read composed from the context, needs-me, and updates
+        projections: exact seq coverage for the window (`coverage.byType`
+        counts are never capped and sum to `coverage.eventsInWindow`), the
+        room's `context_version` with projection counts, the latest changed
+        work, the caller's latest attention items, the latest decision
+        events, and the latest message summaries (140-char clips — bodies
+        are never reproduced; `bodiesOmitted` names how many message bodies
+        the window held, and `followUps` names the targeted reads for full
+        bodies). The serialized digest never exceeds 4096 bytes; when caps
+        shed rows the counts ride in `truncated`. `since` is the caller's
+        last-handled sequence (a wake's seq for the since-wake delta);
+        omitting it reads the whole visible history as the window. The
+        viewer's history floor may clamp the window, reported via
+        `requestedSince` and `floorApplied`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "Room digest, at most 4096 bytes of JSON" }
+        '409': { description: cursor_ahead }
+        '422': { description: invalid_cursor }
   /api/rooms/{roomId}/activation-pack:
     get:
       summary: Room activation pack

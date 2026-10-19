@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Orient payload builder (jill lane, RC-2026-09-28 — ryska's 404).
 //
 // Read-only, member-scoped orientation payload: contract version, the
@@ -185,7 +186,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   }));
   const lines = [
     ...pinned.filter(pin => pin.text).map(pin => ({ id: pin.messageId, source: "pinned", text: pin.text })),
-    ...(state.messages ?? []).filter(visible).slice(-40).map(message => ({ id: message.id, source: "message", text: message.body })),
+    ...messageRepository(store, roomSlug, state).recent(40, visible).map(message => ({ id: message.id, source: "message", text: message.body })),
     ...claims.map(item => ({ id: item.id, source: "claim", text: item.title }))
   ];
   // A member with no published directory card is still orientable. Missing

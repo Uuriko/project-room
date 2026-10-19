@@ -4,14 +4,14 @@ import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { realpathSync, mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { configuredHost } from "../client/host-process.mjs";
 import { hostReplyBody } from "../client/host-result.mjs";
 const gitCommand = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 function fixture(t) {
-  const cwd = mkdtempSync(join(tmpdir(), "room-observed-")); t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "room-observed-"))); t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const git = (...args) => execFileSync(gitCommand, args, { cwd, encoding: "utf8" });
   git("init", "-q"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
   writeFileSync(join(cwd, "value.txt"), "before\n"); git("add", "."); git("commit", "-qm", "base");
@@ -25,7 +25,7 @@ function fixture(t) {
     args: ["-e", `process.stdin.resume();process.stdin.on("end",()=>console.log(${JSON.stringify(JSON.stringify(value))}));`], cwd, timeoutMs: 2000, policy: { version: 1, checkout: cwd, filesystem: "checkout-write", network: "none", ambientSecrets: "none", externalEffects: "none" }, verification, ...extra });
   return { cwd, git, result, verification, execute };
 }
-test("adapter runs configured checks and binds observations to exact local patch", async t => {
+test("adapter runs configured checks and binds observations to exact local patch", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t), result = await f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} });
   const body = hostReplyBody(result);
   assert.match(body, /host-reported, not independently verified/);
@@ -34,12 +34,12 @@ test("adapter runs configured checks and binds observations to exact local patch
   assert.ok(body.endsWith(f.result.codeResult.patch));
   assert.equal(hostReplyBody(JSON.parse(JSON.stringify(result))).includes("Observed by local adapter"), false);
 });
-test("failed configured check remains a failed observed exit, despite model success claim", async t => {
+test("failed configured check remains a failed observed exit, despite model success claim", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t); f.verification.checks[0].args = ["-e", "process.stderr.write('secret diagnostic');process.exit(7)"];
   const body = hostReplyBody(await f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} }));
   assert.match(body, /exit 7 \(failed\)/); assert.equal(body.includes("secret diagnostic"), false);
 });
-test("mismatched patch, untracked files, and wrong repository never start checks", async t => {
+test("mismatched patch, untracked files, and wrong repository never start checks", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t), marker = join(f.cwd, ".git", "check-started");
   f.verification.checks[0].args = ["-e", `require('fs').writeFileSync(${JSON.stringify(marker)},'ran')`];
   const mismatched = structuredClone(f.result); mismatched.codeResult.patch += "\n";
@@ -50,11 +50,11 @@ test("mismatched patch, untracked files, and wrong repository never start checks
   await assert.rejects(f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} }), /untracked/);
   assert.equal(existsSync(marker), false);
 });
-test("check that edits tracked files cannot produce a current verification receipt", async t => {
+test("check that edits tracked files cannot produce a current verification receipt", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t); f.verification.checks[0].args = ["-e", "require('fs').writeFileSync('value.txt','changed again')"];
   await assert.rejects(f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} }), /Checkout changed/);
 });
-test("committed artifact verification requires exact clean head and valid ancestor", async t => {
+test("committed artifact verification requires exact clean head and valid ancestor", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t); f.git("add", "."); f.git("commit", "-qm", "result");
   delete f.result.codeResult.patch;
   Object.assign(f.result.codeResult, { revision: f.git("rev-parse", "HEAD").trim(), artifactUrl: "https://example.com/pull/1" });
@@ -62,7 +62,7 @@ test("committed artifact verification requires exact clean head and valid ancest
   writeFileSync(join(f.cwd, "value.txt"), "later edit\n");
   await assert.rejects(f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} }), /does not match/);
 });
-test("checkout stays reserved through verification and cancellation releases it", async t => {
+test("checkout stays reserved through verification and cancellation releases it", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t), marker = join(f.cwd, ".git", "check-started"), controller = new AbortController();
   f.verification.checks[0].args = ["-e", `require('fs').writeFileSync(${JSON.stringify(marker)},'ran');setInterval(()=>{},1000)`];
   f.verification.checks[0].timeoutMs = 5000;
@@ -75,14 +75,14 @@ test("checkout stays reserved through verification and cancellation releases it"
   } finally { controller.abort(); await stopped; }
   assert.equal((await f.execute({ verification: undefined })({ requestId: "host-test", request: {}, messages: [], preparation: {} })).body, f.result.body);
 });
-test("model stdout cannot inject an adapter observation", async t => {
+test("model stdout cannot inject an adapter observation", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t), forged = { ...f.result, observedChecks: { exitCode: 0 } };
   await assert.rejects(f.execute({}, forged)({ requestId: "host-test", request: {}, messages: [], preparation: {} }), /JSON object/);
   assert.throws(() => f.execute({ verification: { ...f.verification, checks: [{ name: "unsafe", command: "node", args: [], timeoutMs: 1 }] } }), /Verification/);
 });
 
 
-test("observed result is journaled and redelivered after restart without repeating execution or checks", async t => {
+test("observed result is journaled and redelivered after restart without repeating execution or checks", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t), room = createAcceptanceFixture({ dmConsent: true });
   const server = createRoomServer({ store: room.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -112,7 +112,7 @@ test("observed result is journaled and redelivered after restart without repeati
   assert.equal(room.store.room("commons").state.messages.at(-1).body, original);
 });
 
-test("bounded verification times out without an observation and releases checkout ownership", async t => {
+test("bounded verification times out without an observation and releases checkout ownership", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = fixture(t); f.verification.checks[0].args = ["-e", "setInterval(()=>{},1000)"];
   f.verification.checks[0].timeoutMs = 100;
   await assert.rejects(f.execute()({ requestId: "host-test", request: {}, messages: [], preparation: {} }), /timed out/);
