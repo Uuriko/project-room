@@ -205,7 +205,7 @@ test('review action namespace cannot alias verification journal and invalid inpu
 
 test('historical readonly receipts remain inspectable as pending without installing review tables', t => {
   const f = fixture(t), id = f.receipt.receiptId;
-  f.store.db.exec('DROP TABLE public_work_reviews; DROP TABLE public_work_review_versions; DROP TABLE public_work_review_requests;');
+  f.store.db.exec('DROP TABLE public_work_reviews; DROP TABLE public_work_review_versions; DROP TABLE public_work_review_requests; DROP TABLE public_work_review_reads;');
   const readonly = new RoomStore(f.file, { readOnly: true });
   try {
     const service = new PublicWorkReviews(readonly);
