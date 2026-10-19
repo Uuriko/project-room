@@ -21,9 +21,13 @@ permissions:
 # run (any older pending run in the group is cancelled). A main SHA can
 # therefore finish `test` between merges. workflow_dispatch is keyed by run
 # id: a manual run neither cancels the tip nor is cancelled by it.
+# Merge-group runs are composed batch heads: two batches queued back to
+# back must not cancel each other's required checks, so merge_group joins
+# main pushes and dispatch in the never-cancel set (invariants.yml already
+# scopes it this way; CI-DIET cancel-scope aligns this workflow with it).
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'test-main') || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' && github.event_name != 'merge_group' }}
 
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
