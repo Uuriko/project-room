@@ -535,3 +535,42 @@ test("stalled clipboard recovers without losing the result or download", { timeo
   assert.equal(await p.locator("#result-download").isVisible(), true);
   assert.equal(await p.locator("#result-body").textContent(), f.body);
 });
+
+for (const delayed of [false, true]) test(`withdrawing prior version clears comparison: ${delayed ? "delayed response" : "already rendered"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  const previous = structuredClone(f.state().workItems["native-result"].receipt);
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_STARTED, { resolvedBlocker: "Ready to revise" });
+  const body = "Replacement result without the old note.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "replacement-audit", workItemId: "native-result", body });
+  f.change("native-result", T.WORK_COMPLETED, { summary: "Replacement", nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: previous.eventId, evidenceMessageId: "replacement-audit", evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
+  let release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
+  t.after(() => release());
+  if (delayed) await p.route("**/work-result?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("completionEventId") !== previous.eventId) return route.continue();
+    const response = await route.fetch(); began(); await gate; await route.fulfill({ response });
+  });
+  await f.open(); await f.read();
+  if (delayed) await started;
+  else await p.locator("#result-diff").filter({ hasText: "One useful result" }).waitFor();
+  const messageId = previous.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  await p.waitForFunction(id => document.querySelector(`[data-message-record-id="${id}"]`)?.textContent.includes("deleted"), messageId);
+  release();
+  await p.locator("#result-diff").filter({ hasText: "A version was withdrawn" }).waitFor();
+  await f.capture(delayed ? "withdrawn-comparison-delayed" : "withdrawn-comparison");
+  assert.equal((await p.locator("#result-diff").textContent()).includes("One useful result"), false, "withdrawn previous text must leave comparison too");
+});
+
+test("withdrawal keeps keyboard focus inside the reader", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-copy-text").focus();
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  await p.locator("#result-copy-text").waitFor({ state: "hidden" });
+  const focus = await p.evaluate(() => ({ id: document.activeElement.id, tag: document.activeElement.tagName,
+    visible: Boolean(document.activeElement.getClientRects().length), reader: document.querySelector("#result-dialog").contains(document.activeElement) }));
+  assert.equal(focus.reader && focus.visible, true, JSON.stringify(focus));
+});

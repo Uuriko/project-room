@@ -46,6 +46,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
     const textMessage = getState().messages.find(message => message.id === view.textMessageId);
     if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };
     if (view.withdrawn) {
@@ -70,6 +71,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement(action).hidden = !usableText(view);
       resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying);
     }
+    if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement("close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
   function closeResult(restore = true) {

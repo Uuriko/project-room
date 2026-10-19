@@ -505,3 +505,12 @@ test("editing a quoted result during execution reconciles the new reference befo
   await f.run();
   assert.equal(f.calls.filter(call => call.method === "turn/start").length, 2, "retries do not execute the follow-up twice");
 });
+
+test("previews revalidate changed context even when run revision is unchanged", async t => {
+  const clock = draftClock(t), sent = []; let current = true, checks = 0;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async value => sent.push(value.body),
+    attemptId: "a", requestKey: "k", inputIds: ["m"], isCurrent: async () => { checks++; return current; } });
+  sink.emit(publicDelta("Old context")); await clock.settle();
+  current = false; sink.emit(publicDelta(" continued after withdrawal")); await clock.tick(500); await sink.close();
+  assert.deepEqual(sent, ["Old context"], `context checked ${checks} times`);
+});

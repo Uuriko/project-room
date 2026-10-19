@@ -492,3 +492,30 @@ test("result reply refusal keeps the reader and private destination draft intact
   assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
   assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
 });
+
+test("withdrawal clears an open review and prevents approval of missing text", { timeout: 25000 }, async t => {
+  const f = await setup(t, { review: true }); await f.open(); await f.textReady();
+  await f.save.focus();
+  f.send(T.MESSAGE_DELETED, { messageId: "native-draft", expectedMessageRevision: 0 });
+  await f.page.waitForFunction(() => document.querySelector('[data-message-record-id="native-draft"]')?.textContent.includes("deleted"));
+  assert.equal(await f.page.locator("#action-text-body").textContent(), "", "withdrawal clears the review copy too");
+  assert.equal(await f.save.isDisabled(), true, "withdrawn text cannot be approved from an open form");
+  assert.equal(await f.page.locator("#cancel-action").evaluate(node => node === document.activeElement), true);
+});
+
+test("late review text cannot restore a withdrawn result", { timeout: 25000 }, async t => {
+  const f = await setup(t, { review: true });
+  let release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
+  t.after(() => release());
+  await f.page.route("**/work-result?**", async route => {
+    const response = await route.fetch(); began(); await gate; await route.fulfill({ response });
+  });
+  await f.open(); await started;
+  f.send(T.MESSAGE_DELETED, { messageId: "native-draft", expectedMessageRevision: 0 });
+  await f.page.waitForFunction(() => document.querySelector('[data-message-record-id="native-draft"]')?.textContent.includes("deleted"));
+  release();
+  await f.page.locator("#action-text-origin").filter({ hasText: "This text was withdrawn" }).waitFor();
+  assert.equal(await f.page.locator("#action-text-body").textContent(), "");
+  assert.equal(await f.save.isDisabled(), true);
+});

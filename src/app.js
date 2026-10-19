@@ -2560,14 +2560,6 @@ function renderMessages() {
   if (focusedKey && document.activeElement === document.body) {
     [...list.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusedKey)?.focus({ preventScroll: true });
   }
-  // A re-render that trims or reflows the timeline can move the node the member
-  // was working on out of view (the page scroll is clamped or the card moves),
-  // and restoring focus above uses preventScroll. If it was on screen before and
-  // the focused control is not now, bring it back the least amount.
-  if (focusedOnScreen && list.contains(document.activeElement) && document.activeElement !== document.body) {
-    const now = document.activeElement.getBoundingClientRect();
-    if (now.bottom <= 0 || now.top >= innerHeight) document.activeElement.scrollIntoView({ block: "nearest", behavior: "instant" });
-  }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   renderPinned();
@@ -2576,6 +2568,12 @@ function renderMessages() {
   // visible row steady after both message and new-message controls change.
   if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
     window.scrollBy({ top: anchor.getBoundingClientRect().top - anchorOffset, behavior: "instant" });
+  // Anchor correction can undo focus scrolling; keep the active control visible
+  // only after every layout and scroll adjustment has finished.
+  if (focusedOnScreen && list.contains(document.activeElement) && document.activeElement !== document.body) {
+    const now = document.activeElement.getBoundingClientRect();
+    if (now.top < 0 || now.bottom > innerHeight) document.activeElement.scrollIntoView({ block: "nearest", behavior: "instant" });
+  }
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
 function draftFeedbackHTML(message) {
@@ -6225,14 +6223,31 @@ function resultRow(item) {
 }
 // Both reading and reviewing compare the same pinned completion versions.
 // Each caller owns its dialog/session lifetime; late reads cannot fill a new view.
+const resultComparisons = new Map();
 function clearResultComparison(box) {
+  resultComparisons.delete(box);
   box.hidden = true; box.replaceChildren();
+}
+function syncResultComparisons() {
+  for (const [box, comparison] of resultComparisons) {
+    if (!comparison.owns()) { clearResultComparison(box); continue; }
+    if ([comparison.currentId, comparison.previousId].some(id => state?.messages.find(message => message.id === id)?.deletedAt)) {
+      clearResultComparison(box);
+      box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
+    }
+  }
 }
 function loadResultComparison(workItemId, previousId, text, box, owns) {
   clearResultComparison(box);
   if (!previousId) return;
+  const comparison = { currentId: text.messageId, previousId: null, owns };
+  resultComparisons.set(box, comparison);
+  const current = () => owns() && resultComparisons.get(box) === comparison;
   client.workResult(workItemId, { completionEventId: previousId }).then(previous => {
-    if (!owns() || !previous) return;
+    if (!current() || !previous) return;
+    comparison.previousId = previous.result?.text?.messageId;
+    syncResultComparisons();
+    if (!current()) return;
     if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
     const before = previous.result?.text?.body;
     if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
@@ -6255,7 +6270,7 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
         })();
     box.hidden = false;
   }).catch(() => {
-    if (!owns()) return;
+    if (!current()) return;
     box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
     box.hidden = false;
   });
@@ -6421,8 +6436,18 @@ function actionChanged(entry) {
 }
 function syncActionForm() {
   $("#resume-action").hidden = !pendingAction?.uncertain;
-  if (!pendingAction || !state || busy) return;
-  const entry = pendingAction, changed = actionChanged(entry);
+  if (!pendingAction || !state) return;
+  const entry = pendingAction;
+  const textMessage = entry.text && state.messages.find(message => message.id === entry.text.messageId);
+  if (entry.text && (entry.text.withdrawnAt || textMessage?.deletedAt)) {
+    entry.text = { ...entry.text, body: "", withdrawnAt: entry.text.withdrawnAt ?? textMessage.deletedAt };
+    entry.needsReview = true; entry.error = uiText("result.reviewWithdrawn");
+    $("#action-text-body").textContent = "";
+    $("#action-text-origin").textContent = uiText("result.reviewWithdrawn");
+    clearResultComparison($("#action-result-diff"));
+  }
+  if (busy) return;
+  const changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
   if (entry.action === "complete") {
@@ -6432,7 +6457,9 @@ function syncActionForm() {
       : "You submit this result. Credit its producer, or choose Unknown.";
   }
   save.textContent = entry.uncertain ? "Retry original save" : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
+  const saveFocused = document.activeElement === save;
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
+  if (saveFocused && save.disabled) $("#cancel-action").focus({ preventScroll: true });
   $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
   $("#refresh-action").disabled = false;
@@ -7591,6 +7618,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
     resultStatus();
+    syncResultComparisons();
     syncActionForm();
     const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
       ...(item.helpWanted?.status === "open" ? [Date.parse(item.helpWanted.openedAt), Date.parse(item.helpWanted.expiresAt)] : [])]).filter(at => at > now).sort((a, b) => a - b)[0];

@@ -29,7 +29,7 @@ export async function sharedReplyContext(message, readMessage) {
 // Full snapshots are bounded/throttled; no tool arguments or private reasoning.
 export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds, isCurrent = async () => true, emit = () => {}, intervalMs = 500 }) {
   if (!Number.isSafeInteger(intervalMs) || intervalMs < 500 || intervalMs > 2147483647) throw new Error("Draft interval must be at least 500ms and fit a timer");
-  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", checkedRevision = null, dirty = false, nextAt = 0;
+  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", dirty = false, nextAt = 0;
   const text = () => [...parts.values()].join("\n").slice(0, 65536).toWellFormed();
   const send = async () => {
     dirty = false;
@@ -38,10 +38,8 @@ export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds,
       const current = await read();
       if (current.attemptId !== attemptId || current.status !== "working" || current.sourceDeleted
         || JSON.stringify(current.inputs.map(item => item.sourceMessageId)) !== JSON.stringify(typeof inputIds === "function" ? inputIds() : inputIds)) return;
-      if (current.revision !== checkedRevision) {
-        if (!await isCurrent(current)) return;
-        checkedRevision = current.revision;
-      }
+      // Quoted references and attachments can change without a run revision.
+      if (!await isCurrent(current)) return;
       // Include tokens received while checking authority without a second read.
       const body = text();
       sequence = Math.max(sequence, current.answerDraftSequence ?? current.answerDraft?.sequence ?? 0) + 1;

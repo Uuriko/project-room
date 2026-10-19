@@ -512,5 +512,7 @@
   "human.replyResult": "Reply",
   "human.workOwner": "Assigned to {name}",
   "result.loadingConversation": "Loading conversation…",
-  "result.conversationUnavailable": "Conversation unavailable. Reopen the result to try again."
+  "result.conversationUnavailable": "Conversation unavailable. Reopen the result to try again.",
+  "result.comparisonWithdrawn": "A version was withdrawn. Its text is no longer shown in this comparison.",
+  "result.reviewWithdrawn": "This text was withdrawn. Close this review."
 }
