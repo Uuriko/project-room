@@ -10,7 +10,7 @@ import { AccessRequests, accessRequestSchema } from "../server/access-requests.m
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { attentionReport } from "../server/owner-attention.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 // #662: owner-only "needs your attention" rollup.
@@ -289,4 +289,185 @@ test("exactly at the cap keeps insertion order; past the cap actions move first"
   report = f.report();
   assert.equal(report.itemCount, 26);
   assert.equal(report.items[0].kind, "spend", "past the cap, actions come first");
+});
+
+// ---------------------------------------------------------------------------
+// O-5-FIX (charter ATTENTION-PREP 01): the rollup gate is ownership, not
+// member kind. Fixture: a room whose owner member is kind "agent" — the shape
+// POST /api/agent-rooms produces for an agent creator, and the shape CRAWL-4
+// caught being refused 403 in 9/9 owner cells.
+function agentOwnedRoom(t, { ownerPermissions = [...PERMISSIONS], extraMembers = [] } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-attention-agent-"));
+  const clock = { now: Date.parse("2026-10-19T12:00:00Z") };
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock.now });
+  store.initialize([
+    event({ type: T.ROOM_CREATED, actorId: "agent-owner", roomId: "agentroom",
+      data: { roomId: "agentroom", ownerId: "agent-owner", title: "Agent-owned room", purpose: "O-5 fixture" } }),
+    event({ type: T.MEMBER_ADDED, actorId: "agent-owner", roomId: "agentroom",
+      data: { memberId: "agent-owner", displayName: "Agent Owner", kind: "agent", permissions: ownerPermissions } }),
+    ...extraMembers.map(member => event({ type: T.MEMBER_ADDED, actorId: "agent-owner", roomId: "agentroom",
+      data: member })),
+  ]);
+  store.db.exec(accessRequestSchema);
+  const accessRequests = new AccessRequests(store, { rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const keys = { owner: store.issueAccessKey("agentroom", "agent-owner") };
+  for (const member of extraMembers) keys[member.memberId] = store.issueAccessKey("agentroom", member.memberId);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  return { store, accessRequests, keys, clock };
+}
+
+const agentReport = f => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "agentroom", null, f.clock.now);
+
+function seedJoinRequest(f, requestId = "ar_agent_owner") {
+  const identity = f.store.identities.create("Agent-room Joiner");
+  return f.accessRequests.request("agentroom", { identityId: identity.identityId, displayName: "Agent-room Joiner",
+    requestedPermissions: ["accept_work"], requestId }, identity.secret);
+}
+
+test("O-5: an agent room-owner reads the rollup (the CRAWL-4 cell, inverted)", t => {
+  const f = agentOwnedRoom(t);
+  const created = seedJoinRequest(f);
+  const report = agentReport(f);
+  assert.equal(report.viewerId, "agent-owner");
+  assert.equal(report.itemCount, 1, "the seeded access request is the one item");
+  const [item] = report.items;
+  assert.equal(item.kind, "access_request");
+  assert.deepEqual(item.actions.map(a => a.action), ["approve", "deny"]);
+  assert.equal(item.actions[0].path, `/api/rooms/agentroom/access-requests/${created.requestId}/decide`);
+});
+
+test("O-5: the agent owner's advertised decide action executes through the decide route's own gate", t => {
+  // Charter security note, executed: the rollup's decide templates grant no
+  // authority by themselves. The decide route gates on
+  // canAdministerMembership (manage_members or an owner grant — no kind
+  // clause), so the agent owner could already decide before this change;
+  // reading the rollup changes nothing about what they can do.
+  const f = agentOwnedRoom(t);
+  const created = seedJoinRequest(f);
+  const approve = agentReport(f).items[0].actions[0];
+  const decided = f.accessRequests.decide(f.keys.owner, "agentroom", created.requestId, approve.body);
+  assert.equal(decided.status, "approved");
+  assert.equal(agentReport(f).itemCount, 0, "a decided request leaves the rollup");
+});
+
+test("O-5: the agent-owner report carries the human-owner payload shape", t => {
+  const human = setup(t);
+  const agent = agentOwnedRoom(t);
+  assert.deepEqual(Object.keys(agentReport(agent)).sort(), Object.keys(human.report()).sort(),
+    "payload keys are identical across owner kinds — the human-owner behaviour is unchanged");
+});
+
+test("O-5 negative matrix: non-owners holding manage_members are still refused, either kind", t => {
+  const f = agentOwnedRoom(t, { extraMembers: [
+    { memberId: "human-sponsor", displayName: "Human Sponsor", kind: "human", permissions: [] },
+    { memberId: "agent-deputy", displayName: "Agent Deputy", kind: "agent",
+      permissions: ["manage_members", "accept_work", "complete_work"], accountableHumanId: "human-sponsor" },
+    { memberId: "human-deputy", displayName: "Human Deputy", kind: "human",
+      permissions: ["manage_members", "accept_work", "complete_work"] },
+  ] });
+  for (const memberId of ["agent-deputy", "human-deputy"]) {
+    assert.throws(
+      () => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys[memberId], "agentroom"),
+      { status: 403, code: "owner_required" }, `${memberId} holds manage_members but is not the owner`);
+  }
+});
+
+test("O-5 negative matrix: an owner without manage_members cannot exist — the reducer refuses it", t => {
+  // The charter's (b) cell (the owner, minus manage_members) is unreachable
+  // through the event log: addMember enforces "Owner must retain membership
+  // administration" at write time, so the state requireOwner's second clause
+  // guards against is already impossible to construct. Pin the write-side
+  // proof; the gate clause stays as the read-side second line for any
+  // pre-invariant state.
+  const directory = mkdtempSync(join(tmpdir(), "project-room-attention-agent-"));
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => Date.parse("2026-10-19T12:00:00Z") });
+  try {
+    assert.throws(() => store.initialize([
+      event({ type: T.ROOM_CREATED, actorId: "agent-owner", roomId: "agentroom",
+        data: { roomId: "agentroom", ownerId: "agent-owner", title: "Agent-owned room", purpose: "O-5 fixture" } }),
+      event({ type: T.MEMBER_ADDED, actorId: "agent-owner", roomId: "agentroom",
+        data: { memberId: "agent-owner", displayName: "Agent Owner", kind: "agent",
+          permissions: PERMISSIONS.filter(p => p !== "manage_members") } }),
+    ]), /Owner must retain membership administration/);
+  } finally {
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("O-5 negative matrix: wrong-room credentials and a stale session binding refuse before the gate", t => {
+  const f = agentOwnedRoom(t);
+  // The agentroom owner's key carries no authority in any other room:
+  // refused at authentication (403 access_denied), before any owner gate.
+  assert.throws(
+    () => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "commons"),
+    { status: 403, code: "access_denied" }, "wrong-room presentation is refused at authentication");
+  // The agent owner's join session authenticates with its binding; a
+  // mismatched expected binding is refused by store.authenticate
+  // (409 session_binding_changed) before requireOwner runs, while the fresh
+  // binding reads the rollup as the agent owner.
+  const { token } = f.store.createJoinSession("agentroom", "agent-owner");
+  const auth = f.store.authenticate(token, "agentroom");
+  assert.equal(typeof auth.sessionBinding, "string");
+  const bound = attentionReport({ store: f.store, accessRequests: f.accessRequests },
+    token, "agentroom", auth.sessionBinding, f.clock.now);
+  assert.equal(bound.viewerId, "agent-owner");
+  assert.throws(
+    () => attentionReport({ store: f.store, accessRequests: f.accessRequests },
+      token, "agentroom", "stale-binding", f.clock.now),
+    { status: 409, code: "session_binding_changed" }, "a mismatched session binding is refused");
+});
+
+test("O-5 rendered surface: the card shows the server count for the agent-owner session", async t => {
+  // The count the card renders must be the server's rollup count from the
+  // payload — never a locally derived substitute — and the payload must pass
+  // the client's ownsResponse identity check, whose failure is what ends the
+  // session (endAccess) and hides owner UI.
+  const f = agentOwnedRoom(t);
+  seedJoinRequest(f);
+  // The agent owner's browser shape is a join session (createSession is
+  // human-only by design): account-less, room-bound, string session binding.
+  const { token } = f.store.createJoinSession("agentroom", "agent-owner");
+  const auth = f.store.authenticate(token, "agentroom");
+  const report = attentionReport({ store: f.store, accessRequests: f.accessRequests },
+    token, "agentroom", auth.sessionBinding, f.clock.now);
+  const { RoomClient } = await import("../src/client.js");
+  const session = {
+    authMode: "room",
+    account: null,
+    member: auth.member,
+    roomId: "agentroom",
+    csrf: auth.csrf,
+    sessionBinding: auth.sessionBinding,
+    sessionRevision: null,
+  };
+  const client = new RoomClient({});
+  assert.equal(client.ownsResponse(report, session), true, "the rollup survives the client identity check");
+
+  const { createNeedsAttentionCard } = await import("../src/needs-attention.js");
+  const stubElement = () => ({
+    hidden: false, disabled: false, innerHTML: "", textContent: "", dataset: {},
+    classList: { toggle() {}, add() {}, remove() {} },
+    setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], closest: () => null, focus() {},
+  });
+  const elements = {};
+  const section = {
+    hidden: true,
+    querySelector: sel => (elements[sel] ??= stubElement()),
+  };
+  const card = createNeedsAttentionCard({
+    client: { session: { id: "sess-agent-owner" }, generation: 1, needsAttention: async () => report },
+    section,
+  });
+  const prevDocument = globalThis.document;
+  globalThis.document = { activeElement: null };
+  try {
+    await card.refresh();
+  } finally {
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+  }
+  assert.equal(section.hidden, false, "the card is visible with a pending item");
+  assert.equal(elements["#attention-count"].textContent, String(report.itemCount),
+    "#attention-count equals the API itemCount");
+  assert.equal(report.itemCount, 1);
 });
