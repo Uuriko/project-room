@@ -128,7 +128,8 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   // The share block shows the exact pre-filled text and one-tap targets,
   // and the badge serves the graded verdict as an embeddable SVG.
   assert.match(pwrPage.text, /Share this receipt/);
-  assert.match(pwrPage.text, /Work, verified: Public task — Artifact hash recorded/);
+  assert.match(pwrPage.text, /Public task — Artifact hash recorded/);
+  assert.ok(!pwrPage.text.includes("Work, verified:"), "share text must not headline an unverified receipt as verified");
   assert.match(pwrPage.text, /twitter\.com\/intent\/tweet/);
   assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/badge\\.svg`));
   const badge = await fetch(`${origin}/receipts/${PWR}/badge.svg`);
