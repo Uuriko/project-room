@@ -75,7 +75,7 @@ function failed(result) {
 
 test("registry trigger and permission boundary excludes PRs and unrelated branches/tags", () => {
   // GitHub evaluates this declarative boundary; the executable gate is tested below.
-  assert.deepEqual(workflow.on, { push: { tags: ["v*"], branches: ["main"] }, workflow_dispatch: null });
+  assert.deepEqual(workflow.on, { push: { tags: ["v*"], branches: ["main"], paths: ["server.json", "scripts/server-json-check.mjs", ".github/workflows/mcp-registry-publish.yml"] }, workflow_dispatch: null });
   assert.deepEqual(workflow.permissions, { "id-token": "write", contents: "read" });
   for (const step of steps.slice(steps.indexOf(gate) + 1)) {
     assert.ok(step.if?.includes("steps.gate.outputs.publish == 'true'"), `${step.name} must require the publish decision`);
