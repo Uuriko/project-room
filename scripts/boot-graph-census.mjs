@@ -1,6 +1,9 @@
 // BG-1 — boot-graph census, Miniflare leg (fix programme v2, readpath.md
 // §3 + §5 item 3; drains NEW-RC-5). The node leg is tests/boot-graph
-// .test.js; this leg covers the Worker boot graph.
+// .test.js; this leg covers the Worker boot graph. It is registered in
+// cloudflare/package.json's test list and lives in scripts/ because it
+// is suite tooling, not a runtime module (no *.check.mjs ships in the
+// runtime package; scripts/runtime-package.mjs is the shipped set).
 //
 // Method (named, per the M9 number rule): esbuild bundle closure — the
 // same bundling the suite itself uses to build fixtures for Miniflare.
@@ -19,12 +22,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
 
-const cfDir = fileURLToPath(new URL(".", import.meta.url));
 const repo = fileURLToPath(new URL("../", import.meta.url));
+const cfDir = join(repo, "cloudflare");
+// esbuild is the cloudflare package's devDependency; resolve it from
+// there explicitly so this script runs the same from scripts/.
+const { build } = createRequire(join(cfDir, "package.json"))("esbuild");
 const inScope = path => path === "server.mjs" || path.startsWith("server/") || path.startsWith("src/") || path.startsWith("cloudflare/");
 
 async function bundleSet(entry) {
