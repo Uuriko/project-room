@@ -16,11 +16,19 @@ const privateRoom = "private-blocked-room";
 const privateEvent = "private-blocked-event";
 const privateError = "private body details";
 
-function assertPublicFailure(view) {
-  assert.equal(view.lastErrorCode, "messages_backfill_failed");
-  assert.equal(view.lastErrorSubcheck, "messages_backfill");
-  assert.equal(view.lastErrorRecordClass, "message");
-  assert.ok(view.consecutiveFailures > 0);
+// CURE-INTEGRITY-SCAN contract: a parked room no longer fails the tick.
+// The health reads as the success the scannable rooms earned, with the
+// blocked set riding the summary as its own numbers — and the public
+// surface still carries no block evidence (ids, event ids, error text).
+function assertParkedHealthy(view, runtime) {
+  assert.equal(view.consecutiveFailures, 0, "a parked room does not fail the tick");
+  assert.equal(view.lastErrorCode, null);
+  assert.equal(view.lastErrorSubcheck, null);
+  assert.equal(view.lastErrorRecordClass, null);
+  if (runtime === "worker") {
+    assert.equal(view.status, "ok");
+    assert.equal(view.lastSummary?.blockedRooms, 1, "the blocked set rides the summary as its own number");
+  }
   for (const value of [privateRoom, privateEvent, privateError]) {
     assert.ok(!JSON.stringify(view).includes(value), "public health must not contain block evidence");
   }
@@ -59,7 +67,7 @@ function openParkedFixture(t) {
 }
 
 for (const runtime of ["worker", "node"]) {
-  test(`${runtime} health retains parked failures across full rotations and reopen, then clears after import`, async t => {
+  test(`${runtime} health reports a parked room as blocked counts on passing ticks across full rotations and reopen, then clears after import`, async t => {
     const fixture = openParkedFixture(t);
     let at = Date.now();
     let stored = {};
@@ -80,6 +88,7 @@ for (const runtime of ["worker", "node"]) {
     assert.equal(healthy.consecutiveFailures, 0);
     fixture.park();
     const positions = new Set();
+    let lastView = null;
     for (let i = 0; i < 24; i++) {
       if (i === 12) {
         fixture.reopen();
@@ -87,28 +96,33 @@ for (const runtime of ["worker", "node"]) {
       }
       at += HOUR_MS;
       const view = await tick();
-      assertPublicFailure(view);
-      if (runtime === "worker") assert.notEqual(view.status, "ok");
+      assertParkedHealthy(view, runtime);
+      lastView = view;
       positions.add(fixture.store.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get().step);
     }
     assert.equal(positions.size, 11, "the complete deferred rotation keeps advancing");
+    if (runtime === "worker") {
+      assert.equal(lastView.lastSummary.blockedFailures, 1, "the recorded park rides the summary by the end of the rotation");
+    }
     const parity = fixture.store.db.prepare("SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id='healthy'").get();
     assert.ok(parity.parity_at_seq > 0, "the healthy room reaches parity despite the standing block");
     fixture.repair();
-    // Composed with the deferred-batch isolation on main (#3544): the
-    // batch records the park as a durable integrity_failures row, which
-    // targeted re-verification clears on a later rotation tick — so
-    // recovery lands within one full rotation of the repair rather than
-    // necessarily on the first tick after it. The bridge's own count
-    // already reads zero from the first post-repair tick; the recorded
-    // primary failure is preserved until re-verification clears it.
+    // The import deletes the park row itself, so the bridge count reads
+    // zero from the first post-repair tick; the durable integrity_failures
+    // record the batch wrote for the park clears when a later backfill
+    // visit finds the room caught up — within one full rotation — and
+    // the summary's blockedFailures follows it off the envelope.
     let recovered = null;
     for (let i = 0; i < 12 && !recovered; i++) {
       at += HOUR_MS;
       const view = await tick();
-      if (view.consecutiveFailures === 0) recovered = view;
+      const cleared = runtime === "worker"
+        ? view.lastSummary?.blockedRooms === 0 && view.lastSummary?.blockedFailures === undefined
+        : fixture.store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n === 0
+          && fixture.store.integrityFailures().length === 0;
+      if (cleared) recovered = view;
     }
-    assert.ok(recovered, "health recovers within a rotation after the import repair");
+    assert.ok(recovered, "the blocked numbers clear within a rotation after the import repair");
     assert.equal(recovered.lastErrorCode, null);
     assert.equal(recovered.lastSuccessAt, new Date(at).toISOString());
     if (runtime === "worker") assert.equal(recovered.status, "ok");

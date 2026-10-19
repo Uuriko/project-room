@@ -143,7 +143,7 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "deferredSkips"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "deferredSkips", "verifiedRooms", "blockedFailures", "blockedSince"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
@@ -402,15 +402,19 @@ export const JOBS = Object.freeze([
     disabledReason: () => null,
     async run(store, ctx) {
       let integrity;
+      // Whether the scan result itself carried the outstanding-failure
+      // list. The real scan always does (every return shape carries
+      // `failures`); a result without one never isolated its parked rooms
+      // into per-room records this tick, so the durable-count merge below
+      // remains that park's only — and therefore failing — signal.
+      let scanReportedFailures = false;
       try {
         integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        scanReportedFailures = Array.isArray(integrity?.failures ?? integrity?.deferred?.failures);
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
-        // tick still fails — the verdict is unchanged — with the same
-        // sanitized detail shape as the throw path (stable codes and
-        // classes only; record ids stay in the operator log line). The
         // result is assigned, not returned, so the parked-block count
         // below observes this path too. One extension: when an
         // outstanding failure is recorded against a room, the detail names
@@ -418,29 +422,67 @@ export const JOBS = Object.freeze([
         // reachable from the operator surfaces, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
-          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
-            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
-          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
-          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
-          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
-            failure.recordId = first.recordId;
+          // Per-room isolation at the summary level. A room parked by the
+          // messages backfill (a per-room messages_backfill record) is
+          // UNSCANNABLE, not a failed verification: its log cannot replay,
+          // it is recorded durably by name — identity and error in
+          // integrity_failures, reachable from the operator surfaces — and
+          // every later sweep skips it while the scannable rooms verify.
+          // Failing the whole tick for the parked set zeroed the fleet's
+          // integrity signal for exactly as long as a park lasted: in
+          // production one blocked room produced 156 consecutive failed
+          // ticks (2026-10-11 → 2026-10-19) with verified reading 0, while
+          // every scannable room stood verified. So the parked records
+          // never fail the tick on their own; they ride the summary as
+          // their own numbers (blockedFailures here, blockedRooms below,
+          // blockedSince = the oldest parked record's first sighting, so
+          // the wedge's age is visible in the envelope). A parked room
+          // still reads blocked — its records stay outstanding and are
+          // re-reported every tick — it is never laundered into a pass for
+          // the room itself. Every other failure (a room that WAS scanned
+          // and failed, an unscoped step record, another sub-check) keeps
+          // the tick failing, with the detail chosen from that fatal set:
+          // a parked room must never mask a real failure behind its name.
+          const parked = [];
+          const fatal = [];
+          for (const failure of failures) {
+            if (failure.step === "messages_backfill" && typeof failure.recordId === "string" && failure.recordId !== "") parked.push(failure);
+            else fatal.push(failure);
           }
-          // The operator line carries the allowlisted fields only —
-          // sub-check, record id, stable code, class, count. The stored
-          // failure message is a diagnostic for the record's owner, not
-          // log text: re-emitting it here every tick would republish
-          // whatever a record's error once contained.
-          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips", "verifiedRooms", "budgetExceeded"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          integrity = {
-            ...summary,
-            errors: failures.length,
-            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-            failureDetail: failure
-          };
+          if (parked.length) {
+            summary.blockedFailures = parked.length;
+            const firstSeen = parked.reduce((oldest, failure) => Number.isFinite(failure.firstSeenAt) ? Math.min(oldest, failure.firstSeenAt) : oldest, Infinity);
+            if (Number.isFinite(firstSeen)) summary.blockedSince = firstSeen;
+          }
+          if (fatal.length) {
+            const first = fatal.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+              && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? fatal[0];
+            const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+            if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+            if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+              failure.recordId = first.recordId;
+            }
+            // The operator line carries the allowlisted fields only —
+            // sub-check, record id, stable code, class, count. The stored
+            // failure message is a diagnostic for the record's owner, not
+            // log text: re-emitting it here every tick would republish
+            // whatever a record's error once contained.
+            console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${fatal.length} outstanding)`);
+            integrity = {
+              ...summary,
+              errors: fatal.length,
+              scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+              failureDetail: failure
+            };
+          } else {
+            const names = parked.map(failure => failure.recordId).filter(id => SAFE_RECORD_ID.test(id));
+            console.error(`[integrity] ${parked.length} room(s) parked in messages backfill${names.length === parked.length ? ` (${names.join(", ")})` : ""}; every scannable room verified`);
+            integrity = summary;
+          }
         }
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
@@ -459,7 +501,15 @@ export const JOBS = Object.freeze([
           throw new Error("Invalid database messages backfill block count");
         }
         integrity = { ...integrity, blockedRooms };
-        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+        // A standing park fails the tick only when the scan never
+        // reported it: when the scan's own failure list was carried, the
+        // parked rooms are already accounted as their own summary numbers
+        // (blockedFailures/blockedSince above, blockedRooms here) on a
+        // tick whose verdict is the scannable rooms' — see the partition
+        // comment in the scan path. An unreported park (a stub result, a
+        // legacy shape) keeps the #3855 behaviour: an active failure
+        // until the set is empty, because nothing else names it.
+        if (blockedRooms > 0 && !summaryFailed(integrity) && !scanReportedFailures) {
           integrity = { ...integrity, ...integrityFailure({ integritySubcheck: "messages_backfill" }) };
         }
       } catch (error) {

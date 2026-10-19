@@ -2522,6 +2522,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return Number.isSafeInteger(row?.deferred_skips) && row.deferred_skips > 0 ? row.deferred_skips : 0;
   }
 
+  // Rooms whose messages scope stands verified at head right now: the
+  // backfill cursor is caught up to the room's sequence AND parity was
+  // certified at that sequence (the same predicate the parity sweep
+  // certifies against, head event id included). A room parked in
+  // messages_backfill_blocks can never satisfy it — it is not caught up —
+  // so this count and the blocked set are disjoint by construction, and
+  // the integrity job reports both as distinct numbers: the scannable
+  // fleet's verified count beside the parked set, instead of one global
+  // verified flag that a single parked room holds at zero.
+  integrityVerifiedRooms() {
+    return this.readTransaction(() => this.db.prepare(`SELECT COUNT(*) AS n
+      FROM rooms r JOIN messages_backfill_cursor c ON c.room_id = r.id
+      WHERE c.applied_seq = r.sequence AND c.parity_at_seq = r.sequence
+        AND ((c.applied_seq = 0 AND r.sequence = 0)
+          OR c.applied_event_id = (
+            SELECT e.id FROM events e WHERE e.room_id = r.id AND e.sequence = c.applied_seq
+          ))`).get().n);
+  }
+
   noteDeferredOutcome(progressed) {
     const current = this.integrityDeferredSkips();
     const next = progressed ? 0 : current + 1;
@@ -2642,7 +2661,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // again. A throwing call records nothing: it is a failure tick,
     // not a silent success.
     let deferredProgressed = false;
-    const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed) });
+    const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed), verifiedRooms: this.integrityVerifiedRooms() });
     if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
     if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
       const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
