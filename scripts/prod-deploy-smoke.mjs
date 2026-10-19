@@ -254,7 +254,7 @@ async function main() {
     const health = await get(`${door}/api/health`);
     record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
     const ready = await get(`${door}/api/ready`);
-    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready", { status: ready.status, body: ready.json?.status ?? null });
+    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", { status: ready.status, body: ready.json?.status ?? null, emailVerification: ready.json?.emailVerification ?? "unknown", emailVerificationScope: ready.json?.emailVerificationScope ?? "unknown" });
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");
       record(`page ${door}${page}`, r.status === 200, { status: r.status });

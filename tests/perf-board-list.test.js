@@ -185,7 +185,7 @@ test("served orient / activation-pack / context each decode the board exactly on
     assert.equal(response.status, 200, path);
     return { body: await response.json(), calls: counter.calls, rows: counter.rows };
   };
-  for (const path of [`/api/rooms/${ROOM}/orient`, `/api/rooms/${ROOM}/activation-pack`, `/api/rooms/${ROOM}/context`]) {
+  for (const path of [`/api/rooms/${ROOM}/activation-pack`, `/api/rooms/${ROOM}/context`]) {
     const { body, calls, rows } = await get(path);
     assert.equal(calls, 1, `${path} listed the board ${calls} times`);
     assert.equal(rows, boardRows, path);

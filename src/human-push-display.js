@@ -25,7 +25,7 @@ function shortLabel(value) {
 }
 
 function roomPath(value) {
-  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.length > 2048) return null;
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.length > 2048 || /[\\\u0000-\u0020\u007f]/.test(value)) return null;
   return value;
 }
 

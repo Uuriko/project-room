@@ -123,3 +123,130 @@ test("re-diagnosis resumes from a snapshot ahead of certification", t => {
   assert.deepEqual(after.blocked, []);
   assert.equal(after.done, true);
 });
+
+// r66: muse-room's cursor snapshot is far over STATE_PART_CHARS (600,000), so
+// saveCursor stores it in messages_backfill_state parts and state_json holds
+// only "parts:<n>:<sha>". diagnoseFromCursor parsed state_json directly, which
+// throws on that marker, so for exactly the room r52 was written for the
+// re-diagnosis always fell back to the full replay from sequence 0.
+test("a re-diagnosis resumes from a parts-split cursor snapshot too", t => {
+  const store = open(t);
+  const big = (id, messageId, offset) => event({
+    type: T.MESSAGE_POSTED, actorId: "owner", roomId: "aaa", id, idempotencyKey: `${id}-key`, at: at(offset),
+    data: { messageId, body: `${messageId} ${"x".repeat(60000)}` }
+  });
+  store.initialize([...initialRoom("aaa"), ...Array.from({ length: 12 }, (_, i) => big(`ev-big${i}`, `big${i}`, i + 1))]);
+  assert.equal(store.backfillMessages({ limit: 1000 }).done, true);
+  const poisonSeq = append(store, "aaa", [posted("aaa", "ev-p", "p", 40), posted("aaa", "ev-t", "t", 41)]);
+  setMessageId(store, "ev-p", "bad id@x");
+  const parked = store.backfillMessages({ limit: 1000 });
+  assert.equal(parked.blocked[0]?.sequence, poisonSeq);
+  const { state_json: marker } = store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='aaa'").get();
+  assert.match(marker, /^parts:\d+:[0-9a-f]{64}$/, "the snapshot is stored in parts");
+  // Same shape as the first test: an applied event no longer replays, the
+  // named event is repaired, the head moves. Only a from-zero replay sees ev-big0.
+  setMessageId(store, "ev-big0", "also bad@x");
+  setMessageId(store, "ev-p", "p");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 50)]);
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.deepEqual(after.blocked, [], "the resume diagnosis read the parts snapshot and lifted the park");
+});
+
+test("an unchanged re-diagnosis keeps blocked_at and moves only the diagnosis clock", t => {
+  const store = open(t);
+  const poisonSeq = parkedRoom(store, "aaa");
+  store.db.prepare("UPDATE messages_backfill_blocks SET blocked_at=1, last_diagnosed_at=1 WHERE room_id='aaa'").run();
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.equal(after.blocked[0]?.sequence, poisonSeq);
+  assert.equal(after.blocked[0].fresh, false);
+  const row = store.db.prepare("SELECT blocked_at, last_diagnosed_at, head_seq FROM messages_backfill_blocks WHERE room_id='aaa'").get();
+  assert.equal(row.blocked_at, 1, "the accusation's time is kept");
+  assert.ok(row.last_diagnosed_at > 1, "the diagnosis clock moved");
+  assert.equal(row.head_seq, store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence);
+});
+
+test("a fresh park names the event after the cursor, not an older applied one", t => {
+  const store = open(t);
+  store.initialize([...initialRoom("aaa"), posted("aaa", "ev-a", "a", 10), posted("aaa", "ev-b", "b", 11)]);
+  assert.equal(store.backfillMessages({ limit: 1000 }).done, true);
+  // ev-a was applied under an earlier reducer and no longer replays; the
+  // backfill resumes after it and fails at the new poisoned event.
+  setMessageId(store, "ev-a", "also bad@x");
+  const poisonSeq = append(store, "aaa", [posted("aaa", "ev-p", "p", 12), posted("aaa", "ev-t", "t", 13)]);
+  setMessageId(store, "ev-p", "bad id@x");
+  const parked = store.backfillMessages({ limit: 1000 });
+  assert.equal(parked.blocked.length, 1);
+  assert.equal(parked.blocked[0].sequence, poisonSeq);
+  assert.equal(parked.blocked[0].eventId, "ev-p");
+});
+
+// r71: parks recorded before diagnoseFreshBlock can name an event the
+// backfill already applied (below the cursor snapshot). The re-diagnosis
+// must not keep such a park forever by replaying from sequence 0.
+function standingParkBelowCursor(store, roomId) {
+  store.initialize([...initialRoom(roomId), posted(roomId, "ev-a", "a", 10), posted(roomId, "ev-b", "b", 11)]);
+  assert.equal(store.backfillMessages({ limit: 1000 }).done, true);
+  setMessageId(store, "ev-a", "also bad@x");
+  const seqA = store.db.prepare("SELECT sequence FROM events WHERE id='ev-a'").get().sequence;
+  const { state_seq: stateSeq } = store.db.prepare("SELECT state_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  assert.ok(seqA <= stateSeq, "the named event is at or below the cursor snapshot");
+  const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+  store.db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at, last_diagnosed_at)
+    VALUES (?, ?, 'ev-a', 'parked by a from-zero diagnosis', ?, 1, 1)`).run(roomId, seqA, head);
+  return seqA;
+}
+
+test("a standing park on an already-applied event lifts when the head moves", t => {
+  const store = open(t);
+  standingParkBelowCursor(store, "aaa");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.deepEqual(after.blocked, [], "the backfill never re-reads the named event, so the park lifts");
+  const { lag } = store.db.prepare("SELECT r.sequence - c.applied_seq AS lag FROM rooms r JOIN messages_backfill_cursor c ON c.room_id=r.id WHERE r.id='aaa'").get();
+  assert.equal(lag, 0, "and the backfill replays to the head in the same call");
+});
+
+test("a standing park on an already-applied event lifts on the periodic cadence too", t => {
+  const store = open(t);
+  standingParkBelowCursor(store, "aaa");
+  append(store, "aaa", [posted("aaa", "ev-n", "n", 30)]);
+  // head_seq already at the new head: only the six-hour cadence re-diagnoses
+  store.db.prepare("UPDATE messages_backfill_blocks SET head_seq=(SELECT sequence FROM rooms WHERE id='aaa'), last_diagnosed_at=1 WHERE room_id='aaa'").run();
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.deepEqual(after.blocked, []);
+});
+
+test("a standing park below the cursor moves to the real failure after it", t => {
+  const store = open(t);
+  standingParkBelowCursor(store, "aaa");
+  const poisonSeq = append(store, "aaa", [posted("aaa", "ev-p", "p", 40), posted("aaa", "ev-t", "t", 41)]);
+  setMessageId(store, "ev-p", "bad id@x");
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.equal(after.blocked.length, 1);
+  assert.equal(after.blocked[0].sequence, poisonSeq, "the park names the event the backfill actually stops at");
+  assert.equal(after.blocked[0].eventId, "ev-p");
+});
+
+// Quiet rooms must recover on the periodic pass without a new chat message.
+test("a standing park at the current head lifts without a new event", t => {
+  const store = open(t);
+  standingParkBelowCursor(store, "aaa");
+  const before = store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence;
+  const after = store.backfillMessages({ limit: 1000 });
+  assert.deepEqual(after.blocked, []);
+  assert.equal(after.done, true);
+  assert.equal(store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence, before);
+});
+
+for (const corruption of ["anchor", "snapshot"]) {
+  test(`a quiet-head park stays blocked with a corrupt ${corruption}`, t => {
+    const store = open(t);
+    standingParkBelowCursor(store, "aaa");
+    if (corruption === "anchor") store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='stale-anchor' WHERE room_id='aaa'").run();
+    else store.db.prepare("UPDATE message_replay_snapshots SET state_json='not-json' WHERE room_id='aaa'").run();
+    const after = store.backfillMessages({ limit: 1000 });
+    assert.equal(after.blocked.length, 1);
+    assert.equal(after.blocked[0].eventId, "ev-a", "untrusted cursor falls back to replay and retains the real refusal");
+  });
+}
