@@ -1644,6 +1644,8 @@ summary { overflow-wrap: anywhere; }
 .bounty-balance { display: flex; flex-wrap: wrap; gap: .35rem .75rem; font-size: var(--text-sm); }
 .bounty-balance strong { width: 100%; }
 .bounty-form { display: grid; gap: .5rem; }
+.bounty-guidance { border: 1px dashed var(--line); border-radius: .5rem; padding: .5rem .6rem; }
+.bounty-guidance p { margin: .25rem 0 0; }
 .bounty-form h4, .bounty-receipts h4 { margin: 0; font-size: var(--text-sm); }
 .bounty-list { display: flex; flex-direction: column; gap: .5rem; }
 .bounty-row { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .6rem; }

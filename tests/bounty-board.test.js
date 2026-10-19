@@ -21,6 +21,9 @@ import {
   installBountyBoard,
   bountyFocusKey,
   restoreBountyFocus,
+  pricingGuidanceModel,
+  bountyGuidanceHtml,
+  bountyFormHtml,
 } from "../src/bounty-board.js";
 
 const SUBMITTED = {
@@ -269,4 +272,44 @@ test("restoreBountyFocus focuses the equivalent control and reports misses (A11Y
   const emptyRoot = { querySelector: () => null };
   assert.equal(restoreBountyFocus(emptyRoot, "id:bounty-title"), false,
     "a control that legitimately vanished restores nothing");
+});
+
+test("pricingGuidanceModel normalizes server guidance and rejects malformed payloads (#3524)", () => {
+  assert.equal(pricingGuidanceModel(null), null);
+  assert.equal(pricingGuidanceModel(undefined), null);
+  assert.equal(pricingGuidanceModel({ state: "ok", paidRangeCredits: null }), null);
+  assert.equal(pricingGuidanceModel({ state: "mystery" }), null);
+  assert.deepEqual(pricingGuidanceModel({ state: "no-settled-history" }),
+    { state: "no-settled-history", sampleCount: 0, paidRange: null, rubricCriteriaCount: null, approvalModes: [] });
+  const model = pricingGuidanceModel({ state: "ok", sampleCount: 3,
+    paidRangeCredits: { min: 10, median: 20, max: 30.5 },
+    rubricCriteriaCount: { min: 1, max: 3 }, approvalModes: ["human", 42] });
+  assert.deepEqual(model.paidRange, { min: 10, median: 20, max: 30.5 });
+  assert.deepEqual(model.approvalModes, ["human"], "non-string modes are dropped");
+});
+
+test("bountyGuidanceHtml labels the settled range, states cold start plainly, and renders nothing for null (#3524)", () => {
+  const html = bountyGuidanceHtml(pricingGuidanceModel({ state: "ok", sampleCount: 3,
+    paidRangeCredits: { min: 10, median: 20, max: 30.5 }, rubricCriteriaCount: { min: 1, max: 3 }, approvalModes: ["human"] }));
+  assert.ok(html.includes("Settled receipts only: 3 settled bounties in this room actually paid out"));
+  assert.ok(html.includes("typically 20 credits (range 10 to 30.5)"));
+  assert.ok(html.includes("rubric of 1 to 3 criteria"));
+  assert.ok(html.includes("never blocks posting"));
+  const cold = bountyGuidanceHtml(pricingGuidanceModel({ state: "no-settled-history" }));
+  assert.ok(cold.includes("No settled bounties in this room yet"));
+  assert.ok(!/\d+ credits/.test(cold), "the cold-start panel invents no numbers");
+  assert.equal(bountyGuidanceHtml(null), "", "no guidance -> no panel; posting is unchanged");
+});
+
+test("the post form carries the guidance panel, and the board model passes guidance through (#3524)", () => {
+  const guidance = pricingGuidanceModel({ state: "ok", sampleCount: 1,
+    paidRangeCredits: { min: 9.9, median: 9.9, max: 9.9 }, rubricCriteriaCount: { min: 1, max: 1 }, approvalModes: ["human"] });
+  const form = bountyFormHtml(Date.now(), guidance);
+  assert.ok(form.includes('data-bounty-guidance="ok"'), "guidance panel renders inside the post form");
+  assert.ok(form.includes("1 settled bounty in this room actually paid out"));
+  assert.ok(bountyFormHtml().includes('id="bounty-post-form"'), "the form still renders with no guidance argument");
+  assert.ok(!bountyFormHtml().includes("bounty-guidance"), "no guidance -> no panel in the form");
+  const model = bountyBoardModel({ pricingGuidance: { state: "no-settled-history" } });
+  assert.equal(model.guidance.state, "no-settled-history");
+  assert.equal(bountyBoardModel({}).guidance, null);
 });
