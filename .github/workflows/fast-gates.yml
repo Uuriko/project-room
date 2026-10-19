@@ -1,0 +1,188 @@
+# Fast gates (CI-DIET C2 fold): the small per-PR gates that used to start
+# five separate workflow runs — schema-gate, pr-diff-size, zero-bug-gates,
+# invariants — now run as three jobs in one workflow: one workflow run, one
+# queue entry, and the zero-dependency gates share a single checkout.
+#
+# Job split is by dependency, not by size:
+#   fast-gates — zero-dependency scripts only (no `npm ci`): schema-gate on
+#     every event; pr-diff-size, secret scanning, and dependency existence
+#     on pull requests (their source workflows were PR-only by design: they
+#     block bad code before merge, they do not re-verify main). Every gate
+#     is its own step with `if: always()`, so all gates report on every
+#     run; the final step fails the job with the list of failed gates.
+#   sast — needs `npm ci` (eslint + eslint-plugin-security), PR-only.
+#   invariants — needs `npm ci`, posts the PR comment; logic copied
+#     verbatim from the old invariants.yml, including its triggers
+#     (merge_group + workflow_dispatch ride this workflow's `on:`).
+#
+# NOT folded: zero-bug-quarantine (deleted outright by the CI-DIET package,
+# patch 05) and review-mechanical (its second job is triggered by
+# `workflow_run` on test completion; folding would break that lifecycle).
+#
+# Trigger union note: `on:` is the union of the folded workflows' triggers,
+# so on merge_group / workflow_dispatch the zero-dep schema step also runs
+# (seconds, fail-closed direction only), and a PR body edit re-runs all
+# three jobs (pr-diff-size needs `edited` to re-check the justification
+# after a coordinator edits the body — the behaviour that motivated its
+# type list in the first place).
+name: fast-gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Same grouping discipline as `test`: PRs cancel their own older runs;
+# pushes to main, merge-group runs, and manual runs are never cancelled
+# mid-flight.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' && github.event_name != 'merge_group' }}
+
+jobs:
+  fast-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # the diff-based gates need the PR base commit present
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      # Schema convergence gate (bounty-propose-500 incident follow-up; see
+      # the old schema-gate.yml header, preserved in git history): builds
+      # simulated legacy shards and runs the request-time migration path.
+      # No `npm ci`: the gate imports only node builtins plus the repo's own
+      # server modules. Keeps this step to seconds.
+      - name: schema-gate
+        id: schema_gate
+        run: node scripts/schema-gate/schema-gate.mjs
+      # Smaller-PR discipline: diffs over ~300 changed lines must carry an
+      # explicit "Large diff justification:" section in the PR body.
+      - name: pr-diff-size
+        id: diff_size
+        if: always() && github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/pr-diff-size-check.mjs
+      # Secret scanning (PR diff): zero-dep script (node: builtins only).
+      # Scans added lines only, so history never blocks a new PR. Patterns
+      # are conservative (provider-prefixed: AWS, GitHub, Slack, Stripe,
+      # OpenAI, npm, PEM keys, Bearer tokens); documented placeholders
+      # escape via a `secrets-allowlist` comment on the line.
+      - name: secret scanning (PR diff)
+        id: secrets
+        if: always() && github.event_name == 'pull_request'
+        run: node scripts/scan-secrets.mjs --base "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      # Dependency existence (slopsquatting defense): zero-dep script.
+      # Every registry dependency declared in package.json (root + relay/ +
+      # cloudflare/) must resolve on the npm registry, and every bare
+      # import in scanned source must be a declared dependency of an
+      # enclosing package.json, a Node builtin, a workerd (`cloudflare:`)
+      # virtual module, or a relative path.
+      - name: dependency existence (slopsquatting defense)
+        id: deps
+        if: always() && github.event_name == 'pull_request'
+        run: node scripts/check-deps-exist.mjs
+      - name: Fast-gates verdict
+        if: always()
+        env:
+          SCHEMA_GATE: ${{ steps.schema_gate.outcome }}
+          DIFF_SIZE: ${{ steps.diff_size.outcome }}
+          SECRETS: ${{ steps.secrets.outcome }}
+          DEPS: ${{ steps.deps.outcome }}
+        run: |
+          failed=0
+          for pair in "schema-gate:$SCHEMA_GATE" "pr-diff-size:$DIFF_SIZE" "secret-scanning:$SECRETS" "dependency-existence:$DEPS"; do
+            name=${pair%%:*}
+            outcome=${pair#*:}
+            echo "$name=$outcome" | tee -a "$GITHUB_STEP_SUMMARY"
+            # 'skipped' is the intentional non-PR skip of the PR-only gates.
+            if [ "$outcome" != "success" ] && [ "$outcome" != "skipped" ]; then failed=1; fi
+          done
+          exit "$failed"
+
+  sast:
+    name: SAST (eslint-plugin-security)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci # eslint + eslint-plugin-security are devDependencies
+      # Blocking ruleset is high-signal-only (see eslint.security.config.mjs):
+      # the full plugin set is too noisy on day one (detect-object-injection
+      # alone fires 2022x, nearly all false positives; non-literal-fs-filename
+      # 1122x; non-literal-regexp 139x; unsafe-regex 55x). Every rule kept is
+      # zero-noise on the current tree, so this job fails only on real issues:
+      # eval() injection, child-process execution, Math.random() for crypto
+      # material, unsafe Buffer use, mustache XSS, CSRF method-override, and
+      # trojan-source bidi characters. Excluded rules stay candidates for a
+      # future warn+triage lane.
+      - run: npx eslint --config eslint.security.config.mjs .
+
+  # Invariant harness CI gate (PRODUCT-200 reliability, lane A12), copied
+  # verbatim from the old invariants.yml job: runs the permanent never-break
+  # product invariants in tests/invariants/, uploads the JSONL per the
+  # INVARIANTS telemetry contract (A14: docs/INVARIANTS-TELEMETRY.md), and
+  # posts the table as a PR comment (one push = one comment). Promotion to
+  # a branch-protection "required" check remains a separate lane (John's).
+  invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write # PR comment with the results table.
+    env:
+      # Per-SHA results path per the INVARIANTS telemetry contract
+      # (docs/INVARIANTS-TELEMETRY.md, A14). results/ is gitignored.
+      INVARIANTS_RESULTS_FILE: results/invariants-${{ github.sha }}.jsonl
+      INVARIANTS_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run invariant suite (gate)
+        id: invariants
+        run: node scripts/invariants-ci.mjs --report-out "$RUNNER_TEMP/invariants-report.md"
+      - name: Upload results JSONL
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.INVARIANTS_RESULTS_FILE }}
+          if-no-files-found: error
+      - name: Comment results on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # One push = one comment: remove this bot's previous invariants
+          # comment before posting the fresh table.
+          for id in $(gh api "repos/Uuriko/project-room/issues/$PR_NUMBER/comments" --paginate \
+              -q '.[] | select(.body | contains("<!-- invariants-ci -->")) | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/Uuriko/project-room/issues/comments/$id" >/dev/null 2>&1 || true
+          done
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room \
+            --body-file "$RUNNER_TEMP/invariants-report.md" || echo "comment failed"
