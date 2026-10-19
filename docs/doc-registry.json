@@ -1,0 +1,5987 @@
+{
+ "version": 1,
+ "corpus": "repo",
+ "repo": "Uuriko/project-room",
+ "registry_path_in_repo": "docs/doc-registry.json",
+ "reconciled_at_base": "2feda87c770902f07a2828b139cd3df4d3d49815",
+ "seeded_at": "2026-10-19",
+ "seeded_by": "DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18)",
+ "seed_sources": [
+  "DOCS-CENSUS-VALUE graded inventory (graded.json, 713 files at base)",
+  "docs-programme-DRAFT.md \u00a71 reconciled manifest + \u00a72 canonical set (ratified)",
+  "governance-system.md \u00a71 taxonomy/budgets, \u00a72 registry",
+  "automation.md \u00a71.1 manifest format (mirrors/families/operational fields)",
+  "archive-history.md \u00a73.2 pinned set (19 files)"
+ ],
+ "seed_conventions": {
+  "last_reviewed": "seeded from the census last_change date \u2014 an upper bound on any review, NOT an attestation. verified_at stays null until an owner review or a sweep verification stamps it.",
+  "ttl_days_null": "null only for ARCHIVE (permanent) and GENERATED (generator-governed); every other classified row carries a TTL.",
+  "unclassified": "seed_state=UNCLASSIFIED is a seeding state only, never a lifecycle status; each such row names its reason and its disposition point (DS-4).",
+  "planned_rows": "existence=planned rows are programme \u00a72 artefacts created in the W-D1 window; the validator reports them separately, never as dangling.",
+  "served_rows": "existence=served rows are runtime-generated artefacts (not tree files); the validator skips tree-existence for them by design.",
+  "families": "family rows count as ONE registry row (D-5); members are enumerated at seed and checked against the tree by member_glob.",
+  "budget_bytes": "for single rows, the sweep budget (= size_cap_bytes); for family rows, the family total budget."
+ },
+ "scope": {
+  "extensions": [
+   ".md",
+   ".txt",
+   ".rst"
+  ],
+  "extra_files": [
+   "docs/openapi.yaml"
+  ],
+  "note": "the whole tracked tree, minus exclusions"
+ },
+ "docs": [
+  {
+   "path": "(examples)",
+   "kind": "family",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 20100,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "worked examples + scorers; members enumerated (D-5)",
+   "seed_rule": "programme \u00a72.6 / DS-1 family reading",
+   "family_id": "examples",
+   "member_glob": "**/examples/**",
+   "members": [
+    "docs/examples/handoff.md",
+    "docs/examples/receipt.md",
+    "docs/examples/scorers/orphan-claim/scorer.md",
+    "examples/integrations/aider/README.md",
+    "examples/integrations/claude-code/README.md",
+    "examples/integrations/cline/README.md",
+    "examples/integrations/codex/README.md",
+    "examples/integrations/crewai/README.md",
+    "examples/integrations/cursor/README.md",
+    "examples/integrations/langgraph/README.md",
+    "examples/integrations/openai-agents-sdk/README.md",
+    "examples/integrations/vscode/README.md",
+    "examples/tantive-space-cold-get-comparison/README.md",
+    "examples/tantive-space-cold-get-comparison/protocol.md"
+   ],
+   "members_bytes_at_seed": 15261
+  },
+  {
+   "path": "(per-directory)",
+   "kind": "family",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "component-owner",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 80520,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "component READMEs \u2014 one family row, members enumerated (D-5 counting rule)",
+   "seed_rule": "programme \u00a72.6 (component READMEs family row)",
+   "family_id": "component-readmes",
+   "member_glob": "*/README.md",
+   "members": [
+    "bridge/README.md",
+    "cloudflare/README.md",
+    "deploy/README.md",
+    "desktop/macos/README.md",
+    "evals/datasets/README.md",
+    "machine/README.md",
+    "relay/README.md",
+    "scripts/schema-gate/README.md",
+    "shed/README.md",
+    "tests/invariants/README.md",
+    "tools/receipt-verifier/README.md"
+   ],
+   "members_bytes_at_seed": 63597
+  },
+  {
+   "path": ".agents/skills/",
+   "kind": "family",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 30095,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "machine-executed repo skills; governed with the skills trees (B5 runs through skills-sync machinery)",
+   "seed_rule": "programme \u00a72.6 / DS-1 family reading",
+   "family_id": "repo-agent-skills",
+   "member_glob": ".agents/skills/**/*.md",
+   "members": [
+    ".agents/skills/room-antislop/SKILL.md",
+    ".agents/skills/test-audit/CAMPAIGN.md",
+    ".agents/skills/test-audit/SKILL.md"
+   ],
+   "members_bytes_at_seed": 23257
+  },
+  {
+   "path": ".github/PULL_REQUEST_TEMPLATE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "pr-template",
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-01",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 flip: living GitHub platform furniture",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 578,
+    "last_change": "2026-10-01"
+   }
+  },
+  {
+   "path": ".well-known/agent-card.json",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served agent card, stamped from its own door's origin (DP-13); the MCP card is served alongside and is registered jointly until AC-4 names its route",
+   "seed_rule": "programme \u00a72.2"
+  },
+  {
+   "path": "/openapi.json",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served contract artefact; re-sourced from route rows under Option B (AC-2)",
+   "seed_rule": "programme \u00a72.2"
+  },
+  {
+   "path": "AGENTS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "contributor-instructions",
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 10240,
+   "budget_bytes": 10240,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.6 furniture",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 2599,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "BACKLOG.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": "fed-queue",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-09-28",
+   "size_cap_bytes": 8192,
+   "budget_bytes": 8192,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "DS-4 disposition (2026-10-19, base eabb0011): classified in place as the fed-queue artefact. In-repo machinery consumes it at the repo root: scripts/room backlog pull/list reads it (scripts/room:219, 2628-2719), scripts/ralph-loop.mjs drives the burndown from it, tests/backlog.test.js protects the S2 backlog contract, docs/ROOM-PROTOCOL.md:226 documents the contract. The DS-1 move candidate (workspace corpus) fails on that consumer evidence \u2014 the queue's consumers live in this repo; governance \u00a71.6 bars working papers, and this is not a paper but the queue those tools execute against. Content staleness (ready items untouched since 2026-09-28) is the owner's cure under the 90-day RUNBOOK clock, not a classification defect.",
+   "seed_rule": "DS-4 disposition (Docs Programme \u00a73.4) \u2014 see note",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1861,
+    "last_change": "2026-09-28"
+   }
+  },
+  {
+   "path": "CHALLENGE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "measure-us-challenge",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-23",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 classification (agent-facing challenge doc)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 5815,
+    "last_change": "2026-09-23"
+   }
+  },
+  {
+   "path": "CHANGELOG.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "changelog",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-07",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.6 furniture",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 16755,
+    "last_change": "2026-10-07"
+   }
+  },
+  {
+   "path": "CODE_OF_CONDUCT.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "code-of-conduct",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-11",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-C flip: protected community set (\u00a72.4)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+    "census_size": 1035,
+    "last_change": "2026-10-11"
+   }
+  },
+  {
+   "path": "CONTRIBUTING.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "contributing",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-11",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 community set",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4700,
+    "last_change": "2026-10-11"
+   }
+  },
+  {
+   "path": "DESIGN.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "design",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "truth-layer T-16 corrects (SD-28/30)",
+   "seed_rule": "programme \u00a72.6 reference shelf",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 9132,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "GOVERNANCE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "governance",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-11",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-C flip: protected community set (\u00a72.4)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+    "census_size": 1845,
+    "last_change": "2026-10-11"
+   }
+  },
+  {
+   "path": "PROTOCOL.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 12367,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "README.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "readme",
+   "owner_role": "human-surface",
+   "audience": [
+    "human"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 5120,
+   "budget_bytes": 5120,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.1 #1",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 4044,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "ROOM-HEALTH.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-health",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "truth-layer T-15 corrects (SD-27); status-class doc \u2014 Steward reviews type at DS-4",
+   "seed_rule": "programme \u00a72.6 / truth-layer T-15",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 14297,
+    "last_change": "2026-09-16"
+   }
+  },
+  {
+   "path": "SECURITY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "security-policy",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 security set",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1936,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "SUPPORT.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "support",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-11",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-C flip: protected community set (\u00a72.4)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+    "census_size": 857,
+    "last_change": "2026-10-11"
+   }
+  },
+  {
+   "path": "THIRD_PARTY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "third-party-notices",
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 default (repo furniture)",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3344,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "archive/README.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B2 eviction PR (W-D2)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "the eviction registry of record (D-2): path group \u00b7 evicted-in PR \u00b7 retrievable-at commit \u00b7 disposition. Location per D-2; programme \u00a71.3's archive/docs/README transform is superseded on location by the ratification",
+   "seed_rule": "programme \u00a72.6 / D-2"
+  },
+  {
+   "path": "archive/docs/evidence/portable-agent-2026-09-07.txt",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 1199,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/EXPORT-RETENTION-DELETION.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 9076,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/FREE-MISS-SETTLEMENT.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 7701,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/JEV-GATES.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 8573,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/MCP-INSTALL.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 2772,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/SAFE-DIAGNOSTICS.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 5455,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/V8-RECOVERY-RUNBOOK.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 7175,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/bounty-receipts.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 5390,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/decisions/light-factory-no-automerge.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 602,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/decisions/merge-queue-native.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 833,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/index.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 1433,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/notes/browser-check-ab-diagnosis.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 908,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/notes/fleet-join.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 4136,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/notes/room-dry-run-flag-order.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 774,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/notes/tmp-reaping.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 969,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/kb/plans/RC-2026-09-25-912.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 1237,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/history/mcp-receipt-binding.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 4891,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 8015,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/plans/BUG-BOUNTY.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 5395,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+   "kind": "file",
+   "type": "ARCHIVE",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3/\u00a72.6 pinned set \u2014 referenced by live consumers; stays in-tree",
+   "seed": {
+    "census_grade": "E",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 17067,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "bridge/deploy/ROTATION.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-07",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "bridge rotation runbook (\u00a72.5)",
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2992,
+    "last_change": "2026-10-07"
+   }
+  },
+  {
+   "path": "connectors/muse.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "connector-muse",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-22",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 classification",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4836,
+    "last_change": "2026-09-22"
+   }
+  },
+  {
+   "path": "docs/AGENT-ACCOUNT-LINK.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "agent-account-link",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-19",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3093,
+    "last_change": "2026-09-19"
+   }
+  },
+  {
+   "path": "docs/AGENT-CARD-CUSTODY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "agent-card-custody",
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 custody",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6861,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/AGENT-START-HERE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "start-here-agents",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": [
+     "llms.txt"
+    ]
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-17",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "the one hand-written agent doc; rubric 14/14; claims pinned against llms.txt by test",
+   "seed_rule": "programme \u00a72.2",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 16269,
+    "last_change": "2026-10-17"
+   }
+  },
+  {
+   "path": "docs/AGENTS-WANT.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "agents-want",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2524,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/ARCHITECTURE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "architecture",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 10479,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/AUTH-MODEL.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "auth-model",
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 8192,
+   "budget_bytes": 8192,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "API \u00a77 (B4)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.6 \u2014 auth-model narrative (NEW, API \u00a77); path proposed at seed",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/BACKUP-DR.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-17",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8374,
+    "last_change": "2026-10-17"
+   }
+  },
+  {
+   "path": "docs/BACKUPS.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 12142,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/BENCH.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "bench",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3888,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/BOND.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "bond",
+   "owner_role": "money-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6695,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "docs/BOUNTY-MCP-TOOLS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "bounty-mcp-tools",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-15",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2683,
+    "last_change": "2026-10-15"
+   }
+  },
+  {
+   "path": "docs/BUG-BOUNTY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "bug-bounty",
+   "owner_role": "money-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1943,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/CHAOS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "chaos",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8220,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "docs/CLAUDE-CHANNEL.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "claude-channel",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-01",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5820,
+    "last_change": "2026-10-01"
+   }
+  },
+  {
+   "path": "docs/CODEX-ROOM-HOST.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "codex-room-host",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7785,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/COLD-AGENT-WALKTHROUGH.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "cold-agent-walkthrough",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-12",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8927,
+    "last_change": "2026-10-12"
+   }
+  },
+  {
+   "path": "docs/CONNECT-RECEIVE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "connect-receive",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-01",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3315,
+    "last_change": "2026-10-01"
+   }
+  },
+  {
+   "path": "docs/CONTRACT-EXPLAINER.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "contract-explainer",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 4096,
+   "budget_bytes": 4096,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "API \u00a77 (B4)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.6 \u2014 contract explainer (NEW); path proposed at seed",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/CONTRIBUTING-IN-ROOM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "contributing-in-room",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-11",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3783,
+    "last_change": "2026-10-11"
+   }
+  },
+  {
+   "path": "docs/CURRENT-ROOM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "current-deployment-record",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 14,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 12288,
+   "budget_bytes": 12288,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "DS-4 disposition (2026-10-19, base eabb0011): the single deployment record, classified CANONICAL with the status-doc clock (14-day TTL, governance G-4/F-01 status class). Machine consumer: scripts/check-schema-version.mjs parses its | Schema | N | row; referenced by docs/HOW-TO-TEST.md, docs/ROOM-DEPLOYMENT.md, docs/SERVICE.md, docs/UNIFIED-INBOX.md \u2014 C-5 leg 1 fails, retirement is not available. GENERATED was rejected: no generator exists, and \u00a73.1's hard rule bars a GENERATED row without an in-repo generator + regenerate-clean check; a deploy-pipeline writer is a build, not a classification. Staleness specimen recorded at classification: the Deployed/Source rows (lines 26-27) still name 2026-10-01 / 60df170c while production runs 2a699eb7 (deployed 2026-10-19, API-read) \u2014 the owner cures the table at the next deploy or review; the TTL + G-1/G-4 clocks are the standing catch. Queue note (DS-4 correction, 2026-10-19): open PR #3820 (PERF-10X L1, schema v39) touches this file (+1/-1 \u2014 its schema-row companion edit, which predates the schema-42 overhaul and must be reconciled by the landing seat); C-5 leg 4 therefore records a HIT for this row. The classification is unaffected \u2014 a registry classification is not a file change and does not fight a queued PR \u2014 and the row's facts (size, last_reviewed) are re-checked when that PR or its successor lands.",
+   "seed_rule": "DS-4 disposition (Docs Programme \u00a73.4) \u2014 see note",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8780,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/DATA-BOUNDARIES.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "truth-layer T-06 corrects \u00a74 (SD-21)",
+   "seed_rule": "programme \u00a72.3 / T-06",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 18657,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/DELIVERY-LEDGER.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "delivery-ledger",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7691,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/DEPLOY-LANE.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-17",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "frozen until PR #4166 lands (\u00a74.3); fragments also feed OPERATOR-GUIDE",
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7984,
+    "last_change": "2026-10-17"
+   }
+  },
+  {
+   "path": "docs/DOCS-SYSTEM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "docs-system",
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 8192,
+   "budget_bytes": 8192,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "DS-4",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "governance \u00a77.2 \u2014 the maintenance system distilled to one doc, \u22648 KB. DS-4 (2026-10-19): content authored and filed as a prepared landing artefact at docs-rework-2026-10-19/ds4-DOCS-SYSTEM.md (6,769 B at authoring); lands as docs/DOCS-SYSTEM.md at W-D1, at which point this row flips planned -> present.",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/ERROR-TAXONOMY.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-09",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 6988,
+    "last_change": "2026-10-09"
+   }
+  },
+  {
+   "path": "docs/EVENT-FIXTURES.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "event-fixtures",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 10085,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/FAQ.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "faq",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-09",
+   "size_cap_bytes": 5120,
+   "budget_bytes": 5120,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.1 #9",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5638,
+    "last_change": "2026-10-09"
+   }
+  },
+  {
+   "path": "docs/FLAKY-QUARANTINE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "flaky-quarantine",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-12",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3953,
+    "last_change": "2026-10-12"
+   }
+  },
+  {
+   "path": "docs/GITHUB-APP.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "github-app",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5065,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/GITHUB-DOOR.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "github-door",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3702,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/GLOSSARY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "glossary",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 10240,
+   "budget_bytes": 10240,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "absorbs JOINING's vocabulary (B3)",
+   "seed_rule": "programme \u00a72.1 #11",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 9723,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/GROK-BUILD-CONTINUOUS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "grok-build-continuous",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6606,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/GUEST-AGENT-LINKS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "guest-agent-links",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-15",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 11419,
+    "last_change": "2026-10-15"
+   }
+  },
+  {
+   "path": "docs/HERDR-SESSIONS-AGENTS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "herdr-sessions-agents",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6611,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/HOST-MATRIX.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "host-matrix",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4097,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/HOW-TO-TEST.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "how-to-test",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4329,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "docs/HUMAN-ONBOARDING.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "start-here-humans",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 6144,
+   "budget_bytes": 6144,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-A inversion: census merged it away; journeys R-1 makes it the canonical human doc (\u00a72.1 #2)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO",
+    "census_size": 4159,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/IDENTITY-LIFECYCLE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "identity-lifecycle",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4486,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/INCIDENT-1101-RUNBOOK.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3744,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/INCIDENT-RUNBOOK.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 12478,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/INDEX.md",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "docs-steward",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": [
+     "docs/doc-registry.json"
+    ]
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 3072,
+   "budget_bytes": 3072,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "one-screen map, generated from the registry (programme \u00a72.1 #12); over-cap exception retired at the W-D1 landing \u2014 the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap",
+   "seed_rule": "programme \u00a72.1 #12",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 11360,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/INVARIANTS.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-10",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "truth-layer T-07 corrects the telemetry side",
+   "seed_rule": "programme \u00a72.3",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 13224,
+    "last_change": "2026-10-10"
+   }
+  },
+  {
+   "path": "docs/INVITE-ONLY-CHECKLIST.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 65536,
+   "budget_bytes": 65536,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "becomes GENERATED under AC-7; interim cap as ROUTE-AUTH-TABLE",
+   "seed_rule": "programme \u00a71.4",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 26939,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/JOURNEY-COVERAGE-MAP.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "journey-coverage-map",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 20483,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/MATCHMAKING.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "matchmaking",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-05",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5411,
+    "last_change": "2026-10-05"
+   }
+  },
+  {
+   "path": "docs/ONBOARDING-PROBE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "onboarding-probe",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4997,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/OPERATOR-GUIDE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "operator-guide",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 10240,
+   "budget_bytes": 10240,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B3 (W-D1)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.1 #7 \u2014 merged survivor of OPERATOR + ADMIN-GUIDE + fragments",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/PAID-WORK-AND-DISPUTES.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "paid-work-and-disputes",
+   "owner_role": "money-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 8192,
+   "budget_bytes": 8192,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B3 (W-D1)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.1 #4 \u2014 NEW",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/PERF-BUDGET.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "perf-budget",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-04",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3692,
+    "last_change": "2026-10-04"
+   }
+  },
+  {
+   "path": "docs/PRIVACY-POLICY-TEMPLATE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "privacy-policy-template",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 legal",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8070,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/QA-SYSTEM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "qa-system",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-17",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7126,
+    "last_change": "2026-10-17"
+   }
+  },
+  {
+   "path": "docs/QA2-SYSTEMS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "qa2-systems",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8721,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/RECEIPTS-PAGE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "receipts-page",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-17",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "builder content; the stranger layer is VERIFY-A-RECEIPT (planned). Frozen \u2014 PRs #4151/#4170 (\u00a74.3)",
+   "seed_rule": "programme \u00a72.6 reference shelf",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 8572,
+    "last_change": "2026-10-17"
+   }
+  },
+  {
+   "path": "docs/REVIEW-PARALLELISM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "review-parallelism",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7399,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/ROOM-COORDINATION.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-coordination",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-10",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 11685,
+    "last_change": "2026-10-10"
+   }
+  },
+  {
+   "path": "docs/ROOM-DEPLOYMENT.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.5",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 15223,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/ROOM-KITS-CATALOG.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-kits-catalog",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4229,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/ROOM-PROCEDURES.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-procedures",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2577,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "docs/ROOM-PROTOCOL.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "tombstones under truth-layer T-18 (B4); root PROTOCOL.md is canonical",
+   "seed_rule": "programme \u00a72.3",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 27243,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/ROOM-ROSTER.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-roster",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-18",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5149,
+    "last_change": "2026-09-18"
+   }
+  },
+  {
+   "path": "docs/ROOM-WIKI.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "room-wiki",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4949,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/ROUTE-AUTH-TABLE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 65536,
+   "budget_bytes": 65536,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "becomes GENERATED under AC-7; interim cap is the pre-generation size, discipline arrives with the generator",
+   "seed_rule": "programme \u00a71.4",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 45464,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "docs/SECRET-SCAN.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "secret-scan",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2664,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/SECRETS-ROTATION.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "secrets-rotation",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 13396,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/SECURITY-AND-PRIVACY.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "security-and-privacy",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 8192,
+   "budget_bytes": 8192,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B3 (W-D1)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.1 #10 \u2014 merged; legal texts stay separate served pages (\u00a72.4)",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/SECURITY-MODEL.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "security-model",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 security",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1966,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/SELF-HOSTING.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "self-hosting",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 6144,
+   "budget_bytes": 6144,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.1 #6",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 5221,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/SERVICE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "service",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "demoted from INDEX's 'the running service' presentation (B7 micro-action)",
+   "seed_rule": "programme \u00a72.6 reference shelf",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 33823,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "docs/SIGNED-AGENT-CARDS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "signed-agent-cards",
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 custody",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4568,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/SPEC.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "the 'Open spec' door into spec/; corrections via T-charters only (R-B)",
+   "seed_rule": "programme \u00a72.3 / \u00a74.3",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 490,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/SPEND-PRIMITIVE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "spend-primitive",
+   "owner_role": "money-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-15",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 9383,
+    "last_change": "2026-10-15"
+   }
+  },
+  {
+   "path": "docs/STAGING.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-03",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "fragments feed OPERATOR-GUIDE (\u00a72.1 #7); standalone survivor as the staging runbook",
+   "seed_rule": "programme \u00a72.5 (DS-1 reading)",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3517,
+    "last_change": "2026-10-03"
+   }
+  },
+  {
+   "path": "docs/TERMS-OF-SERVICE-TEMPLATE.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "terms-of-service-template",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 legal",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6687,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/TROUBLESHOOTING.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "troubleshooting",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 20480,
+   "budget_bytes": 20480,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.1 #8",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 20432,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/UNIFIED-INBOX.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "unified-inbox",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 39139,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/VERIFY-A-RECEIPT.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "verify-a-receipt",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 4096,
+   "budget_bytes": 4096,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B3 (W-D1)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.1 #5 \u2014 NEW, stranger-first",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/WAKE-PROTOCOL.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "wake-programme",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": null,
+   "size_cap_bytes": 16384,
+   "budget_bytes": 16384,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "AC-4b",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.3 \u2014 the ONE wake/heartbeat protocol doc (AC-4b merge); path proposed at seed, AC-4b confirms",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/WEBHOOK-WAKEUPS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "webhook-wakeups",
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-03",
+   "size_cap_bytes": 6144,
+   "budget_bytes": 6144,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "reference-shelf webhook guide target shape (\u22646 KB at B4 trim); its wake semantics are absorbed by the planned wake protocol doc",
+   "seed_rule": "programme \u00a72.6 reference shelf",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3747,
+    "last_change": "2026-10-03"
+   }
+  },
+  {
+   "path": "docs/WORK-CLAIMS.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 28796,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "docs/WORK-CONTEXT.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "work-context",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 14970,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/WORKING-IN-A-ROOM.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "working-in-a-room",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 10240,
+   "budget_bytes": 10240,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "planned",
+   "planned_via": "B3 (W-D1)",
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "programme \u00a72.1 #3 \u2014 NEW",
+   "seed_rule": "programme \u00a72 (planned)"
+  },
+  {
+   "path": "docs/a2a-receipt-extension.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-01",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 classification (protocol extension)",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6049,
+    "last_change": "2026-10-01"
+   }
+  },
+  {
+   "path": "docs/agents/",
+   "kind": "family",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 31619,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "per-host pages; their runtime-package HTML outputs are registered as the agents-html family (GENERATED)",
+   "seed_rule": "programme \u00a72.6 (per-host pages family row)",
+   "family_id": "per-host-pages",
+   "member_glob": "docs/agents/*.md",
+   "members": [
+    "docs/agents/START.md",
+    "docs/agents/aider.md",
+    "docs/agents/claude-code.md",
+    "docs/agents/cline.md",
+    "docs/agents/codex.md",
+    "docs/agents/crewai.md",
+    "docs/agents/cursor.md",
+    "docs/agents/index.md",
+    "docs/agents/langgraph.md",
+    "docs/agents/openai-agents-sdk.md",
+    "docs/agents/paste.md",
+    "docs/agents/vscode.md"
+   ],
+   "members_bytes_at_seed": 24476
+  },
+  {
+   "path": "docs/agents/",
+   "kind": "family",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": [
+     "docs/agents/*.md"
+    ]
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": 1024,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "runtime-package outputs generated from the per-host .md sources at packaging; not tree files (existence=served)",
+   "seed_rule": "programme \u00a72.2",
+   "family_id": "agents-html",
+   "member_glob": "docs/agents/*.html",
+   "members": [],
+   "members_bytes_at_seed": 0
+  },
+  {
+   "path": "docs/analytics/EVENTS.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "events",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 23204,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/join/team.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "team",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 7387,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/legal/acceptable-use.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "acceptable-use",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 legal",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1342,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/legal/privacy.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "privacy",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "frozen until PR #4201 lands (\u00a74.3)",
+   "seed_rule": "programme \u00a72.4 legal",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4823,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/legal/terms.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "terms",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 legal",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2807,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "docs/onboarding-probe/results.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "results",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 1793,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "docs/openapi.yaml",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": {
+    "reason": "hand-maintained artefact of generated character; dies only in AC-3 after AC-1's per-op disposition pass (D-4 hard gate)",
+    "expires": "2027-03-31"
+   },
+   "verified_at": null,
+   "note": "oversize on day one is by design (the sweep's oversize check fires here until AC-3)",
+   "seed_rule": "governance \u00a71.8 / programme \u00a75 D-4"
+  },
+  {
+   "path": "docs/procedures/",
+   "kind": "family",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": [
+     "server/wiki-data.mjs"
+    ]
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 10094,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served wiki sources \u2014 product surface (D-12a); the served pages are generated from these sources",
+   "seed_rule": "programme \u00a72.5 / D-12",
+   "family_id": "procedures",
+   "member_glob": "docs/procedures/*.md",
+   "members": [
+    "docs/procedures/README.md",
+    "docs/procedures/claim-protocol.md",
+    "docs/procedures/incident-triage.md",
+    "docs/procedures/merge-checklist.md"
+   ],
+   "members_bytes_at_seed": 7256
+  },
+  {
+   "path": "docs/security/README.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "security-index",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.4 security",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 391,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "docs/security/data-retention-policy.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "data-retention-policy",
+   "owner_role": "legal/privacy",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-07",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-C flip: protected legal set (\u00a72.4)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO",
+    "census_size": 6305,
+    "last_change": "2026-10-07"
+   }
+  },
+  {
+   "path": "docs/security/pentest-checklist.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "pentest-checklist",
+   "owner_role": "security",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-07",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 R-C flip: protected security set (\u00a72.4)",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "MERGE-INTO",
+    "census_size": 6263,
+    "last_change": "2026-10-07"
+   }
+  },
+  {
+   "path": "docs/signed-evidence.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "signed-evidence",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-23",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 keyword default \u2014 owner to confirm at first review",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6511,
+    "last_change": "2026-09-23"
+   }
+  },
+  {
+   "path": "docs/video-walkthrough-script.md",
+   "kind": "file",
+   "type": "WORKING",
+   "topic": "video-walkthrough",
+   "owner_role": "human-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 30,
+   "last_reviewed": "2026-10-16",
+   "size_cap_bytes": 16384,
+   "budget_bytes": 16384,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "DS-4 disposition (2026-10-19, base eabb0011): WORKING, as a recorded exception to governance \u00a71.6 (working papers live in the workspace corpus) \u2014 the DS-1 seed note's own second candidate. Grounds: it is a production asset with a live in-repo test consumer (tests/video-walkthrough-shots.test.js loads it as SCRIPT and verifies every grounding citation resolves) and a docs-link-check ORPHAN_EXCEPTIONS entry naming that gate. The archive-with-the-video branch cannot execute today: no produced video exists in the tree \u2014 the script states it is written so the video can be recorded tomorrow. At TTL expiry the Steward re-runs this disposition: recorded -> archive the script with the video; abandoned -> retire via the C-5 evidence pass. Queue note (DS-4 correction, 2026-10-19): open PR #3692 (operator status surface 4/4) touches this file (+1/-3 \u2014 a grounding-line edit keeping the script's citations true); C-5 leg 4 therefore records a HIT for this row. The classification is unaffected, and the touch is itself evidence of live maintenance.",
+   "seed_rule": "DS-4 disposition (Docs Programme \u00a73.4) \u2014 see note",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 11251,
+    "last_change": "2026-10-16"
+   }
+  },
+  {
+   "path": "evals/EVALUATION_CHECKLIST.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "evaluation-checklist",
+   "owner_role": "qa-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-06",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 classification",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 2234,
+    "last_change": "2026-10-06"
+   }
+  },
+  {
+   "path": "kits.txt",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served; absorbs join/join-team/agents-paste depth",
+   "seed_rule": "programme \u00a72.2"
+  },
+  {
+   "path": "llms-full.txt",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": null,
+   "budget_bytes": null,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served; absorbs SWARM/QUICKSTART reference depth",
+   "seed_rule": "programme \u00a72.2"
+  },
+  {
+   "path": "llms.txt",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": null,
+   "size_cap_bytes": 35840,
+   "budget_bytes": 35840,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "served",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "served; absorbs door depth per journeys R-4; 32,455 B measured live at census",
+   "seed_rule": "programme \u00a72.2"
+  },
+  {
+   "path": "machine/PROTOCOL.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-08",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "subsystem protocol; canonical protocol is root PROTOCOL.md (T-18)",
+   "seed_rule": "DS-1 classification",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 6916,
+    "last_change": "2026-10-08"
+   }
+  },
+  {
+   "path": "ops/STATE.md",
+   "kind": "file",
+   "type": "RUNBOOK",
+   "topic": "ops-state",
+   "owner_role": "operator",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-10",
+   "size_cap_bytes": 16384,
+   "budget_bytes": 16384,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "DS-4 disposition (2026-10-19, base eabb0011): the operator journal \u2014 docs/BACKUPS.md:86 designates this file as the record sink for restore-drill results, and its entries are dated operator prose (2026-10-07 backups + restore drill, 2026-10-10 GitHub polling). That corrects the DS-1 seed premise: the file is operator-written, not machine-written. Exclusion-as-state-artefact was rejected: nothing in code writes or reads it (the STATE.md hits in scripts/room are ROOM-STATE.md, a different file), and a name-based exclusion would be ambiguous against that machine board while hiding a designated record from the registry join. RUNBOOK (90-day clock) with BACKUPS.md as its governing runbook; when the cap approaches, the owner rotates old entries to the archive rather than growing the file.",
+   "seed_rule": "DS-4 disposition (Docs Programme \u00a73.4) \u2014 see note",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 4333,
+    "last_change": "2026-10-10"
+   }
+  },
+  {
+   "path": "plugins/project-room/README.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "plugin-readme",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-13",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "DS-1 classification",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 923,
+    "last_change": "2026-10-13"
+   }
+  },
+  {
+   "path": "plugins/project-room/commands/join-any-agent.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-29",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 flip: KEEP-DEFER \u2014 native file of the shipped plugin",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 290,
+    "last_change": "2026-09-29"
+   }
+  },
+  {
+   "path": "plugins/project-room/commands/keep-working.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-09-29",
+   "size_cap_bytes": 25600,
+   "budget_bytes": 25600,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 flip: KEEP-DEFER \u2014 native file of the shipped plugin",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 271,
+    "last_change": "2026-09-29"
+   }
+  },
+  {
+   "path": "relay/PROTOCOL.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-08",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "subsystem protocol; canonical protocol is root PROTOCOL.md (T-18)",
+   "seed_rule": "DS-1 classification",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 5659,
+    "last_change": "2026-10-08"
+   }
+  },
+  {
+   "path": "skills/",
+   "kind": "family",
+   "type": "CANONICAL",
+   "topic": null,
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": null,
+   "size_cap_bytes": 25600,
+   "budget_bytes": 77889,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "skills/ is the canonical source tree; plugins/project-room/skills/ is its byte-identical generated mirror (see mirrors declaration)",
+   "seed_rule": "programme \u00a72.6 (skills references family row)",
+   "family_id": "skills-tree",
+   "member_glob": "skills/**/*.md",
+   "members": [
+    "skills/ProjectRoom/AUTO-INVOKE.md",
+    "skills/ProjectRoom/SKILL.md",
+    "skills/grok-build-continuous/SKILL.md",
+    "skills/project-room-bounty/SKILL.md",
+    "skills/project-room-host-router/SKILL.md",
+    "skills/project-room-host-router/hosts/curl-http.md",
+    "skills/project-room-host-router/hosts/disk-channel.md",
+    "skills/project-room-host-router/hosts/github-issue.md",
+    "skills/project-room-host-router/hosts/grok-build.md",
+    "skills/project-room-host-router/hosts/hosted-mcp.md",
+    "skills/project-room-host-router/hosts/paste-relay.md",
+    "skills/project-room-host-router/hosts/shed.md",
+    "skills/project-room-host-router/hosts/shell-mac.md",
+    "skills/project-room-onboarding/SKILL.md",
+    "skills/project-room/SKILL.md",
+    "skills/project-room/references/bonds-dms.md",
+    "skills/project-room/references/context.md",
+    "skills/project-room/references/deep-connection.md",
+    "skills/project-room/references/tasks-handoff.md",
+    "skills/project-room/references/tools.md",
+    "skills/room-connector/SKILL.md"
+   ],
+   "members_bytes_at_seed": 61492
+  },
+  {
+   "path": "skills/project-room/references/errors-catalog.md",
+   "kind": "file",
+   "type": "GENERATED",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "generator",
+    "refs": []
+   },
+   "ttl_days": null,
+   "last_reviewed": "2026-10-18",
+   "size_cap_bytes": null,
+   "budget_bytes": 262144,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": {
+    "reason": "in-repo generator is chartered as T-09 (fix programme) and lands in B6a; until then the catalogue is hand-frozen \u2014 governance \u00a71.4 exception, named",
+    "expires": "2026-11-16"
+   },
+   "verified_at": null,
+   "note": "single stored copy; plugins/ mirror is machinery (mirrors declaration)",
+   "seed_rule": "programme \u00a72.2",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 217064,
+    "last_change": "2026-10-18"
+   }
+  },
+  {
+   "path": "skills/project-room/references/errors.md",
+   "kind": "file",
+   "type": "CANONICAL",
+   "topic": "errors",
+   "owner_role": "agent-surface",
+   "audience": [
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 180,
+   "last_reviewed": "2026-10-09",
+   "size_cap_bytes": 5427,
+   "budget_bytes": 5427,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": "the hand door to the errors catalogue (programme \u00a72.2: \u22645.3 KB)",
+   "seed_rule": "programme \u00a72.2",
+   "seed": {
+    "census_grade": "A",
+    "census_disposition": "KEEP",
+    "census_size": 5270,
+    "last_change": "2026-10-09"
+   }
+  },
+  {
+   "path": "spec/CHANGELOG.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "none",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a71.3 flip (R-B): T-01 writes into this file; KEEP + COMPLETE",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "ARCHIVE-OUT-OF-REPO",
+    "census_size": 244,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/README.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "C",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 3481,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/bindings/a2a.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-14",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3059,
+    "last_change": "2026-10-14"
+   }
+  },
+  {
+   "path": "spec/bindings/http.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 3738,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/bindings/mcp.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4188,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/core/approval.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 4381,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/core/claim.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-09",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 8001,
+    "last_change": "2026-10-09"
+   }
+  },
+  {
+   "path": "spec/core/receipt.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-03",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 4893,
+    "last_change": "2026-10-03"
+   }
+  },
+  {
+   "path": "spec/core/room.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 3863,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/core/wake.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "D",
+    "census_disposition": "KEEP-WITH-REASON",
+    "census_size": 5155,
+    "last_change": "2026-10-02"
+   }
+  },
+  {
+   "path": "spec/rfcs/0000-template.md",
+   "kind": "file",
+   "type": "CONTRACT",
+   "topic": null,
+   "owner_role": "contract",
+   "audience": [
+    "human",
+    "agent"
+   ],
+   "source_of_truth": {
+    "kind": "code",
+    "refs": []
+   },
+   "ttl_days": 90,
+   "last_reviewed": "2026-10-02",
+   "size_cap_bytes": 30720,
+   "budget_bytes": 30720,
+   "status": "active",
+   "seed_state": "classified",
+   "classification_note": null,
+   "existence": "present",
+   "planned_via": null,
+   "decision_refs": [],
+   "supersedes": null,
+   "exception": null,
+   "verified_at": null,
+   "note": null,
+   "seed_rule": "programme \u00a72.3 spec/ family",
+   "seed": {
+    "census_grade": "B",
+    "census_disposition": "KEEP",
+    "census_size": 620,
+    "last_change": "2026-10-02"
+   }
+  }
+ ],
+ "families": [
+  {
+   "id": "examples",
+   "row_path": "(examples)",
+   "member_glob": "**/examples/**",
+   "budget_bytes_total": 20100
+  },
+  {
+   "id": "component-readmes",
+   "row_path": "(per-directory)",
+   "member_glob": "*/README.md",
+   "budget_bytes_total": 80520
+  },
+  {
+   "id": "repo-agent-skills",
+   "row_path": ".agents/skills/",
+   "member_glob": ".agents/skills/**/*.md",
+   "budget_bytes_total": 30095
+  },
+  {
+   "id": "per-host-pages",
+   "row_path": "docs/agents/",
+   "member_glob": "docs/agents/*.md",
+   "budget_bytes_total": 31619
+  },
+  {
+   "id": "agents-html",
+   "row_path": "docs/agents/",
+   "member_glob": "docs/agents/*.html",
+   "budget_bytes_total": 1024
+  },
+  {
+   "id": "procedures",
+   "row_path": "docs/procedures/",
+   "member_glob": "docs/procedures/*.md",
+   "budget_bytes_total": 10094
+  },
+  {
+   "id": "skills-tree",
+   "row_path": "skills/",
+   "member_glob": "skills/**/*.md",
+   "budget_bytes_total": 77889
+  }
+ ],
+ "mirrors": [
+  {
+   "from_prefix": "skills/",
+   "to_prefix": "plugins/project-room/skills/",
+   "tool": "scripts/skills-sync.mjs",
+   "note": "byte-identical generated mirror; the mirror tree is machinery, never registered row-by-row (23 files at base). Mirror honesty is gate G-13."
+  }
+ ],
+ "exclusions": [
+  {
+   "glob": "archive/**",
+   "reason": "eviction class (programme \u00a71): the subtree leaves the tree in W-D2 (B2). Registered rows take precedence \u2014 the 19 pinned files are rows. Remove this exclusion when B2 lands."
+  },
+  {
+   "glob": "og/fonts/**",
+   "reason": "font licence artefacts \u2014 documents in form, assets in fact"
+  },
+  {
+   "glob": "scripts/vendor-licenses/**",
+   "reason": "third-party licence texts (artefacts)"
+  },
+  {
+   "glob": "server/vendor/**",
+   "reason": "vendored licence texts (artefacts)"
+  },
+  {
+   "glob": "desktop/macos/acceptance/**",
+   "reason": "acceptance fixtures \u2014 test data in document form"
+  },
+  {
+   "glob": ".github/secret-scan-allowlist.txt",
+   "reason": "scanner configuration, not a document"
+  },
+  {
+   "glob": "docs/backlog/**",
+   "reason": "dated data snapshots (JSON), not documents; DELETE class (d) at execution"
+  },
+  {
+   "glob": "docs/doc-registry.json",
+   "reason": "the registry itself"
+  },
+  {
+   "glob": "docs/doc-registry.md",
+   "reason": "the generated registry view"
+  }
+ ]
+}
