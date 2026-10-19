@@ -154,13 +154,13 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   calls += 1;
   assert.equal(listed.status, 200, listed.text);
   assert.ok(Array.isArray(listed.json.result?.tools) && listed.json.result.tools.length > 0);
-  const orientCurl = steps.find(step => step.url.endsWith("/orient"));
-  const oriented = await fetch(orientCurl.url, {
-    headers: { authorization: orientCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
+  const packCurl = steps.find(step => step.url.endsWith("/activation-pack"));
+  const packed = await fetch(packCurl.url, {
+    headers: { authorization: packCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
   });
   calls += 1;
-  assert.equal(oriented.status, 200);
-  const orient = await oriented.json();
+  assert.equal(packed.status, 200);
+  const orient = (await packed.json()).orient;
   assert.equal(orient.member.handle, "Probe Agent");
   assert.ok(orient.work.some(item => item.title === "Starter task"));
   const board = steps.filter(step => step.url.includes("/work-claims/starter/"));

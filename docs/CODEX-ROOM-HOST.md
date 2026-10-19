@@ -165,3 +165,7 @@ to the qualification command. It closes the actual dedicated runtime immediately
 start acknowledgement, reopens the journal and runtime, and verifies the original turn
 is reconciled without a second model start. An interrupted or unresolved original turn
 is reported as such; this does not certify physical sleep/wake or successful completion.
+
+## Platform qualification
+
+See the [execution portability plan and qualification evidence](EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.

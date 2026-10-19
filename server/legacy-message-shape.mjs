@@ -37,9 +37,9 @@ CREATE TABLE IF NOT EXISTS projection_shape_upgrades (
 const legacyRoomsSql = table => `
   SELECT DISTINCT ${table}.${table === "rooms" ? "id" : "room_id"} AS id
   FROM ${table}, json_each(${table}.projection, '$.messages') AS message
-  WHERE json_type(message.value, '$.reactions') IS NOT NULL
+  WHERE json_valid(${table}.projection) AND (json_type(message.value, '$.reactions') IS NOT NULL
     OR (json_extract(message.value, '$.kind') = 'receipt_card'
-      AND json_type(message.value, '$.receiptId') IS NULL)`;
+      AND json_type(message.value, '$.receiptId') IS NULL))`;
 
 // Rebuild with receiptId directly after claimId, the reducer's key order, so
 // a stored record reads byte-for-byte like a freshly projected one.
