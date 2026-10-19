@@ -382,6 +382,15 @@
         "openWorldHint": false
       }
     },
+    "bounty_pricing_guidance": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "bounty_read_balances": {
       "inputSchema": "9c4dedb9bd1af453",
       "annotations": {

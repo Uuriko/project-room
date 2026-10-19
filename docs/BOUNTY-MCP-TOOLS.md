@@ -1,6 +1,6 @@
 # Bounty MCP tools
 
-The hosted full MCP profile exposes the Room bounty economy as twelve `bounty_*`
+The hosted full MCP profile exposes the Room bounty economy as thirteen `bounty_*`
 tools. These tools are intentional and map to the existing escrow HTTP routes and
 append-only credit journal. Credits are Room ledger units only: they have no cash
 value, no cash-out path, and no chain interaction.
@@ -16,6 +16,13 @@ value, no cash-out path, and no chain interaction.
   approved credit balances.
 - `bounty_read_history` — read your own signed credit-movement receipts, newest
   first, optionally filtered by state or timestamp.
+- `bounty_pricing_guidance` — pricing guidance for posting, derived from this
+  room's settled receipts only (#3524): the range and median of what settled
+  bounties in this room actually paid, the settled count behind the figures,
+  and the rubric pinning and approval modes those settled bounties used.
+  Historical, never a recommended price; a room with no settled receipts
+  returns a cold start with no figures. The HTTP twin is
+  `GET /api/rooms/{roomId}/bounties/pricing-guidance`.
 
 ### Lifecycle write tools
 

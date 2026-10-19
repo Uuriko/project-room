@@ -57,6 +57,10 @@ export const bountyTools = [
     schema({ state: { type: "string", enum: ["payable", "locked", "attributed", "approved", "paid", "refunded"] },
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
+  tool("bounty_pricing_guidance",
+    "Pricing guidance for posting a bounty in this room, derived from this room's settled receipts only: the range and median of what settled bounties in this room actually paid (net amounts workers received), the number of settled bounties behind the figures, and how those settled bounties pinned their rubrics and approval. Historical data, labelled as such — not a recommended price for your bounty and not a platform price. A room with no settled receipts returns coldStart with no figures rather than invented numbers. Read-only: it never blocks or changes posting.",
+    schema()),
+
   tool("bounty_post",
     "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },

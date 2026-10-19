@@ -5,6 +5,7 @@
 // wires the existing endpoints into the room UI; it adds no server surface:
 //
 //   GET  /api/rooms/{roomId}/bounties                      list
+//   GET  /api/rooms/{roomId}/bounties/pricing-guidance     settled-receipt pricing guidance (#3524)
 //   POST /api/rooms/{roomId}/bounties                      create (proposed)
 //   POST /api/rooms/{roomId}/bounties/{id}/fund            lock escrow
 //   POST /api/rooms/{roomId}/bounties/{id}/accept         release escrow
@@ -102,6 +103,35 @@ function normalizeBounty(row, self) {
   };
 }
 
+// Pricing guidance (#3524) as the server derives it from this room's
+// settled receipts. null means "not loaded" (the fetch failed or has not
+// run): the panel then renders nothing beside the post form and posting is
+// exactly as it was without guidance. A loaded cold start is its own
+// shape — a sentence, never numbers.
+function normalizeGuidance(row) {
+  if (!row || typeof row !== "object") return null;
+  const settledCount = typeof row.settledCount === "number" && row.settledCount > 0
+    ? Math.floor(row.settledCount) : 0;
+  if (row.coldStart === true || settledCount === 0) return { coldStart: true, settledCount: 0 };
+  const range = row.paidRangeCredits && typeof row.paidRangeCredits === "object" ? row.paidRangeCredits : {};
+  const modes = row.approvalModes && typeof row.approvalModes === "object" ? row.approvalModes : {};
+  const rubric = row.rubricCriteria && typeof row.rubricCriteria === "object" ? row.rubricCriteria : null;
+  return {
+    coldStart: false,
+    settledCount,
+    min: typeof range.min === "number" ? range.min : 0,
+    max: typeof range.max === "number" ? range.max : 0,
+    median: typeof row.medianPaidCredits === "number" ? row.medianPaidCredits : 0,
+    approvalModes: {
+      human: typeof modes.human === "number" ? modes.human : 0,
+      agent: typeof modes.agent === "number" ? modes.agent : 0,
+      legacy: typeof modes.legacy === "number" ? modes.legacy : 0,
+    },
+    rubricMin: rubric && typeof rubric.min === "number" ? rubric.min : null,
+    rubricMax: rubric && typeof rubric.max === "number" ? rubric.max : null,
+  };
+}
+
 function normalizeReceipt(row) {
   return {
     receiptId: typeof row?.receiptId === "string" ? row.receiptId : "",
@@ -115,8 +145,8 @@ function normalizeReceipt(row) {
   };
 }
 
-// Pure view model over the three endpoint payloads. Tested without DOM.
-export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) {
+// Pure view model over the endpoint payloads. Tested without DOM.
+export function bountyBoardModel({ bounties, balances, receipts, guidance, selfId } = {}) {
   const self = canonicalLaneId(selfId);
   const rows = Array.isArray(bounties) ? bounties : [];
   const items = rows.map(row => normalizeBounty(row, self));
@@ -124,6 +154,7 @@ export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) 
   const history = (Array.isArray(receipts) ? receipts : []).map(normalizeReceipt);
   return {
     self,
+    guidance: normalizeGuidance(guidance),
     balance: {
       payable: typeof balance.payable === "number" ? balance.payable : 0,
       locked: typeof balance.locked === "number" ? balance.locked : 0,
@@ -192,6 +223,37 @@ export function bountyBalanceHtml(model) {
     `<span>Attributed ${escapeHtml(formatCredits(b.attributed))}</span>` +
     `<span>Approved ${escapeHtml(formatCredits(b.approved))}</span>` +
     `<span>Total ${escapeHtml(formatCredits(b.total))}</span></div>`;
+}
+
+// The guidance panel beside the post form (#3524). Read-only: it renders
+// no controls and nothing in the posting flow depends on it. Every number
+// is labelled as settled-receipt history from this room — never as a
+// recommended price for the bounty being posted. Cold start is a plain
+// sentence with no numbers, exactly as the server reports it.
+export function pricingGuidanceHtml(guidance) {
+  if (!guidance) return "";
+  if (guidance.coldStart) {
+    return `<div class="bounty-guidance"><h4>Pricing guidance</h4>` +
+      `<p class="form-hint">No settled bounties in this room yet, so there is no pricing history to show. ` +
+      `Settled receipts from this room will build it as bounties here settle.</p></div>`;
+  }
+  const modes = guidance.approvalModes ?? {};
+  const modeParts = [];
+  if (modes.human) modeParts.push(`human approval for ${modes.human}`);
+  if (modes.agent) modeParts.push(`agent approval for ${modes.agent}`);
+  if (modes.legacy) modeParts.push(`legacy approval for ${modes.legacy}`);
+  const rubric = guidance.rubricMin !== null && guidance.rubricMin !== undefined
+    ? (guidance.rubricMin === guidance.rubricMax
+      ? ` They pinned a rubric of ${escapeHtml(String(guidance.rubricMin))} ${guidance.rubricMin === 1 ? "criterion" : "criteria"} at posting.`
+      : ` They pinned rubrics of ${escapeHtml(String(guidance.rubricMin))}–${escapeHtml(String(guidance.rubricMax))} criteria at posting.`)
+    : "";
+  const approval = modeParts.length ? ` Approval was ${escapeHtml(modeParts.join(", "))}.` : "";
+  return `<div class="bounty-guidance"><h4>Pricing guidance</h4>` +
+    `<p class="form-hint">Settled bounties in this room paid ` +
+    `${escapeHtml(formatCredits(guidance.min))}–${escapeHtml(formatCredits(guidance.max))} credits ` +
+    `(typical ${escapeHtml(formatCredits(guidance.median))}), from ${escapeHtml(String(guidance.settledCount))} settled bounties in this room. ` +
+    `Amounts are what workers received, from settled receipts in this room — history only, not a recommended price for this bounty.` +
+    `${rubric}${approval}</p></div>`;
 }
 
 function reviewHtml(item) {
@@ -315,6 +377,7 @@ export function installBountyBoard({ client, getSession }) {
     if (chip) chip.textContent = String(model.count);
     const focusKey = typeof host.contains === "function" && host.contains(document.activeElement) ? bountyFocusKey(document.activeElement) : null;
     host.innerHTML = bountyFormHtml() +
+      `<div id="bounty-guidance-host">${pricingGuidanceHtml(model.guidance)}</div>` +
       `<div id="bounty-balance-host">${bountyBalanceHtml(model)}</div>` +
       `<div id="bounty-list-host">${bountyListHtml(model)}</div>` +
       `<div id="bounty-receipts-host">${bountyReceiptsHtml(model, highlightReceiptId)}</div>`;
@@ -329,15 +392,19 @@ export function installBountyBoard({ client, getSession }) {
     busy = true;
     try {
       const self = encodeURIComponent(session.member.id);
-      const [list, balances, history] = await Promise.all([
+      // Guidance (#3524) is fetched on its own failure track: a failed or
+      // slow guidance read yields no panel — it must never fail, delay as
+      // a gate, or otherwise change loading and posting.
+      const [list, balances, history, guidanceRes] = await Promise.all([
         client.request(client.path("/bounties")),
         client.request(client.path(`/credits/balances/${self}`)),
         client.request(client.path(`/credits/history/${self}`)),
+        client.request(client.path("/bounties/pricing-guidance")).catch(() => null),
       ]);
       if (epoch !== generation || getSession()?.roomId !== roomId) return;
       render(bountyBoardModel({
         bounties: list?.bounties, balances: balances?.balances,
-        receipts: history?.receipts, selfId: session.member.id,
+        receipts: history?.receipts, guidance: guidanceRes?.guidance, selfId: session.member.id,
       }));
       loadedFor = roomId;
       setStatus("");

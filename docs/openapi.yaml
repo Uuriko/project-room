@@ -7455,6 +7455,58 @@ paths:
                     items: { $ref: '#/components/schemas/ReviewPacket' }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/pricing-guidance:
+    get:
+      summary: Pricing guidance for posting, from this room's settled receipts (#3524)
+      description: |
+        Read-only guidance the posting flow shows beside the post form.
+        Derived from this room's settled receipts only: bounty records in
+        this room carrying a recorded settlement whose worker leg actually
+        paid. The paid range is the min–max of those settled (net) paid
+        amounts, the typical value is their median, and the count of
+        settled bounties behind the numbers is named in `settledCount`.
+        Rubric pinning is summarised from the same settled rows (pinned
+        rubric criterion counts, approval-mode counts). A room with no
+        settled receipts returns `coldStart: true` with null figures —
+        plainly no history, never invented numbers. Every figure is
+        historical, labelled as settled-receipt data: not a recommendation
+        for what a new bounty should pay and not a platform price. This
+        read never blocks, gates, or delays posting. API keys need
+        `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's pricing guidance from its settled receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  guidance:
+                    type: object
+                    properties:
+                      roomId: { type: string }
+                      source: { type: string, enum: [settled-receipts] }
+                      settledCount: { type: integer, minimum: 0 }
+                      coldStart: { type: boolean }
+                      paidRangeCredits:
+                        type: [object, 'null']
+                        properties:
+                          min: { type: number }
+                          max: { type: number }
+                      medianPaidCredits: { type: [number, 'null'] }
+                      approvalModes:
+                        type: object
+                        additionalProperties: { type: integer, minimum: 0 }
+                      rubricCriteria:
+                        type: [object, 'null']
+                        properties:
+                          min: { type: integer, minimum: 1 }
+                          max: { type: integer, minimum: 1 }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/reputation-reviews:
     get:
       summary: Inspect probation-gate review packets (slice 4)
