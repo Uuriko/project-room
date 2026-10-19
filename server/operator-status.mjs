@@ -53,6 +53,20 @@ export function collectLargestTables(db, { deadlineMs = 1500, now = () => perfor
   return { tables: counts.slice(0, limit), partial, ...(skipped.length ? { skipped } : {}) };
 }
 
+// Rooms the patrol parked (r67), for operatorStatus below.
+function patrolBlocks(store, limit = 25) {
+  try {
+    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, head_seq AS headSeq,
+      error_class AS errorClass, error, blocked_at AS blockedAt
+      FROM patrol_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
+      ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
+    }));
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
+}
+
 export function operatorStatus(store, options = {}) {
   const tables = collectLargestTables(store.db, options);
   return {
@@ -79,25 +93,12 @@ export function operatorStatus(store, options = {}) {
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
     messagesBackfillBlocks: messagesBackfillBlocks(store),
-    // Rooms the patrol parked (guardian census F5): stored state the
-    // patrol cannot process, named with the cursor, the head it parked
-    // at, and the error class — the projection-repair list for
-    // /api/operator/projection/plan. Operator-token gated for the same
-    // reason as the backfill blocks: room ids stay off public surfaces.
-    patrolBlocks: patrolBlocksView(store)
+    // Rooms the patrol parked (r67): the patrol_blocks rows (room, cursor,
+    // head, error class, one-line error). The public health surface carries
+    // only "patrol could not process a room (<class>)" and a count, so
+    // without this no surface names the room. Operator-token gated; capped.
+    patrolBlocks: patrolBlocks(store)
   };
-}
-
-function patrolBlocksView(store, limit = 25) {
-  try {
-    if (typeof store.patrolBlocks !== "function") return [];
-    return store.patrolBlocks().slice(0, limit).map(block => ({
-      ...block, error: typeof block.error === "string" ? block.error.slice(0, 240) : null
-    }));
-  } catch (error) {
-    if (/no such table/i.test(error?.message ?? "")) return [];
-    throw error;
-  }
 }
 
 function messagesBackfillBlocks(store, limit = 25) {
