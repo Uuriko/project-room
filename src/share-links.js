@@ -277,7 +277,33 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
       || !$("#share-note-preview").value;
   }
+  // The growth kit's pair has ONE source (#4071): paintGrowthInvite is
+  // the only writer of both fields and of both copy buttons' disabled
+  // states, so Copy link and Copy message can never carry different
+  // links. kitInvite is the referral pair loadKit rendered; a freshly
+  // created share link replaces the pair (growthPairCreated) until
+  // clearResult restores the kit pair — expiry and revocation both
+  // route through clearResult, so a dead created link leaves both
+  // fields together.
+  let kitInvite = { url: "", message: "" };
+  let growthPairCreated = false;
+  function paintGrowthInvite(url, message) {
+    const urlField = $("#growth-invite-url");
+    if (urlField) urlField.value = url;
+    const messageField = $("#growth-invite-message");
+    if (messageField) messageField.value = message;
+    const copyLink = $("#growth-copy-link");
+    if (copyLink) copyLink.disabled = !url;
+    const copyMessage = $("#growth-copy-message");
+    if (copyMessage) copyMessage.disabled = !message;
+  }
   function clearResult(message = "") {
+    if (growthPairCreated) {
+      growthPairCreated = false;
+      paintGrowthInvite(kitInvite.url, kitInvite.message);
+      const kitStatus = $("#growth-kit-status");
+      if (kitStatus) kitStatus.textContent = "";
+    }
     const heldFocus = $("#share-link-result").contains(document.activeElement);
     copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
     $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
@@ -343,16 +369,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const invite = data?.invite;
     const url = invite?.token ? humanJoinShareUrl(invite.token) : "";
     const message = invite?.message && url ? String(invite.message).replaceAll("{url}", url) : "";
-    const urlField = $("#growth-invite-url");
-    if (urlField) urlField.value = url;
-    const messageField = $("#growth-invite-message");
-    if (messageField) messageField.value = message;
+    kitInvite = { url, message };
+    if (!growthPairCreated) paintGrowthInvite(url, message);
     const rewardEl = $("#growth-reward");
     if (rewardEl) rewardEl.textContent = rewardLine(data?.reward);
-    const copyLink = $("#growth-copy-link");
-    const copyMessage = $("#growth-copy-message");
-    if (copyLink) copyLink.disabled = !url;
-    if (copyMessage) copyMessage.disabled = !message;
     const kitStatus = $("#growth-kit-status");
     if (kitStatus && data?.inviteBlocked === "email_unverified") kitStatus.textContent = "Verify your email to invite people. Open Sign-in & security from the account menu.";
     else if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
@@ -547,12 +567,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
       else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
-      // #3794: the growth-kit field at the top of this dialog still showed
-      // a pre-existing (guest) link after a create — the only URL many
-      // inviters ever copied. The created link is the link the current
-      // settings describe, so it is the URL every field here shows.
-      const growthUrl = $("#growth-invite-url");
-      if (growthUrl) growthUrl.value = inviteUrl;
+      // #3794 + #4071: the growth-kit fields at the top of this dialog
+      // still showed a pre-existing (guest) link after a create — the
+      // only URL many inviters ever copied — and the message field kept
+      // the old link even after the URL field was fixed, so the two
+      // copy controls carried different links. The created link is the
+      // link the current settings describe, so it drives BOTH fields:
+      // the message is the kit template with the created link in place
+      // of the kit link, written through the pair's one writer.
+      growthPairCreated = true;
+      const kitTemplate = kitInvite.url && kitInvite.message ? kitInvite.message.replaceAll(kitInvite.url, "{url}") : inviteMessage(getState()?.room?.title);
+      paintGrowthInvite(inviteUrl, kitTemplate.replaceAll("{url}", inviteUrl));
       const growthStatus = $("#growth-kit-status");
       if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
       $("#share-link-result").hidden = false;
