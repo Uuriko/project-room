@@ -450,7 +450,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // headroom; a larger guard does not establish the deployed storage ceiling.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 // T062: a projection-cap refusal states the size the change would reach and
-// the limit, so a caller can tell "one big message over" from "room full".
+// the limit, so a caller can distinguish an oversized message and a full room.
 export function projectionLimitMessage(projectedBytes) {
   return `Room storage limit reached: this change would make the room ${projectedBytes} bytes; the limit is ${PILOT_LIMITS.projectionBytes} bytes; no data was changed. Ask the room owner to have older messages archived to free space.`;
 }
