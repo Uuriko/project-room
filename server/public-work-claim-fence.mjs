@@ -31,6 +31,20 @@ export function verifyPublicWorkClaimFence(db, { allowAbsent = false } = {}) {
   if (rows.length !== 1 || rows[0].singleton !== 1 || rows[0].enabled !== 0) throw new Error('Public claim writer permit must be closed at rest');
   return true;
 }
+// Reconcilers (claim-pr-sync, claim-autolink) walk every room's claims. A
+// public-work namespace is owned by its own writer; a reconciler skips it
+// rather than taking the permit (Fo 15510), so one public row cannot abort a
+// whole tick with "unsupported public claim writer".
+export function isPublicWorkClaimNamespace(store, roomId) {
+  const db = store?.db ?? store;
+  if (!db?.prepare || typeof roomId !== 'string') return false;
+  try {
+    return db.prepare('SELECT 1 FROM public_work_tasks WHERE namespace_key=? LIMIT 1').get(roomId) !== undefined;
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? '')) return false;
+    throw error;
+  }
+}
 export function withPublicWorkClaimWriter(store, fn) {
   return store.transaction(() => {
     if (store.db.prepare(`SELECT enabled FROM ${permit} WHERE singleton=1`).get()?.enabled !== 0) throw new Error('Public claim writer permit must be closed before entry');

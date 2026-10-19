@@ -25,6 +25,7 @@
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { isPublicWorkClaimNamespace } from "./public-work-claim-fence.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
@@ -368,6 +369,7 @@ function ciReadDue(item, nowMs) {
 // Reading the current row first makes the retry a no-op: the links are
 // already stamped, so `linked` misses and the function returns false.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
+  if (isPublicWorkClaimNamespace(store, roomId)) return false;
   const current = registry?.get?.(roomId, item?.id) ?? item;
   const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
@@ -520,7 +522,7 @@ function loadDueClaims(store, nowMs) {
     throw error;
   }
   const due = [];
-  for (const row of rows) {
+  for (const row of privateRoomRows(store, rows)) {
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -572,7 +574,7 @@ function loadVerificationClaims(store, nowMs, limit) {
     throw error;
   }
   const due = [];
-  for (const row of rows) {
+  for (const row of privateRoomRows(store, rows)) {
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -865,9 +867,19 @@ const HOUSEKEEPING_ROOM = "_claim-pr-housekeeping";
 // Item fields live under $.data in enveloped rows, top-level in legacy rows.
 const fieldText = name => `COALESCE(json_extract(item_json, '$.data.${name}'), json_extract(item_json, '$.${name}'))`;
 
+// A public-work namespace is its own writer's (public-work-claim-fence.mjs);
+// the reconciler skips it, so one public row cannot abort the tick (15509).
+function privateRoomRows(store, rows) {
+  const seen = new Map();
+  return rows.filter(row => {
+    if (!seen.has(row.roomId)) seen.set(row.roomId, isPublicWorkClaimNamespace(store, row.roomId));
+    return !seen.get(row.roomId);
+  });
+}
+
 function claimCandidatePairs(store, sql, params = []) {
   try {
-    return store.db.prepare(sql).all(...params);
+    return privateRoomRows(store, store.db.prepare(sql).all(...params));
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return [];
     throw error;
@@ -894,6 +906,7 @@ function writeHousekeepingState(store, state, nowMs) {
 // rotation. #3464: closeWhenLive re-validates the stored row; isolate per
 // item so one invalid row cannot abort the phase for every other room.
 function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
+  if (isPublicWorkClaimNamespace(store, roomId)) return;
   let item;
   try {
     item = store.workClaims.get(roomId, claimId);
@@ -1009,6 +1022,8 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
 }
 
 function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
+  // Re-checked per room: a public-work row can appear mid-run.
+  if (isPublicWorkClaimNamespace(store, roomId)) return 0;
   const candidates = [];
   for (const claimId of claimIds) {
     let item;
@@ -1100,7 +1115,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
   try {
     roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims
       WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'`)
-      .all().map(row => row.roomId);
+      .all().filter(row => !isPublicWorkClaimNamespace(store, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return 0;
     throw error;
@@ -1134,7 +1149,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
       }
       pairs = pairs.slice(0, STALE_SWEEP_BATCH);
     }
-    if (pairs.length === 0) continue;
+    if (pairs.length === 0 || isPublicWorkClaimNamespace(store, roomId)) continue;
     store.workClaims.transaction(() => {
       for (const [, item] of pairs) {
         store.workClaims.set(roomId, item);
@@ -1201,7 +1216,8 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
   const applied = [];
   let roomIds = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all()
+      .filter(row => !isPublicWorkClaimNamespace(store, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return { applied: [] };
     throw error;

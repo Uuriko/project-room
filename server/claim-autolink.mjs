@@ -26,6 +26,7 @@ import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordina
 import { applyPullRequestWebhook, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
+import { isPublicWorkClaimNamespace } from "./public-work-claim-fence.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
 
 // Claim ids in the wild: plan-pr-autolink, fo-sec06-invite-race,
@@ -162,6 +163,8 @@ function autoLinkShape(parsed) {
 // exists (the owner can still link more by hand). Emits one
 // work_claim.updated receipt with reason pr_autolinked.
 export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unknown" } = {}, { nowMs = Date.now() } = {}) {
+  // A public-work namespace is its own writer's; never a reconciler's (15509).
+  if (isPublicWorkClaimNamespace(store, roomId)) return { linked: false, reason: "public_work" };
   const item = store?.workClaims?.get(roomId, claimId);
   if (!item || !LIVE_CLAIM_STATES.has(item.state) || !item.owner || item.supersededBy) {
     return { linked: false, reason: "not_active" };
@@ -233,7 +236,8 @@ function liveClaims(store) {
   const out = [];
   let roomIds = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all()
+      .filter(row => !isPublicWorkClaimNamespace(store, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return out;
     throw error;
@@ -399,7 +403,8 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
   if (!store?.db || !store.workClaims) return out;
   let roomIds = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all()
+      .filter(row => !isPublicWorkClaimNamespace(store, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return out;
     throw error;
