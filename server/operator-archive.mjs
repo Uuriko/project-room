@@ -21,7 +21,7 @@ import { messagesBackfillCaughtUp } from "./messages-store.mjs";
 export const ARCHIVE_DEFAULT_KEEP = 2000;
 export const ARCHIVE_MIN_KEEP = 100;
 export const ARCHIVE_MAX_KEEP = 100_000;
-const FIELDS = new Set(["roomId", "keepNewest", "dryRun", "reason", "expect"]);
+const FIELDS = new Set(["roomId", "keepNewest", "dryRun", "reason", "expect", "belowCursor"]);
 const CATCH_UP_CALLS = 20;
 const CATCH_UP_BUDGET_MS = 15_000;
 
@@ -42,6 +42,8 @@ function parse(input) {
   }
   const dryRun = input.dryRun ?? true;
   if (typeof dryRun !== "boolean") fail(422, "invalid_archive_request", "dryRun must be true or false");
+  const belowCursor = input.belowCursor ?? false;
+  if (typeof belowCursor !== "boolean") fail(422, "invalid_archive_request", "belowCursor must be true or false");
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
   if (!reason || reason.length > 200) fail(422, "reason_required", "Give a reason of 1 to 200 characters");
   let expect = null;
@@ -55,7 +57,7 @@ function parse(input) {
       fail(422, "dry_run_required", "A real run needs expect: { archived, throughSeq } from a dry run of the same room and keepNewest");
     }
   }
-  return { roomId, keepNewest, dryRun, reason, expect };
+  return { roomId, keepNewest, dryRun, reason, expect, belowCursor };
 }
 
 // Replay the room's messages table to its head and certify it there. Returns
@@ -81,19 +83,22 @@ function certifyAtHead(store, roomId, deadline) {
 export function operatorArchive(store, input, requestId = null, { clock = () => Date.now() } = {}) {
   if (store?.readOnly) fail(409, "read_only", "This store is read-only");
   const request = parse(input);
-  const { roomId, keepNewest, dryRun, reason, expect } = request;
+  const { roomId, keepNewest, dryRun, reason, expect, belowCursor } = request;
   if (!store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) fail(404, "room_not_found", "Room not found");
   const audit = (result, counts) => appendOperatorAction(store, {
     action: dryRun ? "messages_archive_plan" : "messages_archive",
-    targetKind: "room", targetId: roomId, reason, counts: { keepNewest, ...counts }, result, requestId
+    targetKind: "room", targetId: roomId, reason, counts: { keepNewest, ...(belowCursor ? { belowCursor } : {}), ...counts }, result, requestId
   });
   const before = projectionBytes(store.db, roomId);
-  const certified = certifyAtHead(store, roomId, clock() + CATCH_UP_BUDGET_MS);
+  // belowCursor (a room parked behind its head): no catch-up, which would
+  // re-run the parked backfill; the archive itself plans only below the
+  // cursor and keeps every message a later event names.
+  const certified = belowCursor ? { ok: true } : certifyAtHead(store, roomId, clock() + CATCH_UP_BUDGET_MS);
   if (!certified.ok) {
     audit("refused", { detail: certified.detail, projectionBytes: before });
     fail(409, "archive_not_ready", `The room's messages table could not be certified at its head (${certified.detail}); nothing was archived`);
   }
-  const plan = store.archiveMessages(roomId, { keepNewest, dryRun: true });
+  const plan = store.archiveMessages(roomId, { keepNewest, dryRun: true, belowCursor });
   if (!plan.ok) {
     audit("refused", { detail: plan.reason, projectionBytes: before });
     fail(409, "archive_not_ready", `Archive refused (${plan.reason}); nothing was archived`);
@@ -102,13 +107,14 @@ export function operatorArchive(store, input, requestId = null, { clock = () => 
     audit("plan_changed", { archived: plan.archived, throughSeq: plan.throughSeq, expected: expect });
     fail(409, "plan_changed", "The archive plan changed since the dry run; run the dry run again and send its archived and throughSeq");
   }
-  const done = dryRun ? plan : store.archiveMessages(roomId, { keepNewest, dryRun: false });
+  const done = dryRun ? plan : store.archiveMessages(roomId, { keepNewest, dryRun: false, belowCursor });
   if (!done.ok) {
     audit("refused", { detail: done.reason, projectionBytes: before });
     fail(409, "archive_not_ready", `Archive refused (${done.reason}); nothing was archived`);
   }
   const after = projectionBytes(store.db, roomId);
-  const counts = { archived: done.archived, retained: done.retained, freedBytes: done.freedBytes, throughSeq: done.throughSeq, projectionBytes: { before, after } };
+  const counts = { archived: done.archived, retained: done.retained, freedBytes: done.freedBytes, throughSeq: done.throughSeq,
+    ...(belowCursor ? { cursorSeq: done.cursorSeq, touchedKept: done.touchedKept } : {}), projectionBytes: { before, after } };
   audit("ok", counts);
   return { ok: true, roomId, dryRun, keepNewest, ...counts, expect: { archived: done.archived, throughSeq: done.throughSeq } };
 }
