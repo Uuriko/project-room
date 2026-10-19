@@ -354,7 +354,15 @@ for (const boundary of ["close", "revoke"]) test(`native result: held retry cann
 
 // A live update that re-renders the timeline while the member's focus is on a
 // work card's "View result" button must leave that button on screen.
-test("native result 320px: a live update keeps the focused View result control on screen", { timeout: 30000, skip: QUARANTINED_RESULT_FLAKES ? "quarantined: tests/quarantine.json (viewport race; repair by 2026-11-02)" : false }, async t => {
+// Repair (flake quarantine, viewport race): the old fixed 500ms wait sampled
+// inside the scroll-compensation window — on a stalled runner the render
+// stream is still catching up and the control is caught mid-compensation
+// (specimen run 39223827514: top 484 -> 970, scrollY 189 at both samples,
+// passed on re-run). The requirement is the RESTING position after the
+// updates land, so wait for the follow-up to render and for the focused
+// control's position to hold steady across two samples 400ms apart, then
+// judge that position with the same assertion as before.
+test("native result 320px: a live update keeps the focused View result control on screen", { timeout: 60000 }, async t => {
   const f = await setup(t, { review: true, viewport: { width: 320, height: 900 } });
   const { page } = f, read = page.locator(`[data-work-record-id="${f.workItemId}"] [data-read-result]`);
   await read.waitFor();
@@ -364,9 +372,17 @@ test("native result 320px: a live update keeps the focused View result control o
   for (let i = 0; i < 3; i++) { f.send(T.MESSAGE_POSTED, { body: `Live update ${i}`, replyToId: "test-welcome" }); await page.waitForTimeout(250); }
   const mid = await where();
   f.send(T.MESSAGE_POSTED, { messageId: "native-follow", workItemId: f.workItemId, packetId: "human-packet", basisRevision: f.item().revision, body: "Follow-up on the same work" });
-  await page.waitForTimeout(500);
+  const trajectory = [];
+  const settled = await waitForState(page, "the follow-up to render and the focused control to settle", async () => {
+    const rendered = await page.evaluate(() => Boolean(document.querySelector('[data-key="message:native-follow"]')));
+    if (!rendered) return false;
+    const a = await where(); trajectory.push(a);
+    await page.waitForTimeout(400);
+    const b = await where(); trajectory.push(b);
+    return a.top === b.top && a.bottom === b.bottom && a.scrollY === b.scrollY;
+  }, { timeout: 20000 }).then(() => true, () => false);
   const after = await where();
-  assert.ok(after.top >= 0 && after.bottom <= after.h, `focused control on screen after live updates: ${JSON.stringify({ before, mid, after })}`);
+  assert.ok(settled && after.top >= 0 && after.bottom <= after.h, `focused control on screen after live updates: ${JSON.stringify({ before, mid, after, settled, trajectory: trajectory.slice(-4) })}`);
 });
 
 // A room credential that dies while the account is still signed in used to drop
