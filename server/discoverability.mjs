@@ -129,6 +129,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/mcp", ["GET"], "none", "Hosted MCP server card (alias).", "getMcpWellKnown"),
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
+  route("/.well-known/agent-skills/connect/SKILL.md", ["GET", "HEAD"], "none", "Agent connect skill: join one room from a one-time invite code and end up listening (markdown).", "getConnectSkill",
+    { operationIds: { GET: "getConnectSkill", HEAD: "headConnectSkill" } }),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   // Onboarding.
