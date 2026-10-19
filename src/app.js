@@ -57,7 +57,6 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
-import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
@@ -8042,8 +8041,23 @@ const ready = (async () => {
 });
 // --- W board: Tasks › Board. The command palette opens Board. ---
 {
+  // board-ui.js loads exactly once, on first need: the board panel's
+  // lazyDisclosure and the claim-chat painter share this loader, so the
+  // board closure stays out of the boot path. It used to be statically
+  // imported for paintClaimChat alone, which defeated the lazy seam —
+  // every room open parsed the board whether or not it was ever opened.
+  let boardModulePromise = null;
+  const loadBoardModule = () => {
+    if (!boardModulePromise) {
+      boardModulePromise = import("./board-ui.js");
+      // A failed load must not poison the seam: clear the cached promise
+      // so the next board open or chat render retries the import.
+      boardModulePromise.catch(() => { boardModulePromise = null; });
+    }
+    return boardModulePromise;
+  };
   const board = lazyDisclosure({ panel: $("#board-panel"),
-    load: () => import("./board-ui.js"),
+    load: loadBoardModule,
     // JDOT-COH-NAV begin
     install: module => {
       const controller = module.installWorkBoard({ client, getState: () => state, getSession: () => session });
@@ -8115,7 +8129,19 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
-  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
+  let claimChatPainter = null;
+  const paintChat = () => {
+    if (!state) return;
+    if (claimChatPainter) { claimChatPainter(state, $("#message-list")); return; }
+    // First chat render kicks the shared lazy load. paintClaimChat is
+    // idempotent — it rebuilds the claim lines from state — so painting
+    // when the module lands produces exactly the lines a synchronous
+    // paint would have, and later renders paint synchronously again.
+    loadBoardModule().then(module => {
+      claimChatPainter = module.paintClaimChat;
+      if (state) claimChatPainter(state, $("#message-list"));
+    }).catch(() => { /* messages already rendered; the next render retries */ });
+  };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
