@@ -2562,6 +2562,7 @@ function renderMessages() {
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   renderPinned();
+  humanExperience?.paint();
   // On narrow screens the page scrolls instead of the timeline. Keep the
   // visible row steady after both message and new-message controls change.
   if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
@@ -3828,7 +3829,8 @@ async function submit(form, fn, { failureHint } = {}) {
   try { await fn(current); }
   catch (error) {
     if (!current()) return;
-    const text = failureTextWithHint(error, failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
+    const hint = typeof failureHint === "function" ? failureHint(error) : failureHint;
+    const text = failureTextWithHint(error, hint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
@@ -4050,6 +4052,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+  getConversation: () => ({ channelId: activeChannelId, threadId: currentThreadId, rootOf: id => conversation?.rootById.get(id) }),
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
   startContribution: (sourceMessageId, intent) => {
@@ -4274,7 +4277,7 @@ $("#message-form").addEventListener("submit", e => {
       updateReply(); syncRequestComposer(); persistDrafts();
     }
     maybeShowGuestUpgradeHint();
-  }, { failureHint: "Draft kept. Send again to retry." });
+  }, { failureHint: humanExperience.askFailureHint });
 });
 $("#composer-attach")?.addEventListener("click", () => { composerReselectId = null; $("#composer-file")?.click(); });
 $("#composer-file")?.addEventListener("cancel", () => { composerReselectId = null; });
@@ -4613,17 +4616,9 @@ function renderMentions() {
   input.removeAttribute("aria-expanded");
   input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
-// Choosing the assistant from the @ list is an Ask Room, not a plain mention.
 function chooseMention(member) {
-  const input = $("#message-input"), found = input && member ? mentionQuery(input.value, input.selectionStart) : null;
-  if (found && humanExperience.assistantName(member.id) && humanExperience.selectAsk()) {
-    const value = input.value, caret = input.selectionStart, before = value.slice(0, found.start).replace(/[ \t]+$/, ""), after = value.slice(caret).replace(/^[ \t]+/, "");
-    input.value = [before, after].filter(Boolean).join(" ");
-    const at = before ? before.length + (after ? 1 : 0) : 0;
-    hideMentions(); saveComposer(); syncRequestComposer(); input.focus(); input.setSelectionRange(at, at);
-    return;
-  }
-  applyMentionMember(member);
+  const name = member && humanExperience.assistantName(member.id);
+  applyMentionMember(name ? { ...member, displayName: name } : member);
 }
 function applyMentionMember(member) {
   const input = $("#message-input");

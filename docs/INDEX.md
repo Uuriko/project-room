@@ -1,5 +1,7 @@
 # Project Room docs
 
+Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md).
+
 Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
 
 Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md).

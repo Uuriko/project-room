@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from './auth-signin.mjs';
-import { clickChrome, ensureSidebarOpen } from './room-chrome.mjs';
+import { clickChrome, ensureSidebarOpen, openSettings, closeSettings } from './room-chrome.mjs';
 
 for (const width of [1280, 390]) test(`entry recovery and room search at ${width}`, { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -26,11 +26,12 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   await page.locator('#main').waitFor();
   await page.waitForFunction(() => document.querySelector('#room-assistant').hidden);
   assert.equal(await page.locator('#room-assistant').isVisible(), false, 'unconfigured assistant does not occupy ordinary chat');
-  await page.locator('#ask-room').click();
+  assert.equal(await page.locator('#ask-room').count(), 0);
+  await openSettings(page);
   await page.locator('#assistant-setup').waitFor();
-  assert.equal(await page.locator('#room-assistant').isVisible(), true, 'asking exposes connection and recovery');
-  await page.locator('#ask-room').click();
-  assert.equal(await page.locator('#room-assistant').isVisible(), false, 'canceling an empty ask restores quiet chat');
+  assert.equal(await page.locator('#assistant-setup').isVisible(), true, 'assistant setup is available in settings');
+  await closeSettings(page);
+  assert.equal(await page.locator('#room-assistant').isVisible(), false, 'ordinary chat remains quiet');
   await ensureSidebarOpen(page);
   await page.locator('#nav-rooms').click();
   await page.locator('#account-rooms-list button').first().waitFor();

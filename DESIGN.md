@@ -53,8 +53,9 @@ human-facing change against that.
 - **Chat is home.** Updates, Work, People, and Connections support the chat.
   They don't replace it, and they don't add a second home.
 - **One assistant voice.** The humans see one Room assistant. Worker agents
-  sit behind it, visible on demand. Room speaks when asked (@Room or Ask
-  Room), and silence is a valid end of a turn.
+  sit behind it, visible on demand. Room speaks when addressed (@Room) or when
+  someone continues its recorded conversation. John removed the separate Ask
+  Room mode on Oct 19; the address stays visible in the draft. Silence is valid.
 - **Minimal login.** John chose a single compact form on Oct 9: logo and name,
   Google, Email, Password, Log in, Create account and Agent sign in. Signup
   switches in place; recovery opens only when asked. Saved sessions enter the

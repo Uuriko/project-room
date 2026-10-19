@@ -13,13 +13,12 @@ import { signInFixture } from './auth-signin.mjs';
 
 
 async function configureAssistant(page) {
-  const reveal = !await page.locator('#assistant-setup').isVisible();
-  if (reveal) await page.locator('#ask-room').click();
+  await openSettings(page);
   await page.locator('#assistant-setup').click();
   await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click();
   await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
-  if (reveal) await page.locator('#ask-room').click();
+  await closeSettings(page);
 }
 
 function deferredResultResponse() {
@@ -90,17 +89,21 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
-  await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
+  await send(owner,'@Room Compare our launch ideas.');
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   let run=(await api('producer')).runs[0]; assert.equal(run.status,'queued');
   // HS2 3a: the request and its state are on the card face, with Activity still closed.
   for(const page of pages) {
-    await page.locator('#assistant-face .assistant-face-request').getByText('Compare our launch ideas.').waitFor();
+    await page.locator(`[data-message-record-id="${run.sourceMessageId}"] #assistant-face`).waitFor();
+    assert.equal(await page.locator('#assistant-face .assistant-face-request').isVisible(), false, 'the source message supplies the prompt without repetition');
     assert.match(await page.locator('#assistant-face .assistant-face-status').textContent(), /^(Asked|Not picked up yet)/);
     assert.equal(await page.locator('#assistant-activity').evaluate(n=>n.open), false);
   }
-  await peer.locator('#assistant-face').getByRole('button',{name:'Add to this ask',exact:true}).click(); await send(peer,'Keep the design mobile first.');
+  const original = peer.locator(`[data-message-record-id="${run.sourceMessageId}"]`);
+  await original.hover();
+  await original.locator('[data-message-action="reply"]').click();
+  await send(peer,'Keep the design mobile first.');
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('mobile first'));
   run=(await api('producer')).runs[0]; assert.equal(run.inputs.length,2); assert.equal(run.inputs[1].status,'pending');
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
@@ -183,8 +186,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
       await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click();
-  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-input').fill('@Room Recover this request exactly once.');
   await owner.locator('#message-form button[type=submit]').click();
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   const beforeRetry = (await api('owner')).runs;
@@ -232,6 +234,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   // Losing the committed response must preserve one exact cancellation for retry.
   const ownerRun = owner.locator(`[data-assistant-run="${recovery.id}"]`);
   const peerRun = peer.locator(`[data-assistant-run="${recovery.id}"]`);
+  await openSettings(owner);
   await owner.locator('#assistant-activity').evaluate(n => { n.open = true; });
   await ownerRun.getByRole('button', {name:'Stop', exact:true}).waitFor({timeout:3000});
   assert.equal(await peerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
@@ -249,7 +252,9 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   recovery = (await api('producer')).runs.find(r => r.id === recovery.id);
   assert.equal(recovery.status, 'cancel_requested');
+  await openSettings(owner);
   await ownerRun.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation', {exact:true}).waitFor();
+  await closeSettings(owner);
   assert.equal(await ownerRun.getByRole('button', {name:'Add to this ask', exact:true}).count(), 0);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   await owner.locator('#assistant-retry').click();
@@ -260,6 +265,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(id => document.querySelector(`[data-assistant-run="${id}"]`).textContent.includes('Cancelled'), recovery.id);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   // The result link returns to the exact public answer, rather than a different run.
+  await openSettings(peer);
   await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
   await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
@@ -470,10 +476,13 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:1,state:'working',summary:'ERASED-BROWSER-PROMPT'});
   const page=await browser.newPage();await page.goto(origin);await signInFixture(page,f.keys.owner);
   await page.locator('#main').waitFor({state:'visible'});
+  await openSettings(page);
   await page.locator('#assistant-activity > summary').click();
   const panel=page.locator('[data-assistant-run="deleted-browser-run"]');
   await panel.getByRole('button',{name:'Original prompt',exact:true}).waitFor();
+  await closeSettings(page);
   await page.locator('#message-input').fill('Keep my unsent conversation draft.');
+  await openSettings(page);
   // Keep the old assistant projection cached while real message deletion arrives.
   await page.route('**/api/rooms/commons/assistant',route=>route.request().method()==='GET'?route.abort():route.continue());
   const deletion=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),type:'message.deleted',data:{messageId:'erase-browser-prompt',expectedMessageRevision:0}})});
@@ -483,11 +492,13 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await page.unroute('**/api/rooms/commons/assistant');
   for(const name of ['Original prompt','Add to this ask','Change direction','Resolve direction','Resume']) assert.equal(await panel.getByRole('button',{name,exact:true}).count(),0);
   await panel.getByRole('button',{name:'Pause',exact:true}).click();
+  await openSettings(page);
   await panel.locator('.assistant-run-status').getByText('Pausing · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:3,state:'paused',summary:'Stopped'});
   await panel.locator('.assistant-run-status').getByText('Paused',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button',{name:'Resume',exact:true}).count(),0);
   await panel.getByRole('button',{name:'Stop',exact:true}).click();
+  await openSettings(page);
   await panel.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
   await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor();
@@ -530,7 +541,7 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopping…',{exact:true}).waitFor();
   assert.equal(stopPayload.expectedAttemptId, 'kbd-host');
   assert.equal(stopPayload.expectedRevision, 1, 'the UI sent its observed revision rather than silently refreshing the control');
-  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#room-assistant')) }));
+  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#assistant-face')) }));
   assert.deepEqual(focus,{body:false,inCard:true},'focus stays on the Room card after a keyboard Stop');
   await api('producer',{action:'report',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:3,state:'cancelled',summary:'Stopped.'});
   await status.getByText('Stopped',{exact:true}).waitFor();
@@ -571,9 +582,9 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   await owner.locator('#message-input').fill('Keep my unrelated draft.');
   await control.focus(); await owner.keyboard.press('Enter');
   assert.equal(await owner.locator('#message-input').inputValue(), '');
-  assert.equal(await owner.locator('#ask-room').textContent(), 'Resolve direction');
+  assert.equal(await owner.locator('#assistant-context').textContent(), 'Resolve direction');
   assert.equal((await api('owner')).runs[0].inputs.length, 1, 'opening the composer sends nothing');
-  await owner.locator('#ask-room').click();
+  await owner.locator('#assistant-context').click();
   await owner.locator('#thread-back').click();
   assert.equal(await owner.locator('#message-input').inputValue(), 'Keep my unrelated draft.');
   await control.click();
@@ -600,7 +611,7 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 });
 
-test('@Room in the mention list is an Ask Room, not a plain mention', { timeout: 45000 }, async t => {
+test('@Room stays visible in the draft and routes without a separate composer mode', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
@@ -615,12 +626,12 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   assert.equal(await roomOptions(), 0);
   await input.fill('');
   await configureAssistant(page);
-  await input.fill('can you help? @Roo');
+  await input.fill('@Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('#ask-room').count(), 0);
   await page.locator('#mention-list .mention-option').filter({ hasText: /^\s*Room(?! owner)/ }).first().click();
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'true', 'choosing @Room selects Ask Room');
-  assert.equal(await input.inputValue(), 'can you help?', 'the @ token is removed, not posted as plain text');
+  assert.equal(await input.inputValue(), '@Room ', 'the address remains visible');
+  await input.pressSequentially('can you help?');
   assert.equal(await page.locator('#mention-list').isHidden(), true);
   // Sending now goes out as an invocation: a run exists for the message.
   await page.locator('#message-form button[type=submit]').click();
@@ -641,8 +652,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask c
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   await configureAssistant(page);
-  await page.locator('#ask-room').click();
-  await page.locator('#message-input').fill('What is the plan?');
+  await page.locator('#message-input').fill('@Room What is the plan?');
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What is the plan?'));
@@ -696,7 +706,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     page.setDefaultTimeout(8000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin); await signInFixture(page, f.keys.guest);
-    await page.locator('#assistant-face').waitFor({ state: 'visible' });
+    await page.locator('#assistant-runs [data-assistant-run="shared"]').waitFor({ state: 'attached' });
+    await openSettings(page);
     await page.locator('#assistant-activity > summary').click();
     await page.locator('#assistant-runs [data-assistant-message="shared-ask"]').click();
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
@@ -710,7 +721,14 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
     await page.locator('#message-input').fill('Keep this unrelated general draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').focus();
+    const historyContribution = async () => {
+      await openSettings(page);
+      await page.locator('#assistant-activity').evaluate(node => { node.open = true; });
+      await page.locator('[data-assistant-run="shared"]').evaluate(node => { node.open = true; });
+      return page.locator('#assistant-runs [data-contribute-run="shared"]:not([data-conflict])');
+    };
+    assert.equal(await page.locator('#assistant-face').isVisible(), false, 'another channel does not show unrelated progress');
+    await (await historyContribution()).focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('#message-input').evaluate(node => node === document.activeElement), true);
     assert.equal(await page.locator('#message-input').inputValue(), '', 'adding context does not repurpose the destination draft');
@@ -718,7 +736,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-input').fill('Keep the design mobile first.');
     await page.locator('#cancel-reply').click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the existing design thread draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the design mobile first.', 'cancelling the contribution preserves its own draft');
     const response = page.waitForResponse(res => res.url().endsWith('/assistant') && res.request().method() === 'POST');
     await page.locator('#message-form button[type=submit]').click();
@@ -739,17 +757,17 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#channel-list [data-channel="general"]').click();
     await ensureSidebarClosed(page);
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unrelated general draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     await page.locator('#message-input').fill('Unsent additional context.');
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
-    assert.equal(await page.locator('#ask-room').textContent(), 'Ask Room');
+    assert.equal(await page.locator('#assistant-context').isVisible(), false);
     await page.locator('#message-input').fill('Ordinary group banter.');
     const posted = page.waitForResponse(res => res.url().endsWith('/commands') && res.request().postDataJSON()?.data?.body === 'Ordinary group banter.');
     await page.locator('#message-form button[type=submit]').click(); assert.equal((await posted).status(), 201);
     await page.waitForFunction(() => document.querySelector('#message-input').value === '');
     assert.equal((await api('producer')).runs.length, 1, 'leaving context mode does not turn ordinary chat into a new ask');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Unsent additional context.');
     assert.deepEqual(errors, []);
   });
@@ -807,10 +825,11 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   await configureAssistant(page);
-  const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
+  const send = async body => { await page.locator('#message-input').fill(`@Room ${body}`); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
   await send('Second question for the room?');
   await page.waitForFunction(()=>document.querySelectorAll('#assistant-runs details.assistant-run').length===2);
+  await openSettings(page);
   await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
   // One line per ask: the summary carries the prompt and the status.
   const summaries = await page.locator('#assistant-runs details.assistant-run > summary').allTextContents();
@@ -850,17 +869,17 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   await configureAssistant(page);
-  await page.locator('#ask-room').click();
-  await page.locator('#message-input').fill('What should we prioritize?');
+  await page.locator('#message-input').fill('@Room What should we prioritize?');
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What should we prioritize?'));
+  await openSettings(page);
   await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
   await page.locator('details.assistant-run').evaluate(n=>{n.open=true;});
   // The ask card offers "Add to this ask"; the composer names the ask.
   await page.locator('details.assistant-run').getByRole('button',{name:'Add to this ask',exact:true}).click();
-  assert.equal(await page.locator('#ask-room').textContent(), "Adding to Room owner's ask");
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('#assistant-context').textContent(), "Adding to Room owner's ask");
+  assert.equal(await page.locator('#assistant-context').isVisible(), true);
   // Sending wires the message into the existing run as a contribution.
   await page.locator('#message-input').fill('One more constraint: keep it simple.');
   await page.locator('#message-form button[type=submit]').click();
@@ -971,6 +990,7 @@ for (const width of [1280, 390]) {
     const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'pause-run', ask: 'pause-ask' });
     await api('producer', { action: 'claim', runId: 'pause-run', attemptId: 'pause-host', expectedRevision: 0 });
     const pause = page.locator('#assistant-runs [data-pause-run]:not([data-cancel]):not([data-resume])').first();
+    await openSettings(page);
     await page.locator('#assistant-activity summary').first().click().catch(() => {});
     await pause.click();
     await page.locator('#assistant-review').waitFor({ state: 'visible' });

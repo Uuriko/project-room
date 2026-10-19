@@ -67,7 +67,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:a5edccd46833367bc06f94cd5c92758d0a333aacab567345f98a5f79ba307016",
-    "src/app.js": "sha256:e4dec56dc535c458f70b8af854c0542c70c85563d2951616fededc6106ba267d",
+    "src/app.js": "sha256:448dbf73aa5123cac942b9d33566aa6f1b143d472f80ebd0739391125be2f7a9",
     "src/auth-signin-ui.js": "sha256:4ab8fcecc993a503b1540a394bf72956ffa69a56e4db0eb60f9a16c29113c474",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -78,6 +78,7 @@
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",
     "src/composer-files.js": "sha256:863047fdeb020d583dbbd9789f4d728f25a4224a6e468f5e4d0b2a11c3ee9568",
+    "src/conversation-intent.js": "sha256:96360c38a73b0333b5badbf3185d9c407fa043df588725eb2add7921c958cd30",
     "src/conversation.js": "sha256:842408ea3bbbbd6b930e4339413c22512112bf90eb7368c0d9bc4fe5cf0a9c1f",
     "src/display-name-guard.js": "sha256:91ea4bfe1b6c3edd516473601c50a37d5c37f37c388a7b2bf28ffd754c850626",
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
@@ -90,8 +91,8 @@
     "src/gmail-ui.js": "sha256:3fbd569b20d6065a6f949ae9fbd19f1e5a855248389e9cced604c7e52a239ef4",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
-    "src/human-experience.css": "sha256:037ed3fca5cde89a11ca77e4e2cbaeaf4a7d5e8a81f6b00fdbd94b346cdcb531",
-    "src/human-experience.js": "sha256:4a4016d865864b274be59080acaea516d067aa1b13893971885f530fcdc2d5e0",
+    "src/human-experience.css": "sha256:838d3ff672ae907bfd4f8ab56b767a558899d6ee617b9c0e6792878e5e0de072",
+    "src/human-experience.js": "sha256:6e404bd72feff9d433221ff63c601f51c2383f03ded7dcaf4092848b828b65cf",
     "src/human-push-display.js": "sha256:e5ae3ec560fe7334442557e286e5d297f8b579a215f41c2702890ba49d8050f6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/inbox-client.js": "sha256:49c5a629886ab5fb6a304be3a5194a2e8b629a2f4a49ca4757522a186514fcdd",
@@ -151,8 +152,8 @@
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:75afb66fcd031067af430171d63d1671434ddfeff3d19a5a55e0081e97f9aa34",
-    "strings/en.json": "sha256:6bf71c6b8961164b5df4153e4c3d561869040b8043218a63c563ce04ea6d6603"
+    "strings/en.js": "sha256:296c93f4b9d0b9f5c477cc3d71684b8e667b03961788b6b1e79dc2cee381de53",
+    "strings/en.json": "sha256:2714ae1037e42d87ae9c57e9573848025117abae457b07618ab3c1653b0f84e0"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ea6161b091a3d0f8bab5b5f921534039fc784a339d650d38b11f487287b77c12",

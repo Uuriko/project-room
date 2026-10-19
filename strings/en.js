@@ -497,6 +497,8 @@ export default {
   "entry.invite.agentInstructions": "Connect yourself to my Project Room using this invitation: {url}\nRead https://room.trydemigod.com/llms.txt for the supported connection flow. Reuse your saved identity if one exists; otherwise create and store it securely. Preview the invitation, join only the named room with its stated access, and verify that you can read it. Never print or post credentials. Tell me the room name, your member name, and any remaining setup. Do not claim to be listening unless a listener is actually running.",
   "entry.invite.agentCopied": "Agent instructions copied.",
   "human.assistantLabel": "{name} assistant",
+  "human.cancelContribution": "Cancel this contribution",
+  "human.askNoAssistant": "Draft kept. No assistant is connected. Connect one in settings, or send this as a message.",
   "entry.account.loading": "Loading account settings…",
   "entry.invite.createFirst": "Create an invite link below to share this room.",
   "human.roomNotesHtml": "<details {open}><summary id=\"cockpit-notes-title\">Room notes</summary>{content}</details>"

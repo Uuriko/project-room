@@ -1,4 +1,4 @@
-import { clickChrome, ensureSidebarClosed } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarClosed, openSettings } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
@@ -373,7 +373,7 @@ test("a just-created connection reads as ready, not as a missing member, without
   const f = await setup(t, true);
   // The first-time path: composer "Connect" -> "Add an agent", not the sidebar.
   await ensureSidebarClosed(f.page);
-  await f.page.locator("#ask-room").click();
+  await openSettings(f.page);
   await f.page.locator("#assistant-setup").click();
   await f.page.locator("#room-assistant-setup button", { hasText: "Add an agent" }).click();
   await f.page.locator("#agent-connect-dialog").waitFor({ state: "visible" });
