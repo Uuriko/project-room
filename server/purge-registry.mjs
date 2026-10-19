@@ -1872,6 +1872,16 @@ const ROWS = [
       ]
     }
   },
+  {
+    "table": "work_claim_review_history",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
   // Decision #10: per-room marker for the workItems -> board-claims
   // backfill (server/work-item-board.mjs). Room-owned migration state:
   // deleted with the room (a purged room must not leave a marker behind;

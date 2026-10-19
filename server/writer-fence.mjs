@@ -375,6 +375,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // additive and intentionally NOT fenced, same rationale as the claim
   // rows themselves — the registry verifies its own schema on open.
   "work_claim_history",
+  // Claim review-version archive (HW-CAPTURE data preservation): the
+  // append-only store for review records displaced when a reviewer
+  // re-reviews (the claim row keeps the latest record per member).
+  // Purely additive and intentionally NOT fenced, same rationale as the
+  // spill — the registry verifies its own schema on open.
+  "work_claim_review_history",
   // human_push_subscriptions (browser push for human members): one row per
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,

@@ -63,6 +63,13 @@ export const workClaimSchema = `
     stamp_json TEXT NOT NULL,
     PRIMARY KEY (room_id, claim_id, seq)
   );
+  CREATE TABLE IF NOT EXISTS work_claim_review_history (
+    room_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    review_json TEXT NOT NULL,
+    PRIMARY KEY (room_id, claim_id, seq)
+  );
 `;
 
 const parse = text => {
@@ -89,6 +96,10 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
   const insertSpill = statement("INSERT OR IGNORE INTO work_claim_history (room_id, claim_id, seq, stamp_json) VALUES (?, ?, ?, ?)");
   const selectSpill = statement("SELECT seq, stamp_json FROM work_claim_history WHERE room_id=? AND claim_id=? AND seq<? ORDER BY seq ASC");
   const deleteSpill = statement("DELETE FROM work_claim_history WHERE room_id=? AND claim_id=?");
+  const insertReviewVersion = statement("INSERT OR IGNORE INTO work_claim_review_history (room_id, claim_id, seq, review_json) VALUES (?, ?, ?, ?)");
+  const selectReviewVersions = statement("SELECT seq, review_json FROM work_claim_review_history WHERE room_id=? AND claim_id=? ORDER BY seq ASC");
+  const maxReviewVersionSeq = statement("SELECT COALESCE(MAX(seq), -1) AS max_seq FROM work_claim_review_history WHERE room_id=? AND claim_id=?");
+  const deleteReviewVersions = statement("DELETE FROM work_claim_review_history WHERE room_id=? AND claim_id=?");
   // W3 claim-history spill: work_claim_history is additive (created by the
   // schema exec on open), but a registry can be constructed before that
   // exec runs and read-only handles never create it, so availability is
@@ -100,6 +111,26 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       spillReady = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get("work_claim_history"));
     }
     return spillReady;
+  };
+  // HW-CAPTURE review-version archive: work_claim_review_history carries
+  // the same availability story as the spill — additive (created by the
+  // schema exec on open), but a registry can be constructed before that
+  // exec runs and read-only handles never create it, so availability is
+  // probed rather than assumed.
+  let reviewArchiveReady = false;
+  const reviewArchiveAvailable = () => {
+    if (!reviewArchiveReady) {
+      reviewArchiveReady = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get("work_claim_review_history"));
+    }
+    return reviewArchiveReady;
+  };
+  // Key-order-insensitive record comparison: a review record round-trips
+  // through JSON storage, so identity of content — not key order or
+  // object identity — decides whether a record was displaced.
+  const canonicalReview = value => {
+    if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+    if (Array.isArray(value)) return `[${value.map(canonicalReview).join(",")}]`;
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalReview(value[key])}`).join(",")}}`;
   };
   const omittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
   // The state machine trims a claim's in-row history to MAX_CLAIM_HISTORY
@@ -153,6 +184,38 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     return { ...item, history: history.slice(excess), historyOmitted: omitted + excess };
   };
 
+  // The state machine keeps only the latest review record per member on
+  // the item: recordReview filters the member's prior record out, and
+  // attestWork supersedes a verdict the same way, so a re-review used to
+  // destroy the earlier verdict record outright — verdict, summary, url
+  // and basis survived nowhere. Preserve every displaced record here, at
+  // set() time, before the stored row is replaced: a record in the
+  // previously stored row that the item being written no longer carries
+  // for that member (member absent, or the member's record changed) is
+  // appended to work_claim_review_history under the claim's next
+  // lifetime seq. The stored row keeps its current shape; reviewHistory()
+  // below is the versioned read. A no-change set() displaces nothing.
+  const archiveDisplacedReviews = (roomId, item) => {
+    if (!reviewArchiveAvailable()) return;
+    const row = selectOne.get(roomId, item.id);
+    if (!row) return;
+    const before = decodeItem(row.item_json);
+    const prior = Array.isArray(before.reviews) ? before.reviews : [];
+    if (prior.length === 0) return;
+    const next = Array.isArray(item?.reviews) ? item.reviews : [];
+    const nextByMember = new Map(next.map(entry => [entry?.memberId, entry]));
+    let seq = null;
+    for (const record of prior) {
+      const memberId = record?.memberId;
+      if (typeof memberId !== "string") continue;
+      const current = nextByMember.get(memberId);
+      if (current !== undefined && canonicalReview(current) === canonicalReview(record)) continue;
+      if (seq === null) seq = maxReviewVersionSeq.get(roomId, item.id).max_seq + 1;
+      insertReviewVersion.run(roomId, item.id, seq, JSON.stringify(record));
+      seq += 1;
+    }
+  };
+
   const rawConfig = roomId => {
     const row = selectConfig.get(roomId);
     return row ? parse(row.config_json) : {};
@@ -164,16 +227,19 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
       const shapes = definitions.map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-      // work_claim_history is the purely additive spill sidecar (W3): an
-      // older database carries the claim pair without it and read-only
-      // startup never creates it, so its absence is the pre-spill state,
-      // not damage — a present sidecar is shape-verified, an absent one is
-      // tolerated (the wake-queue side-table pattern). The claim pair
-      // itself stays all-or-nothing: both absent is the pre-claims state
-      // allowAbsent exists for; exactly one absent, or any shape drift
-      // anywhere, is operator reconciliation.
-      const core = shapes.filter(shape => shape.name !== "work_claim_history");
-      const sidecar = shapes.filter(shape => shape.name === "work_claim_history");
+      // The purely additive sidecars (work_claim_history, the W3 history
+      // spill; work_claim_review_history, the HW-CAPTURE review-version
+      // archive): an older database carries the claim pair without them
+      // and read-only startup never creates them, so absence is the
+      // pre-sidecar state, not damage — a present sidecar is
+      // shape-verified, an absent one is tolerated (the wake-queue
+      // side-table pattern). The claim pair itself stays all-or-nothing:
+      // both absent is the pre-claims state allowAbsent exists for;
+      // exactly one absent, or any shape drift anywhere, is operator
+      // reconciliation.
+      const sidecarNames = new Set(["work_claim_history", "work_claim_review_history"]);
+      const core = shapes.filter(shape => !sidecarNames.has(shape.name));
+      const sidecar = shapes.filter(shape => sidecarNames.has(shape.name));
       if (sidecar.some(shape => shape.actual !== undefined && normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
       if (allowAbsent && core.every(shape => shape.actual === undefined)) return false;
       if (core.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
@@ -196,8 +262,27 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       }
       return item;
     },
+    // Every review record ever recorded for the claim: the archived
+    // versions displaced by re-reviews (lifetime seq order), then the
+    // records still live on the item. Per member the order is the
+    // recording order, and the newest record per member here is exactly
+    // the record get() shows in item.reviews — the versioned read loses
+    // nothing the current read shows, and the live read model is
+    // unchanged. Without the sidecar (a pre-archive database) this is
+    // just the live records.
+    reviewHistory(roomId, id) {
+      const archived = reviewArchiveAvailable()
+        ? selectReviewVersions.all(roomId, id).map(entry => JSON.parse(entry.review_json))
+        : [];
+      const row = selectOne.get(roomId, id);
+      if (!row) return archived;
+      const item = decodeItem(row.item_json);
+      const live = Array.isArray(item.reviews) ? item.reviews : [];
+      return [...archived, ...live];
+    },
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
+      archiveDisplacedReviews(roomId, item);
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());
       if (typeof onChange === "function") onChange(roomId);
       return item;
@@ -225,6 +310,10 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       // a later claim reusing the id can never inherit a predecessor's
       // stamps through the reunion read.
       if (spillAvailable()) deleteSpill.run(roomId, id);
+      // Same rule for the review-version archive: the claim's archived
+      // verdicts die with it, so a later claim reusing the id can never
+      // inherit a predecessor's verdicts through the versioned read.
+      if (reviewArchiveAvailable()) deleteReviewVersions.run(roomId, id);
       if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {
