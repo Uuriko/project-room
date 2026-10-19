@@ -10,6 +10,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { archiveRoomMessages } from "../server/messages-store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -207,4 +208,41 @@ test("no projection-cap refusal tells people to raise a limit that has no settin
     }
   }
   assert.deepEqual(offenders, []);
+});
+
+test("MA-01: a room caught up but not parity-certified at head is refused by the archive gate and left untouched", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-archive-gate-"));
+  // The room's flood guard refills on the store clock; step it per post.
+  let clock = Date.now();
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock });
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  for (let i = 0; i < 6; i++) {
+    clock += 10_000;
+    store.command(owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: `gate-${i}`, body: `gate fixture ${i}` } });
+  }
+  for (let i = 0; i < 20; i++) if (store.backfillMessages({ limit: 1000 }).done) break;
+  assert.equal(store.checkMessagesParity({ roomId: "commons" }).ok, true);
+  const head = store.headSequence("commons");
+  const cursor = () => store.db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  assert.deepEqual({ ...cursor() }, { applied_seq: head, parity_at_seq: head },
+    "fixture: the room is caught up and parity-certified at its head");
+  // Void ONLY the parity leg — backfill sits at head, but the table was
+  // never parity-certified there (the state a redaction, import or
+  // unsupported transition leaves behind). LAB-MUTATION MA-01: dropping
+  // the parity comparison from archiveRoomMessages' gate survived all
+  // three archive suites; the door would archive a room whose tabled
+  // history no certificate vouches for.
+  store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
+  assert.deepEqual(archiveRoomMessages(store, "commons", { keepNewest: 2, dryRun: false }),
+    { ok: false, reason: "messages_table_not_certified" });
+  assert.equal(store.room("commons").state.messages.length, 6, "a refused archive moves nothing");
+  // Control: re-certify at head and the same call archives down to the
+  // newest two — the refusal above is the parity leg, not a dead door.
+  assert.equal(store.checkMessagesParity({ roomId: "commons" }).ok, true);
+  const archived = archiveRoomMessages(store, "commons", { keepNewest: 2, dryRun: false });
+  assert.equal(archived.ok, true);
+  assert.equal(archived.archived, 4);
+  assert.equal(store.room("commons").state.messages.length, 2);
 });
