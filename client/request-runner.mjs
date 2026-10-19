@@ -79,6 +79,10 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   if (Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation })) > 262144)
     throw new Error("Request exceeds the automatic preparation limit; inspect it directly");
   signal?.throwIfAborted();
+  // Preparation is only for new work: a saved answer must remain deliverable
+  // even when its original execution backend is no longer available.
+  if (execute.prepare) await execute.prepare({ signal });
+  signal?.throwIfAborted();
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
