@@ -128,6 +128,7 @@ a{color:var(--blue)}
 pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{overflow-wrap:anywhere}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
