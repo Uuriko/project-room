@@ -166,9 +166,21 @@ test("online capture preserves all application tables, identity boundaries and e
     backedUpAt: JSON.parse(readFileSync(receipt.watermark, "utf8")).backedUpAt,
     source: "recovery-drill",
   });
-  assert.deepEqual(gate.stale.map(entry => entry.kind), ["credential"],
-    "the only post-capture authority drift is the session revocation");
-  assert.equal(gate.reapplied.length, 1);
+  // The post-capture drift is the session revocation and its cascade:
+  // the dead session's login-method bindings read stale against the
+  // surviving store too. Nothing else may appear.
+  assert.ok(gate.stale.length >= 2, "the revocation and its cascade are named stale");
+  assert.ok(gate.stale.every(entry => entry.kind === "credential" || entry.kind === "login_method"),
+    "the only post-capture authority drift is the session revocation and its login-method cascade");
+  assert.ok(gate.stale.some(entry => entry.kind === "credential"), "the revoked session credential is named");
+  // The credential is re-applied (its row exists in the copy). The
+  // login-method entries name bindings the backup never held — there is
+  // no restored row to revoke, so they are journaled as skipped with a
+  // reason; nothing is resurrected either way.
+  assert.equal(gate.reapplied.length, 1, "the one re-appliable revocation is re-applied");
+  assert.equal(gate.reapplied.length + gate.skipped.length, gate.stale.length,
+    "every stale entry is re-applied or journaled skipped with a reason");
+  assert.ok(gate.skipped.every(entry => typeof entry.reason === "string" && entry.reason.length > 0));
   // The gate's journal footprint: the copy's operator_actions plus one
   // re-apply row and the summary row.
   const copyActions = receipt.recovery.tables.find(entry => entry.table === "operator_actions")?.rows;

@@ -134,7 +134,7 @@ test('explicit isolated RoomStore writes roll back independently on real Workers
 // refused instead of overwriting. This is the platform boundary the node
 // suite cannot reach: PRAGMA behavior, the writer-fence permit dance, and
 // DurableDatabase all run for real here.
-test('whole-store NDJSON restore replays into a pristine Durable Object and refuses a live one', async () => {
+test('whole-store NDJSON restore replays into a pristine Durable Object and re-restores a live one under the IR-2 gate', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const persistence = await mkdtemp(join(tmpdir(), 'project-room-cf-restore-'));
@@ -154,8 +154,14 @@ test('whole-store NDJSON restore replays into a pristine Durable Object and refu
     assert.equal(result.verified, true);
     assert.ok(result.events > 0 && result.tables > 0, 'replay reports what it restored');
     const again = await mf.dispatchFetch('http://localhost/restore-drill-fresh', { method: 'POST', body: ndjson });
-    const refused = await again.json();
-    assert.equal(refused.ok, false, 'second replay into the live DO must not succeed');
-    assert.match(refused.error ?? '', /non-empty/i, 'refusal names the fail-closed rule');
+    const second = await again.json();
+    // IR-2: a live store is no longer refused — the restore replaces its
+    // contents under the gate. The live store's authority is exactly the
+    // backup's (nothing was revoked in between), so the gate reconciles
+    // quiet and the replay succeeds.
+    assert.equal(second.ok, true, `gated re-restore of a live DO failed: ${second.error ?? 'unknown'}`);
+    assert.equal(second.verified, true);
+    assert.deepEqual(second.reconcile, { outcome: 'reconciled', stale: 0, reapplied: 0 },
+      'the gate ran at the completion point and found no post-watermark drift');
   } finally { await mf.dispose(); }
 });

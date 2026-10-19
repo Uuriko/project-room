@@ -826,6 +826,10 @@
       "path": "/api/operator/restore-from-backup"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/restore-acknowledge"
+    },
+    {
       "method": "GET",
       "path": "/api/opportunities.json"
     },
@@ -4370,6 +4374,10 @@
     {
       "method": "POST",
       "path": "/api/operator/restore-from-backup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/restore-acknowledge"
     },
     {
       "method": "POST",
