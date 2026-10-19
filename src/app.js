@@ -1259,10 +1259,10 @@ $("#account-room-form").addEventListener("submit", async event => {
     if (accountClient.session !== owned) return;
     if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) { endAccountAccess(); return; }
     if (error.code === "room_exists") delete form.dataset.roomId; // A lost response created it under another shape; the next attempt gets a fresh id.
-    setFormStatus(status, error.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
-      : error.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
-      : error.status === 429 ? "Too many rooms just now. Try again in a minute."
-        : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
+    // An unverified account is refused with 403 email_unverified: say so and open
+    // Sign-in & security, where the code box is, instead of "Try again".
+    setFormStatus(status, accountRoomCreateFailure(error), true);
+    if (error.code === "email_unverified") openAccountSettings();
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
 $("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
@@ -1327,6 +1327,14 @@ function setConnectionStatus(text) {
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
+}
+// Copy for a refused account room create, by server error code (pure; tested by extraction).
+function accountRoomCreateFailure(error) {
+  if (["email_unverified", "pilot_limit"].includes(error?.code)) return uiText(`error.${error.code}`);
+  return error?.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
+    : error?.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
+    : error?.status === 429 ? "Too many rooms just now. Try again in a minute."
+      : error?.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.";
 }
 function setFormStatus(status, text, error = false) {
   if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
@@ -3802,7 +3810,8 @@ async function submit(form, fn, { failureHint } = {}) {
   try { await fn(current); }
   catch (error) {
     if (!current()) return;
-    const text = failureTextWithHint(error, failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
+    const hint = typeof failureHint === "function" ? failureHint(error) : failureHint;
+    const text = failureTextWithHint(error, hint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
@@ -4248,7 +4257,7 @@ $("#message-form").addEventListener("submit", e => {
       updateReply(); syncRequestComposer(); persistDrafts();
     }
     maybeShowGuestUpgradeHint();
-  }, { failureHint: "Draft kept. Send again to retry." });
+  }, { failureHint: humanExperience.askFailureHint });
 });
 $("#composer-attach")?.addEventListener("click", () => { composerReselectId = null; $("#composer-file")?.click(); });
 $("#composer-file")?.addEventListener("cancel", () => { composerReselectId = null; });

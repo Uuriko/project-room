@@ -231,6 +231,7 @@ export default {
   "human.deletedRequest": "Deleted request",
   "human.askNotPickedUp": "Not picked up — the assistant hasn't claimed this yet",
   "human.askStalled": "Stalled — no update from the assistant in a while",
+  "human.askNoAssistant": "Draft kept. No assistant is connected to this room yet, so Ask Room is off. Send posts it as a message.",
   "human.askResult": "Result",
   "human.addToThisAsk": "Add to this ask",
   "human.resolveDirection": "Resolve direction",
