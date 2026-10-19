@@ -5,6 +5,8 @@ import { RoomDirectory, roomDirectorySchema, DIRECTORY_PAGE_LIMIT } from "../ser
 import { roomPublicFaceSchema } from "../server/public-face.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 import { publicUnpublishSchema } from "../server/legal-store.mjs";
+import { publicRoomView } from "../server/public-rooms.mjs";
+import { roomProofView } from "../server/proof-page.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
@@ -45,6 +47,18 @@ const stateFor = (id, { ownerId = "owner", title = "Build week", purpose = "Ship
 
 const errOf = fn => { try { fn(); } catch (e) { return e; } return null; };
 
+// Listing follows the serving predicate (P-10): a room is listed only
+// while its public page row exists with public receipts on — the row
+// syncRoomPublication upserts when the owner publishes the page. Tests
+// that expect a room in the listing publish its page row here.
+function publishPage(store, roomId, { receiptsEnabled = 1 } = {}) {
+  store.db.prepare(`INSERT INTO public_rooms
+    (slug, title, purpose, humans, agents, names_json, tasks_json, members_json,
+     receipts_enabled, join_mode, join_token, owner_member_id, set_at, updated_at)
+    VALUES (?, ?, '', 1, 0, '[]', '[]', '[]', ?, 'request', NULL, 'owner', NULL, '2026-10-01T00:00:00.000Z')`)
+    .run(roomId, `Room ${roomId}`, receiptsEnabled);
+}
+
 test("owner toggles discoverability; non-owner is refused", () => {
   const store = makeStore({ r1: stateFor("r1") });
   const dir = new RoomDirectory(store);
@@ -73,6 +87,7 @@ test("feed setting is owner-only, independent of directory listing, and survives
   // Opting out before listing must not opt the room into the directory.
   assert.deepEqual(dir.setOpportunities("r1", "owner", false), { roomId: "r1", enabled: false });
   assert.deepEqual(dir.list().rooms, []);
+  publishPage(store, "r1");
   dir.set("r1", "owner", true);
   assert.equal(dir.list().rooms.length, 1);
   assert.equal(dir.opportunityStatus("r1", "owner").enabled, false);
@@ -98,6 +113,8 @@ test("public listing shows only discoverable, non-archived rooms, sanitized", ()
     r3: stateFor("r3", { title: "Quiet room" }),
   });
   const dir = new RoomDirectory(store);
+  publishPage(store, "r1");
+  publishPage(store, "r2");
   dir.set("r1", "owner", true);
   dir.set("r2", "owner", true); // archived: must stay hidden
   // r3 never opted in
@@ -131,7 +148,7 @@ test("pagination cursors and limit clamping", () => {
   for (let i = 1; i <= 5; i++) states[`r${i}`] = stateFor(`r${i}`, { title: `Room ${i}` });
   const store = makeStore(states);
   const dir = new RoomDirectory(store);
-  for (const id of Object.keys(states)) dir.set(id, "owner", true);
+  for (const id of Object.keys(states)) { publishPage(store, id); dir.set(id, "owner", true); }
   const first = dir.list({ limit: 2 });
   assert.equal(first.rooms.length, 2);
   assert.equal(first.rooms[0].roomId, "r1");
@@ -160,6 +177,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { syncRoomPublication } from "../server/public-read-model.mjs";
 
 async function httpFixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-room-directory-http-"));
@@ -182,7 +200,7 @@ async function httpFixture(t) {
 }
 
 test("HTTP: owner toggles directory; public listing serves it; unauthenticated toggle refused", async t => {
-  const { call, ownerToken } = await httpFixture(t);
+  const { store, call, ownerToken } = await httpFixture(t);
   // Empty directory first.
   const empty = await call("GET", "/api/public/rooms/directory");
   assert.equal(empty.status, 200);
@@ -196,6 +214,20 @@ test("HTTP: owner toggles directory; public listing serves it; unauthenticated t
   const status = await call("GET", "/api/rooms/commons/directory", { token: ownerToken });
   assert.equal(status.status, 200);
   assert.equal(status.body.discoverable, true);
+  // Discovery opt-in alone does not list the room (P-10): the listing
+  // follows the serving predicate, and no public page exists yet, so a
+  // listing here would promise a /r/commons that 404s.
+  const unpublished = await call("GET", "/api/public/rooms/directory");
+  assert.equal(unpublished.status, 200);
+  assert.deepEqual(unpublished.body.rooms, []);
+  // The owner publishes the room page with public receipts on; the read
+  // model's sync is what writes the row the listing (and the page) read.
+  const state = store.room("commons").state;
+  syncRoomPublication(store, {
+    roomId: "commons",
+    state: { ...state, room: { ...state.room, publicPage: { enabled: true, revision: 1 }, publicReceipts: { enabled: true, revision: 1 } } },
+    previous: null,
+  });
   // Public listing now carries the room, sanitized.
   const listed = await call("GET", "/api/public/rooms/directory");
   assert.equal(listed.status, 200);
@@ -252,4 +284,79 @@ test("public receipts column migrates onto pre-existing directory tables", () =>
   assert.equal(dir.publicReceiptsVisible("r1"), false);
   const columns = new Set(store.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
   assert.ok(columns.has("public_receipts"));
+});
+
+// ---- Directory <-> room-page conformance (P-10) -------------------------
+// The directory and the public room pages (/r/<id>, /r/<id>/proof) are
+// two consumers of one fact — "this room is public" — and they drifted
+// apart once already: the directory listed rooms whose owners had opted
+// into discovery but never published a page, so every listed room 404ed
+// at its canonical URL (verified live in production, X-RAY UX-FRICTION
+// register #1). The invariant pinned here, walked end to end over the
+// real consumers: every room the directory lists resolves at the room
+// page AND at the proof page; a room failing any part of the serving
+// predicate is not listed.
+
+function listAllIds(dir) {
+  const ids = [];
+  let after = null;
+  for (let hops = 0; hops < 20; hops += 1) {
+    const page = dir.list({ after, limit: 1 });
+    ids.push(...page.rooms.map(room => room.roomId));
+    if (!page.nextCursor) return ids;
+    after = page.nextCursor;
+  }
+  throw new Error("directory pagination did not terminate");
+}
+
+test("conformance: every directory-listed room resolves at its room page and its proof page", () => {
+  const store = makeStore({
+    "aa-full": stateFor("aa-full"),
+    "bb-nopage": stateFor("bb-nopage"),
+    "cc-noreceipts": stateFor("cc-noreceipts"),
+    "dd-unpublished": stateFor("dd-unpublished"),
+    "ee-archived": { ...stateFor("ee-archived"), archived: true },
+    "ff-unlisted": stateFor("ff-unlisted"),
+  });
+  const dir = new RoomDirectory(store);
+  // Every room opts into the directory, the way the production rooms did.
+  for (const id of ["aa-full", "bb-nopage", "cc-noreceipts", "dd-unpublished", "ee-archived"]) {
+    dir.set(id, "owner", true);
+  }
+  // Page publication is the separate opt-in that drifted from listing:
+  publishPage(store, "aa-full"); // page on, receipts on — the full public surface
+  // bb-nopage: discoverable only — the production P-10 shape. No page row.
+  publishPage(store, "cc-noreceipts", { receiptsEnabled: 0 }); // page on, receipts off: proof 404s
+  publishPage(store, "dd-unpublished"); // page on, receipts on, but operator-unpublished below
+  publishPage(store, "ee-archived"); // page on, receipts on, but archived
+  publishPage(store, "ff-unlisted"); // page on, receipts on, but never opted into the directory
+  store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'dd-unpublished', 1, 'op')").run();
+
+  const listed = listAllIds(dir);
+  assert.deepEqual(listed, ["aa-full"],
+    "the directory lists exactly the rooms whose page and proof both serve");
+
+  // The conformance walk itself: follow every listed room to both pages
+  // through the real serving functions the /r/ routes call.
+  for (const roomId of listed) {
+    assert.ok(publicRoomView(store, roomId), `/r/${roomId} must serve for a listed room`);
+    const proof = roomProofView(store, roomId);
+    assert.ok(proof && !proof.error, `/r/${roomId}/proof must serve for a listed room`);
+  }
+});
+
+test("conformance: a listed room drops out of the directory when its page stops serving", () => {
+  const store = makeStore({ "aa-full": stateFor("aa-full") });
+  const dir = new RoomDirectory(store);
+  dir.set("aa-full", "owner", true);
+  publishPage(store, "aa-full");
+  assert.deepEqual(listAllIds(dir), ["aa-full"]);
+
+  // Owner turns public receipts off: the read model rewrites the row
+  // with receipts_enabled = 0 (and deletes it entirely when the page
+  // itself goes off). Either way the listing follows the serving truth.
+  store.db.prepare("UPDATE public_rooms SET receipts_enabled = 0 WHERE slug = 'aa-full'").run();
+  assert.deepEqual(listAllIds(dir), []);
+  store.db.prepare("DELETE FROM public_rooms WHERE slug = 'aa-full'").run();
+  assert.deepEqual(listAllIds(dir), []);
 });

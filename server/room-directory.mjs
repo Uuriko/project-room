@@ -19,6 +19,14 @@
 //   - Title/purpose are trimmed and length-capped (they were validated at
 //     creation, but the listing never trusts the projection blindly).
 //   - Archived rooms never appear, even if still flagged discoverable.
+//   - Listing is the SERVING predicate, not a second one: a room appears
+//     only while the public read model holds its page row with public
+//     receipts on — the same row loadPublicRoom serves at /r/<roomId> and
+//     roomProofView gates on. Directory discovery and page publication
+//     stay separate owner opt-ins, but the listing never promises a page
+//     that does not exist: a discoverable room whose owner never
+//     published its page (or turned receipts off) is not listed, so a
+//     listed room can never 404 at /r/<id> or /r/<id>/proof (P-10).
 //
 // The module is shaped like PublicFace/DmConsents: it takes the RoomStore
 // (db handle, transactions, room state) and exports its schema for
@@ -197,6 +205,7 @@ export class RoomDirectory {
         SELECT s.room_id AS roomId, s.listed_at AS listedAt
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
+        JOIN public_rooms p ON p.slug = s.room_id AND p.receipts_enabled = 1
         WHERE s.discoverable = 1 AND r.archived_at IS NULL
           AND (? IS NULL OR s.room_id > ?)
         ORDER BY s.room_id ASC
