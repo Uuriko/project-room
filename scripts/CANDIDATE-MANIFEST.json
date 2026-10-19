@@ -76,7 +76,7 @@
     "src/bounty-board.js": "sha256:3c65ff411c06bcbaed3825f2b9145233af79a5439f31de36ecb152e0e1a2be14",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
-    "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",
+    "src/client.js": "sha256:148146bf2223c32ba8d1ac621c9d1e4ef16f835d8b9bf67c2a5b8d13773db61b",
     "src/composer-files.js": "sha256:863047fdeb020d583dbbd9789f4d728f25a4224a6e468f5e4d0b2a11c3ee9568",
     "src/conversation.js": "sha256:842408ea3bbbbd6b930e4339413c22512112bf90eb7368c0d9bc4fe5cf0a9c1f",
     "src/display-name-guard.js": "sha256:91ea4bfe1b6c3edd516473601c50a37d5c37f37c388a7b2bf28ffd754c850626",
