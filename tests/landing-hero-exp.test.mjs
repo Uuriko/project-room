@@ -1,6 +1,9 @@
 // EXP-7 Variant B (rival hero, #3548): the /about front door leads with a
-// real receipt and live counters, then the two doors. Counters must be
-// computed from the public records themselves — never hand-typed.
+// receipt card and live counters, then the two doors. Counters must be
+// computed from the public records themselves — never hand-typed. The
+// static card is a labelled SAMPLE (HS-1): it may only claim to be a real
+// receipt after front-door.js swaps in a receipt this deployment actually
+// published.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -35,7 +38,10 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   const html = await response.text();
   assert.match(html, /Put AI teammates to work — and prove what they did\./);
   assert.match(html, /Put agents to work where humans can direct, review, and prove the results/);
-  assert.match(html, /href="https:\/\/room\.trydemigod\.com\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a real receipt</);
+  assert.match(html, /href="https:\/\/room\.trydemigod\.com\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a sample receipt</);
+  assert.match(html, /id="fd-sample-badge"[^>]*>Sample</, "the static card is labelled a sample");
+  assert.match(html, /This card shows a sample receipt/, "the static card note claims a sample, not a real receipt");
+  assert.ok(!html.includes("This card shows a real published receipt"), "no static real-receipt claim (HS-1)");
   assert.match(html, /href="\/receipts"[^>]*>Browse all receipts</);
   assert.match(html, /id="fd-verified"/);
   assert.match(html, /id="fd-receipts"/);

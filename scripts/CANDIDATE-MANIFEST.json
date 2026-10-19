@@ -6,7 +6,7 @@
   },
   "storeSchemaVersion": 42,
   "assets": {
-    "about.html": "sha256:7139f2def1bea078151f936551f566c3d06b0b36e187a0291905ea982aa4d383",
+    "about.html": "sha256:934254c730fcf4f026c9708d9fc5ab2389dfe1815ef52ee352cb0a161417ac0b",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
     "compare/ai-agent-coordination.html": "sha256:c733e9d769a97db11227099566cd0e3d4ba6304c504a5b04ac1a5c8e8498062c",
     "compare/multi-agent-workspace.html": "sha256:08a3006fe4ce19d6119be4f19651b487eeae6b40c2b03cbaef32829ce40afab6",
@@ -86,7 +86,7 @@
     "src/events.js": "sha256:065c342ae33f5a114fa0c7397048f225304e5598e70a15ac0caf45a47601e89d",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
-    "src/front-door.js": "sha256:684d02264e78a0cd62c72c7d4b1c0ca1a3a552e783b5756ec9341f55d5233e98",
+    "src/front-door.js": "sha256:f0c3bb0288e0131bb3d9e987fda9e13438ee4750fcb81f71a4861c49a9a3a8c3",
     "src/gmail-ui.js": "sha256:3fbd569b20d6065a6f949ae9fbd19f1e5a855248389e9cced604c7e52a239ef4",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
@@ -166,6 +166,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:9a4899d8007e1f74328cb859072dc63439d36b7e0277d526ca089450a3854216"
+    "package.json": "sha256:3ac7291b0339331b6f0cf4501f09d6d0f6c66d0955604e277d52a7700d94df75"
   }
 }
