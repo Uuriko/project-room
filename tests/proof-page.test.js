@@ -210,7 +210,7 @@ test("room page links to the proof page and the sitemap lists it", async t => {
   assert.ok(room.text.includes('href="/r/commons/proof"'));
   const doc = JSON.parse((await raw(origin, "/r/commons.json")).text);
   assert.equal(doc.proofHref, "/r/commons/proof");
-  const sitemap = await raw(origin, "/sitemap.xml");
+  const sitemap = await raw(origin, "/sitemap-core.xml");
   assert.ok(sitemap.text.includes("/r/commons/proof"));
 });
 

@@ -173,7 +173,21 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
     if (path === "/about" && crawlAllowed && /noindex/i.test(r.res.headers.get("x-robots-tag") || "")) add("noindex_public", `${path} sends X-Robots-Tag noindex`);
   }
   const sitemap = await get("/sitemap.xml");
-  const receiptLoc = sitemap?.text?.match(/<loc>[^<]*\/receipts\/[^<]+<\/loc>/);
+  let receiptLoc = sitemap?.text?.match(/<loc>[^<]*\/receipts\/[^<]+<\/loc>/);
+  if (!receiptLoc && sitemap?.text?.includes("<sitemapindex")) {
+    // PERF2-SITEMAP: /sitemap.xml is an index; receipt URLs live in the
+    // /sitemap-receipts-<n>.xml children. Follow them (bounded) so the
+    // receipt-detail probe keeps working; a bare urlset (pre-change
+    // deployments) is handled by the direct match above.
+    const children = [...sitemap.text.matchAll(/<loc>([^<]*sitemap-receipts-[^<]*)<\/loc>/g)]
+      .map(m => { try { return new URL(m[1]).pathname; } catch { return null; } })
+      .filter(Boolean);
+    for (const child of children.slice(0, 10)) {
+      const page = await get(child);
+      receiptLoc = page?.text?.match(/<loc>[^<]*\/receipts\/[^<]+<\/loc>/);
+      if (receiptLoc) break;
+    }
+  }
   if (receiptLoc) {
     const path = new URL(receiptLoc[0].replace(/<\/?loc>/g, "")).pathname;
     const detail = await get(path, { headers: { accept: "text/html" } });

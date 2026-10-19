@@ -1060,12 +1060,34 @@ export function collectPublicReceipts(store) {
     .map(row => receiptWithOutcome(store, row));
 }
 
-export function listPublicReceiptSitemap(store, limit = 1000) {
-  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+// Receipt URLs per sitemap page (PERF2-SITEMAP, C-2). The sitemap protocol
+// allows 50,000 URLs per file; 10,000 keeps a page near a megabyte of XML.
+export const RECEIPT_SITEMAP_PAGE_SIZE = 10000;
+
+// One page of the receipt sitemap — or, with no limit, the complete set.
+// An explicit limit is honoured exactly: the old silent cap
+// (Math.min(limit, 1000)) dropped every receipt past the first thousand
+// with no signal anywhere (PERF2-MEASURE: 9,000 of 10,000 missing at the
+// S1 shape). Pagination is the caller's job — pass { limit, offset } per
+// page; ordering matches every other receipt read (at DESC, id ASC) and
+// the operator-unpublish filter (HIDDEN_RECEIPT) applies in SQL.
+export function listPublicReceiptSitemap(store, options = {}) {
+  const { limit = null, offset = 0 } = typeof options === "number" ? { limit: options } : options ?? {};
+  const cap = Number.isInteger(limit) && limit > 0 ? limit : null;
+  const off = Number.isInteger(offset) && offset > 0 ? offset : 0;
+  const paging = cap === null ? "" : " LIMIT ? OFFSET ?";
+  const params = cap === null ? [] : [cap, off];
+  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC${paging}`).all(...params).map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
+}
+
+// The true total behind the paged receipt sitemap, in one statement, so
+// the sitemap index can name every page — and a page past the end is an
+// explicit 404 at the door, never a silent truncation.
+export function countPublicReceiptSitemap(store) {
+  return store.db.prepare(`SELECT COUNT(*) AS n FROM public_receipts WHERE ${HIDDEN_RECEIPT}`).get().n;
 }
 
 export function loadPublicRoom(store, slug) {
@@ -1088,13 +1110,25 @@ export function loadPublicRoom(store, slug) {
 }
 
 export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
-    .filter(row => !isUnpublished(store.db, "room", row.slug))
-    .map(row => ({
-      slug: row.slug,
-      setAt: row.set_at,
-      receiptsEnabled: row.receipts_enabled === 1,
-    }));
+  // The operator-unpublish filter is an anti-join in the same statement
+  // (PERF2-SITEMAP, C-2): the per-row isUnpublished probe cost one
+  // statement per room — 10,001 statements at 10k rooms. Fail closed like
+  // isUnpublished: when the unpublish state cannot be read, no room is
+  // listed; any other failure still propagates.
+  let rows;
+  try {
+    rows = store.db.prepare(`SELECT slug, set_at, receipts_enabled FROM public_rooms
+      WHERE NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=public_rooms.slug)
+      ORDER BY slug ASC`).all();
+  } catch (error) {
+    if (!/public_unpublish/i.test(error?.message ?? "")) throw error;
+    return [];
+  }
+  return rows.map(row => ({
+    slug: row.slug,
+    setAt: row.set_at,
+    receiptsEnabled: row.receipts_enabled === 1,
+  }));
 }
 
 // What one public receipt actually proves, named by its source. Only a

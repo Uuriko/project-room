@@ -24,8 +24,15 @@ const PARAM = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 const compiled = new WeakMap();
 
 function node() {
-  return { static: new Map(), param: null, methods: new Map() };
+  return { static: new Map(), param: null, patterns: [], methods: new Map() };
 }
+
+// A segment may embed one param between static text — "files-{id}.json" —
+// for file-shaped routes (PERF2-SITEMAP: /sitemap-receipts-{page}.xml).
+// Whole-segment params use the plain param node; a pattern segment keeps
+// its static prefix/suffix literal and the capture must be non-empty.
+const PATTERN = /^([^{}]*)\{([A-Za-z_][A-Za-z0-9_]*)\}([^{}]*)$/;
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function compileRoutes(routes) {
   const root = node();
@@ -46,6 +53,22 @@ export function compileRoutes(routes) {
         if (!cursor.param) cursor.param = { name: param[1], next: node() };
         else if (cursor.param.name !== param[1]) throw new Error(`route param conflict at ${row.method} ${row.path}`);
         cursor = cursor.param.next;
+      } else if (segment.includes("{")) {
+        const pattern = PATTERN.exec(segment);
+        if (!pattern || (pattern[1] === "" && pattern[3] === "")) {
+          throw new Error(`route segment must be static, {param}, or prefix{param}suffix: ${row.method} ${row.path}`);
+        }
+        const [, prefix, name, suffix] = pattern;
+        let entry = cursor.patterns.find(p => p.prefix === prefix && p.suffix === suffix && p.name === name);
+        if (!entry) {
+          entry = {
+            prefix, suffix, name,
+            regex: new RegExp(`^${escapeRegExp(prefix)}(.+)${escapeRegExp(suffix)}$`),
+            next: node(),
+          };
+          cursor.patterns.push(entry);
+        }
+        cursor = entry.next;
       } else {
         if (!cursor.static.has(segment)) cursor.static.set(segment, node());
         cursor = cursor.static.get(segment);
@@ -74,11 +97,25 @@ function walk(cursor, segments, index, params) {
     const found = walk(exact, segments, index + 1, params);
     if (found) return found;
   }
-  if (!cursor.param) return null;
-  let decoded;
-  try { decoded = decodeURIComponent(segment); }
-  catch { return null; }
-  return walk(cursor.param.next, segments, index + 1, { ...params, [cursor.param.name]: decoded });
+  if (cursor.param) {
+    let decoded;
+    try { decoded = decodeURIComponent(segment); }
+    catch { decoded = null; }
+    if (decoded !== null) {
+      const found = walk(cursor.param.next, segments, index + 1, { ...params, [cursor.param.name]: decoded });
+      if (found) return found;
+    }
+  }
+  for (const pattern of cursor.patterns) {
+    const match = pattern.regex.exec(segment);
+    if (!match) continue;
+    let decoded;
+    try { decoded = decodeURIComponent(match[1]); }
+    catch { continue; }
+    const found = walk(pattern.next, segments, index + 1, { ...params, [pattern.name]: decoded });
+    if (found) return found;
+  }
+  return null;
 }
 
 function matchMount(mounts, pathname) {

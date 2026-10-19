@@ -68,7 +68,7 @@ test("default: receipts stay public for everyone (backward compatible)", async t
   assert.ok(JSON.parse(feed.text).receipts.some(receipt => receipt.id === PWR));
   assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 200);
   assert.equal((await raw(origin, `/receipts/${PWR}.json`)).status, 200);
-  assert.ok((await raw(origin, "/sitemap.xml")).text.includes(`/receipts/${PWR}`));
+  assert.ok((await raw(origin, "/sitemap-receipts-1.xml")).text.includes(`/receipts/${PWR}`));
 });
 
 test("owner flips receipts private; non-owner mutation is refused", async t => {
@@ -124,7 +124,7 @@ test("private receipts: anonymous 403/404, members still read; flipping back res
   assert.equal(JSON.parse(feed.text).receipts.some(receipt => receipt.id === PWR), false);
   assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 404);
   assert.equal((await raw(origin, `/receipts/${PWR}.json`)).status, 404);
-  assert.equal((await raw(origin, "/sitemap.xml")).text.includes(`/receipts/${PWR}`), false);
+  assert.equal((await raw(origin, "/sitemap-receipts-1.xml")).text.includes(`/receipts/${PWR}`), false);
   assert.equal((await setVisibility(origin, ownerKey, true)).status, 200);
   assert.equal((await raw(origin, `/api/public-work/receipts/${PWR}`)).status, 200);
   assert.ok(JSON.parse((await raw(origin, "/api/public/receipts")).text).receipts.some(receipt => receipt.id === PWR));

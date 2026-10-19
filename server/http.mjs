@@ -2,7 +2,7 @@
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
@@ -89,16 +89,16 @@ import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs"
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
 import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
-import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
-import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
 import { roomProofView } from "./proof-page.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
 import { termsStatus } from "./legal-store.mjs";
-import { LEGAL_SITEMAP_PATHS } from "./legal-pages.mjs";
+
 import { handleLegalRequest, isLegalPath } from "./legal-routes.mjs";
 // --- end LEGAL ---
 import {
@@ -1230,6 +1230,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
+        // PERF2-SITEMAP: the core sitemap probes asset availability with the
+        // server's own loader (tests inject it via createRoomServer).
+        loadAsset,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -2172,32 +2175,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (handled) return;
       }
       // --- end LEGAL ---
-      if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
-        // Confirm bytes exist before advertising an asset-backed canonical URL.
-        const candidates = [...publicSearchAssets(publicAssetPaths)]
-          .filter(([path]) => reviewedPublicSearchPaths.includes(path));
-        // Independent immutable assets need no serial I/O round trips. Keep
-        // catalog order and use the same loader as page serving; a failed
-        // read still excludes the page rather than poisoning the whole map.
-        const availability = await Promise.allSettled(candidates.map(async ([, file]) => loadAsset(file)));
-        const available = candidates.filter((_, i) => availability[i].status === "fulfilled")
-          .map(([path]) => path);
-        const receiptEntries = listPublicReceiptSitemap(store).map(item => ({
-          path: item.path,
-          lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,
-        }));
-        const xml = publicSearchSitemap(ROOM_ORIGIN, [
-          ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
-          { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
-          ...LEGAL_SITEMAP_PATHS.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
-          ...receiptEntries,
-          ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
-        ]);
-        if (!url.search) res.setHeader("X-Robots-Tag", "all");
-        res.setHeader("Link", publicPageLinks(url, "/sitemap.xml"));
-        res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
-        return res.end(req.method === "HEAD" ? undefined : xml);
-      }
+      // The sitemap family (/sitemap.xml index, /sitemap-core.xml,
+      // /sitemap-receipts-<n>.xml, plus the /room aliases) is served by the
+      // route table — see server/routes/sitemap.mjs (PERF2-SITEMAP, C-2).
       // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);

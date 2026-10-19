@@ -29,7 +29,9 @@ function stand(overrides = {}) {
     "/agents.json": [200, "application/json", "{}"],
     "/openapi.json": [200, "application/json", "{}"],
     "/robots.txt": [200, "text/plain", "User-agent: *\nAllow: /\n"],
-    "/sitemap.xml": [200, "application/xml", "<urlset><url><loc>https://room.trydemigod.com/receipts/pwr_abcdabcdabcdabcd</loc></url></urlset>"],
+    "/sitemap.xml": [200, "application/xml", "<sitemapindex><sitemap><loc>https://room.trydemigod.com/sitemap-core.xml</loc></sitemap><sitemap><loc>https://room.trydemigod.com/sitemap-receipts-1.xml</loc></sitemap></sitemapindex>"],
+    "/sitemap-core.xml": [200, "application/xml", "<urlset></urlset>"],
+    "/sitemap-receipts-1.xml": [200, "application/xml", "<urlset><url><loc>https://room.trydemigod.com/receipts/pwr_abcdabcdabcdabcd</loc></url></urlset>"],
     "/favicon.ico": [200, "image/x-icon", "x"],
     "/a2a": [405, "application/json", "{}"],
     "/api/needs-me": [401, "application/json", "{}"],
@@ -66,6 +68,22 @@ test("a healthy origin passes: 405/401 routes and templated URLs are not broken 
   assert.deepEqual(failures(report), []);
   assert.equal(report.deploy.status, "current");
   assert.equal(code, 0);
+});
+
+test("a legacy bare-urlset sitemap still feeds the receipt probe (rollout overlap)", async () => {
+  const { code, report } = await smoke(await stand({
+    "/sitemap.xml": [200, "application/xml", "<urlset><url><loc>https://room.trydemigod.com/receipts/pwr_abcdabcdabcdabcd</loc></url></urlset>"],
+  }));
+  assert.deepEqual(failures(report), []);
+  assert.equal(code, 0);
+});
+
+test("a receipt detail page advertised only via the sitemap index that 404s fails the run", async () => {
+  const { code, report } = await smoke(await stand({
+    "/receipts/pwr_abcdabcdabcdabcd": [404, "text/html", "<!doctype html><title>Not found</title>"],
+  }));
+  assert.equal(code, 1);
+  assert.deepEqual(report.findings.filter(f => f.severity === "fail").map(f => [f.code, f.detail]), [["page_status", "/receipts/pwr_abcdabcdabcdabcd -> 404"]]);
 });
 
 test("an advertised same-host route that 404s fails the run", async () => {

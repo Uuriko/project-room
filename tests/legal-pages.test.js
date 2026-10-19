@@ -124,7 +124,7 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
   } finally {
     t.mock.timers.reset();
   }
-  const sitemap = await raw(origin, "/sitemap.xml");
+  const sitemap = await raw(origin, "/sitemap-core.xml");
   assert.equal(sitemap.status, 200);
   for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
     assert.match(sitemap.text, new RegExp(path.replace("/", "\\/")));
@@ -238,7 +238,7 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
   assert.equal((await raw(origin, "/r/commons")).status, 200);
   assert.match((await raw(origin, "/r/commons")).text, /Report/);
   assert.match((await raw(origin, `/receipts/${claimId}`)).text, /Report/);
-  assert.match((await raw(origin, "/sitemap.xml")).text, /\/r\/commons/);
+  assert.match((await raw(origin, "/sitemap-core.xml")).text, /\/r\/commons/);
   assert.match((await raw(origin, "/api/public/rooms/directory")).text, /commons/);
 
   const stranger = await signup(origin, store, OTHER_EMAIL, OTHER_PASSWORD);
@@ -261,7 +261,7 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
   assert.equal((await raw(origin, `/receipts/${claimId}`)).status, 404);
   assert.equal((await raw(origin, `/receipts/${claimId}.json`)).status, 404);
   assert.equal((await raw(origin, "/receipts")).text.includes("Ship the door"), false);
-  assert.equal((await raw(origin, "/sitemap.xml")).text.includes(`/receipts/${claimId}`), false);
+  assert.equal((await raw(origin, "/sitemap-receipts-1.xml")).text.includes(`/receipts/${claimId}`), false);
   assert.equal((await raw(origin, "/r/commons")).status, 200);
   assert.match((await raw(origin, `/receipts/${PWR}`)).text, /Public task/);
 
@@ -274,8 +274,8 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
   assert.equal((await raw(origin, "/r/commons")).status, 404);
   assert.equal((await raw(origin, "/r/commons.json")).status, 404);
   assert.equal((await raw(origin, `/receipts/${PWR}`)).status, 404);
-  assert.equal((await raw(origin, "/sitemap.xml")).text.includes("/r/commons"), false);
-  assert.equal((await raw(origin, "/sitemap.xml")).text.includes(PWR), false);
+  assert.equal((await raw(origin, "/sitemap-core.xml")).text.includes("/r/commons"), false);
+  assert.equal((await raw(origin, "/sitemap-receipts-1.xml")).text.includes(PWR), false);
   const directory = JSON.parse((await raw(origin, "/api/public/rooms/directory")).text);
   assert.equal(directory.rooms.some(room => room.roomId === "commons"), false);
   store.command(ownerKey, "commons", { id: "page-again", type: "room.public_page_set", data: { enabled: true } });

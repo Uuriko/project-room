@@ -55,7 +55,8 @@ test("GET /receipts publishes canonical metadata", async t => {
 
 test("sitemap lists compare pages and those pages return 200", async t => {
   const origin = await serve(t);
-  const xml = await (await fetch(`${origin}/sitemap.xml`)).text();
+  // /sitemap.xml is the index (PERF2-SITEMAP); page URLs live in the core child.
+  const xml = await (await fetch(`${origin}/sitemap-core.xml`)).text();
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);

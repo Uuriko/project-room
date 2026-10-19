@@ -7273,14 +7273,6 @@
     },
     {
       "method": "GET",
-      "path": "/sitemap.xml"
-    },
-    {
-      "method": "HEAD",
-      "path": "/sitemap.xml"
-    },
-    {
-      "method": "GET",
       "path": "/skill.md"
     },
     {

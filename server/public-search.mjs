@@ -150,3 +150,19 @@ export function publicSearchSitemap(origin, entries) {
     + rows.join("\n")
     + "\n</urlset>\n";
 }
+
+// The sitemap index (PERF2-SITEMAP, C-2): names the child sitemaps and
+// carries no page URLs itself. Entries are { path, lastmod? } like
+// publicSearchSitemap's; a child without a date of its own gets none —
+// the dates live in the child documents.
+export function publicSearchSitemapIndex(origin, entries) {
+  const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+  const rows = entries.map(entry => {
+    const loc = `<loc>${escape(new URL(entry.path, origin).href)}</loc>`;
+    const mod = entry.lastmod ? `<lastmod>${escape(entry.lastmod)}</lastmod>` : "";
+    return `  <sitemap>${loc}${mod}</sitemap>`;
+  });
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    + rows.join("\n")
+    + "\n</sitemapindex>\n";
+}

@@ -120,7 +120,15 @@ test("public doors are indexable while credentials and unknown pages keep privat
   assert.equal((await fetch(origin + "/room/offers")).status, 404);
   const map = await fetch(origin + "/sitemap.xml");
   assert.equal(map.status, 200); assert.equal(map.headers.get("x-robots-tag"), "all");
-  const xml = await map.text();
+  const index = await map.text();
+  // /sitemap.xml is an index (PERF2-SITEMAP): it names the child sitemaps
+  // and carries no page URLs of its own. This empty store has no receipts,
+  // so only the core child is listed.
+  assert.match(index, /<sitemapindex/);
+  assert.match(index, /<loc>https:\/\/room\.trydemigod\.com\/sitemap-core\.xml<\/loc>/);
+  assert.doesNotMatch(index, /<lastmod>/);
+  assert.doesNotMatch(index, /\/join|\/api|token/);
+  const xml = await (await fetch(origin + "/sitemap-core.xml")).text();
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
@@ -218,7 +226,7 @@ test("failed public asset cannot become indexable or enter sitemap", async t => 
   const origin = await serve(t, { loadAsset: async () => { throw new Error("synthetic missing asset"); } });
   const response = await fetch(origin + "/about");
   assert.equal(response.status, 500); assert.match(response.headers.get("x-robots-tag"), /noindex/);
-  assert.doesNotMatch(await (await fetch(origin + "/sitemap.xml")).text(), /\/about/);
+  assert.doesNotMatch(await (await fetch(origin + "/sitemap-core.xml")).text(), /\/about/);
 });
 
 test("compare routes exist only for registered reviewed pages", () => {
@@ -245,7 +253,7 @@ test("sitemap probes independent assets concurrently and excludes a failed asset
     if (file === missing) throw new Error('synthetic missing asset');
     return Buffer.from('available');
   } });
-  const response = fetch(origin + '/sitemap.xml');
+  const response = fetch(origin + '/sitemap-core.xml');
   await firstProbe;
   // The handler starts every independent probe before waiting for any result.
   // A held promise exposes serialization without a wall-clock assertion.
@@ -258,7 +266,7 @@ test("sitemap probes independent assets concurrently and excludes a failed asset
   assert.doesNotMatch(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   missing = 'offers.html';
-  const changed = await (await fetch(origin + '/sitemap.xml')).text();
+  const changed = await (await fetch(origin + '/sitemap-core.xml')).text();
   assert.match(changed, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.doesNotMatch(changed, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
 });
@@ -273,11 +281,11 @@ test("default public loader serves the same package bytes it advertises and does
   const retained = await fetch(origin + '/about');
   assert.equal(retained.status, 200);
   assert.equal(await retained.text(), 'available package bytes', 'advertised cached bytes remain actually serveable');
-  const first = await (await fetch(origin + '/sitemap.xml')).text();
+  const first = await (await fetch(origin + '/sitemap-core.xml')).text();
   assert.match(first, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.doesNotMatch(first, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   writeFileSync(join(directory, 'offers.html'), 'newly available package bytes');
-  const later = await (await fetch(origin + '/sitemap.xml')).text();
+  const later = await (await fetch(origin + '/sitemap-core.xml')).text();
   assert.match(later, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.equal(await (await fetch(origin + '/offers')).text(), 'newly available package bytes');
 });

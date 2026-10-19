@@ -172,7 +172,7 @@ test("template start is idempotent, carries ref, and the gallery is indexable", 
   assert.equal(Object.keys(store.room("room-from-template").state.workItems).length, tasks);
   const ownerKey = store.issueAccessKey("alpha", "owner");
   store.command(ownerKey, "alpha", { id: "publish-page", type: "room.public_page_set", data: { enabled: true } });
-  const map = await raw(origin, "/sitemap.xml");
+  const map = await raw(origin, "/sitemap-core.xml");
   assert.match(map.text, /\/templates</);
   assert.match(map.text, /\/templates\/bug-bash</);
   assert.match(map.text, /\/agents</);

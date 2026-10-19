@@ -567,6 +567,31 @@
       "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
     },
     {
+      "template": "/sitemap-core.xml",
+      "class": "web-asset",
+      "reason": "Sitemap index child (PERF2-SITEMAP): the non-receipt urlset named by /sitemap.xml; crawler furniture generated from the public read model, not an API contract."
+    },
+    {
+      "template": "/sitemap-receipts-{}.xml",
+      "class": "web-asset",
+      "reason": "Sitemap index child (PERF2-SITEMAP): one page of public receipt URLs named by /sitemap.xml; crawler furniture generated from the public read model, not an API contract."
+    },
+    {
+      "template": "/room/sitemap.xml",
+      "class": "web-asset",
+      "reason": "GR1 /room-prefixed alias of /sitemap.xml (PERF2-SITEMAP route rows); crawler furniture, not an API contract."
+    },
+    {
+      "template": "/room/sitemap-core.xml",
+      "class": "web-asset",
+      "reason": "GR1 /room-prefixed alias of /sitemap-core.xml (PERF2-SITEMAP route rows); crawler furniture, not an API contract."
+    },
+    {
+      "template": "/room/sitemap-receipts-{}.xml",
+      "class": "web-asset",
+      "reason": "GR1 /room-prefixed alias of /sitemap-receipts-{}.xml (PERF2-SITEMAP route rows); crawler furniture, not an API contract."
+    },
+    {
       "template": "/skill.md",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."

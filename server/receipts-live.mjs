@@ -22,6 +22,7 @@ import {
   queryPublicReceipts as queryUnderlying,
   publicReceiptById as byIdUnderlying,
   listPublicReceiptSitemap as sitemapUnderlying,
+  countPublicReceiptSitemap as countSitemapUnderlying,
   collectPublicReceipts as collectUnderlying,
   roomProofRows as proofRowsUnderlying,
 } from "./public-read-model.mjs";
@@ -126,10 +127,22 @@ export function publicReceiptById(store, id) {
   return byIdUnderlying(store, id);
 }
 
-export function listPublicReceiptSitemap(store, limit) {
-  const entries = sitemapUnderlying(store, limit);
+// One page of the receipt sitemap with the owner toggle applied. Options
+// pass through to the read model ({ limit, offset }, or a bare limit) —
+// see listPublicReceiptSitemap there for the paging contract. The toggle
+// filter runs per page, so a page can come back short; it can never come
+// back with a hidden receipt in it.
+export function listPublicReceiptSitemap(store, options) {
+  const entries = sitemapUnderlying(store, options);
   const hidden = hiddenReceiptIds(store, entries.map(receiptIdOf));
   return entries.filter(entry => !hidden.has(receiptIdOf(entry)));
+}
+
+// The total behind the sitemap index's page list. This is the read-model
+// count (operator unpublish applied in SQL); the owner toggle can only
+// shrink a page's contents, never the set of pages the index must name.
+export function countPublicReceiptSitemap(store) {
+  return countSitemapUnderlying(store);
 }
 
 export function collectPublicReceipts(store) {
