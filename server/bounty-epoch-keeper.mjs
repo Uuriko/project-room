@@ -96,18 +96,32 @@ export function escrowEpochNextDueAt(store, now) {
 // - failed / errors: per-bounty failures (closeEpoch already isolates
 //            them in its summary; a whole-room throw counts once). errors
 //            mirrors failed so the schedulers mark the tick failed.
-export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } = {}) {
+//
+// Deadline discipline (PR-2 / HOT-PATH F5): like every other cron job,
+// the pass takes the caller's `deadline` (cronDeadline() — now +
+// JOB_BUDGET_MS) and checks it between rooms, plus an optional per-tick
+// room `limit`. Rooms are visited in a stable order (room_id ASC), so
+// when the budget runs out the summary gains budgetExceeded: 1 and
+// pending: <rooms not visited>; those rooms stay due — the due-scan is
+// the resumable cursor — and the next tick picks them up in the same
+// order. Splitting a pass across ticks moves no money differently:
+// closeEpoch is per-room and idempotent, so the split outcome is the
+// single-tick outcome reached over more ticks.
+export function progressEscrowEpochs(store, { now = Date.now(), escrow = null, deadline = Infinity, limit = Infinity } = {}) {
   const summary = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
     released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
   if (!store?.db?.prepare) return summary;
   summary.due = dueCount(store, now);
   if (summary.due === 0) return summary;
   const roomRows = query(store,
-    `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${DUE_WHERE}`,
+    `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${DUE_WHERE}
+     ORDER BY b.room_id ASC`,
     [now, now, now, now, now]);
   const instance = escrow
     ?? (store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store));
+  let budgetExceeded = false;
   for (const { roomId } of roomRows ?? []) {
+    if (summary.rooms >= limit || Date.now() > deadline) { budgetExceeded = true; break; }
     summary.rooms += 1;
     try {
       // No caller: a mechanical close attributes to the rule actor and
@@ -127,6 +141,10 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
   }
   summary.errors = summary.failed;
   summary.overdue = dueCount(store, now, { excludeApproved: true });
+  if (budgetExceeded) {
+    summary.budgetExceeded = 1;
+    summary.pending = (roomRows?.length ?? 0) - summary.rooms;
+  }
   if (summary.rooms > 0) console.info(JSON.stringify({ event: "room.escrow_epochs", ...summary }));
   return summary;
 }

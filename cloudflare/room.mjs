@@ -116,7 +116,7 @@ export class ProjectRoom extends DurableObject {
     // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
       queueMicrotask(() => {
-        this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}).finally(() => {
+        this.store.agentPlugin.drainWebhookDeliveries({ deadline: cronDeadline() }).catch(() => {}).finally(() => {
           this.#armJobAlarm().catch(() => {});
         });
       });
@@ -401,7 +401,7 @@ export class ProjectRoom extends DurableObject {
   async drainWebhookDeliveries() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
-    return this.store.agentPlugin.drainWebhookDeliveries();
+    return this.store.agentPlugin.drainWebhookDeliveries({ deadline: cronDeadline() });
   }
   // Land queue: gentle GitHub poll on the per-minute cron. Merged and closed
   // items are skipped, unchanged items back off, and a rate-limit response
@@ -434,7 +434,7 @@ export class ProjectRoom extends DurableObject {
   async progressEscrowEpochs() {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
-    return runEscrowEpochs(this.store, { now: Date.now() });
+    return runEscrowEpochs(this.store, { now: Date.now(), deadline: cronDeadline() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.

@@ -1381,7 +1381,7 @@ export class AgentPluginStore {
 
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
-  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers, isolated = null }) {
+  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers, isolated = null, timeoutMs = null, dnsCache = null }) {
     // #3251: claim the row before the first await. A concurrent drain —
     // on this store, or on another instance sharing the database — that
     // selected the same row loses this race and skips it instead of
@@ -1389,7 +1389,7 @@ export class AgentPluginStore {
     const claimExpiresAt = this.claimWebhookDelivery(row, now);
     if (claimExpiresAt === null) return "skipped";
     try {
-      return await this.#attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt });
+      return await this.#attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt, timeoutMs, dnsCache });
     } catch (error) {
       // #3893: a throw after the claim — the stored payload no longer
       // parses, the subscription's stored secret fails signDelivery's
@@ -1451,7 +1451,7 @@ export class AgentPluginStore {
     });
   }
 
-  async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt }) {
+  async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt, timeoutMs = null, dnsCache = null }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
       const changed = this.mutate(() =>
@@ -1491,7 +1491,7 @@ export class AgentPluginStore {
       eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload?.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
-    const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
+    const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: timeoutMs ?? DELIVERY_TIMEOUT_MS, dnsResolvers, dnsCache });
     return this.mutate(() => {
       // #3251: re-read and verify ownership before writing the outcome.
       // The drain-start snapshot (row.attempts, row.state) is stale by
@@ -1614,7 +1614,8 @@ export class AgentPluginStore {
   // is re-validated before its POST (dispatch-time SSRF guard). An injected
   // webhook lookup, when set, is the resolver for this drain. fetchImpl is an optional
   // override (tests); omitted, postDelivery uses its DNS-pinned transport
-  // on Node (plain fetch on Workers) — the M-1 rebinding fix.
+  // on Node (plain fetch on Workers) — the M-1 rebinding fix. `deadline`
+  // (PR-2) is the cron tick's budget: see #drainWebhookDeliveriesOnce.
   // #3251: drains on one store are serialized. The dispatch kick, the
   // per-minute cron and the agent-triggered process endpoint can all fire
   // while an earlier drain is still awaiting a POST; without this chain
@@ -1633,7 +1634,7 @@ export class AgentPluginStore {
     return current;
   }
 
-  async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+  async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers, deadline = Infinity } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
     // disabled subscription or of an identity no longer linked to the event's
@@ -1649,14 +1650,33 @@ export class AgentPluginStore {
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
-       ORDER BY d.next_attempt_at ASC LIMIT ?`)
+       ORDER BY d.next_attempt_at ASC, d.created_at ASC, d.delivery_id ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
     const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
+    // Deadline discipline (PR-2 / HOT-PATH F2): the same cooperative
+    // budget every other cron job gets via cronDeadline(). The deadline
+    // is checked between deliveries — a delivery never starts past it —
+    // and each attempt's POST timeout is capped at the time left, so a
+    // single slow receiver cannot hold the tick open for the full
+    // DELIVERY_TIMEOUT_MS past the budget either. Rows the tick does not
+    // reach keep their state and next_attempt_at untouched: they stay
+    // due, in the order above, and the next drain picks them up — no
+    // loss, and the per-row claim (#3251) still prevents duplicates.
+    // The per-drain DNS cache is shared by every attempt in this drain
+    // (keyed by hostname, in resolveWebhookTarget): the SSRF
+    // classification of each URL still runs per attempt, only the DNS
+    // answer is reused within the tick; the next drain re-resolves.
+    const dnsCache = new Map();
+    let budgetExceeded = false;
     for (const row of due) {
+      if (Date.now() > deadline) { budgetExceeded = true; break; }
       summary.processed++;
+      const timeoutMs = Number.isFinite(deadline)
+        ? Math.max(1, Math.min(DELIVERY_TIMEOUT_MS, deadline - Date.now()))
+        : DELIVERY_TIMEOUT_MS;
       try {
-        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated })]++;
+        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated, timeoutMs, dnsCache })]++;
       } catch (error) {
         // #3893 last-resort guard: attemptStoredDelivery records an
         // outcome for every throw after its claim; a throw that still
@@ -1665,6 +1685,10 @@ export class AgentPluginStore {
         // The row keeps its queue position and is retried next drain.
         noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
       }
+    }
+    if (budgetExceeded) {
+      summary.budgetExceeded = 1;
+      summary.pending = due.length - summary.processed;
     }
     // #3893: the isolated count is numeric, so it survives compactSummary
     // into the job heartbeat; the item detail rides this return value

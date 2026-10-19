@@ -188,6 +188,21 @@ export async function resolveWebhookTarget(url, options = {}) {
   if (host.startsWith("[") || parseIpv4(host) !== null) {
     return { url, addresses: [stripBrackets(host)] };
   }
+  // Per-drain DNS cache (PR-2 / HOT-PATH F2): a caller that attempts many
+  // deliveries in one tick (the webhook drain) may pass a Map as
+  // `dnsCache`, keyed by hostname. Only the DNS answer is reused, and
+  // only within that caller's tick — the blocked-answer classification
+  // below still runs on every call, and the next drain re-resolves.
+  const dnsCache = options.dnsCache instanceof Map ? options.dnsCache : null;
+  if (dnsCache?.has(host)) {
+    const addresses = dnsCache.get(host);
+    for (const answer of addresses) {
+      if (answerIsBlocked(answer)) {
+        fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
+      }
+    }
+    return { url, addresses: [...addresses] };
+  }
   const explicit4 = typeof options.resolve4 === "function";
   const explicit6 = typeof options.resolve6 === "function";
   const explicitLookup = typeof options.lookup === "function";
@@ -204,6 +219,7 @@ export async function resolveWebhookTarget(url, options = {}) {
         fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
       }
     }
+    if (dnsCache) dnsCache.set(host, [...addresses]);
     return { url, addresses };
   }
   let answers;
@@ -226,6 +242,7 @@ export async function resolveWebhookTarget(url, options = {}) {
       fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
     }
   }
+  if (dnsCache) dnsCache.set(host, [...answers]);
   return { url, addresses: answers };
 }
 
