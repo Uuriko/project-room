@@ -1,0 +1,109 @@
+// ORPHANS C4 repro: seed a room, archive its messages (marker on the
+// projection), import a DIVERGENT history that omits the archived ghost
+// message, then read the archived views (search + thread) at three points:
+//   (1) immediately after import, before any backfill;
+//   (2) after the messages backfill completes;
+//   (3) after the new history is itself archived.
+// A ghost is "served" if the omitted message's body/id shows up in either
+// reader at any point. Run from the lane worktree so imports resolve.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "__R1ROOT__/server/store.mjs";
+import { initialRoom } from "__R1ROOT__/server/bootstrap.mjs";
+import { archiveMarker } from "__R1ROOT__/server/messages-store.mjs";
+import { EVENT_TYPES as T, event } from "__R1ROOT__/src/events.js";
+
+const dir = mkdtempSync(join(tmpdir(), "orphans-c4-"));
+const store = new RoomStore(join(dir, "room.sqlite"));
+const roomId = "commons";
+const at = offset => new Date(Date.UTC(2026, 9, 2) + offset * 1000).toISOString();
+const msg = (id, messageId, body, offset, extra = {}) =>
+  event({ type: T.MESSAGE_POSTED, actorId: "owner", roomId, id, idempotencyKey: `${id}-key`, at: at(offset), data: { messageId, body, ...extra } });
+
+function finishBackfill() {
+  let guard = 0, result;
+  do {
+    result = store.backfillMessages({ limit: 400 });
+    if (result.budgetExceeded) throw new Error("backfill budget exceeded");
+  } while (!result.done && ++guard < 200);
+  if (!result.done) throw new Error("backfill did not finish");
+}
+
+function reads(label) {
+  const owner = store.issueAccessKey(roomId, "owner");
+  let searchHits = null, searchError = null;
+  try {
+    const found = store.search(owner, roomId, "ghostneedle");
+    searchHits = found.messages.map(m => m.id);
+  } catch (error) { searchError = error.code ?? error.message; }
+  let threadRoot = null, threadError = null;
+  try {
+    const thread = store.messageThread(owner, roomId, "ghost");
+    threadRoot = thread.thread?.id ?? null;
+  } catch (error) { threadError = error.code ?? error.message; }
+  const marker = archiveMarker(store.db, roomId);
+  const ghostRows = store.db.prepare("SELECT count(*) AS n FROM messages WHERE room_id=? AND message_id IN ('ghost','ghost-reply')").get(roomId).n;
+  console.log(`[${label}] marker.throughSeq=${marker.throughSeq} ghostRowsInTable=${ghostRows} searchHits=${JSON.stringify(searchHits)} searchError=${searchError} threadRoot=${threadRoot} threadError=${threadError}`);
+  return { searchHits, threadRoot };
+}
+
+try {
+  // --- Seed history A: 14 messages; the ghost sits early (seq well inside
+  // the range an archive marker will cover), with one reply under it.
+  const seed = [...initialRoom(roomId)];
+  for (let i = 1; i <= 5; i++) seed.push(msg(`ev-a${i}`, `a${i}`, `alpha ${i}`, 10 + i));
+  seed.push(msg("ev-ghost", "ghost", "the ghostneedle body", 30));
+  seed.push(msg("ev-ghost-reply", "ghost-reply", "reply under the ghost", 31, { replyToId: "ghost", alsoSendToChannel: true }));
+  for (let i = 6; i <= 12; i++) seed.push(msg(`ev-a${i}`, `a${i}`, `alpha ${i}`, 40 + i));
+  store.initialize(seed);
+  finishBackfill();
+  store.checkMessagesParity();
+
+  // --- Archive history A down to the newest 4 messages.
+  const archived = store.archiveMessages(roomId, { dryRun: false, keepNewest: 4 });
+  console.log("archive A:", JSON.stringify(archived));
+  const markerA = archiveMarker(store.db, roomId);
+  const ghostSeq = store.db.prepare("SELECT seq FROM messages WHERE room_id=? AND message_id='ghost'").get(roomId)?.seq;
+  console.log(`markerA.throughSeq=${markerA.throughSeq} ghostSeq=${ghostSeq} ghostInProjection=${store.room(roomId).state.messages.some(m => m.id === "ghost")}`);
+  if (!(markerA.throughSeq >= ghostSeq)) throw new Error("seed failed: ghost is not under the archive marker");
+
+  // Sanity: pre-import, the archived readers DO serve the ghost (proves the
+  // readers can serve it from the table when a marker covers it).
+  const before = reads("pre-import");
+  if (!before.searchHits?.includes("ghost")) throw new Error("seed failed: pre-import search does not serve the ghost");
+
+  // --- Divergent history B: A's events up to just before the ghost, then
+  // fresh filler messages (different ids) pushing B's head past ghostSeq.
+  // B omits the ghost, its reply, and A's later messages entirely.
+  const allEvents = store.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)
+    .map(row => ({ sequence: row.sequence, event: JSON.parse(row.body) }));
+  const ghostEventSeq = allEvents.find(row => row.event.id === "ev-ghost").sequence;
+  const kept = allEvents.filter(row => row.sequence < ghostEventSeq).map(row => row.event);
+  const fillers = [];
+  for (let i = 1; i <= 8; i++) fillers.push(msg(`ev-b${i}`, `b${i}`, `bravo ${i}`, 100 + i));
+  const linesB = [...kept, ...fillers].map((entry, index) => ({ sequence: index + 1, event: entry }));
+  console.log(`history A events=${allEvents.length} ghostEventSeq=${ghostEventSeq} history B events=${linesB.length}`);
+
+  const owner = store.issueAccessKey(roomId, "owner");
+  const imported = store.importEvents(owner, roomId, linesB);
+  console.log("import B:", JSON.stringify(imported));
+
+  const step1 = reads("post-import, pre-backfill");
+
+  finishBackfill();
+  const step2 = reads("post-backfill");
+
+  // --- Re-archive the NEW history (certify parity first, as the archive
+  // door requires), then read again.
+  store.checkMessagesParity();
+  const archivedB = store.archiveMessages(roomId, { dryRun: false, keepNewest: 2 });
+  console.log("archive B:", JSON.stringify(archivedB));
+  const step3 = reads("post-re-archive");
+
+  const served = [step1, step2, step3].some(s => s.searchHits?.includes("ghost") || s.threadRoot === "ghost");
+  console.log(served ? "VERDICT: REPRODUCED — ghost served after divergent import" : "VERDICT: NOT REPRODUCED — ghost never served");
+} finally {
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+}

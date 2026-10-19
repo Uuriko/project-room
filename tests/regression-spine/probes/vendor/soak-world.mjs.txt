@@ -1,0 +1,100 @@
+// HUNT-SOAK shared world: one RoomStore (in-memory SQLite, fake clock),
+// driven through the production code paths the repo's own tests use.
+import { performance } from "node:perf_hooks";
+import { RoomStore } from "__R1ROOT__/server/store.mjs";
+import { initialRoom } from "__R1ROOT__/server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "__R1ROOT__/src/events.js";
+import { BountyEscrow } from "__R1ROOT__/server/bounty-escrow.mjs";
+import { progressEscrowEpochs } from "__R1ROOT__/server/bounty-epoch-keeper.mjs";
+import { runPatrolTick, patrolPending } from "__R1ROOT__/server/patrol.mjs";
+import { JOBS, earliestFutureAlarm, measureStoreGrowth } from "__R1ROOT__/server/jobs.mjs";
+import { runLiveStoreRetention } from "__R1ROOT__/server/retention-run.mjs";
+
+export const T0 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
+
+export function makeWorld({ file = ":memory:" } = {}) {
+  const clock = { t: T0 };
+  const store = new RoomStore(file, { now: () => clock.t });
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  const members = {};
+  for (const [id, kind] of [["human", "human"], ["agent", "agent"], ["stranger", "human"]]) {
+    store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] } });
+    members[id] = store.issueAccessKey("commons", id);
+  }
+  const escrow = new BountyEscrow(store, { now: () => clock.t, allowLegacyStringLanes: true });
+  escrow.ensureGenesis("commons");
+  return { store, clock, owner, members, escrow };
+}
+
+export const cmd = (type, data) => ({ id: crypto.randomUUID(), type, data });
+
+export function postMessage(w, body, { from = "human", room = "commons" } = {}) {
+  return w.store.command(w.members[from], room, cmd(T.MESSAGE_POSTED, { messageId: crypto.randomUUID(), body }));
+}
+
+export function escrowCycle(w, i) {
+  const { escrow } = w;
+  const room = "commons";
+  // Lanes are the room's real member ids: with a full RoomStore the escrow
+  // enforces current membership (the keeper test's bare adapter did not).
+  const poster = i % 2 ? "stranger" : "human"; // two genesis endowments fund the run
+  const bounty = escrow.postBounty(room, { poster, title: `soak-${i}`, criteria: "C",
+    amount: 1, deadline: new Date(w.clock.t + 30 * 86400_000).toISOString() }).bounty;
+  escrow.fundBounty(room, bounty.bountyId, { funder: poster });
+  escrow.claimBounty(room, bounty.bountyId, { claimant: "agent" });
+  escrow.submitWork(room, bounty.bountyId, { claimant: "agent",
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(room, bounty.bountyId, { acceptor: poster,
+    verifierAttestation: { at: new Date(w.clock.t).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  return bounty.bountyId;
+}
+
+export const keeperTick = (w) => progressEscrowEpochs(w.store, { now: w.clock.t, escrow: w.escrow });
+export const patrolTick = (w) => runPatrolTick(w.store, { deadline: Date.now() + 30_000 });
+export const alarmCost = (w) => earliestFutureAlarm(JOBS, { env: {}, store: w.store, now: w.clock.t, lastRan: {} });
+export function retentionTick(w, tableIndex) {
+  const receipt = runLiveStoreRetention({ store: w.store, env: {}, now: new Date(w.clock.t).toISOString(), tableIndex });
+  let prune = null;
+  try { prune = w.store.agentPlugin.pruneWebhookDeliveries({ now: w.clock.t }); } catch { /* table may not exist yet */ }
+  return { receipt, prune };
+}
+
+export function tableCounts(db) {
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
+  const out = {};
+  for (const t of tables) {
+    try { out[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; } catch { out[t] = -1; }
+  }
+  return out;
+}
+
+export function sample(w, label) {
+  if (globalThis.gc) globalThis.gc();
+  const mem = process.memoryUsage();
+  return {
+    label, clock: w.clock.t,
+    counts: tableCounts(w.store.db),
+    gauges: measureStoreGrowth(w.store),
+    heapUsed: mem.heapUsed, rss: mem.rss,
+    appendListeners: w.store._appendListeners?.size ?? null,
+    appendStamps: w.store._appendStamps?.size ?? null,
+    patrolPending: patrolPending(w.store),
+  };
+}
+
+// Time a batch; returns total ms and per-op ms.
+export function timed(label, fn) {
+  const start = performance.now();
+  const out = fn();
+  return { label, ms: performance.now() - start, out };
+}
+
+export function pct(values, p) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(p / 100 * sorted.length))];
+}
+
+export const summarize = (values) => ({ n: values.length, p50: pct(values, 50), p95: pct(values, 95), max: Math.max(...values) });

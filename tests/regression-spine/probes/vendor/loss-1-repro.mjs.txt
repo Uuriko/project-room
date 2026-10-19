@@ -1,0 +1,30 @@
+// HUNT-LOSS repro: does the work-item board's 200-stamp cap destroy a
+// board-native divergence-repair stamp (the one record the event mapping
+// cannot re-derive) once an item accrues >200 event-derived stamps?
+import { boardClaimForWorkItem, workItemEventFacts, DIVERGENCE_REPAIR_NOTE } from "__R1ROOT__/server/work-item-board.mjs";
+
+const t0 = Date.parse("2026-01-01T00:00:00Z");
+const ev = (id, type, atMs) => ({ id, type, at: new Date(atMs).toISOString(), actorId: "alice", data: { workItemId: "wi-1" } });
+const events = [ev("e0", "work.proposed", t0)];
+for (let i = 1; i <= 210; i += 1) events.push(ev(`e${i}`, "claim.renewed", t0 + i * 60000));
+const facts = workItemEventFacts(events).get("wi-1");
+const item = { id: "wi-1", title: "t", state: "accepted", createdAt: new Date(t0).toISOString(), proposedById: "alice" };
+
+// The repair happened BEFORE the renewal storm: its stamp is the oldest.
+const repairAt = new Date(t0 - 86400000).toISOString();
+const existing = { history: [{ at: repairAt, agentId: "system", action: "state:unclaimed", note: DIVERGENCE_REPAIR_NOTE }] };
+
+const row = boardClaimForWorkItem(item, facts, { nowMs: t0 + 211 * 60000, existing });
+const repairKept = row.history.some(s => typeof s.note === "string" && s.note.startsWith("divergence repair:"));
+console.log(JSON.stringify({
+  historyLength: row.history.length,
+  historyOmitted: row.historyOmitted ?? 0,
+  repairStampPresent: repairKept,
+  firstStampAt: row.history[0]?.at,
+}, null, 2));
+console.log(repairKept ? "RESULT: repair stamp SURVIVES" : "RESULT: repair stamp DESTROYED by the cap (board-native record, not re-derivable from events)");
+
+// Control: same repair stamp, few events -> must survive (preservation loop works).
+const fewFacts = workItemEventFacts(events.slice(0, 5)).get("wi-1");
+const row2 = boardClaimForWorkItem(item, fewFacts, { nowMs: t0 + 5 * 60000, existing });
+console.log("control (5 events): repair present =", row2.history.some(s => typeof s.note === "string" && s.note.startsWith("divergence repair:")));
