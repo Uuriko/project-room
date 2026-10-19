@@ -256,6 +256,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   const onClick = async event => {
     if (busy) return;
+    const emailLink = event.target?.closest?.('[name="method"][value="email"]');
+    if (emailLink) {
+      const form = emailLink.closest('[data-signin-form]');
+      if (form?.reportValidity()) await onSubmit({ target: form, submitter: emailLink, preventDefault() {} });
+      return;
+    }
     if (event.target?.closest?.("[data-passkey-signin]")) {
       const provider = credentials ?? globalThis.navigator?.credentials;
       if (!provider?.get || await beforeSignIn?.() === false) return;

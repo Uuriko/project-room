@@ -72,7 +72,7 @@ export default {
   "signin.copy.032": "This sign-in link is incomplete or invalid.",
   "signin.copy.033": "{fragmentA} Request a new link.",
   "signin.copy.034": "Signing you in…",
-  "signin.copy.035": "<button type=\"submit\" class=\"text-button\" name=\"method\" value=\"email\">Email me a sign-in link</button>",
+  "signin.copy.035": "<button type=\"button\" class=\"text-button\" name=\"method\" value=\"email\">Email me a sign-in link</button>",
   "signin.copy.036": "Enter a valid email address.",
   "signin.copy.037": "Complete the highlighted field before continuing.",
   "invite.copy.001": "Name must be 80 characters or fewer.",

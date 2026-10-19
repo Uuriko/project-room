@@ -110,6 +110,7 @@ export async function openMemberProfile(page, memberId) {
 
 // Secondary controls moved into their existing account/room contexts.
 export async function clickChrome(page, selector) {
+  if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();

@@ -1,5 +1,7 @@
 # Project Room docs
 
+Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md).
+
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
 Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).

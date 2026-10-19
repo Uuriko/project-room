@@ -1821,3 +1821,5 @@ body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 
 #account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
+
+#signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
