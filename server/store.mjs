@@ -449,6 +449,11 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
 // headroom; a larger guard does not establish the deployed storage ceiling.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// T062: a projection-cap refusal states the size the change would reach and
+// the limit, so a caller can tell "one big message over" from "room full".
+export function projectionLimitMessage(projectedBytes) {
+  return `Room storage limit reached: this change would make the room ${projectedBytes} bytes; the limit is ${PILOT_LIMITS.projectionBytes} bytes; no data was changed. Ask the room owner to have older messages archived to free space.`;
+}
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -848,7 +853,9 @@ export function validateCommand(command) {
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
   // Message commands carry a long body. Every other command stays at 16 KiB.
-  if (Buffer.byteLength(JSON.stringify(command)) > (messageBodyCommand ? MAX_MESSAGE_COMMAND_BYTES : 16384)) fail(413, "too_large", "Command is too large");
+  const commandBytes = Buffer.byteLength(JSON.stringify(command));
+  const commandLimit = messageBodyCommand ? MAX_MESSAGE_COMMAND_BYTES : 16384;
+  if (commandBytes > commandLimit) fail(413, "too_large", `Command is too large: ${commandBytes} bytes; the limit is ${commandLimit} bytes`);
   if (command.type === T.MESSAGE_POSTED) {
     try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
   }
@@ -3502,7 +3509,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", projectionLimitMessage(Buffer.byteLength(projection)));
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -4428,7 +4435,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", projectionLimitMessage(Buffer.byteLength(projection)));
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -6110,7 +6117,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const sequence = room.sequence + 1;
       const messageWrite = prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence});
       const { projection } = messageWrite;
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", projectionLimitMessage(Buffer.byteLength(projection)));
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the

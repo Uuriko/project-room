@@ -915,11 +915,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     }
     if (reasonCode === "too_large") {
       // G7 (#940): the body-cap rejection must teach — name the limit, the
-      // actual size, and the next step. server/http.mjs stamps both numbers
-      // into the message; the store-level "Command is too large" carries no
-      // numbers, so the caps are named here (src/events.js
-      // MAX_MESSAGE_COMMAND_BYTES; server/store.mjs validateCommand).
+      // actual size, and the next step. server/http.mjs and the store-level
+      // "Command is too large" stamp both numbers into the message; a bare
+      // "Command is too large" (older server) still names both caps here
+      // (src/events.js MAX_MESSAGE_COMMAND_BYTES; server/store.mjs validateCommand).
       const sized = /(\d+) bytes; the limit is (\d+) bytes/.exec(String(message || ""));
+      // T062: the store-level refusal now carries both numbers too; it keeps
+      // its own copy because a command (not a body) is resent with its id.
+      if (sized && /^Command is too large/.test(String(message || ""))) {
+        return {
+          status: "action_required", reason: "input_refused",
+          hint: `The command is ${sized[1]} bytes; the limit is ${sized[2]} bytes. Shrink it and resend with the same id.`,
+          next: [command(`Shrink the command under ${sized[2]} bytes — trim data fields or split it — and resend with the same id`)]
+        };
+      }
       if (sized) {
         return {
           status: "action_required", reason: "input_refused",

@@ -18,7 +18,7 @@ import { ServiceError } from "./service-error.mjs";
 // Read at call time, like the other satellite modules (access-requests,
 // referrals): store.mjs sits above this module in the import graph, so the
 // binding is only safe to dereference once modules are fully loaded.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS, projectionLimitMessage } from "./store.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -251,7 +251,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   const sequence = room.sequence + 1;
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   const projection = store.storedProjection(roomId, compact);
-  if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", projectionLimitMessage(Buffer.byteLength(projection)));
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);

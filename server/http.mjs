@@ -1156,14 +1156,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER"
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
-          const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          const mcpLimit = fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES;
+          const text = await readText(req, mcpLimit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${mcpLimit} bytes`));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
         }
         return writeRoomMcpNode(req, res, url);
       }
       if (isA2aPath(inboundPath)) {
         rate(`a2a:${remoteAddress}`, 60);
-        const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large")) : "";
+        const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${JSON_BODY_BYTES} bytes`)) : "";
         return writeA2aNode(req, res, { bodyText: text });
       }
       // The global origin gate runs before routing; the share-link preview is
@@ -1661,7 +1662,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         let data;
         if (/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(contentType)) {
           // Consent-form submission: same bounded reader as the JSON body.
-          const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          const text = await readText(req, JSON_BODY_BYTES, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${JSON_BODY_BYTES} bytes`));
           data = Object.fromEntries(new URLSearchParams(text));
         } else {
           data = await body(req);

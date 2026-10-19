@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, event } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 // Read at call time (store.mjs imports this module): one source for capacity.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS, projectionLimitMessage } from "./store.mjs";
 
 // Guest-agent tier primitives + seat machinery, shared by guest-invites v1
 // (server/guest-invites.mjs). The v0 link-exchange system that originally
@@ -180,7 +180,7 @@ export class GuestAgentLinks {
     }
     if (swept === 0) return;
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", projectionLimitMessage(Buffer.byteLength(projection)));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }
 }
