@@ -3,7 +3,10 @@
 // used with a reason. Room purge deletes `delete` rows for that room, then
 // the room itself. Identity purge revokes the identity and deletes its
 // `delete` rows. Account purge runs the account-deletion executor and then
-// the account-scoped `delete` rows.
+// the account-scoped `delete` rows. A row may also carry a `guard`: per-kind
+// constant column equalities that narrow the match (for example, only rows
+// whose kind column holds one value). The guard feeds counts and deletes
+// alike, so a plan never promises a different set than the execute removes.
 
 function freezeMatch(match) {
   const out = {};
@@ -17,6 +20,13 @@ function freezeVia(via) {
   if (!via) return undefined;
   const out = {};
   for (const [kind, spec] of Object.entries(via)) out[kind] = Object.freeze({ ...spec });
+  return Object.freeze(out);
+}
+
+function freezeGuard(guard) {
+  if (!guard) return undefined;
+  const out = {};
+  for (const [kind, spec] of Object.entries(guard)) out[kind] = Object.freeze({ ...spec });
   return Object.freeze(out);
 }
 
@@ -1161,6 +1171,28 @@ const ROWS = [
     }
   },
   {
+    "table": "patrol_cursor",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "patrol_findings",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "peer_dm_messages",
     "key": "room_id",
     "action": "delete",
@@ -1381,6 +1413,29 @@ const ROWS = [
       "room": [
         "room_id"
       ]
+    }
+  },
+  {
+    "table": "public_abuse_reports",
+    "key": "target",
+    "action": "delete",
+    "match": {
+      "room": [
+        "target"
+      ]
+    },
+    "guard": {
+      "room": {
+        "kind": "room"
+      }
+    },
+    "via": {
+      "account": {
+        "parent": "account_login_methods",
+        "parentKey": "email",
+        "childKey": "email",
+        "scope": "account_id"
+      }
     }
   },
   {
@@ -1918,5 +1973,6 @@ export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
   match: freezeMatch(row.match),
   ...(row.optional ? { optional: true } : {}),
   ...(row.reason ? { reason: row.reason } : {}),
-  ...(row.via ? { via: freezeVia(row.via) } : {})
+  ...(row.via ? { via: freezeVia(row.via) } : {}),
+  ...(row.guard ? { guard: freezeGuard(row.guard) } : {})
 })));

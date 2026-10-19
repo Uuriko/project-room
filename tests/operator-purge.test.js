@@ -54,7 +54,19 @@ function matchingRows(db, entry, kind, id) {
   // (retired tables, lazy-additive tables like the #3345 wake-accounting
   // pair) counts as zero rows while the table is absent.
   if (entry.optional && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
-  return db.prepare(`SELECT count(*) AS n FROM ${entry.table} WHERE ${parts.join(" OR ")}`).get(...params).n;
+  // Mirrors the guard in where(): constant column equalities for this kind
+  // narrow the match (e.g. only abuse reports whose kind is 'room').
+  let sql = parts.join(" OR ");
+  const guard = entry.guard?.[kind];
+  if (guard) {
+    const fixed = [];
+    for (const [column, value] of Object.entries(guard)) {
+      fixed.push(`${column}=?`);
+      params.push(value);
+    }
+    if (fixed.length) sql = `(${sql}) AND ${fixed.join(" AND ")}`;
+  }
+  return db.prepare(`SELECT count(*) AS n FROM ${entry.table} WHERE ${sql}`).get(...params).n;
 }
 
 function createdRoom(roomId, title) {

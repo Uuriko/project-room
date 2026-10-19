@@ -133,8 +133,11 @@ export const EXEMPTIONS = Object.freeze({
 
 // Tables with no accepted disposition. Coordinator-owned: each entry must be
 // listed in the PR body that introduces it, with the ruling it is waiting on.
-export const UNRESOLVED = Object.freeze([
-  "patrol_cursor",
-  "patrol_findings",
-  "public_abuse_reports",
-]);
+// Emptied 2026-10-18 (PURGE-GAPS-CLOSURE, stacked on #4160): patrol_cursor
+// and patrol_findings gained room-scoped purge-registry rows, and
+// public_abuse_reports gained a registry row reaching it on both keys it
+// carries (room purge on kind='room' + target; account purge on the
+// reporter's email via account_login_methods). The set-equality pin now
+// guards an empty list: any future undispositioned table fails this suite
+// until it is dispositioned, with no coordinator list to hide on.
+export const UNRESOLVED = Object.freeze([]);

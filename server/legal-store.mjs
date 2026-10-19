@@ -99,9 +99,15 @@ export function submitPublicReport(db, { kind, target, body, email, ipHash, now 
     return { ok: false, status: 422, code: "invalid_report", message: "The report must be 1 to 1,000 characters" };
   }
   if (email != null && !emailOk(email)) return { ok: false, status: 422, code: "invalid_report", message: "Email must be a plain address" };
+  // Store the address in the normalized form account_login_methods uses
+  // (trim + lowercase — cf. normalizeEmail there, which this module cannot
+  // import without a cycle through store.mjs), so the purge registry's
+  // reporter-email match compares like with like. The address is contact
+  // data for a reply, never rendered, so the submitted case is not kept.
+  const storedEmail = email == null ? null : email.trim().toLowerCase();
   const id = `rpt_${randomBytes(16).toString("hex")}`;
   db.prepare(`INSERT INTO public_abuse_reports (id, kind, target, body, email, ip_hash, created_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`).run(id, kind, target, body, email ?? null, ipHash, now);
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`).run(id, kind, target, body, storedEmail, ipHash, now);
   return { ok: true, id };
 }
 
