@@ -585,14 +585,22 @@ export class AgentPluginStore {
   // outside the (attester, target) pair. A two-identity ring satisfies
   // C1's relationship test trivially (the attacker holds both secrets), so
   // relationship alone cannot be what the tier certifies. Anchored means
-  // either:
-  //   (a) settlement anchor — the attester took part in at least one PAID
-  //       bounty settlement (as poster or as claimant, via its identity
-  //       links in that room) whose counterparty identity is neither the
-  //       attester nor the target; or
-  //   (b) operator anchor — the attester itself stands attested by an
-  //       attester outside the pair (an independent operator's vouching
-  //       is the attester's root of standing).
+  // exactly one thing: the settlement anchor — the attester took part in
+  // at least one PAID bounty settlement (as poster or as claimant, via
+  // its identity links in that room) whose counterparty identity is
+  // neither the attester nor the target.
+  //
+  // SF2-TM1-FIXUP (Jill's ruling, 2026-10-18): the ruling's second leg —
+  // "or operator-verified" — is NOT implemented, deliberately. No
+  // platform-operator verification register exists in this codebase, so
+  // "operator-verified" has no product referent today; the shipped
+  // substitute (the attester itself attested from outside the pair) was
+  // strictly weaker than the settlement leg and let an attestation-only
+  // 3-cycle anchor all three members with zero settlements. A trust
+  // gate does not ship a leg weaker than its ruling because the ruled
+  // mechanism doesn't exist yet. The operator leg returns only when a
+  // real operator-verification register lands, as a separate charter.
+  //
   // A revoked attester identity anchors nothing: its attestations persist
   // as provenance but stop conferring (a departed attester must not become
   // a laundering path). Fails closed: unknown attester, missing tables,
@@ -603,11 +611,6 @@ export class AgentPluginStore {
       const identity = this.db.prepare(
         "SELECT revoked_at FROM agent_identities WHERE identity_id=?").get(attesterIdentityId);
       if (!identity || identity.revoked_at != null) return false;
-      const operatorAnchor = this.db.prepare(
-        `SELECT 1 FROM agent_identity_verification
-         WHERE identity_id = ? AND verified_by NOT IN (?, ?)
-         LIMIT 1`).get(attesterIdentityId, attesterIdentityId, targetIdentityId);
-      if (operatorAnchor) return true;
       const hasBounties = this.db.prepare(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounty_records'").get();
       if (!hasBounties) return false;

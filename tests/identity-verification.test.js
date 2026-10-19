@@ -393,10 +393,12 @@ test("verification attestations survive a store reload", async t => {
 // ------------------------------------------------------------------
 // SECURITY-FIX-2 TM-1 (Jill's anchor ruling): an attestation counts ONLY
 // when the attester is itself anchored — ≥1 paid settlement with a
-// DISTINCT operator outside the (attester, target) pair, or attested by
-// an operator outside the pair. Unanchored attestations are recorded
-// but confer nothing: verificationLevel reads "unverified", and every
-// requireVerified gate inherits that through verificationLevel.
+// DISTINCT operator outside the (attester, target) pair. (The ruling's
+// "or operator-verified" leg is unimplemented by design — no operator-
+// verification register exists; see the SF2-TM1-FIXUP tests below.)
+// Unanchored attestations are recorded but confer nothing:
+// verificationLevel reads "unverified", and every requireVerified gate
+// inherits that through verificationLevel.
 // ------------------------------------------------------------------
 
 test("TM-1: a two-identity ring's attestation is recorded but confers nothing", async t => {
@@ -458,18 +460,21 @@ test("TM-1: an attester with a paid settlement outside the pair anchors", () => 
   f.store.close();
 });
 
-test("TM-1: an attester attested by an operator outside the pair anchors", () => {
+test("TM-1 fixup: an attester attested from outside the pair does NOT anchor on vouching alone", () => {
   const f = createAcceptanceFixture();
   const attester = makeAttester(f);
-  const agent = f.store.identities.create("Operator-anchored agent");
+  const agent = f.store.identities.create("Vouched-only agent");
   linkIntoCommons(f, agent.identityId);
-  // A third operator (outside the pair) attests the attester: that
-  // independent vouching is the attester's root of standing.
+  // A third party (outside the pair) attests the attester. Under the
+  // shipped operator leg that vouching anchored the attester; under
+  // Jill's 2026-10-18 ruling it confers nothing — no operator-
+  // verification register exists, so vouching is not "operator-
+  // verified", and only a paid settlement anchors.
   const outside = f.store.identities.create("Outside attester");
   f.store.agentPlugin.verifyIdentity({ identityId: attester.identityId, verifiedBy: outside.identityId });
   f.store.agentPlugin.verifyIdentity({ identityId: agent.identityId, verifiedBy: attester.identityId });
-  assert.equal(f.store.agentPlugin.attesterAnchored(attester.identityId, agent.identityId), true);
-  assert.equal(f.store.agentPlugin.verificationLevel(agent.identityId), "verified");
+  assert.equal(f.store.agentPlugin.attesterAnchored(attester.identityId, agent.identityId), false);
+  assert.equal(f.store.agentPlugin.verificationLevel(agent.identityId), "unverified");
   f.store.close();
 });
 
@@ -487,5 +492,37 @@ test("TM-1: a revoked attester anchors nothing, even with settlement history", (
     .run(Date.now(), attester.identityId);
   assert.equal(f.store.agentPlugin.verificationAttestation(agent.identityId).verifiedBy, attester.identityId);
   assert.equal(f.store.agentPlugin.verificationLevel(agent.identityId), "unverified");
+  f.store.close();
+});
+
+// SF2-TM1-FIXUP (Jill's ruling, 2026-10-18): the shipped TM-1 "operator
+// leg" — an attester anchored merely by being attested from outside the
+// pair — does NOT stand. No platform-operator verification register
+// exists, so "operator-verified" has no product referent; anchoring is
+// the paid-settlement leg ONLY. An attestation-only 3-cycle must
+// therefore confer nothing: each member's only standing is the ring's
+// own vouching, with zero settlements anywhere.
+test("TM-1 fixup: an attestation-only 3-cycle anchors nobody", () => {
+  const f = createAcceptanceFixture();
+  const A = f.store.identities.create("Cycle A");
+  const B = f.store.identities.create("Cycle B");
+  const C = f.store.identities.create("Cycle C");
+  // The cycle: A attests B, B attests C, C attests A. No bounty
+  // settlements exist in this fixture at all.
+  f.store.agentPlugin.verifyIdentity({ identityId: B.identityId, verifiedBy: A.identityId });
+  f.store.agentPlugin.verifyIdentity({ identityId: C.identityId, verifiedBy: B.identityId });
+  f.store.agentPlugin.verifyIdentity({ identityId: A.identityId, verifiedBy: C.identityId });
+  // Every attestation is recorded as provenance…
+  assert.equal(f.store.agentPlugin.verificationAttestation(A.identityId).verifiedBy, C.identityId);
+  assert.equal(f.store.agentPlugin.verificationAttestation(B.identityId).verifiedBy, A.identityId);
+  assert.equal(f.store.agentPlugin.verificationAttestation(C.identityId).verifiedBy, B.identityId);
+  // …but no member of the ring is anchored w.r.t. any other, and no
+  // attestation in the cycle confers the verified tier.
+  assert.equal(f.store.agentPlugin.attesterAnchored(A.identityId, B.identityId), false);
+  assert.equal(f.store.agentPlugin.attesterAnchored(B.identityId, C.identityId), false);
+  assert.equal(f.store.agentPlugin.attesterAnchored(C.identityId, A.identityId), false);
+  assert.equal(f.store.agentPlugin.verificationLevel(A.identityId), "unverified");
+  assert.equal(f.store.agentPlugin.verificationLevel(B.identityId), "unverified");
+  assert.equal(f.store.agentPlugin.verificationLevel(C.identityId), "unverified");
   f.store.close();
 });
