@@ -18,15 +18,26 @@
 // push subscription receives a pointer-only POST. Push does not decide
 // who gets a queued signal.
 //
+// WAKE0-1 (wake-on-mention Step 0): the `wake` kind is a wake INTENT —
+// the durable summons for a member whose runtime is not currently
+// listening. A wake-causing event (mention, DM, bond, claim, assignment,
+// land) whose target is offline with a delivery target emits one intent
+// per (agent, room), coalesced while outstanding; delivery, discharge
+// and the bridge contract are WAKE0-2/WAKE0-3 (spec:
+// wake-step0-spec.md §2). The intent is a pointer like every signal:
+// its message_id is `wake:` + the triggering message id (the fabric's
+// coalesce index spans all kinds, and the underlying signal already
+// owns the raw id — the work-claim: derived-id precedent).
+//
 // SQLite persistence survives restarts. The schema is additive.
 import { randomBytes } from "node:crypto";
-import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
+import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
-const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
+const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land", "wake"]);
 const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
@@ -79,7 +90,7 @@ export const agentHeartbeatSchema = `
   CREATE INDEX IF NOT EXISTS agent_hosts_seen ON agent_hosts(agent_id, last_seen_at);
   CREATE TABLE IF NOT EXISTS agent_wake_signals (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land','wake')),
     room_id TEXT, message_id TEXT,
     created_at INTEGER NOT NULL, delivered_at INTEGER
   );
@@ -1191,6 +1202,110 @@ export class AgentHeartbeats {
     });
   }
 
+  // §2.1(4) + §2.7: does a delivery target exist for a wake intent? A
+  // target is an enabled agent.wake (or *) webhook subscription, a
+  // wakeable host with a wakeUrl, or a live push subscription on a
+  // wakeable host (the D4/D5 target sets). Pull-only hosts are an
+  // explicit do-not-wake declaration: when every host is pull-only there
+  // is no target, subscriptions notwithstanding.
+  _wakeTargetExists(agentId, hosts) {
+    const wakeable = hosts.filter(host => host.mode === "wakeable");
+    if (wakeable.length === 0) return false;
+    if (wakeable.some(host => typeof host.wakeUrl === "string" && host.wakeUrl.length > 0)) return true;
+    try {
+      const rows = this.db.prepare(
+        "SELECT events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(agentId);
+      for (const row of rows) {
+        let events = [];
+        try { events = JSON.parse(row.eventsJson); } catch { continue; }
+        if (Array.isArray(events) && (events.includes(WAKE_PING_EVENT) || events.includes("*"))) return true;
+      }
+    } catch (error) { if (!isMissingTable(error)) throw error; }
+    try {
+      const wakeableIds = new Set(wakeable.map(host => host.hostId));
+      const rows = this.db.prepare(
+        "SELECT host_id AS hostId, push_url AS pushUrl, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
+        .all(agentId);
+      if (rows.some(row => row.pushUrl && !row.pushSuspended && wakeableIds.has(row.hostId))) return true;
+    } catch (error) { if (!isMissingTable(error)) throw error; }
+    return false;
+  }
+
+  // WAKE0-1: the wake-intent emission rule (wake-step0-spec.md §2.1).
+  // The wake-causing paths call this AFTER the underlying signal's own
+  // gates have passed (wakeIfOffline for mentions and DMs,
+  // enqueueClaimWake for claim events, the bond branch for proposals):
+  // the event produced a signal for the agent in the room, and the rule
+  // decides whether a `wake` INTENT is also owed. Conditions, in order:
+  // the room is not wake-paused for the member (counted
+  // suppressed_policy, §2.7); the agent has at least one registered
+  // host (else the underlying attempt's counted suppressed_no_host
+  // stands — §2.1(2)); NO host is currently online under statusOf (a
+  // live host is already reachable via heartbeat/poll — §2.1(3)); and a
+  // delivery target exists (else counted suppressed_no_target —
+  // §2.1(4): the design never creates an intent it has no way to
+  // attempt). Emission coalesces on (agent, room): while an intent is
+  // outstanding, a further event is counted coalesced and re-points the
+  // intent at the latest trigger (§2.4 keys expiry off the latest
+  // cause). Never throws — a mention must not fail because a wake could
+  // not be attempted (the M1 rule); an unexpected failure is counted
+  // `failed` with the allowlisted reason instead of propagating.
+  maybeEmitWakeIntent({ agentId, roomId = null, messageId }) {
+    try {
+      return this._emitWakeIntent({ agentId, roomId, messageId });
+    } catch {
+      recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "failed", kind: "wake", subjectId: agentId, reason: "enqueue_error" });
+      return Object.freeze({ emitted: false, reason: "error", signal: null });
+    }
+  }
+
+  _emitWakeIntent({ agentId, roomId, messageId }) {
+    checkAgentId(agentId);
+    const none = reason => Object.freeze({ emitted: false, reason, signal: null });
+    // Intents are per-room (the coalesce key); a room-less cause has
+    // nothing to summon the runtime to.
+    if (typeof roomId !== "string" || roomId.length === 0) return none("no_room");
+    if (typeof messageId !== "string" || messageId.length === 0) return none("no_message");
+    const at = this.now();
+    if (this.pausedRoomsOf(agentId).some(p => p.roomId === roomId)) {
+      recordWakeEvent(this.db, { at, roomId, store: "signals",
+        event: "suppressed_policy", kind: "wake", subjectId: agentId });
+      return none("paused");
+    }
+    const status = this.statusOf(agentId);
+    if (status.hosts.length === 0) return none("no_host");
+    if (status.status === "online") return none("online");
+    if (!this._wakeTargetExists(agentId, status.hosts)) {
+      recordWakeEvent(this.db, { at, roomId, store: "signals",
+        event: "suppressed_no_target", kind: "wake", subjectId: agentId });
+      return none("no_target");
+    }
+    const pointer = `wake:${messageId}`;
+    const outstanding = this.db.prepare(`SELECT * FROM agent_wake_signals
+      WHERE agent_id=? AND room_id=? AND kind='wake' AND delivered_at IS NULL
+      ORDER BY created_at ASC LIMIT 1`).get(agentId, roomId);
+    if (outstanding) {
+      recordWakeEvent(this.db, { at, roomId, store: "signals",
+        event: "coalesced", kind: "wake", subjectId: agentId });
+      // Re-point at the latest trigger unless another row already owns
+      // that pointer key (a discharged intent from an earlier cycle
+      // with the same derived id) — then the standing cause is kept;
+      // the woken runtime re-reads the room on arrival either way.
+      if (outstanding.message_id !== pointer) {
+        this.db.prepare(`UPDATE agent_wake_signals SET message_id=?
+          WHERE signal_id=? AND NOT EXISTS (
+            SELECT 1 FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?)`)
+          .run(pointer, outstanding.signal_id, agentId, roomId, pointer);
+      }
+      const row = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?").get(outstanding.signal_id);
+      return Object.freeze({ emitted: false, coalesced: true, reason: "coalesced", signal: signalView(row) });
+    }
+    const { enqueued, signal } = this.enqueueWake({ agentId, kind: "wake", roomId, messageId: pointer });
+    return Object.freeze({ emitted: enqueued, coalesced: !enqueued,
+      reason: enqueued ? "emitted" : "coalesced", signal });
+  }
+
   // Queue a wake for every agent that has registered at least one host.
   // Mode and presence do not matter. An agent with no host has nowhere to
   // deliver the signal. Coalescing stays on agent plus room plus message.
@@ -1202,10 +1317,14 @@ export class AgentHeartbeats {
       // distinguishable from a lost wake.
       recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
         event: "suppressed_no_host", kind, subjectId: agentId });
-      return Object.freeze({ woken: false, signal: null });
+      return Object.freeze({ woken: false, signal: null, wakeSignal: null });
     }
     const { enqueued, signal } = this.enqueueWake({ agentId, kind, roomId, messageId });
-    return Object.freeze({ woken: true, enqueued, signal });
+    // WAKE0-1: the same event evaluates the wake-intent rule (§2.1) —
+    // the intent rides back on the result so call sites can journal its
+    // delivery (WAKE0-2) without a second lookup.
+    const wake = this.maybeEmitWakeIntent({ agentId, roomId, messageId });
+    return Object.freeze({ woken: true, enqueued, signal, wakeSignal: wake.signal ?? null });
   }
 
   // #3345: the wake-reliability accounting view over this fabric (see

@@ -136,7 +136,15 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
       };
       store.agentPlugin.deliverWakePing({ identityId, signal });
     }
-    return result;
+    // WAKE0-1: claim events are wake-causing events (spec §2.1, M3) —
+    // the same emission rule evaluates a wake intent for the claimant,
+    // riding back on the result for WAKE0-2's delivery. Partial stores
+    // in handler tests may stub agentHeartbeats without the rule; the
+    // guard keeps their contract unchanged.
+    const wake = typeof store.agentHeartbeats.maybeEmitWakeIntent === "function"
+      ? store.agentHeartbeats.maybeEmitWakeIntent({ agentId, roomId, messageId })
+      : null;
+    return Object.freeze({ ...result, wakeSignal: wake?.signal ?? null });
   } catch (error) {
     // #3345: the swallow stays (a wake must never roll back the claim),
     // but the loss is now journaled with an allowlisted reason — never

@@ -6200,10 +6200,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
+            const bondMessageId = typeof bondId === "string" ? bondId : incoming.id;
             this.agentHeartbeats.enqueueWake({ agentId: partyId, kind: "bond",
-              roomId, messageId: typeof bondId === "string" ? bondId : incoming.id });
+              roomId, messageId: bondMessageId });
+            // WAKE0-1: bond proposals are wake-causing events (spec
+            // §2.1, M4) — the emission rule evaluates a wake intent for
+            // the party through the same helper as mentions and DMs.
+            this.agentHeartbeats.maybeEmitWakeIntent({ agentId: partyId, roomId, messageId: bondMessageId });
             this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
-              roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
+              roomId, id: bondMessageId, ts: this.now() });
           }
         }
       }
