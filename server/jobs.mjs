@@ -10,7 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
-import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { escrowEpochNextDueAt, escrowEpochUnreachableCount, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -514,9 +514,21 @@ export const JOBS = Object.freeze([
     // challenge window, an approved one awaiting its sweep, a dispute past
     // its timeout, a deadline refund. One closeEpoch per room per tick:
     // the two-step close (approve, then sweep) is never collapsed.
-    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    // #4128: a stuck bounty (no due branch can ever reach it) waits on no
+    // time at all, so nextDueAt alone would stand the job down and the
+    // keeper's unreachable census would never tick. Stuck bounties also
+    // enable the job, due now, so the census reaches the job summary.
+    enabled(_env, store) {
+      if (!store) return true;
+      const now = Date.now();
+      return escrowEpochNextDueAt(store, now) != null || escrowEpochUnreachableCount(store, now) > 0;
+    },
     disabledReason: () => "No bounty is waiting on an epoch close",
-    nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
+    nextDueAt: (store, now) => {
+      const due = escrowEpochNextDueAt(store, now);
+      if (due != null) return due;
+      return escrowEpochUnreachableCount(store, now) > 0 ? now : null;
+    },
     async run(store, ctx) {
       if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
       return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });

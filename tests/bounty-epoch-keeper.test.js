@@ -11,8 +11,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow } from "../server/bounty-escrow.mjs";
-import { progressEscrowEpochs, escrowEpochNextDueAt } from "../server/bounty-epoch-keeper.mjs";
+import { BountyEscrow, DISPUTE_TIMEOUT_MS } from "../server/bounty-escrow.mjs";
+import { progressEscrowEpochs, escrowEpochNextDueAt, escrowEpochUnreachableCount } from "../server/bounty-epoch-keeper.mjs";
 import { jobByName, jobEnabled, jobIsDue, jobNextDue } from "../server/jobs.mjs";
 
 const ROOM = "room-test";
@@ -154,7 +154,7 @@ test("re-running the keeper over settled state is a no-op", () => {
   const balancesBefore = LANES.map(lane => bal(escrow, room, lane));
   for (let i = 0; i < 3; i++) {
     assert.deepEqual(keeper(world),
-      { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0, released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+      { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0, released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 });
   }
   assert.equal(journalRows(), rowsBefore, "no duplicate journal rows");
   assert.deepEqual(LANES.map(lane => bal(escrow, room, lane)), balancesBefore);
@@ -285,7 +285,7 @@ test("a store that has never run escrow reads as empty, never as an error", () =
   const store = { db };
   assert.equal(escrowEpochNextDueAt(store, nowMs), null);
   const EMPTY = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 };
   assert.deepEqual(progressEscrowEpochs(store, { now: nowMs }), EMPTY);
   // A store with no database at all gets the same empty shape.
   assert.deepEqual(progressEscrowEpochs({}, { now: nowMs }), EMPTY);
@@ -324,5 +324,115 @@ test("a submitted bounty past its deadline settles through the keeper (guardian 
 
   const second = keeper(world);
   assert.deepEqual(second, { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 });
+});
+
+// --- #4128: the stuck-state census ---------------------------------------
+// DUE_WHERE and escrowEpochNextDueAt key off the same branches, so a
+// nonterminal bounty matching no branch was invisible forever: not due,
+// not overdue, no next-due wake — and, alone in a store, it left the
+// escrow-epochs job disabled. The census counts exactly those rows.
+
+let stuckSeq = 0;
+// A bounty_records row written directly, in shapes the escrow API never
+// produces (corruption / legacy rows — the census exists for exactly
+// these). Only the fields the keeper reads are varied.
+function insertRow(world, { state, deadline, challengeEnds, disputeId, disputeOpened, snoozed, resolution } = {}) {
+  const id = `b-stuck-${++stuckSeq}`;
+  world.db.prepare(`INSERT INTO bounty_records
+    (bounty_id, room_id, title, criteria, amount_millis, poster, state,
+     state_changed_ms, deadline_ms, challenge_ends_ms, dispute_id,
+     dispute_opened_ms, snoozed_until_ms, resolution_json, created_at, updated_at)
+    VALUES (?, ?, 'T', 'C', 1000, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, world.room, JILL, state, nowMs,
+      deadline ?? nowMs + 30 * DAY_MS,
+      challengeEnds ?? null, disputeId ?? null, disputeOpened ?? null,
+      snoozed ?? null, resolution ?? null,
+      new Date(nowMs).toISOString(), new Date(nowMs).toISOString());
+  return id;
+}
+
+test("an accepted bounty with NULL challenge_ends_ms is unreachable, not silent (#4128 repro)", () => {
+  const world = makeWorld();
+  const { escrow, store, room } = world;
+  const bounty = runToAccepted(world);
+  // The HUNT-CHAOS repro shape: acceptWork always sets the timestamp, so
+  // today this needs a corrupt or legacy row — written directly.
+  store.db.prepare("UPDATE bounty_records SET challenge_ends_ms = NULL WHERE bounty_id = ?")
+    .run(bounty.bountyId);
+  tick(40 * DAY_MS);
+
+  // Invisible to every pre-census surface: not due, not overdue, and no
+  // next-due wake at all.
+  assert.equal(escrowEpochNextDueAt(store, nowMs), null);
+  const first = keeper(world);
+  assert.equal(first.due, 0);
+  assert.equal(first.overdue, 0);
+  assert.equal(first.failed, 0);
+  assert.equal(first.errors, 0, "a stuck bounty degrades health; it does not fail the tick");
+  assert.equal(first.unreachable, 1, "the census names the stall on the first tick");
+  assert.equal(escrowEpochUnreachableCount(store, nowMs), 1);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "accepted");
+  assert.equal(bal(escrow, room, GROK).attributed, 10, "no money moved while stuck");
+
+  // The job still runs for the census: enabled, and due now.
+  const job = jobByName("escrow-epochs");
+  assert.equal(jobEnabled(job, {}, store), true);
+  assert.equal(jobNextDue(job, store, nowMs), nowMs);
+  assert.equal(jobIsDue(job, store, nowMs, undefined), true);
+
+  // Repair is operator work: restore the timestamp and the same bounty
+  // progresses through the ordinary two-step close, census back to 0.
+  store.db.prepare("UPDATE bounty_records SET challenge_ends_ms = ? WHERE bounty_id = ?")
+    .run(nowMs - 1, bounty.bountyId);
+  assert.equal(escrowEpochUnreachableCount(store, nowMs), 0);
+  const repaired = keeper(world);
+  assert.equal(repaired.unreachable, 0);
+  assert.equal(repaired.approved, 1);
+  keeper(world);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "paid");
+  expectConserved(escrow, room);
+});
+
+test("disputed shapes no due branch can fire are unreachable; a live dispute is not (#4128)", () => {
+  const world = makeWorld();
+  const { store } = world;
+  // No dispute_id: the disputed due branch requires one, whatever the
+  // clock says — its finite next-due (opened + timeout) can never fire.
+  insertRow(world, { state: "disputed", disputeOpened: nowMs });
+  // Resolution already recorded while the state never left 'disputed':
+  // the due branch requires resolution NULL.
+  insertRow(world, { state: "disputed", disputeId: "d-x", disputeOpened: nowMs, resolution: "{}" });
+  // A dispute id but no opened time and no dispute row: no wake exists.
+  insertRow(world, { state: "disputed", disputeId: "d-y" });
+  // Control: an ordinary open dispute, pre-timeout — waiting on time.
+  insertRow(world, { state: "disputed", disputeId: "d-z", disputeOpened: nowMs });
+
+  assert.equal(escrowEpochUnreachableCount(store, nowMs), 3);
+  const summary = keeper(world);
+  assert.equal(summary.due, 0);
+  assert.equal(summary.unreachable, 3);
+  assert.equal(summary.errors, 0);
+  // The control alone schedules the next wake, at its timeout.
+  assert.equal(escrowEpochNextDueAt(store, nowMs), nowMs + DISPUTE_TIMEOUT_MS + 1);
+});
+
+test("every healthy nonterminal shape and every terminal shape reads unreachable: 0 (#4128)", () => {
+  const world = makeWorld();
+  const { store } = world;
+  insertRow(world, { state: "proposed", deadline: nowMs - DAY_MS, snoozed: nowMs + 5 * DAY_MS });
+  insertRow(world, { state: "accepted", challengeEnds: nowMs + 2 * DAY_MS });
+  insertRow(world, { state: "funded", deadline: nowMs + 9 * DAY_MS });
+  insertRow(world, { state: "claimed", deadline: nowMs + 9 * DAY_MS });
+  insertRow(world, { state: "submitted", deadline: nowMs + 9 * DAY_MS });
+  insertRow(world, { state: "paid" });
+  insertRow(world, { state: "refunded" });
+  insertRow(world, { state: "cancelled" });
+
+  assert.equal(escrowEpochUnreachableCount(store, nowMs), 0);
+  const summary = keeper(world);
+  assert.equal(summary.unreachable, 0);
+  assert.equal(summary.due, 0, "none of the waiting shapes is due yet");
+  // The earliest wake is the accepted bounty's window end.
+  assert.equal(escrowEpochNextDueAt(store, nowMs), nowMs + 2 * DAY_MS);
 });

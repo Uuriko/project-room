@@ -61,26 +61,57 @@ function dueCount(store, now, { excludeApproved = false } = {}) {
   return rows ? Number(rows[0]?.n ?? 0) : 0;
 }
 
+// One per-bounty expression, two readers: the UTC millisecond at which a
+// bounty becomes actionable, or NULL when it is not waiting on time at
+// all. Two ? parameters: `now`, used as the due time of work that is
+// already actionable (approved rows awaiting their sweep, terminal
+// disputes awaiting their retry). escrowEpochNextDueAt takes the MIN;
+// the stuck-state census below tests the same expression for NULL, so
+// the two can never disagree about whether a bounty is waiting on time.
+const NEXT_DUE_CASE = `CASE b.state
+    WHEN 'approved' THEN ?
+    WHEN 'accepted' THEN b.challenge_ends_ms
+    WHEN 'proposed' THEN MAX(b.deadline_ms, COALESCE(b.snoozed_until_ms, b.deadline_ms))
+    WHEN 'disputed' THEN CASE WHEN ${TERMINAL_DISPUTE} THEN ?
+      ELSE b.dispute_opened_ms + ${DISPUTE_TIMEOUT_MS + 1} END
+    ELSE b.deadline_ms
+  END`;
+
 // The next UTC millisecond at which any bounty becomes actionable, or
-// null when no bounty is waiting on time at all. Two ? parameters: `now`,
-// used as the due time of work that is already actionable (approved rows
-// awaiting their sweep, terminal disputes awaiting their retry).
+// null when no bounty is waiting on time at all.
 export function escrowEpochNextDueAt(store, now) {
   const rows = query(store, `SELECT MIN(t) AS due FROM (
-      SELECT CASE b.state
-        WHEN 'approved' THEN ?
-        WHEN 'accepted' THEN b.challenge_ends_ms
-        WHEN 'proposed' THEN MAX(b.deadline_ms, COALESCE(b.snoozed_until_ms, b.deadline_ms))
-        WHEN 'disputed' THEN CASE WHEN ${TERMINAL_DISPUTE} THEN ?
-          ELSE b.dispute_opened_ms + ${DISPUTE_TIMEOUT_MS + 1} END
-        ELSE b.deadline_ms
-      END AS t
+      SELECT ${NEXT_DUE_CASE} AS t
       FROM bounty_records b
       WHERE b.state IN ${ACTIONABLE_STATES}
     ) WHERE t IS NOT NULL`, [now, now]);
   if (!rows) return null;
   const due = rows[0]?.due;
   return due == null ? null : Number(due);
+}
+
+// Stuck-state census (#4128): nonterminal bounties the keeper can never
+// act on — not due now, and either they have no finite next-due (the
+// shared CASE yields NULL: an accepted bounty whose challenge_ends_ms is
+// NULL, a dispute with no opened time and no terminal dispute row) or
+// their due branch's structural preconditions can never hold (a disputed
+// bounty with no dispute_id, or one whose resolution is already recorded
+// while its state never left 'disputed'). Before this census such a row
+// was invisible on every surface: not due, not overdue, no next-due wake
+// — and, alone in a store, it left the escrow-epochs job disabled, so no
+// tick ever ran to notice it. Repair is operator work; this count is the
+// complaint. Seven ? parameters in textual order: DUE_WHERE's five `now`s,
+// then the CASE's two.
+const UNREACHABLE_WHERE = `b.state IN ${ACTIONABLE_STATES}
+  AND NOT ${DUE_WHERE}
+  AND ((${NEXT_DUE_CASE}) IS NULL
+       OR (b.state = 'disputed' AND (b.dispute_id IS NULL OR b.resolution_json IS NOT NULL)))`;
+
+export function escrowEpochUnreachableCount(store, now) {
+  const rows = query(store,
+    `SELECT COUNT(*) AS n FROM bounty_records b WHERE ${UNREACHABLE_WHERE}`,
+    [now, now, now, now, now, now, now]);
+  return rows ? Number(rows[0]?.n ?? 0) : 0;
 }
 
 // One automatic epoch pass over every room with due work. Returns a
@@ -96,11 +127,18 @@ export function escrowEpochNextDueAt(store, now) {
 // - failed / errors: per-bounty failures (closeEpoch already isolates
 //            them in its summary; a whole-room throw counts once). errors
 //            mirrors failed so the schedulers mark the tick failed.
+// - unreachable: the stuck-state census (#4128) — nonterminal bounties no
+//            due branch can ever reach. Computed on every tick, including
+//            ticks with no due work (a store holding only stuck bounties
+//            is exactly the case that must not read as healthy silence).
+//            It never feeds errors: like overdue, it degrades job health
+//            through the heartbeat streak, it does not fail the tick.
 export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } = {}) {
   const summary = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 };
   if (!store?.db?.prepare) return summary;
   summary.due = dueCount(store, now);
+  summary.unreachable = escrowEpochUnreachableCount(store, now);
   if (summary.due === 0) return summary;
   const roomRows = query(store,
     `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${DUE_WHERE}`,
@@ -127,6 +165,6 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
   }
   summary.errors = summary.failed;
   summary.overdue = dueCount(store, now, { excludeApproved: true });
-  if (summary.rooms > 0) console.info(JSON.stringify({ event: "room.escrow_epochs", ...summary }));
+  if (summary.rooms > 0 || summary.unreachable > 0) console.info(JSON.stringify({ event: "room.escrow_epochs", ...summary }));
   return summary;
 }

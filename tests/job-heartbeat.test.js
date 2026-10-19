@@ -645,3 +645,68 @@ test("escrow-epochs overdue streak: sustained overdue degrades the job with an a
   assert.equal(patrolView.overdueStreak, null);
   assert.equal(patrolView.overdueSinceAt, null);
 });
+
+test("escrow-epochs unreachable streak: sustained stuck bounties degrade the job with an age (#4128)", () => {
+  const now = 1_786_000_000_000;
+  const tickAt = (stored, at, unreachable) => applyOutcomes(stored,
+    [{ job: "escrow-epochs", ok: true, at, summary: { rooms: 0, due: 0, overdue: 0, unreachable } }]);
+  const escrowJob = (stored, at) => jobHealthView(stored, at).jobs.find(job => job.name === "escrow-epochs");
+
+  // Below the shared threshold the job stays ok, but the streak and its
+  // start are already on the record. (Base: every job fresh, so the
+  // rollup below reflects escrow alone.)
+  let stored = applyOutcomes({}, CRON_JOBS.map(job => ({ job: job.name, ok: true, at: now, summary: { checked: 1 } })));
+  stored = tickAt(stored, now, 1);
+  assert.equal(stored["escrow-epochs"].unreachableStreak, 1);
+  assert.equal(stored["escrow-epochs"].unreachableSinceAt, now);
+  stored = tickAt(stored, now + 60_000, 1);
+  assert.equal(stored["escrow-epochs"].unreachableStreak, 2);
+  assert.equal(stored["escrow-epochs"].unreachableSinceAt, now, "the streak keeps its original start");
+  let view = escrowJob(stored, now + 90_000);
+  assert.equal(view.status, "ok");
+  assert.equal(view.degraded, null);
+  assert.equal(view.unreachableStreak, 2);
+  assert.equal(view.unreachableSinceAt, new Date(now).toISOString());
+
+  // The OVERDUE_DEGRADE_TICKS-th consecutive tick crosses into degraded
+  // with its own reason — but not failing, and never a 503 on its own.
+  for (let i = 2; i < OVERDUE_DEGRADE_TICKS; i++) stored = tickAt(stored, now + i * 60_000, 1);
+  assert.equal(stored["escrow-epochs"].unreachableStreak, OVERDUE_DEGRADE_TICKS);
+  view = escrowJob(stored, now + 150_000);
+  assert.equal(view.status, "degraded");
+  assert.equal(view.degraded, "escrow_unreachable");
+  assert.equal(view.unreachableStreak, OVERDUE_DEGRADE_TICKS);
+  assert.equal(view.unreachableSinceAt, new Date(now).toISOString());
+  const rollup = jobHealthView(stored, now + 150_000);
+  assert.equal(rollup.status, "degraded");
+
+  // A tick reporting the census clear closes the streak.
+  stored = tickAt(stored, now + OVERDUE_DEGRADE_TICKS * 60_000, 0);
+  assert.equal(stored["escrow-epochs"].unreachableStreak, 0);
+  assert.equal(stored["escrow-epochs"].unreachableSinceAt, null);
+  view = escrowJob(stored, now + OVERDUE_DEGRADE_TICKS * 60_000 + 30_000);
+  assert.equal(view.degraded, null);
+  assert.equal(view.unreachableStreak, 0);
+  assert.equal(view.unreachableSinceAt, null);
+
+  // A thrown tick carries no summary: it neither extends nor clears a
+  // standing streak.
+  let thrown = tickAt({}, now, 1);
+  thrown = applyOutcomes(thrown, [{ job: "escrow-epochs", ok: false, at: now + 60_000, error: "boom" }]);
+  assert.equal(thrown["escrow-epochs"].unreachableStreak, 1);
+  assert.equal(thrown["escrow-epochs"].unreachableSinceAt, now);
+
+  // A standing overdue streak keeps its own reason: overdue grades first.
+  let both = applyOutcomes({}, CRON_JOBS.map(job => ({ job: job.name, ok: true, at: now, summary: { checked: 1 } })));
+  for (let i = 0; i < OVERDUE_DEGRADE_TICKS; i++) {
+    both = applyOutcomes(both, [{ job: "escrow-epochs", ok: true, at: now + i * 60_000, summary: { rooms: 1, due: 1, overdue: 1, unreachable: 1 } }]);
+  }
+  assert.equal(escrowJob(both, now + 150_000).degraded, "escrow_overdue");
+
+  // Jobs whose summaries never carry `unreachable` never gain a streak.
+  const other = applyOutcomes({}, [{ job: "patrol", ok: true, at: now, summary: { checked: 3 } }]);
+  assert.equal(other["patrol"].unreachableStreak, undefined);
+  const patrolView = jobHealthView(other, now).jobs.find(job => job.name === "patrol");
+  assert.equal(patrolView.unreachableStreak, null);
+  assert.equal(patrolView.unreachableSinceAt, null);
+});
