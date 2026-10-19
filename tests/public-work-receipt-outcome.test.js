@@ -145,8 +145,15 @@ test('accepted public-work receipt: the stamp is the outcome face, bound to the 
 
 test('rejected public-work receipt reads as rejected everywhere; undecided claims no outcome', t => {
   const f = unpaidFixture(t, 'human');
-  const rejected = f.finish('rejected-task');
-  const pending = f.finish('pending-task');
+  // Both finishes attest the criterion, as the accepted case above does:
+  // the passed coverage check earns each receipt its system_checked fact,
+  // which is what lets either face serve at all under PROOF-WALL-FLIP.
+  // The outcome distinction this test pins is unchanged — the rejected
+  // receipt's fact is its review decision, the undecided one's is only
+  // the finish-time check, and neither claims the other's outcome.
+  const attested = { criteriaAttestation: [{ criterion: 'Correct result', status: 'met' }] };
+  const rejected = f.finish('rejected-task', attested);
+  const pending = f.finish('pending-task', attested);
   f.reviews.decide('commons', 'owner', rejected.receiptId, f.input(rejected, 'reject', 0, { decision: 'rejected' }));
   // A rejection never stamps: the stored record is the minted record, byte for byte.
   assert.deepEqual(f.stored(rejected.receiptId), rejected);

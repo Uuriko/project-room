@@ -78,8 +78,11 @@ test("a done merged claim is a receipt in both the live list and the growth pred
   const { store } = openRoom(t);
   const projection = structuredClone(store.room("alpha").state);
   projection.room.publicReceipts = { enabled: true, revision: 1, setById: "owner", setAt: "2026-09-30T15:00:00.000Z" };
+  // The done item's receipt names its reporter, as every real completion
+  // record does (store provenance repair stamps reportedById from the
+  // completion event); PROOF-WALL-FLIP projects no reporter-less receipt.
   projection.workItems = {
-    done: { id: "done", state: "completed", title: "LeakTitleZZ", receipt: { eventId: "r1" }, updatedAt: "2026-09-30T15:00:00.000Z" },
+    done: { id: "done", state: "completed", title: "LeakTitleZZ", receipt: { eventId: "r1", reportedById: "agent1" }, updatedAt: "2026-09-30T15:00:00.000Z" },
     open: { id: "open", state: "working", title: "LeakTitleZZ", receipt: null }
   };
   store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(projection));

@@ -64,7 +64,12 @@ async function fixture(t) {
     const finish = await call("POST", taskPath + "/finish", { secret, body: {
       requestId: `f-finish-${room}`, expectedTermsVersion: read.body.termsVersion,
       generation: claim.body.task.claim.generation,
-      artifactText: `ARTIFACT BODY ${room.toUpperCase()}`, checksReported: ["checked"] } });
+      artifactText: `ARTIFACT BODY ${room.toUpperCase()}`, checksReported: ["checked"],
+      // The attestation lets the platform execute its coverage check at
+      // finish; the passed check earns the system_checked fact
+      // PROOF-WALL-FLIP requires before the receipt projects publicly —
+      // this suite's subject is the takedown of a published receipt.
+      criteriaAttestation: [{ criterion: "Do it", status: "met" }] } });
     return finish.body.receipt.receiptId;
   };
   rooms[COMMONS].receiptId = await finishTask(COMMONS);

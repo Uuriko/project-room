@@ -86,13 +86,24 @@ test("room receipts list alongside public-work receipts, newest first, feed shap
   const { store, galleryKey, feed } = await serve(t);
   store.command(galleryKey, "gallery-room", { id: "opt-in", type: "room.public_receipts_set", data: { enabled: true } });
   store.workClaims.set("gallery-room", mergedClaim("settled-claim", "Room receipt, newer"));
-  projectPublicWorkReceipt(store, {
+  // The public-work receipt is backed by its source record, as every real
+  // delivery is: the record carries the system_checked tier — the
+  // verification fact PROOF-WALL-FLIP requires before the projection
+  // serves. (Projecting a body with no record behind it is the pruned-
+  // source shape, which no longer serves.)
+  const pwrBody = {
     receiptId: "pwr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Public work receipt, older",
     namespaceId: "public-gallery",
     agentName: "gallery-agent",
     createdAt: "2026-10-01T00:00:00.000Z",
-  }, "ab".repeat(32));
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }],
+  };
+  store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .run(pwrBody.receiptId, "offer-gallery", "public-gallery", 1, "gallery-agent", "note", "ab".repeat(32), 4,
+      JSON.stringify({ schema: "public-work-receipt/1", identityId: "gallery-agent", artifact: { sha256: "ab".repeat(32) }, ...pwrBody }), Date.now());
+  projectPublicWorkReceipt(store, pwrBody, "ab".repeat(32));
 
   const receipts = await feed();
   assert.deepEqual(receipts.map(receipt => receipt.title), ["Room receipt, newer", "Public work receipt, older"],

@@ -77,6 +77,7 @@ function sweep() {
   step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: true });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
+  step(T.ROOM_INTERNAL_SET, "owner", { enabled: true });
   // --- PRIV-2: history setting (restored to "all" for the rest of the sweep) and export audit. ---
   step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "since_join" });
   step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "all" });
@@ -340,6 +341,8 @@ test("the event surface has not grown without this sweep noticing", () => {
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 66,
+  // room.internal_set is exercised above via the owner's marking step
+  // (PROOF-WALL-FLIP added the type; this sweep now models it).
+  assert.equal(Object.values(T).length, 67,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

@@ -197,7 +197,12 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   publish(hidden.identityId, "hidden-agent", "Hidden Agent Card", "private");
   store.identities.link(ownerKey, "alpha", { identityId: visible.identityId, displayName: "hidden-link-name", permissions: ["accept_work"] });
   const receiptId = `pwr_${"ab".repeat(16)}`;
-  const counted = { schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z" };
+  // The record carries the shape the real finish writes — the
+  // system_checked tier is the verification fact PROOF-WALL-FLIP requires
+  // before a public-work record serves (and so before it counts here).
+  const counted = { schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z",
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }] };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     receiptId, "offer-1", "alpha", 1, visible.identityId, "note", "ab".repeat(32), 4,
     JSON.stringify(counted), Date.now());
