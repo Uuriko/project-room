@@ -64,7 +64,9 @@ test('actual Worker review verification/acceptance and exact journals survive di
   const {receipt,producer}=await json(await call('setup'));
   const before=await json(await call('state'));
   const tuple={taskId:receipt.taskId,expectedTermsVersion:receipt.termsVersion,generation:receipt.generation,artifactSha256:receipt.artifact.sha256};
-  const verification={...tuple,requestId:'worker-review-pass',expectedReviewRevision:0,verdict:'PASS',reason:'Private verifier reasoning'};
+  // #3613: the fixture offer carries one criterion ('Keep exact bytes' -> c1);
+  // a verify verdict must cite it with a per-criterion outcome.
+  const verification={...tuple,requestId:'worker-review-pass',expectedReviewRevision:0,verdict:'PASS',reason:'Private verifier reasoning',criterionOutcomes:[{criterionId:'c1',verdict:'pass'}]};
   const verified=await json(await call('verify',{receiptId:receipt.receiptId,body:verification}));
   await reopen();
   assert.deepEqual(await json(await call('verify',{receiptId:receipt.receiptId,body:verification})),verified);
@@ -75,10 +77,11 @@ test('actual Worker review verification/acceptance and exact journals survive di
   const persisted=await json(await call('state'));
   assert.equal(persisted.results.results[0].offer.status,'withdrawn');
   // #3546: acceptance rewrites only the receipt's verified successor
-  // fields (state/verification/executedChecks/verified); the submitted
+  // fields (state/verification/executedChecks/verified); #3613 adds the
+  // verdict's criteria + criterionOutcomes beside them. The submitted
   // artifact bytes and every other row column survive byte-exactly.
   const beforeReceipt=JSON.parse(before.submitted[0].receipt_json);
-  const expectedSubmitted=before.submitted.map(row=>({...row,receipt_json:JSON.stringify({...beforeReceipt,state:'verified',verification:'system_checked',executedChecks:verified.review.verification.executedChecks,verified:{by:'owner',at:accepted.review.decision.at,reviewRevision:accepted.review.revision,passVerdict:verified.review.verification.verdict}})}));
+  const expectedSubmitted=before.submitted.map(row=>({...row,receipt_json:JSON.stringify({...beforeReceipt,state:'verified',verification:'system_checked',executedChecks:verified.review.verification.executedChecks,verified:{by:'owner',at:accepted.review.decision.at,reviewRevision:accepted.review.revision,passVerdict:verified.review.verification.verdict},criteria:[{criterionId:'c1',criterion:'Keep exact bytes'}],criterionOutcomes:verified.review.verification.criterionOutcomes})}));
   assert.deepEqual(persisted.submitted,expectedSubmitted);assert.deepEqual(persisted.kernel,before.kernel);assert.deepEqual(persisted.balances,before.balances);
   assert.deepEqual(persisted.members,before.members);assert.equal(persisted.permit,0);assert.ok(!persisted.members.includes(producer.identityId));
   await reopen();assert.deepEqual(await json(await call('state')),persisted);

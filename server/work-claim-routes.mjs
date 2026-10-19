@@ -1309,7 +1309,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis", "criterionOutcomes"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?, criterionOutcomes?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
@@ -1320,7 +1320,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // reassign round preconditions), not a review of the current basis.
       let reviewed;
       try {
-        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs });
+        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, criterionOutcomes: data.criterionOutcomes, now: nowMs });
       } catch (error) {
         if (error instanceof ClaimError && error.code === "work_claim_conflict") {
           reject(409, error.code, `${error.message} — re-read the claim and retry with its current basis.`);

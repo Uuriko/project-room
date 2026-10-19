@@ -3,6 +3,7 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { validId, roomPolicy } from '../src/events.js';
+import { criteriaWithIds } from './criteria.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
@@ -110,6 +111,10 @@ export class ProjectOffers {
     const terms = termsOf(JSON.parse(row.terms));
     const result = { schema: 'project-room-offer/1', id: row.offer_id, version: row.version,
       revision: row.revision, status: row.status, ...terms,
+      // #3613: the acceptance criteria with their derived addressable ids.
+      // The terms version pins the list, so the ids are pinned with it —
+      // a verification verdict cites these ids (server/criteria.mjs).
+      criteria: criteriaWithIds(terms.acceptanceCriteria),
       fundingStatus: terms.reward.kind === 'unpaid' ? 'not_applicable' : terms.reward.kind === 'work_trade' ? 'ledger_only' : 'not_configured',
       paymentStatus: terms.reward.kind === 'unpaid' ? 'not_applicable' : terms.reward.kind === 'work_trade' ? 'ledger_only' : 'not_configured',
       createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString() };

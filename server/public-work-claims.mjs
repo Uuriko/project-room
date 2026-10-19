@@ -4,6 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
+import { criteriaWithIds } from './criteria.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
@@ -236,7 +237,7 @@ export class PublicWorkClaims {
     const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
-      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, criteria: criteriaWithIds(offer.acceptanceCriteria), files: JSON.parse(row.files_json),
       reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed' && !deadlinePassed,
       claim: { state, generation: row.generation,
@@ -566,7 +567,11 @@ export class PublicWorkClaims {
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.
-            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString(),
+            // #3613: the period of use rides the record a stranger reads —
+            // claimedAt (this claim round's start, from the claim item) to
+            // submittedAt (this finish instant, the receipt's createdAt).
+            period: { claimedAt: item.claimedAt ?? null, submittedAt: new Date(this.store.now()).toISOString() } };
           // Paid tasks attach the submission to the funded escrow bounty
           // before the receipt lands, so a receipt never exists without its
           // settlement vehicle in 'submitted' state (no-op when unpaid).

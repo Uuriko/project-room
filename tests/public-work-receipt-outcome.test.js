@@ -97,7 +97,7 @@ test('accepted public-work receipt: the stamp is the outcome face, bound to the 
   assert.equal(fresh.review, undefined);
   assert.equal(Object.hasOwn(f.store.publicWorkClaims.receipt(id), 'review'), false);
   // Mid-state: a PASS verdict is public, but no outcome is claimed yet.
-  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass', 0, { verdict: 'PASS' }));
+  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass', 0, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   const mid = publicReceiptById(f.store, id);
   assert.equal(mid.state, 'submitted');
   assert.deepEqual(Object.keys(mid.review).sort(), ['decidedAt', 'state', 'verificationReviewerKind', 'verificationVerdict', 'verifiedAt']);
@@ -188,7 +188,7 @@ test('FAIL verdict and revision request read truthfully, and a later acceptance 
   // Agent-mode offers name the agent reviewer for both verify and decide.
   const receipt = f.finish('revise-task');
   const id = receipt.receiptId;
-  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'fail', 0, { verdict: 'FAIL' }));
+  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'fail', 0, { verdict: 'FAIL', criterionOutcomes: [{ criterionId: 'c1', verdict: 'fail' }] }));
   const failed = publicReceiptById(f.store, id);
   assert.equal(failed.state, 'submitted');
   assert.equal(failed.review.state, 'pending');
@@ -201,7 +201,7 @@ test('FAIL verdict and revision request read truthfully, and a later acceptance 
   assert.deepEqual(f.stored(id), receipt); // revision requests never stamp either
   // revision_requested is not terminal: a fresh PASS and an acceptance
   // move the same receipt to the train's verified state.
-  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass-2', 2, { verdict: 'PASS' }));
+  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass-2', 2, { verdict: 'PASS', criterionOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
   f.reviews.decide('commons', REVIEWER, id, f.input(receipt, 'accept-2', 3, { decision: 'accepted' }));
   const accepted = publicReceiptById(f.store, id);
   assert.equal(accepted.state, 'verified');

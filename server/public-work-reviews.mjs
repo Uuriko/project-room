@@ -3,6 +3,7 @@ import { validId, roomPolicy } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
+import { criteriaWithIds, criterionOutcomesAgainst } from './criteria.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
 
@@ -112,7 +113,7 @@ export class PublicWorkReviews {
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria, criteria: scope.offer.criteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -179,6 +180,18 @@ export class PublicWorkReviews {
     receipt.verification = receipt.executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : (receipt.verification ?? 'hash_only');
     receipt.verified = { by: review.decision.actorId, at: review.decision.at,
       reviewRevision: review.revision, passVerdict: review.verification?.verdict ?? null };
+    // #3613: when the accepted verdict carried criteria-level outcomes,
+    // they ride the public record, beside the pinned criteria they cite
+    // (ids derived from the offer's terms, which the receipt's
+    // termsVersion pins). An acceptance with no cited verification leaves
+    // the record exactly as the #3546 stamp left it.
+    if (review.verification?.criterionOutcomes) {
+      const offerRow = this.db.prepare('SELECT terms FROM project_offers WHERE offer_id=?').get(receipt.taskId);
+      if (offerRow) {
+        try { receipt.criteria = criteriaWithIds(JSON.parse(offerRow.terms).acceptanceCriteria); } catch { /* terms unreadable: outcomes ride alone */ }
+      }
+      receipt.criterionOutcomes = review.verification.criterionOutcomes;
+    }
     this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
     projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
   }
@@ -186,7 +199,10 @@ export class PublicWorkReviews {
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
     const keys = ['requestId', 'expectedReviewRevision', 'taskId', 'expectedTermsVersion', 'generation', 'artifactSha256', 'reason', action === 'decide' ? 'decision' : 'verdict'];
-    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => keys.includes(key)), 'Unexpected or missing review fields');
+    // #3613: a verify may carry criterionOutcomes (required below when the
+    // offer carries criteria); no other action accepts the field.
+    const allowed = action === 'verify' ? [...keys, 'criterionOutcomes'] : keys;
+    check(input && typeof input === 'object' && !Array.isArray(input) && keys.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => allowed.includes(key)), 'Unexpected or missing review fields');
     check(validId(input.requestId) && validId(input.taskId) && Number.isSafeInteger(input.expectedReviewRevision) && input.expectedReviewRevision >= 0
       && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 && Number.isSafeInteger(input.generation) && input.generation > 0
       && typeof input.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(input.artifactSha256), 'Invalid review binding');
@@ -219,6 +235,14 @@ export class PublicWorkReviews {
       if (['accepted', 'rejected'].includes(current.state)) fail(409, 'review_final', 'Review decision is final');
       const at = new Date(this.store.now()).toISOString();
       if (action === 'verify') {
+        // #3613: per-criterion outcomes are part of the verdict, mirroring
+        // the bounty lane's citationsAgainstRubric discipline — when the
+        // offer carries criteria (pinned by the receipt's termsVersion),
+        // the verifier cites every criterion with a pass|fail outcome;
+        // an aggregate PASS/FAIL alone no longer records.
+        const criteriaTexts = Array.isArray(scope.offer.acceptanceCriteria) ? scope.offer.acceptanceCriteria : [];
+        const criterionOutcomes = criteriaTexts.length > 0 || input.criterionOutcomes !== undefined
+          ? criterionOutcomesAgainst(input.criterionOutcomes, criteriaTexts, check) : null;
         // #3547 executed evidence: a PASS is recorded only after the
         // platform re-hashes the stored submission bytes itself and finds
         // them identical to the hash the receipt was issued under. A
@@ -233,6 +257,7 @@ export class PublicWorkReviews {
           executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
         }
         current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
+          ...(criterionOutcomes ? { criterionOutcomes } : {}),
           ...(executedChecks ? { executedChecks } : {}) };
       } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');

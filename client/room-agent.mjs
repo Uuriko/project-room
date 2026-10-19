@@ -898,11 +898,12 @@ export class RoomAgentClient {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { appendPullRequest: pullRequest, expectedClaimedAt, expectedHistoryLength }, signal);
   }
-  reviewWorkItem(id, { note, verdict, summary, url, expectedBasis, signal } = {}) {
+  reviewWorkItem(id, { note, verdict, summary, url, expectedBasis, criterionOutcomes, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
       { ...(note === undefined ? {} : { note }), ...(verdict === undefined ? {} : { verdict }),
         ...(summary === undefined ? {} : { summary }), ...(url === undefined ? {} : { url }),
-        ...(expectedBasis === undefined ? {} : { expectedBasis }) }, signal);
+        ...(expectedBasis === undefined ? {} : { expectedBasis }),
+        ...(criterionOutcomes === undefined ? {} : { criterionOutcomes }) }, signal);
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,

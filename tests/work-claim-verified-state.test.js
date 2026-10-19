@@ -188,7 +188,10 @@ test("verify: a delivery that declares its own criterion not_met fails coverage"
   const delivered = updateWork(item, "quill", { state: "delivered",
     delivery: bundle({ criteria: [{ criterion: "tests green", status: "not_met" }] }) });
   assert.equal(delivered.state, "delivered");
-  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "looks fine at a glance" });
+  // #3613: the reviewer's own outcome may (wrongly) say pass — the platform
+  // coverage check still reads the delivery's declared not_met and blocks.
+  const reviewed = recordReview(delivered, "sage", { verdict: "approve", summary: "looks fine at a glance",
+    criterionOutcomes: [{ criterionId: "c1", verdict: "pass" }] });
   assert.throws(() => updateWork(reviewed, "sage", { state: "done", reviewedBy: "sage", authority: true }),
     error => error.code === "delivery_check_failed" && /criteria_coverage/.test(error.message));
 });

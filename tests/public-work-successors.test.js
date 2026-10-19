@@ -24,7 +24,7 @@ function fixture(t, { mixed = false, linked = false } = {}) {
   store.publicWorkClaims.act('parent',producer.secret,'claim',{requestId:'claim',expectedTermsVersion:1});
   const receipt=store.publicWorkClaims.act('parent',producer.secret,'finish',{requestId:'finish',expectedTermsVersion:1,generation:1,artifactText:'Original bytes 🐈',checksReported:[]}).receipt;
   const tuple={taskId:'parent',expectedTermsVersion:1,generation:1,artifactSha256:receipt.artifact.sha256,reason:'Private owner feedback does not become public task text'};
-  if(mixed) store.publicWorkReviews.verify('commons','reviewer',receipt.receiptId,{...tuple,requestId:'verify',expectedReviewRevision:0,verdict:'PASS'});
+  if(mixed) store.publicWorkReviews.verify('commons','reviewer',receipt.receiptId,{...tuple,requestId:'verify',expectedReviewRevision:0,verdict:'PASS',criterionOutcomes:[{criterionId:'c1',verdict:'pass'}]});
   const revised=store.publicWorkReviews.decide('commons','owner',receipt.receiptId,{...tuple,requestId:'revision',expectedReviewRevision:mixed?1:0,decision:'revision_requested'});
   const input={requestId:'follow-up',expectedReviewRevision:revised.review.revision,taskId:'parent',expectedTermsVersion:1,generation:1,artifactSha256:receipt.artifact.sha256,successorTaskId:'child',terms:{...terms,title:'Improve the result',summary:'Explicit owner-authored public instructions'},repositoryRef:'main',files:['result.txt']};
   t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true});});
@@ -47,7 +47,7 @@ test('explicit follow-up preserves parent/PASS/credits and uses the same public 
   assert.notEqual(receipt.receiptId,f.receipt.receiptId);assert.equal(f.store.publicWorkReviews.inspect('commons','owner',receipt.receiptId).review.state,'pending');
   const childReview={taskId:'child',expectedTermsVersion:1,generation:receipt.generation,artifactSha256:receipt.artifact.sha256,reason:'Independent review of revised result'};
   assert.throws(()=>f.store.publicWorkReviews.decide('commons','owner',receipt.receiptId,{...childReview,requestId:'early-accept',expectedReviewRevision:0,decision:'accepted'}),code('review_pass_required'));
-  f.store.publicWorkReviews.verify('commons','reviewer',receipt.receiptId,{...childReview,requestId:'child-pass',expectedReviewRevision:0,verdict:'PASS'});
+  f.store.publicWorkReviews.verify('commons','reviewer',receipt.receiptId,{...childReview,requestId:'child-pass',expectedReviewRevision:0,verdict:'PASS',criterionOutcomes:[{criterionId:'c1',verdict:'pass'}]});
   assert.equal(f.store.publicWorkReviews.decide('commons','owner',receipt.receiptId,{...childReview,requestId:'child-accept',expectedReviewRevision:1,decision:'accepted'}).review.state,'accepted');
   assert.deepEqual(original(f),before);assert.equal(f.store.db.prepare('SELECT count(*) n FROM identity_links WHERE identity_id=?').get(f.other.identityId).n,0);assert.equal(f.store.db.prepare('SELECT enabled FROM public_work_claim_writer_permit').get().enabled,0);
 });
