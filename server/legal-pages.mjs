@@ -9,7 +9,7 @@ export const LEGAL_CACHE_CONTROL = "public, max-age=3600";
 // privacy policy says the page policy permits it, so legal pages do too.
 export const LEGAL_PAGE_CSP = "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 export const REPORT_PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
-export const LEGAL_SITEMAP_PATHS = Object.freeze(["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]);
+export const LEGAL_SITEMAP_PATHS = Object.freeze(["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal", "/contact"]);
 export const LEGAL_FOOTER_LINKS = `<a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/subprocessors">Subprocessors</a> · <a href="/acceptable-use">Acceptable use</a> · <a href="/report">Report</a> · <a href="mailto:potter@trydemigod.com">Abuse</a>`;
 export const ABUSE_EMAIL = "potter@trydemigod.com";
 
@@ -17,6 +17,7 @@ const PAGE_FILES = Object.freeze({
   "/terms": "terms.md",
   "/privacy": "privacy.md",
   "/acceptable-use": "acceptable-use.md",
+  "/contact": "contact.md",
 });
 
 export function reportHref(kind, target) {
@@ -97,6 +98,7 @@ function indexHtml() {
 <li><a href="/privacy">Privacy Policy</a></li>
 <li><a href="/subprocessors">Subprocessors</a></li>
 <li><a href="/acceptable-use">Acceptable use</a></li>
+<li><a href="/contact">Contact</a></li>
 </ul>`,
   });
 }

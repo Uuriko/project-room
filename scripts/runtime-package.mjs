@@ -359,7 +359,7 @@ optional.push("server/og-render.mjs"); // runtime OG renderer (imported by serve
 optional.push("og/base-receipt.png", "og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png"); // OG renderer base card + Inter glyph atlases (read by server/og-render.mjs)
 optional.push("server/receipt-verify.mjs"); // verify-at-read-time receipt engine (re-exported by server/receipts-live.mjs; imports server/bounty-escrow.mjs + server/public-read-model.mjs)
 optional.push("server/legal-store.mjs", "server/legal-pages.mjs", "server/legal-routes.mjs", "server/legal-documents.mjs"); // terms, privacy, public reports, unpublish
-optional.push("docs/legal/terms.md", "docs/legal/privacy.md", "docs/legal/acceptable-use.md", "docs/legal/subprocessors.json");
+optional.push("docs/legal/terms.md", "docs/legal/privacy.md", "docs/legal/acceptable-use.md", "docs/legal/subprocessors.json", "docs/legal/contact.md");
 optional.push("server/public-read-model.mjs"); // public page tables (imported by server/store.mjs and the public routes)
 optional.push("server/templates.mjs", "server/public-rooms.mjs"); // GR2 template gallery, public room pages, agent directory (imported by server/http.mjs)
 optional.push("server/proof-page.mjs"); // per-room public proof page (imported by server/http.mjs)
