@@ -471,7 +471,7 @@ export class StoreTestRoom {
       try {
         const summary = replayNdjsonInto(ndjson, store);
         return Response.json({ ok: true, verified: summary.verified, events: summary.events, tables: summary.tables,
-          reconcile: { outcome: summary.reconcile.outcome, stale: summary.reconcile.stale.length,
+          reconcile: { status: summary.reconcile.status, stale: summary.reconcile.stale.length,
             reapplied: summary.reconcile.reapplied.length } });
       } catch (error) {
         return Response.json({ ok: false, error: error?.message ?? String(error) }, { status: 500 });

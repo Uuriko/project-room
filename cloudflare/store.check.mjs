@@ -161,7 +161,7 @@ test('whole-store NDJSON restore replays into a pristine Durable Object and re-r
     // quiet and the replay succeeds.
     assert.equal(second.ok, true, `gated re-restore of a live DO failed: ${second.error ?? 'unknown'}`);
     assert.equal(second.verified, true);
-    assert.deepEqual(second.reconcile, { outcome: 'reconciled', stale: 0, reapplied: 0 },
+    assert.deepEqual(second.reconcile, { status: 'reconciled', stale: 0, reapplied: 0 },
       'the gate ran at the completion point and found no post-watermark drift');
   } finally { await mf.dispose(); }
 });
