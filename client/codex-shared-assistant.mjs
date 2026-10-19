@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { createCodexRuntimeHost } from "./codex-runtime.mjs";
 import { createRoomClient } from "./room-assistant-client.mjs";
+import { withAttachmentReferences, withAttachmentText } from "./shared-attachment-context.mjs";
 
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const stops = new Set(["pause_requested", "cancel_requested"]);
@@ -129,7 +130,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
           state: "working", summary: "Working on the shared request." });
       }
     } });
-  const inputs = async current => Promise.all(current.inputs.map(async entry => {
+  const inputs = async current => withAttachmentReferences(await Promise.all(current.inputs.map(async entry => {
     const message = await room.message(entry.sourceMessageId);
     if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
     // Preserve the conversation links a human sees when replying. References
@@ -140,7 +141,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
         .filter(field => typeof message[field] === "string" && message[field])
         .map(field => [field, message[field]])),
       conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
-  }));
+  })), await room.files());
   if (run.status === "resume_requested") {
     const prior = record.prior_result ? JSON.parse(record.prior_result) : null;
     if (prior?.resumeRevision !== run.revision) {
@@ -190,6 +191,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
       }
     })().catch(error => { if (error.code !== "assistant_revision_conflict") controller.abort(); }).finally(() => { polling = null; });
   }, pollMs);
+  const preparedInput = async () => ({ ...executionInput, inputs: await withAttachmentText(executionInput.inputs, id => room.file(id)), signal: controller.signal });
   let result;
   try {
     if (recovering) {
@@ -199,12 +201,12 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
         recovered = await runtime.reconcile(binding);
       }
       if (recovered.status === "not_started" && run.status === "working")
-        result = await runtime({ ...executionInput, signal: controller.signal }, { binding, previousBinding });
+        result = await runtime(await preparedInput(), { binding, previousBinding });
       else {
         if (recovered.status !== "completed") throw new Error("Shared runtime recovery required; original turn is not completed");
         result = { body: recovered.body };
       }
-    } else result = await runtime({ ...executionInput, signal: controller.signal }, { binding, previousBinding });
+    } else result = await runtime(await preparedInput(), { binding, previousBinding });
   } catch (error) {
     // Only observed terminal runtime state permits acknowledging a human Stop.
     const current = await read().catch(() => null);

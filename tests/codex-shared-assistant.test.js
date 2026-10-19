@@ -77,6 +77,34 @@ test("two humans' public ask runs through Codex and atomic publication without p
   const binding = JSON.parse(f.db.prepare("SELECT binding FROM codex_runtime_attempts").get().binding);
   assert.equal(binding.kind, "shared-assistant"); assert.equal(binding.runId, "shared");
 });
+test("committed request attachments reach the runtime through authenticated file routes", async t => {
+  const f = await setup(t);
+  f.f.store.roomAttachments.stage(f.f.keys.owner, "commons", { id: "request-notes", filename: "notes.txt", mediaType: "text/plain", data: Buffer.from("Use a single sign-in button.").toString("base64") });
+  f.f.store.roomAttachments.commit(f.f.keys.owner, "commons", { id: "request-notes", messageId: "shared-question" });
+  const result = await f.run();
+  assert.equal(result.result.status, "done");
+  const input = JSON.parse(f.calls.find(x => x.method === "turn/start").params.input[0].text).context.inputs[0];
+  assert.equal(input.attachments[0].text, "Use a single sign-in button.");
+  assert.equal(input.attachments[0].contentStatus, "read");
+  assert.equal(input.attachments[0].messageId, "shared-question");
+  assert.equal(JSON.stringify(input).includes(f.f.keys.owner), false);
+});
+test("an attachment committed during work triggers continuation before result publication", async t => {
+  const f = await setup(t, async ({ turnNumber, finish }) => {
+    if (turnNumber === 1) {
+      f.f.store.roomAttachments.stage(f.f.keys.guest, "commons", { id: "late-notes", filename: "notes.txt", mediaType: "text/plain", data: Buffer.from("Also support keyboard navigation.").toString("base64") });
+      f.f.store.roomAttachments.commit(f.f.keys.guest, "commons", { id: "late-notes", messageId: "shared-friend" });
+    }
+    finish("completed");
+  });
+  assert.equal((await f.run()).result.status, "done");
+  const turns = f.calls.filter(x => x.method === "turn/start");
+  assert.equal(turns.length, 2);
+  const changed = JSON.parse(turns[1].params.input[0].text).context.inputs;
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].memberId, "guest");
+  assert.equal(changed[0].attachments[0].text, "Also support keyboard navigation.");
+});
 test("Stop interrupts runtime and acknowledges only its observed terminal state", async t => {
   const f = await setup(t, async ({ api }) => {
     const current = (await api("owner")).runs[0];
