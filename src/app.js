@@ -5589,6 +5589,8 @@ function syncPublicReceipts() {
   const viewerId = session?.member?.id;
   const show = Boolean(state && viewerId && viewerId === state.room.ownerId);
   control.hidden = !show;
+  const hint = $("#public-receipts-hint");
+  if (hint) hint.hidden = !show;
   if (!show) return;
   box.checked = state.room.publicReceipts?.enabled === true;
   box.disabled = publicReceiptsBusy;
