@@ -27,6 +27,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { encodeRow } from "../server/persisted-row.mjs";
 import { GUEST_CREDENTIAL_TTL_MIN_MS } from "../server/guest-invites.mjs";
 import { agentsJson, llmsTxt } from "../server/agent-discovery.mjs";
@@ -267,8 +268,8 @@ test("anonymous identities that never activate expire; auth, link, and post keep
     const quiet = ids.create("Quiet Read", anon("203.0.113.14"));
     const internal = ids.create("Internal");
     store.transaction(() => ids.noteActivated(authed.identityId));
-    ids.link(owner, "commons", { identityId: linked.identityId, permissions: [] });
-    ids.link(owner, "commons", { identityId: posted.identityId, permissions: [] });
+    linkWithProof(store, owner, "commons", linked, { permissions: [] });
+    linkWithProof(store, owner, "commons", posted, { permissions: [] });
     store.db.prepare("UPDATE agent_identities SET activated_at=NULL WHERE identity_id IN (?, ?)").run(linked.identityId, posted.identityId);
     setTier(store.db, "commons", posted.identityId, "t2_standard", { updatedBy: "owner", nowMs: now });
     store.command(posted.secret, "commons", {

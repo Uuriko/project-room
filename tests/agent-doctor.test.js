@@ -11,6 +11,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { doctorHealthUrl } from "../scripts/agent-doctor.mjs";
+import { mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -100,10 +101,10 @@ test("doctor with only an origin looks for a saved connection first", async t =>
 });
 
 test("doctor reports HTTP access health without claiming native host or execution verification", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { origin, ownerCommons, store } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Doctor Bot");
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work", "complete_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work", "complete_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") });
   const base = mkdtempSync(join(tmpdir(), "doctor-healthy-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent"); // saveAgentConnection creates it; must not exist yet
@@ -218,10 +219,10 @@ test("signature table covers the stale-MCP-client and outdated-CLI failures", as
 });
 
 test("healthy doctor output carries no signature table", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { origin, ownerCommons, store } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Healthy Sig Bot");
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") });
   const base = mkdtempSync(join(tmpdir(), "doctor-sig-healthy-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent");
@@ -255,7 +256,7 @@ test("doctor never echoes the credential in output, healthy or not (RC-2026-09-1
   const origin = `http://127.0.0.1:${server.address().port}`;
   const { identityId, secret } = await createAgentIdentity(origin, "Quiet Doctor Bot");
   const owner = new RoomAgentClient({ origin, roomId: "lab", token: ownerLab, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "lab") });
   const base = mkdtempSync(join(tmpdir(), "doctor-secret-quiet-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent");

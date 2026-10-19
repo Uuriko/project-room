@@ -28,7 +28,7 @@ function serve(t, roomId = "commons") {
 function addAgent(store, roomId, token, memberId, displayName) {
   const secret = `pri_${memberId}${"s".repeat(43 - memberId.length)}`;
   const identity = store.identities.create(displayName, { secret });
-  linkWithProof(store, token, roomId, identity, { memberId, displayName, permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, token, roomId, { identityId: identity.identityId, secret }, { memberId, displayName, permissions: ["accept_work", "complete_work"] });
   return { secret, memberKey: store.issueAccessKey(roomId, memberId) };
 }
 
