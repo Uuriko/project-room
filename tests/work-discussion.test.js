@@ -14,6 +14,7 @@ import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
 import { selectedWorkDiscussion, discussionWindow } from "../server/work-discussion.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }), handles = new Set();
@@ -230,7 +231,7 @@ test('prepared MCP reads resume after a completed checkpoint without skipping a 
   for (const transport of ['stdio', 'hosted']) await t.test(transport, async t => {
   const f = await fixture(t);
   const identity = f.store.identities.create('Hosted observer');
-  f.store.identities.link(f.keys.owner, 'commons', { identityId: identity.identityId, permissions: [] });
+  linkWithProof(f.store, f.keys.owner, 'commons', identity, { permissions: [] });
   const mcp = transport === 'stdio' ? await f.open() : { async call(name, args) {
     const response = await fetch(`${f.origin}/room/mcp`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.secret}` },

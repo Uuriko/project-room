@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const WAKE_TOOLS = [
@@ -253,9 +254,7 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   const owner = store.identities.create("Pause owner");
   const peer = store.identities.create("Pause peer");
   const created = roomFor(store, rooms, owner);
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Pause peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Pause peer", permissions: [] });
   const outsider = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-1", reason: "away"
   }, store.identities.create("Pause outsider").secret);

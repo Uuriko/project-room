@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const ROOM = "commons";
 
@@ -77,10 +78,7 @@ async function fixture(t) {
   const enroll = async name => {
     const identity = store.identities.create(name);
     const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 32);
-    store.identities.link(ownerKey, ROOM, {
-      identityId: identity.identityId, memberId, displayName: name,
-      permissions: ["accept_work", "complete_work"],
-    });
+    linkWithProof(store, ownerKey, ROOM, identity, { memberId, displayName: name, permissions: ["accept_work", "complete_work"] });
     return { memberId, key: store.issueAccessKey(ROOM, memberId) };
   };
   return { store, ownerKey, call, enroll };

@@ -13,6 +13,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Deleting a message used to leave the text in the event log. PRIV-0 hid it
 // on read. This test is the write: after delete, the text is gone from storage
@@ -100,7 +101,7 @@ test("deleting a message removes its text from storage and every listed read", a
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Redaction reader");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Reader", permissions: [] });
+  linkWithProof(store, ownerKey, "commons", identity, { displayName: "Reader", permissions: [] });
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   cmd(T.MEMBER_ADDED, { memberId: "agent-priv", displayName: "Priv agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const agentKey = store.issueAccessKey("commons", "agent-priv");
@@ -197,7 +198,7 @@ test("deleting a message removes its text from storage and every listed read", a
   });
   const receiptVars = { roomId: "commons", messageId: "draft-1", needle: "Potter", workItemId: WORK_ITEM };
   const receiptIdentity = fixture.store.identities.create("Receipt reader");
-  fixture.store.identities.link(fixture.keys.owner, "commons", { identityId: receiptIdentity.identityId, displayName: "Receipt", permissions: [] });
+  linkWithProof(fixture.store, fixture.keys.owner, "commons", receiptIdentity, { displayName: "Receipt", permissions: [] });
   for (const row of MESSAGE_BODY_READS) {
     if (row.group !== "receipt" && row.group !== "mcp") continue;
     seen.add(row.id);

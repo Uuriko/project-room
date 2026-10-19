@@ -16,6 +16,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
 import { parseBootstrapArgs, parseAccountLinkArgs, slugRoomId, roomDeepLink } from "../scripts/bootstrap-agent-room.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 async function cli(origin, args, env = {}) {
@@ -120,9 +121,7 @@ test("unknown or malformed identity secrets are 401", async t => {
 
 test("owner transfers ownership to an agent member; the chain is auditable", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   const result = rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId, reason: "the agent runs this room now" });
   assert.equal(result.roomId, "commons");
   assert.equal(result.previousOwnerId, "owner");
@@ -151,9 +150,7 @@ test("owner transfers ownership to an agent member; the chain is auditable", asy
 
 test("transfer by a non-owner is 403", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   assert.throws(() => rooms.transfer(identity.secret, "commons", { toMemberId: "owner" }),
     err => err.status === 403 && err.code === "owner_required");
 });
@@ -166,9 +163,7 @@ test("transfer to an unknown or inactive member is a bare 404", async t => {
 
 test("an agent owner may set room policy and the room-wide spend allowance", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId });
   // Room-scoped owner powers work for the agent owner...
   const policy = store.command(identity.secret, "commons", {
@@ -198,9 +193,7 @@ test("an agent owner may archive its own room", async t => {
 
 test("transfer through the generic command path is auditable too", async t => {
   const { store, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   const result = store.command(ownerToken, "commons", {
     id: randomUUID(), type: "ownership.transferred", data: { toMemberId: identity.identityId }
   });
@@ -368,9 +361,7 @@ test("HTTP: owner transfers ownership; non-owner is refused", async t => {
   const { store, post } = await httpFixture(t);
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("HTTP Agent");
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "HTTP Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "HTTP Agent", permissions: ["accept_work"] });
   const memberToken = store.issueAccessKey("commons", identity.identityId);
   const refused = await post("/api/rooms/commons/ownership/transfer", {
     token: memberToken, data: { toMemberId: "owner", reason: "coup" }
@@ -668,9 +659,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.equal(guestMint.body?.error?.code, "guest_invite_account_session_required");
   // A non-owner agent member: denied on every admin surface.
   const other = await post("/room/api/agent-identities", { data: { displayName: "Other Agent" } });
-  store.identities.link(ownerSecret, "owner-den", {
-    identityId: other.body.identityId, displayName: "Other Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerSecret, "owner-den", other.body, { displayName: "Other Agent", permissions: ["accept_work"] });
   for (const path of [`${room}/reports`, `${room}/access-review`, `${room}/agent-connections`, `${room}/diagnostics`, `${room}/share-links`]) {
     const res = await get(path, other.body.secret);
     assert.equal(res.status, 403, `${path}: ${res.status}`);

@@ -214,8 +214,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
     // Work delivery crosses the actual HTTP + Durable Object SQLite boundary.
+    const workLinkCode = await json(await call(`/api/identities/${identity.identityId}/link-code`, { headers: identityHeaders,
+      data: { roomId: 'commons' } }), 201);
     await json(await call('/api/rooms/commons/identity-links', { headers: ownerHeaders,
-      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'] } }), 201);
+      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'], identityLinkCode: workLinkCode.linkCode } }), 201);
     const beatWork = () => call('/api/agent-heartbeats', { headers: identityHeaders,
       data: { hostId: 'worker-work-test', mode: 'pull-only', workWakes: true } });
     assert.equal((await json(await beatWork())).host.workWakes, true);
@@ -695,8 +697,11 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
     const { ownerKey } = await json(await call('/__test-provision'));
     const peer = await json(await call('/api/agent-identities', { displayName: 'Workers wake agent' }), 201);
     const ownerHeaders = { Authorization: `Bearer ${ownerKey}` }, identityHeaders = { Authorization: `Bearer ${peer.secret}` };
+    const peerLinkCode = await json(await call(`/api/identities/${peer.identityId}/link-code`, {
+      roomId: 'commons'
+    }, identityHeaders), 201);
     await json(await call('/api/rooms/commons/identity-links', {
-      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: []
+      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: [], identityLinkCode: peerLinkCode.linkCode
     }, ownerHeaders), 201);
     const key = await json(await call('/api/agent-keys', { scopes: ['heartbeats:report', 'heartbeats:read'] }, identityHeaders), 201);
     const peerHeaders = { Authorization: `Bearer ${key.credential}` };

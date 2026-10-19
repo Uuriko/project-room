@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -44,10 +45,7 @@ function seat(t) {
   let at = Date.now();
   f.store.now = () => at;
   const identity = f.store.identities.create("Pull Host");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "pullhost",
-    displayName: "Pull Host", permissions: [],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "pullhost", displayName: "Pull Host", permissions: [] });
   return { f, identity, clock: { advance: ms => { at += ms; } } };
 }
 

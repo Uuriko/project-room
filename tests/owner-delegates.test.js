@@ -21,6 +21,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { guestAgentMemberId } from "../server/guest-agent-links.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 
 async function serve(t) {
@@ -51,10 +52,7 @@ async function serve(t) {
 // active member — the grant binds to the identity, never to a bare secret.
 function makeLinkedAgent(store, ownerKey, name = "Delegate Agent") {
   const agent = store.identities.create(name);
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: agent.identityId, displayName: name,
-    permissions: ["accept_work", "complete_work", "steer", "verify"]
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", agent, { displayName: name, permissions: ["accept_work", "complete_work", "steer", "verify"] });
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   return { ...agent, memberId: linked.memberId };
 }

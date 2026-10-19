@@ -13,6 +13,7 @@ import { AgentWakeClient } from '../client/agent-wake.mjs';
 const fixture = `
 import entry, { ProjectRoom } from './room.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 export class WakeTestRoom extends ProjectRoom {
  async fetch(request) {
   const path = new URL(request.url).pathname;
@@ -20,7 +21,7 @@ export class WakeTestRoom extends ProjectRoom {
    const owner = this.store.identities.create('Synthetic wake owner');
    new AgentRooms(this.store).create(owner.secret,{roomId:'wake-room',title:'Wake test',purpose:'Disposable Worker adapter'});
    const identity = this.store.identities.create('Synthetic listener');
-   this.store.identities.link(owner.secret,'wake-room',{identityId:identity.identityId,memberId:'linked-worker',displayName:'Listener',permissions:[]});
+   linkWithProof(this.store, owner.secret, 'wake-room', identity, { memberId:'linked-worker', displayName:'Listener', permissions:[] });
    return Response.json({identity,ownerSecret:owner.secret,roomKey:this.store.issueAccessKey('wake-room','linked-worker')});
   }
   if (path === '/__fixture/state') return Response.json({hosts:this.store.db.prepare('SELECT count(*) n FROM agent_hosts').get().n,

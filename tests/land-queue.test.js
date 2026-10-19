@@ -18,6 +18,7 @@ import {
 } from "../server/land-queue.mjs";
 import { createWork, claimWork } from "../server/work-claims.mjs";
 import { landCardHtml, shortSha } from "../src/land-queue-board.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const SHA = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -91,9 +92,7 @@ function spyWake(t, store) {
 
 function linkOffline(store, ownerKey) {
   const identity = store.identities.create("Lander");
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Lander", permissions: []
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", identity, { displayName: "Lander", permissions: [] });
   const seen = store.now() - 10 * 60 * 1000;
   store.db.prepare(`INSERT INTO agent_hosts
     (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)

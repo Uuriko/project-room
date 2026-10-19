@@ -43,7 +43,7 @@ test("fixtures: linkToRoom returns a fresh owner key; issuing it revokes f.keys.
   const scenario = invariant("smoke-link", "link helper semantics")
     .given(async (f, ctx) => {
       const agent = mintIdentity(f, "link-probe");
-      const { ownerKey } = linkToRoom(f, agent.identityId, ["accept_work"]);
+      const { ownerKey } = linkToRoom(f, agent, ["accept_work"]);
       ctx.ownerKey = ownerKey;
       ctx.workItemId = proposeWork(f, { actor: ownerKey, title: "linked probe" });
       return ctx;

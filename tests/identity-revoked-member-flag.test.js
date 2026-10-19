@@ -6,10 +6,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function linkedAgent(f, name) {
   const agent = f.store.identities.create(name);
-  f.store.identities.link(f.keys.owner, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  linkWithProof(f.store, f.keys.owner, "commons", agent, { permissions: ["accept_work"] });
   return agent;
 }
 

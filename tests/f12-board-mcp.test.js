@@ -61,6 +61,7 @@ import { createWork, claimWork, updateWork, recordReview } from "../server/work-
 import { SOURCE_REVISION } from "../server/version.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { setTier, demoteToReadonly } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const pageValue = reply => {
   assert.equal(reply.status, 200);
@@ -267,7 +268,7 @@ test("stored Board reads preserve member, guest, scoped-key and read-only visibi
   const nonmemberMcp = await f.mcp({}, stranger.secret);
   assert.equal(nonmemberMcp.body.result?.isError ?? Boolean(nonmemberMcp.body.error), true);
   const peer = f.store.identities.create("Read-only peer");
-  f.store.identities.link(f.identity.secret, f.roomId, { identityId: peer.identityId, displayName: "Read-only peer", permissions: [] });
+  linkWithProof(f.store, f.identity.secret, f.roomId, peer, { displayName: "Read-only peer", permissions: [] });
   demoteToReadonly(f.store.db, f.roomId, peer.identityId, { updatedBy: f.ownerId, nowMs: Date.now() });
   const guest = f.store.identities.create("Guest reader");
   const guestId = "guest-agent-board-read";

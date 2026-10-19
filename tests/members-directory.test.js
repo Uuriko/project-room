@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -36,9 +37,7 @@ function setup() {
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("skills-agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  f.store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Skills Agent", permissions: ["accept_work"], memberId: "skills-agent",
-  });
+  linkWithProof(f.store, ownerKey, "commons", identity, { displayName: "Skills Agent", permissions: ["accept_work"], memberId: "skills-agent" });
   const roomKey = f.store.issueAccessKey("commons", "skills-agent");
   return { f, identity, roomKey };
 }

@@ -10,6 +10,7 @@ import { readWorkSelection, workReadRefusal } from '../client/work-preparation.m
 import { textVersion } from '../server/text-results.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { openMcpTestClient } from '../scripts/mcp-test-client.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture(), id = 'test-handoff';
@@ -37,7 +38,7 @@ test('one review read returns exact evidence and current gates through hosted an
   assert.equal(empty.review.result.kind, 'none');
   const completion = f.complete(body);
   const reader = f.store.identities.create('Review reader');
-  f.store.identities.link(f.keys.owner, 'commons', { identityId: reader.identityId, displayName: 'Review reader', permissions: [] });
+  linkWithProof(f.store, f.keys.owner, 'commons', reader, { displayName: 'Review reader', permissions: [] });
   const beforeRead = f.store.room('commons').sequence;
   const config = join(f.directory, 'agent'); saveAgentConnection(config, { ...f.config, memberId: reader.identityId, token: reader.secret });
   const stdio = await openMcpTestClient(config); t.after(() => stdio.close());

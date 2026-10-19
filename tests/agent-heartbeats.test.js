@@ -17,6 +17,7 @@ import {
 import { buildWakePing, WAKE_PING_EVENT } from "../server/outbound-webhooks.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -303,10 +304,7 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent",
-    displayName: "Wake Agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent", displayName: "Wake Agent", permissions: ["accept_work"] });
   // Consent-bound DMs: the owner's test DM to wakeagent needs approval.
   f.store.dmConsents.request("commons", "owner", "wakeagent", "test fixture");
   f.store.dmConsents.decide("commons", "wakeagent", "owner", "approve");
@@ -353,10 +351,7 @@ test("fresh wakeable agents retain mentions while non-agent mentions queue nothi
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent-2");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent2",
-    displayName: "Wake Agent Two", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent2", displayName: "Wake Agent Two", permissions: ["accept_work"] });
   await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret);
 
   // Fresh heartbeat does not prove message delivery; retain the targeted pointer.
@@ -376,10 +371,7 @@ test("room presence lists agent members with additive host presence", async t =>
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent-3");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent3",
-    displayName: "Wake Agent Three", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent3", displayName: "Wake Agent Three", permissions: ["accept_work"] });
   const presenceOf = async () => {
     const res = await get(origin, "/api/rooms/commons/presence", f.keys.owner);
     assert.equal(res.status, 200);
@@ -446,8 +438,7 @@ test("opted-in work wakes survive retries and obey current pause, preferences, r
   let at = Date.now(); f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("work-wake-agent");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, memberId: "workwake",
-    displayName: "Work wake", permissions: ["accept_work"] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "workwake", displayName: "Work wake", permissions: ["accept_work"] });
   const heartbeat = async extra => {
     const response = await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", ...extra }, identity.secret);
     assert.equal(response.status, 200); return response.json();

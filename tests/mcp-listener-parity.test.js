@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-wake-"));
@@ -89,7 +90,7 @@ test("MCP room lease validates current membership and rolls back heartbeat on re
   const refused = await call(origin, "heartbeat_set", args, foreign.secret);
   assert.equal(refused.value.code, "room_mismatch");
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_hosts WHERE agent_id=?").get(foreign.identityId).n, 0);
-  const linked = store.identities.link(owner.secret, "wake-den", { identityId: foreign.identityId, displayName: "Linked peer", permissions: [] });
+  const linked = linkWithProof(store, owner.secret, "wake-den", foreign, { displayName: "Linked peer", permissions: [] });
   const initial = await call(origin, "heartbeat_set", args, foreign.secret);
   assert.equal(initial.value.listener.acquired, true);
   const member = store.room("wake-den").state.members[linked.memberId];
@@ -104,7 +105,7 @@ test("MCP scoped lease cannot cross rooms or survive membership revocation", asy
   const owner = store.identities.create("Lease person");
   roomFor(store, rooms, owner);
   const peer = store.identities.create("Peer");
-  const linked = store.identities.link(owner.secret, "wake-den", { identityId: peer.identityId, displayName: "Peer", permissions: [] });
+  const linked = linkWithProof(store, owner.secret, "wake-den", peer, { displayName: "Peer", permissions: [] });
   const key = store.agentPlugin.issueApiKey({ identityId: peer.identityId, scopes: ["mcp:wake", "mcp:room:wake-den"] });
   const args = { hostId: "scoped", mode: "pull-only", listenerLease: true };
   const deniedKey = store.agentPlugin.issueApiKey({ identityId: peer.identityId, scopes: ["mcp:room:wake-den"] });

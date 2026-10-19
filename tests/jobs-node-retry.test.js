@@ -13,6 +13,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { wireNodeJobs } from "../server/jobs.mjs";
 import { backoffDelayMs, MAX_DELIVERY_ATTEMPTS } from "../server/webhook-dispatch.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const publicDns = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
 
@@ -26,9 +27,7 @@ test("node scheduler retries a failing webhook receiver then dead-letters it", a
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Hook Agent");
-  store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "hookagent", displayName: "Hook Agent", permissions: []
-  });
+  linkWithProof(store, ownerKey, "commons", identity, { memberId: "hookagent", displayName: "Hook Agent", permissions: [] });
   const posts = [];
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
