@@ -9,7 +9,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -285,7 +285,7 @@ test('spawn builds argv from kind template; caller argv is ignored', async () =>
   const call = fixtureA.callsFor('agent.start').at(-1);
   assert.deepEqual(call.params.argv, ['claude']);
   assert.ok(!('LD_PRELOAD' in (call.params.env ?? {})));
-  assert.equal(call.params.cwd, join(dir, 'ws-a'));
+  assert.equal(call.params.cwd, realpathSync(join(dir, 'ws-a')));
   assert.ok(json.handle, 'bridge issues an occupant handle');
 });
 
