@@ -232,8 +232,6 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
   for (const messageId of affected) {
     const message = byId.get(messageId);
     if (!message || typeof message.authorId !== "string" || typeof message.createdAt !== "string") continue;
-    const reactions = message.reactions && typeof message.reactions === "object" && Object.keys(message.reactions).length
-      ? JSON.stringify(message.reactions) : null;
     upsert.run(
       roomId, message.id, sequenceById.get(message.id),
       textOrNull(message.channelId),
@@ -246,7 +244,7 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
       message.createdAt,
       textOrNull(message.editedAt),
       textOrNull(message.deletedAt),
-      reactions,
+      null, // reactions_json: reactions were removed; the column stays for old rows
       pinned.has(message.id) ? 1 : 0,
       JSON.stringify(currentRecord(message)),
       JSON.stringify(reducerExtras(message))
@@ -1041,8 +1039,8 @@ function certifyMessagesParity(store, target = null) {
   const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
   for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
-    let record, reactions, extras;
-    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
+    let record, extras;
+    try { record = JSON.parse(row.record_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
     catch { /* invalid records fail parity */ }
     if (!message || !isDeepStrictEqual(record, currentRecord(message))
       || (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message)))
@@ -1055,8 +1053,7 @@ function certifyMessagesParity(store, target = null) {
       || row.work_item_id !== textOrNull(message.workItemId)
       || row.created_at !== message.createdAt || row.edited_at !== textOrNull(message.editedAt)
       || row.deleted_at !== textOrNull(message.deletedAt)
-      || row.pinned !== (pinned.has(message.id) ? 1 : 0)
-      || !isDeepStrictEqual(reactions, message.reactions ?? {})) {
+      || row.pinned !== (pinned.has(message.id) ? 1 : 0)) {
       throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs`);
     }
   }
