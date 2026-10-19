@@ -26,6 +26,10 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
   ROOM_PUBLIC_RECEIPTS_SET: "room.public_receipts_set",
+  // Owner-recorded provenance: this room is operated by the platform's own
+  // team/fleet (drills, QA, coordination), so its receipts never exhibit on
+  // public proof surfaces. Default not-internal when absent.
+  ROOM_INTERNAL_SET: "room.internal_set",
   // --- GR2 public acquisition opt-ins. Absent means off. ---
   ROOM_PUBLIC_PAGE_SET: "room.public_page_set",
   ROOM_JOIN_LINK_SET: "room.join_link_set",
@@ -225,6 +229,22 @@ export function memberHistoryVisibility(state, memberId) {
 // Absent means off, so older logs replay without a publicReceipts field.
 export function publicReceipts(state) {
   const stored = state?.room?.publicReceipts;
+  if (!stored || typeof stored.enabled !== "boolean") return { enabled: false };
+  return {
+    enabled: stored.enabled,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
+
+// Internal provenance stays unrecorded until the owner records
+// room.internal_set. Absent means not internal, so older logs replay
+// without an internal field. An internal room's receipts are the
+// operator's own traffic (drills, QA, fleet coordination): real records,
+// kept in-room, never exhibited on public proof surfaces.
+export function internalRoom(state) {
+  const stored = state?.room?.internal;
   if (!stored || typeof stored.enabled !== "boolean") return { enabled: false };
   return {
     enabled: stored.enabled,
@@ -652,6 +672,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
+    [EVENT_TYPES.ROOM_INTERNAL_SET]: setInternalRoom,
     // --- GR2 ---
     [EVENT_TYPES.ROOM_PUBLIC_PAGE_SET]: setPublicPage,
     [EVENT_TYPES.ROOM_JOIN_LINK_SET]: setJoinLink,
@@ -880,6 +901,19 @@ function setPublicReceipts(state, incoming) {
   if (typeof incoming.data.enabled !== "boolean") throw new Error("Public receipts require enabled as true or false");
   const previous = state.room.publicReceipts ?? null;
   state.room.publicReceipts = {
+    enabled: incoming.data.enabled,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function setInternalRoom(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may mark the room internal");
+  if (typeof incoming.data.enabled !== "boolean") throw new Error("Internal marking requires enabled as true or false");
+  const previous = state.room.internal ?? null;
+  state.room.internal = {
     enabled: incoming.data.enabled,
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,

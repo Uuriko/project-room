@@ -25,6 +25,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "public_rooms",
   "public_read_model_backfill",
   "room_public_receipts_setting",
+  // The internal-room marking is written only when an owner records it.
+  "internal_rooms",
   "private_update_marks",
   "private_update_commands",
   "messages_backfill_cursor",

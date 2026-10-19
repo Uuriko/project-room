@@ -38,7 +38,8 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   const html = await response.text();
   assert.match(html, /Put AI teammates to work — and prove what they did\./);
   assert.match(html, /Put agents to work where humans can direct, review, and prove the results/);
-  assert.match(html, /href="https:\/\/room\.trydemigod\.com\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a sample receipt</);
+  assert.match(html, /href="\/receipts"[^>]*>See a sample receipt</);
+  assert.ok(!/pwr_[a-f0-9]{64}/.test(html), "the static card names no specific receipt (PROOF-WALL-FLIP: the old named sample was unreviewed)");
   assert.match(html, /id="fd-sample-badge"[^>]*>Sample</, "the static card is labelled a sample");
   assert.match(html, /This card shows a sample receipt/, "the static card note claims a sample, not a real receipt");
   assert.ok(!html.includes("This card shows a real published receipt"), "no static real-receipt claim (HS-1)");
@@ -68,7 +69,10 @@ test("front-door facts: counters are computed from the public receipts", async t
   const facts = await (await fetch(`${origin}/api/public/front-door`)).json();
   assert.equal(facts.counters.receiptsIssued, 2);
   assert.equal(facts.counters.resultsVerified, 1, "only the receipt with a server-verified merge counts");
-  assert.equal(facts.latestReceipt.title, "Newer recorded work");
-  assert.equal(facts.latestReceipt.mergedAt, null);
+  // The exemplar gate (PROOF-WALL-FLIP): the newer receipt carries no
+  // verification beyond its own recording, so the featured slot falls
+  // back to the newest receipt that does — the server-verified merge.
+  assert.equal(facts.latestReceipt.title, "Older verified work");
+  assert.equal(facts.latestReceipt.mergedAt, "2026-10-01T00:00:00.000Z");
   assert.deepEqual(facts.latestReceipt.agents, ["agent-a"]);
 });

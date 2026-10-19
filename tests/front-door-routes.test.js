@@ -70,9 +70,33 @@ test("frontDoorFacts: counters computed from the receipts; HEAD passes the head 
   assert.equal(calls.json.headOnly, true);
   assert.equal(calls.json.body.counters.receiptsIssued, 2);
   assert.equal(calls.json.body.counters.resultsVerified, 1, "only the receipt with a server-recorded merge counts");
-  assert.equal(calls.json.body.latestReceipt.title, "Newer recorded work");
-  assert.equal(calls.json.body.latestReceipt.mergedAt, null);
-  assert.equal(calls.json.body.latestReceipt.pullRequest, null);
+  // The exemplar gate (PROOF-WALL-FLIP): the newer receipt is
+  // unreviewed — recorded only — so it is never featured; the newest
+  // eligible receipt (the server-verified merge) is.
+  assert.equal(calls.json.body.latestReceipt.title, "Older verified work");
+  assert.equal(calls.json.body.latestReceipt.mergedAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(calls.json.body.latestReceipt.pullRequest, "https://github.com/Uuriko/project-room/pull/1");
   assert.deepEqual(calls.json.body.latestReceipt.agents, ["agent-a"]);
   assert.deepEqual(calls.json.body.latestReceipt.humans, ["human-b"]);
+});
+
+test("frontDoorFacts: a member-verified result receipt is eligible; self-attested alone is not", t => {
+  const store = openStore(t);
+  const seedTier = (id, title, at, tier) => store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, verification_state, hashes_json, at, start_href)
+    VALUES (?, ?, 'work-claim', 'commons', 'commons', 'Commons', '["agent-a"]', '[]', NULL, NULL, ?, '{}', ?, 'https://room.trydemigod.com/?start=room')`)
+    .run(id, title, tier, at);
+  seedTier(`wcr_${"c".repeat(32)}`, "Self attested newest", "2026-10-06T00:00:00.000Z", "self_attested");
+  seedTier(`wcr_${"d".repeat(32)}`, "Member verified older", "2026-10-03T00:00:00.000Z", "verified");
+  const calls = callFacts(store);
+  assert.equal(calls.json.body.latestReceipt.title, "Member verified older",
+    "the newest eligible receipt wins; a self-attested receipt is never the exemplar");
+});
+
+test("frontDoorFacts: no eligible receipt reports latestReceipt null, never an unverified one", t => {
+  const store = openStore(t);
+  seedReceipt(store, { id: `pwr_${"b".repeat(64)}`, title: "Recorded only work", at: "2026-10-05T00:00:00.000Z", merged: false });
+  const calls = callFacts(store);
+  assert.equal(calls.json.body.counters.receiptsIssued, 1);
+  assert.equal(calls.json.body.latestReceipt, null);
 });

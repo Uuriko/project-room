@@ -416,6 +416,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // mirrored by the public read model (#3594). Same class as the four tables
   // above — older writers have no path to it.
   "room_public_receipts_setting",
+  // internal_rooms: the recorded per-room internal marking, mirrored by
+  // the public read model from the owner's room.internal_set record
+  // (PROOF-WALL-FLIP). Same class — older writers have no path to it.
+  "internal_rooms",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",

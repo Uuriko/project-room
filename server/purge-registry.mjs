@@ -1574,6 +1574,16 @@ const ROWS = [
     }
   },
   {
+    "table": "internal_rooms",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "room_public_receipts_setting",
     "key": "room_id",
     "action": "delete",

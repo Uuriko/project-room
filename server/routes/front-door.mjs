@@ -8,11 +8,32 @@
 // the route lives here, not inline in server/http.mjs.
 import { collectPublicReceipts } from "../receipts-live.mjs";
 
+// The featured exemplar is the front door's strongest claim, so it is
+// held to a stronger rule than the wall (PROOF-WALL-FLIP): only a
+// receipt carrying a verification beyond the worker's own report may
+// be featured — a server-verified merge, a member-verified completion
+// (a distinct member recorded the verdict), or a public-work receipt
+// stamped verified / system_checked, or carrying a reviewer's PASS.
+// A self-attested or hash-only receipt stays on the wall at its true
+// tier; it is never the exemplar. With no eligible receipt the card
+// shows the honest empty state (latestReceipt: null).
+export function exemplarEligible(receipt) {
+  if (!receipt || typeof receipt !== "object") return false;
+  if (receipt.mergedAt && receipt.pullRequest) return true;
+  if (receipt.verification && typeof receipt.verification === "object"
+    && receipt.verification.state === "verified") return true;
+  if (receipt.source === "public-work") {
+    if (receipt.state === "verified" || receipt.verification === "system_checked") return true;
+    if (receipt.review && receipt.review.verificationVerdict === "PASS") return true;
+  }
+  return false;
+}
+
 export function frontDoorFacts(ctx) {
   ctx.rate(`receipts:${ctx.remoteAddress}`, 120);
   ctx.res.setHeader("Cache-Control", "no-store");
   const receipts = collectPublicReceipts(ctx.store);
-  const latest = receipts[0] ?? null;
+  const latest = receipts.find(exemplarEligible) ?? null;
   return ctx.json(ctx.res, 200, {
     schema: "project-room-front-door/1",
     counters: {
