@@ -534,6 +534,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_land_tip` | 422 | itemId and a tip field are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_limit` | 422 | limit must be an integer 1..100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link` | 422 | Choose a short guest name | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_link_code_request` | 422 | roomId must name the existing room this code enrolls the identity into | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_access` | 422 | Choose guest, member or co_admin access | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_listener_lease` | 422 | listenerId must match [A-Za-z0-9._-]{1,128}; roomId a non-empty string or null; ttlMs positive | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_live_status` | 422 | Supply an account. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
