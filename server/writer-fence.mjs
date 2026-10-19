@@ -370,6 +370,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Durable live work claims: additive, verified on open, included in recovery.
   "work_claims",
   "work_claim_config",
+  // Claim-history spill (W3 data preservation): the append-only store for
+  // history stamps the SEC-2 cap trims out of work_claims rows. Purely
+  // additive and intentionally NOT fenced, same rationale as the claim
+  // rows themselves — the registry verifies its own schema on open.
+  "work_claim_history",
   // human_push_subscriptions (browser push for human members): one row per
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,
