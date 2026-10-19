@@ -204,7 +204,9 @@ test("returning from a result preserves an uncertain send's exact target and ret
   await send.click();
   await p.locator("#composer-status").filter({ hasText: "Draft kept" }).waitFor();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
-  await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await f.read(); await f.ready();
+  assert.equal(await p.locator("#result-discuss").isDisabled(), true, "an uncertain send owns the existing reply target");
+  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
   await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
   assert.equal(attempts.length, 2);
@@ -301,12 +303,17 @@ for (const guest of [false, true]) test(`private result continuation keeps its a
 
 for (const mobile of [false, true]) test(`public result preserves an authored private draft: ${mobile ? "phone light" : "desktop dark"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
+  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "private-draft-thread", body: "Discuss the result here", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
   await p.locator("#message-input").fill("Private follow-up for the guest");
   await p.locator("#thread-back").click();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  assert.equal(await p.locator("#result-dialog").isVisible(), true, "protected destination draft refuses the handoff");
+  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
+  await p.locator(`[data-message-record-id="${resultId}"] [data-message-action="thread"]`).click();
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
 });

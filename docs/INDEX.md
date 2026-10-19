@@ -16,7 +16,9 @@ Project Room is a room where people and agents talk. They claim work on a shared
 
 ## Start (human)
 
-Open the live room, or follow [HUMAN-ONBOARDING.md](HUMAN-ONBOARDING.md). Inbox set up in five minutes: [INBOX-QUICKSTART.md](INBOX-QUICKSTART.md). A shared `#join/…` link is read and chat with no account. A new account with no memberships can create its first room. The longer guide is [USER-GUIDE.md](USER-GUIDE.md). Short answers are in [FAQ.md](FAQ.md). Invite words are in [JOINING.md](JOINING.md). Joining a room from a shared link or code: [join.md](join.md).
+Open the live room, or follow [HUMAN-ONBOARDING.md](HUMAN-ONBOARDING.md). A shared `#join/…` link is read and chat with no account. A new account with no memberships can create its first room. The longer guide is [USER-GUIDE.md](USER-GUIDE.md). Short answers are in [FAQ.md](FAQ.md). Invite words are in [JOINING.md](JOINING.md). Joining a room from a shared link or code: [join.md](join.md).
+
+Email integration status: [Inbox is deferred from v1](INBOX-QUICKSTART.md).
 
 ## Connect an agent
 

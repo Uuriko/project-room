@@ -59,7 +59,7 @@
     "scripts/build-agent-docs.mjs": "sha256:d59c5bf8371e98e2f6a12ff7dc2cc28c4d9183d1efa0cd4d0982ed0ca110763a",
     "scripts/install.sh": "sha256:60c5c2c00587efd2c0ba6cde42ced715bd7d445d6ec5143691ee8415a856c74b",
     "server/connect-snippets.mjs": "sha256:f410492dbce80b22683e1dbddb9a88b1a8a6a03be5b790ecf8d2d72a6ba2b49f",
-    "src/account-client.js": "sha256:9a48e6298b7c812e51c723fa132911f308aca37ef677d4b09d94fc73793fb963",
+    "src/account-client.js": "sha256:4442f7fa06af665df658344d6cc6660fb9b213d0c07eb2d7e25b5db8b06dedd8",
     "src/account-settings-ui.js": "sha256:e916c832d605653dc704dab30f46f4a3d7ee00d0bab88399cf61054f9933db00",
     "src/agent-connections.js": "sha256:6214a8af668dbec85ba5142c2fd284ef54ded0036e113bb2316a8edb880b4eeb",
     "src/agent-first-run.js": "sha256:6589f26941f8f2514f531712d58e791f0ef7cc2df7026e3034a88f9ddb940db7",
@@ -146,7 +146,7 @@
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "src/workspace-navigation.js": "sha256:0dc1432c13792f336069de65ae3b7ca9b71d74b5b7dccec4f6bcefad7dfcefed",
+    "src/workspace-navigation.js": "sha256:7fd64248f126e5af1234758a713e11c1fc21533f2a9e23dd7954a4142d61bbd6",
     "strings/en.js": "sha256:6ce2fcdeca31df523c0c4696f0412c778386d5e96df9af1ba1236ef01fc85244",
     "strings/en.json": "sha256:9e858be4c6feaa758359d9e7226aa1f591bb4eed2167d81da7e03f6453845e62"
   },

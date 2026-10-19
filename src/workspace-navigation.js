@@ -16,7 +16,8 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
     onNavigate(); sync(); onRooms();
   }
   function showRooms() {
-    browsing = false; onNavigate(); sync();
+    const wasBrowsing = browsing;
+    browsing = false; if (wasBrowsing) onNavigate(); sync();
     if (getRoom()) $("#conversation-title").focus({ preventScroll: true });
     else showRoomList();
   }

@@ -60,11 +60,12 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   await body.getByText("Email magic link").waitFor();
   assert.ok((await body.textContent()).includes("browser@example.invalid"));
 
-  // Honest provider-unconfigured states (no OAuth or mail bindings in the fixture).
-  for (const note of ["GitHub sign-in isn’t configured on this Room.",
-    "Google sign-in isn’t configured on this Room.", "Email delivery isn’t configured on this Room"]) {
-    await body.getByText(note, { exact: false }).first().waitFor();
+  // Unconfigured OAuth choices are omitted; account email recovery still
+  // explains unavailable delivery because it affects linked methods.
+  for (const provider of ["google", "github"]) {
+    assert.equal(await body.locator(`a[href="/api/auth/${provider}/link/start"]`).count(), 0);
   }
+  await body.getByText("Email delivery isn’t configured on this Room", { exact: false }).first().waitFor();
 
   // Disable the magic method through the real UI.
   await methodRow(page, "Email magic link").getByRole("button", { name: "Disable" }).click();

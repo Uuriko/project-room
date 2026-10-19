@@ -424,6 +424,12 @@ for (const outcome of ["success", "failure"]) {
       await route.fulfill({ status: outcome === "success" ? 200 : 401, headers: { "x-test-held": "brief" }, contentType: "application/json", body: JSON.stringify(outcome === "success" ? body : { error: { message: "Obsolete failure" } }) });
     });
     await page.locator("#rb-refresh-button").click(); await held;
+    const initialSlot = await (await page.context().request.get(`${origin}/api/account-session`)).json();
+    const revoked = await page.context().request.delete(`${origin}/api/account-session`, {
+      headers: { Origin: origin, "X-CSRF-Token": initialSlot.csrf, "X-Session-Binding": initialSlot.sessionBinding },
+      data: { expectedSessionRevision: initialSlot.sessionRevision }
+    });
+    assert.equal(revoked.status(), 200);
     key = store.issueAccessKey("commons", "owner"); await enter();
     release();
     await page.waitForFunction(() => window.heldReads.brief);

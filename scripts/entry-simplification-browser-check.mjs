@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from './auth-signin.mjs';
-import { clickChrome, ensureSidebarOpen, openSettings, closeSettings } from './room-chrome.mjs';
+import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openSettings, closeSettings } from './room-chrome.mjs';
 
 for (const width of [1280, 390]) test(`entry recovery and room search at ${width}`, { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -32,7 +32,8 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   assert.equal(await page.locator('#assistant-setup').isVisible(), true, 'assistant setup is available in settings');
   await closeSettings(page);
   assert.equal(await page.locator('#room-assistant').isVisible(), false, 'ordinary chat remains quiet');
-  await ensureSidebarOpen(page);
+  if (width > 940) await ensureSidebarOpen(page);
+  else await ensureSidebarClosed(page);
   await page.locator('#nav-rooms').click();
   await page.locator('#account-rooms-list button').first().waitFor();
   await page.getByText('Room notes', { exact: true }).waitFor();
