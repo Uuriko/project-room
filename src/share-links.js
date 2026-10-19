@@ -622,7 +622,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (resume) redemptionId = resume.redemptionId;
     onAccountSignin(null); mirrorJoin();
     $("#join-account-choices").hidden = true; $("#join-account-auth").hidden = true;
+    // User test 2026-10-19 #3: a name typed before creating an account in this
+    // dialog survives the return here (the same invitation), so the email local
+    // part never replaces it. A fresh invitation still starts clean.
+    const typedName = afterSignIn ? $("#join-link-name").value : "";
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
+    if (typedName.trim()) $("#join-link-name").value = typedName;
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-link-retry").textContent = "Retry";

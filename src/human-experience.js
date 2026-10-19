@@ -27,6 +27,20 @@ export function askFaceStatus(run, now = Date.now(), assistant = null) {
 // A plain message in a one-person room goes to the Room assistant only when it
 // is addressed to no one else: no @-mention of another active member and no reply
 // to a message written by someone other than the sender or the assistant.
+// User test 2026-10-19 #2: offer Ask Room only when the server would take the
+// ask. 'not_connected' means no active agent with accept_work is configured,
+// which the server refuses with 409 assistant_not_connected; awaiting_host and
+// paused still queue the ask.
+export function askAvailable(assistant) {
+  return Boolean(assistant?.coordinatorMemberId) && assistant.availability !== 'not_connected';
+}
+export const ASK_RETRY_HINT = 'Draft kept. Send again to retry.';
+// Sending the same refused ask again can never work, so do not say it will.
+export function askFailureHint(error) {
+  return error?.code === 'assistant_not_connected'
+    ? uiText('human.askNoAssistant')
+    : ASK_RETRY_HINT;
+}
 export function soloUnaddressed({ body, replyToId, members, messages, selfId, assistantId }) {
   const others = Object.values(members ?? {}).filter(m => m.active !== false && m.id !== selfId && m.id !== assistantId);
   if (others.some(m => m.displayName && new RegExp(`@${m.displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(body ?? ''))) return false;
@@ -107,6 +121,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   function paint() {
     if (!human() || !projection) return;
     const assistant = projection.assistant;
+    ask.hidden = !askAvailable(projection.assistant);
+    if (ask.hidden && selected && !contribution) { selected = false; ask.setAttribute('aria-pressed', 'false'); }
     section.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : assistant.availability === 'paused' ? uiText("human.assistantPaused") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
@@ -218,6 +234,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const rejected = failure.status >= 400 && failure.status < 500;
       error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
       if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
+      // No assistant can take this ask; resending it would fail the same way.
+      // Drop it so the next Send posts the kept draft as an ordinary message.
+      if (failure.code === 'assistant_not_connected' && owned.action === 'submit') {
+        rejectedOperation = null; persistOperation(); selected = false; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0;
+      }
       paint();
     } if (rethrow) throw failure; }
   }
@@ -302,14 +323,14 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   return {
     // Ask Room from the @ list: same state the Ask Room button toggles on.
     selectAsk() {
-      if (!human() || document.body.classList.contains('human-advanced') || !projection?.assistant.coordinatorMemberId) return false;
+      if (!human() || document.body.classList.contains('human-advanced') || !askAvailable(projection?.assistant)) return false;
       selected = true; ask.setAttribute('aria-pressed', 'true'); return true;
     },
     assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
-      section.hidden = !active; ask.hidden = !active; advanced.hidden = !active;
+      section.hidden = !active; ask.hidden = !active || !askAvailable(projection?.assistant); advanced.hidden = !active;
       if (active) {
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
@@ -353,6 +374,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
           return null;
         }
       }
+      if (!contribution && !askAvailable(projection?.assistant)) return null;
       const solo = Object.values(getState()?.members ?? {}).filter(m => m.active !== false && m.kind === 'human').length === 1 && projection?.assistant.coordinatorMemberId && soloUnaddressed({ ...content, members: getState().members, messages: getState().messages, selfId: getSession().member.id, assistantId: projection.assistant.coordinatorMemberId }); return !operation && human() && !content.toMemberId && (contribution || selected || /^@Room\b/i.test(content.body) || solo) ? { ...(contribution || { action: 'invoke' }) } : null; },
     shareResult(item) {
       if (!human() || document.body.classList.contains('human-advanced')) return false;
