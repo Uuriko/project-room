@@ -100,7 +100,7 @@
     "src/inbox-ui.js": "sha256:c5983d597f6666d01f41a0beac30db5db2e4cbc24edb652f039e2bf42d1af4dd",
     "src/invite-context.js": "sha256:17328cc6619c64592b75995baa441d45e136da37c80f2079bbdb6c7fc3c44bea",
     "src/join-watchdog.js": "sha256:1f7d0ebc08090f8fff722d16443e4e0764939588122777728db56323dc8baba0",
-    "src/join.js": "sha256:60a98f8f3c282778a7fb9665eaf67d1d63d743ba015ab05f9627e68e85690793",
+    "src/join.js": "sha256:b499455fb1d9ce953d16fe118a8726b53933ad15d9d29f4681e7c287ab4a89cc",
     "src/land-queue-board.js": "sha256:3212e8947fab8748f8162d7e547fb85fef5c825de5362cbffdee204f37310a2b",
     "src/login-polish.css": "sha256:0d4ece96f4d26140e7f99bf34f5e63d73e0143c63e50f7ca61d7dacebd685b3c",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
