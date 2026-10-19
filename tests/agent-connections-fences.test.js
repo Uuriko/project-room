@@ -203,6 +203,20 @@ test("CAL-M14: a history with a renumbered operation (generations 1, 2, 4) is re
   f.refused(() => f.store.agentConnections.verify(), 503, "connection_integrity_error");
 });
 
+// ------------------------------------------------- HC-M14 (strong) ---
+// No test here — deliberately. The strong forgery this section would
+// pin (a journal that satisfies the row/last-state equality while
+// generations skip) was attempted and is evidence-complete without a
+// pin; see the MUTATION-PINS report. In brief: duplicate generations
+// are schema-impossible (UNIQUE(room_id, member_id, generation) on
+// agent_connection_operations — the 1,3,3 write is refused with
+// errcode 2067), and for distinct generations the count check
+// (operations.length === row.generation), the final row/last-state
+// equality, and the per-operation generation equalities jointly force
+// the generation set to exactly {1..N}, where the continuity clause is
+// vacuously true. The clause is defence-in-depth with no independent
+// input space; CAL-M14 above remains its behaviour-level pin.
+
 // ----------------------------------------------------------- IV-03 ---
 
 test("IV-03: the honest two-operation history verifies (positive control)", t => {
