@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
-import { createMagicLinkMailer, magicLinkUnavailable, MAIL_NOT_CONFIGURED_MESSAGE, isMailRecipientRefusal, attemptAuthMailDelivery } from "../server/magic-links.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable, MAIL_NOT_CONFIGURED_MESSAGE, isMailRecipientRefusal, attemptAuthMailDelivery, magicReturnToForAccount } from "../server/magic-links.mjs";
 
 const makeStore = (now = 1700000000000) => {
   const directory = mkdtempSync(join(tmpdir(), "magic-links-"));
@@ -110,4 +110,26 @@ test("mailer is frozen and ignores a non-function send", () => {
   const mailer = createMagicLinkMailer({ send: "smtp://example.invalid" });
   assert.equal(mailer.isConfigured(), false);
   assert.throws(() => { mailer.isConfigured = () => true; }, TypeError);
+});
+
+test("magicReturnToForAccount keeps the room hint only for the account's own rooms", () => {
+  const memberOfCommons = roomId => roomId === "commons";
+  // A room the account belongs to: the target is untouched, byte for byte.
+  assert.equal(magicReturnToForAccount("/?room=commons", memberOfCommons), "/?room=commons");
+  const join = "/?room=commons#join/" + "A".repeat(43) + "/work/task-1";
+  assert.equal(magicReturnToForAccount(join, memberOfCommons), join);
+  // A room it does not belong to: the hint is silently dropped and the
+  // rest of the target — account hint, invitation fragment — survives.
+  assert.equal(magicReturnToForAccount("/?room=elsewhere", memberOfCommons), "/");
+  assert.equal(magicReturnToForAccount("/?room=elsewhere&account=1", memberOfCommons), "/?account=1");
+  const invite = "/?room=elsewhere#invite/" + "A".repeat(43);
+  assert.equal(magicReturnToForAccount(invite, memberOfCommons), "/#invite/" + "A".repeat(43));
+  // No room hint: nothing to vouch for. Invalid targets pass through
+  // untouched, so the callers' 422 set is exactly as before.
+  assert.equal(magicReturnToForAccount("/", memberOfCommons), "/");
+  assert.equal(magicReturnToForAccount("/?account=1", memberOfCommons), "/?account=1");
+  assert.equal(magicReturnToForAccount("https://evil.example/", memberOfCommons), "https://evil.example/");
+  assert.equal(magicReturnToForAccount("/?room=a&room=b", memberOfCommons), "/?room=a&room=b");
+  assert.equal(magicReturnToForAccount(undefined, memberOfCommons), undefined);
+  assert.equal(magicReturnToForAccount("/?room=commons", null), "/?room=commons");
 });

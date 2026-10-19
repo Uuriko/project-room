@@ -249,8 +249,58 @@ test("magic email preserves invitation context and refuses unsafe targets before
   const response = await request(returnTo);
   assert.equal(response.status, 200);
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].returnTo, returnTo);
+  // The invitation context survives — the #join fragment and the account
+  // hint — but the room hint is NOT vouched for: target@example.com has
+  // no account, so no membership can back it, and issuance drops it
+  // silently (the membership-vouching test below pins the member case).
+  assert.equal(sent[0].returnTo, "/?account=1#join/" + "A".repeat(43) + "/work/task-1");
   assert.equal((await consumeCode(origin, slot, "target@example.com", sent[0].code)).status, 201, "valid continuation keeps real code redemption intact");
+});
+
+test("magic request vouches for the room hint only when the email's account belongs to that room", async t => {
+  const { origin, store, sent } = await startServer(t);
+  const slot = await openSlot(origin);
+  const email = "member@example.com";
+  store.createAccount("acct-member", "test");
+  store.accountLogins.linkPasswordMethod("acct-member", { email, verifier: "scrypt$fixture" });
+  store.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES('commons','m-member','acct-member','test')").run();
+  const request = (body) => post(origin, "/api/auth/magic/request", { cookie: slot.cookie, csrf: slot.csrf, body });
+
+  // Member room: the hint is vouched for, the issued target is unchanged.
+  let response = await request({ email, returnTo: "/?room=commons" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "sent" });
+  assert.equal(sent.at(-1).returnTo, "/?room=commons");
+
+  // A room the account does not belong to: the hint is silently dropped
+  // and the reply is indistinguishable from the member case.
+  response = await request({ email, returnTo: "/?room=elsewhere" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "sent" });
+  assert.equal(sent.at(-1).returnTo, "/");
+
+  // An email with no account at all: same silent drop, same reply shape.
+  response = await request({ email: "stranger@example.com", returnTo: "/?room=commons" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "sent" });
+  assert.equal(sent.at(-1).returnTo, "/");
+});
+
+test("password reset request applies the same room vouching", async t => {
+  const { origin, store, sent } = await startServer(t);
+  const slot = await openSlot(origin);
+  const email = "reset-member@example.com";
+  store.createAccount("acct-reset", "test");
+  store.accountLogins.linkPasswordMethod("acct-reset", { email, verifier: "scrypt$fixture" });
+  store.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES('commons','m-reset','acct-reset','test')").run();
+  const request = returnTo => post(origin, "/api/auth/password/reset/request", { cookie: slot.cookie, csrf: slot.csrf, body: { email, returnTo } });
+
+  let response = await request("/?room=commons");
+  assert.equal(response.status, 200);
+  assert.equal(sent.at(-1).returnTo, "/?room=commons");
+  response = await request("/?room=elsewhere");
+  assert.equal(response.status, 200);
+  assert.equal(sent.at(-1).returnTo, "/");
 });
 
 test("signin-options publicly advertises mail configuration for the logged-out wall (#3341)", async t => {

@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
-import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery, attemptAuthMailDelivery } from "../magic-links.mjs";
+import { magicLinkUnavailable, validateMagicReturnTo, magicReturnToForAccount, attemptMailDelivery, attemptAuthMailDelivery } from "../magic-links.mjs";
 import { normalizeEmail } from "../account-login-methods.mjs";
 import { resolvePasskeyParams, passkeyUserLabel, PASSKEY_RP_NAME } from "../account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../../src/password-auth.mjs";
@@ -87,6 +87,16 @@ export async function handleAuthGroup(ctx) {
   // absorbed (and logged), while a transient provider failure still throws
   // so the request surfaces as retryable instead of a fake "sent".
   const deliverAuthMail = (fn, kind) => attemptAuthMailDelivery(fn, kind);
+  // A mailed link may only vouch for a room the account behind the email
+  // belongs to: member_accounts is that binding (the same row
+  // room-lifecycle uses to resolve an account's member in a room). The
+  // room hint for any other room is dropped silently at issuance
+  // (magicReturnToForAccount) — the reply never changes shape.
+  const memberVouchedReturnTo = (returnTo, accountId) => magicReturnToForAccount(returnTo, roomId =>
+    !!accountId && !!store.db.prepare(
+      "SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=? LIMIT 1").get(roomId, accountId));
+  const returnToForEmail = (returnTo, normalized) =>
+    memberVouchedReturnTo(returnTo, store.accountLogins.findAccountHoldingEmail(normalized));
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
 
 
@@ -128,7 +138,7 @@ export async function handleAuthGroup(ctx) {
       magicEmailLimit(magicRequestEmailLimiter, normalized);
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issueMagicCode({ email: normalized });
-      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "magic-request");
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: returnToForEmail(data.returnTo, normalized) } : {}) }), "magic-request");
       return json(res, 200, { status: "sent" });
     }
     const data = await body(req);
@@ -210,7 +220,7 @@ export async function handleAuthGroup(ctx) {
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
       await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
-        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "password-reset-request");
+        ...(Object.hasOwn(data, "returnTo") ? { returnTo: returnToForEmail(data.returnTo, normalized) } : {}) }), "password-reset-request");
       return json(res, 200, { status: "sent" });
     }
     const verifyResetSlot = () => {
@@ -269,7 +279,12 @@ export async function handleAuthGroup(ctx) {
       reject(422, "invalid_signup", "An email, password, and current session are required");
     }
     if (signupReturn && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
-    const signupLink = signupReturn ? { returnTo: data.returnTo } : {};
+    // The room hint in the signup mail is vouched per receiving account,
+    // like sign-in: the already-registered notice checks the holding
+    // account's rooms, the verification mail the new account's (a fresh
+    // account belongs to no room yet, so its hint is dropped and the
+    // invitation fragment alone carries the continuation).
+    const signupLink = accountId => signupReturn ? { returnTo: memberVouchedReturnTo(data.returnTo, accountId) } : {};
     const normalized = normalizeEmail(data.email);
     if (!normalized) reject(422, "invalid_email", "A valid email address is required");
     const policy = checkPasswordPolicy(data.password);
@@ -279,14 +294,14 @@ export async function handleAuthGroup(ctx) {
     const mailConfigured = magicMailer.isConfigured();
     const holding = store.accountLogins.findAccountHoldingEmail(normalized);
     if (holding) {
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink(holding) }));
       return json(res, 202, signupReply());
     }
     const accountId = emailAccountIdFor(store, normalized);
     try { store.createAccount(accountId, "password-signup"); }
     catch (error) {
       if (!(error instanceof ServiceError) || error.status !== 409) throw error;
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink(store.accountLogins.findAccountHoldingEmail(normalized)) }));
       return json(res, 202, signupReply());
     }
     const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier });
@@ -294,7 +309,7 @@ export async function handleAuthGroup(ctx) {
     if (mailConfigured) {
       const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
       await deliverSignupMail(() => magicMailer.sendMagicLink({
-        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...signupLink
+        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...signupLink(accountId)
       }));
     }
     finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);

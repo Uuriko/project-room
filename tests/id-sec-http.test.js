@@ -101,6 +101,38 @@ test("a later verified sign-in removes an unverified password and records it", a
   assert.equal(body.methods.some(row => row.type === "password"), false);
 });
 
+test("signup mail vouches for the room hint only for the receiving account's rooms", async t => {
+  const { f, origin, sent } = await start(t);
+  // Fresh signup: the new account belongs to no room yet, so the room
+  // hint in its verification mail is silently dropped at issuance; the
+  // signup itself is unchanged.
+  const slot = f.store.createAccountSessionSlot();
+  const fresh = await post(origin, "/api/auth/password/signup", {
+    email: email(41), password: password(41), sessionToken: slot.token,
+    sessionRevision: slot.session.sessionRevision, returnTo: "/?room=commons"
+  });
+  assert.equal(fresh.status, 202);
+  const verifyMail = sent.find(row => row.to === email(41));
+  assert.ok(verifyMail, "verification mail sent");
+  assert.equal(verifyMail.returnTo, "/");
+
+  // Already-registered address whose account IS a member of the room:
+  // the notice mail keeps the hint, because that account may be vouched
+  // for. Its non-member room would be dropped the same way.
+  f.store.createAccount("acct-notice", "test");
+  f.store.accountLogins.linkPasswordMethod("acct-notice", { email: email(42), verifier: "scrypt$fixture" });
+  f.store.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES('commons','m-notice','acct-notice','test')").run();
+  const slot2 = f.store.createAccountSessionSlot();
+  const again = await post(origin, "/api/auth/password/signup", {
+    email: email(42), password: password(42), sessionToken: slot2.token,
+    sessionRevision: slot2.session.sessionRevision, returnTo: "/?room=commons"
+  });
+  assert.equal(again.status, 202);
+  const noticeMail = sent.find(row => row.to === email(42));
+  assert.ok(noticeMail, "already-registered notice sent");
+  assert.equal(noticeMail.returnTo, "/?room=commons");
+});
+
 test("an unverified account is refused invites and identity mint", async t => {
   const { f, origin } = await start(t);
   const slot = f.store.createAccountSessionSlot();

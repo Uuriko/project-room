@@ -127,6 +127,32 @@ export function validateMagicReturnTo(value) {
   return value;
 }
 
+// The `room` parameter of a return target is a landing hint the issuing
+// side vouches for: it tells the app which room to open after sign-in.
+// validateMagicReturnTo checks only its shape, so without this step a
+// crafted sign-in request can name ANY room and the emailed link will
+// land the recipient there — including rooms they do not belong to,
+// with an invitation fragment riding along. Issuance therefore keeps
+// the hint only for rooms the account behind the email actually
+// belongs to (isRoomMember, resolved by the caller from the
+// member_accounts binding) and silently drops it otherwise: the
+// request answers exactly as before and the link simply lands on the
+// app root, because any visible difference would turn the endpoint
+// into an account/membership oracle. The `account` parameter and the
+// fragment continuations (#invite/, #join/, #code/ — capabilities of
+// their own) are preserved verbatim. A target that fails
+// validateMagicReturnTo passes through untouched: shape refusal stays
+// the caller's 422, exactly as before.
+export function magicReturnToForAccount(returnTo, isRoomMember) {
+  if (typeof returnTo !== "string" || typeof isRoomMember !== "function") return returnTo;
+  if (validateMagicReturnTo(returnTo) === null) return returnTo;
+  const url = new URL(returnTo, "https://return.invalid");
+  const roomId = url.searchParams.get("room");
+  if (!roomId || isRoomMember(roomId)) return returnTo;
+  url.searchParams.delete("room");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose = "signin" } = {}) {
   if (!["signin", "password-reset", "email-verify", "signup-notice"].includes(purpose)) throw new Error("Invalid email link purpose");
   if (returnTo !== undefined && validateMagicReturnTo(returnTo) === null) throw new Error("Invalid magic-link return target");

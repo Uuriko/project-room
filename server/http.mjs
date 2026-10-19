@@ -109,7 +109,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
+import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo, magicReturnToForAccount } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -1439,8 +1439,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // works as before; a body that is present must be a JSON object.
         const hasBody = Number(req.headers["content-length"] || 0) > 0 || req.headers["transfer-encoding"] !== undefined;
         const data = hasBody ? await body(req) : {};
-        const returnTo = data && Object.hasOwn(data, "returnTo") ? validateMagicReturnTo(data.returnTo) : undefined;
-        if (returnTo === null) reject(422, "invalid_return_target", "A valid local return target is required");
+        const validatedReturnTo = data && Object.hasOwn(data, "returnTo") ? validateMagicReturnTo(data.returnTo) : undefined;
+        if (validatedReturnTo === null) reject(422, "invalid_return_target", "A valid local return target is required");
+        // The resent link vouches only for this account's own rooms: the
+        // room hint for any other room is dropped silently at issuance,
+        // as at sign-in (magicReturnToForAccount); the invitation
+        // fragment that carries the pending invitation is untouched.
+        const returnTo = validatedReturnTo === undefined ? undefined : magicReturnToForAccount(validatedReturnTo, roomId =>
+          !!store.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=? LIMIT 1").get(roomId, session.account.id));
         const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
         const delivered = await attemptMailDelivery(() => magicMailer.sendMagicLink({
           to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...(returnTo ? { returnTo } : {})

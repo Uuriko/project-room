@@ -58,7 +58,11 @@ test("the already-registered notice links back to the invitation", async t => {
   assert.equal(sent[0].purpose, "signup-notice");
   const link = new URL(sent[0].link);
   assert.equal(link.hash, invite, "an existing member keeps the invitation they were signing up from");
-  assert.equal(link.searchParams.get("room"), "studio");
+  // The room hint beside the invitation is NOT carried: the taken
+  // account belongs to no "studio" room, and issuance vouches only for
+  // a member's own rooms. The invitation fragment is the capability
+  // that leads back; it is untouched.
+  assert.equal(link.searchParams.get("room"), null);
   assert.equal(link.searchParams.get("signin"), "1");
 });
 
