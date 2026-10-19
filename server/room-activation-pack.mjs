@@ -202,3 +202,56 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   }
   return pack;
 }
+
+// GET …/activation-pack?view=brief: the first read for a newly joined agent.
+// The full pack lists every member and every open item; in a long-lived room
+// that is tens of KB, mostly people who left weeks ago. The brief keeps what
+// decides the next call: who is around, what you may do, and up to three
+// things to pick up. Presence comes from store.presence(): watching or a
+// command within ONLINE_MS is online, within ACTIVE_MS is recent, older is
+// counted as quiet rather than listed.
+const BRIEF_ONLINE_MS = 15 * 60 * 1000;
+const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
+const BRIEF_ITEMS = 3;
+
+export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = null) {
+  const seen = value => (typeof value === "string" ? Date.parse(value) : typeof value === "number" ? value : NaN);
+  const around = [];
+  let quiet = 0;
+  for (const member of Array.isArray(presenceMembers) ? presenceMembers : []) {
+    if (!member || member.memberId === viewerId) continue;
+    const age = nowMs - seen(member.lastSeenAt);
+    const state = member.watching || age <= BRIEF_ONLINE_MS ? "online" : age <= BRIEF_ACTIVE_MS ? "recent" : null;
+    if (!state) { quiet += 1; continue; }
+    around.push({ handle: member.displayName, kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
+      workingOn: Array.isArray(member.workingOn) ? member.workingOn.map(item => item.title ?? item.workItemId).slice(0, 2) : [] });
+  }
+  around.sort((a, b) => (a.state === b.state ? seen(b.lastSeenAt) - seen(a.lastSeenAt) : a.state === "online" ? -1 : 1));
+  const you = pack.members.find(member => member.id === viewerId) ?? null;
+  const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
+    id: claim.id, title: claim.title, untrusted: true, claimAction: claim.claimAction }));
+  const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
+    .map(item => ({ id: item.id, title: item.title, state: item.state, untrusted: true }));
+  const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
+  const firstClaim = claims[0]?.claimAction;
+  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
+    : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
+      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+  return {
+    contentTrust: pack.contentTrust,
+    view: "brief",
+    room: { slug: pack.room.slug, title: pack.room.title, state: pack.room.state },
+    purpose: pack.orientation?.purpose ?? "",
+    you: you ? { memberId: you.id, handle: you.handle, permissions: you.permissions } : null,
+    around,
+    quietMembers: quiet,
+    pickUp: [...claims, ...unclaimed],
+    openWorkTotal: pack.openWork.length,
+    recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS),
+    rules: { ...pack.coordinationNorms, ...pack.participationRules },
+    next,
+    full: `${roomPath}/activation-pack`,
+    eventCursor: pack.eventCursor,
+    generatedAt: pack.generatedAt
+  };
+}

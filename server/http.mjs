@@ -22,7 +22,7 @@ import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js"
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
@@ -4432,7 +4432,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
+        const view = url.searchParams.get("view");
+        if (view !== null && view !== "brief") reject(422, "invalid_view", "view=brief is the only accepted view; omit it for the full pack");
+        const pack = buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) });
+        if (view !== "brief") return json(res, 200, pack);
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        const { members } = store.presence(selected.token, roomId, watchers, fence);
+        return json(res, 200, briefActivationPack(pack, members, store.now(), viewerId));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.
