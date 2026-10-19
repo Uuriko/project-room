@@ -31,7 +31,7 @@
 //
 // SQLite persistence survives restarts. The schema is additive.
 import { randomBytes } from "node:crypto";
-import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { validateWakeTargetUrl, assertWakeTargetHostDns, WAKE_ACK_HINT, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
@@ -202,6 +202,9 @@ const checkCadenceSeconds = cadenceSeconds =>
 // awaits it before heartbeat() stores anything). The token and bearer
 // credentials are validated for shape only and are NEVER echoed — the
 // caller stores them, responses never include them.
+// WAKE0-3a: a push target is a wake surface, so it validates through the
+// wake-scoped validator — strict for every host except the ones the
+// deployment operator armed by config (ROOM_WAKE_TARGET_ALLOWLIST).
 const PUSH_NOTIFICATION_KEYS = Object.freeze(["url", "token", "authentication"]);
 const checkPushNotification = pushNotification => {
   check(pushNotification !== null && typeof pushNotification === "object" && !Array.isArray(pushNotification),
@@ -212,7 +215,7 @@ const checkPushNotification = pushNotification => {
     422, "invalid_heartbeat", "pushNotification accepts url, token, and optional authentication");
   const { url, token, authentication } = pushNotification;
   let validatedUrl;
-  try { validatedUrl = validateWebhookUrl(url); }
+  try { validatedUrl = validateWakeTargetUrl(url); }
   catch (error) { fail(422, "invalid_heartbeat", `pushNotification.url is not a usable push target: ${error.message}`); }
   check(typeof token === "string" && token.length >= PUSH_TOKEN_MIN && token.length <= PUSH_TOKEN_MAX,
     422, "invalid_heartbeat", `pushNotification.token must be a ${PUSH_TOKEN_MIN}-${PUSH_TOKEN_MAX} char opaque string`);
@@ -541,7 +544,9 @@ export class AgentHeartbeats {
     let url = null;
     if (effectiveMode === "wakeable") {
       if (wakeUrl !== null && wakeUrl !== undefined) {
-        try { url = validateWebhookUrl(wakeUrl); }
+        // WAKE0-3a: the wakeUrl is a wake surface — wake-scoped validation
+        // (operator-armed hosts may be http/loopback; all others strict).
+        try { url = validateWakeTargetUrl(wakeUrl); }
         catch (error) { fail(422, "invalid_heartbeat", `invalid wakeUrl: ${error.message}`); }
       }
     } else if (wakeUrl !== null && wakeUrl !== undefined) {
@@ -651,7 +656,9 @@ export class AgentHeartbeats {
   // omitted they default to the real resolver (fail closed in production).
   async assertPushDns(url) {
     try {
-      await assertWebhookHostDnsPublic(url, this.pushDnsResolvers ?? {});
+      // WAKE0-3a: wake-scoped — an operator-armed host's name may resolve
+      // to a private address; every other name takes the strict check.
+      await assertWakeTargetHostDns(url, this.pushDnsResolvers ?? {});
     } catch (error) {
       fail(422, "invalid_heartbeat", `pushNotification.url rejected: ${error.message}`);
     }
@@ -756,6 +763,9 @@ export class AgentHeartbeats {
         url, envelope, headers,
         timeoutMs: PUSH_DELIVERY_TIMEOUT_MS,
         dnsResolvers: this.pushDnsResolvers ?? undefined,
+        // The push doorbell is a wake delivery: operator-armed targets
+        // (a self-host bridge on loopback) resolve wake-scoped.
+        wakeTarget: true,
       });
     } catch (error) {
       result = { ok: false, error: String(error?.message ?? error).slice(0, 500) };

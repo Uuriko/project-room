@@ -11,7 +11,7 @@
 // Pure module: all state is caller-owned (a Map), no network I/O.
 // Frozen outputs; malformed inputs throw WebhookSubscriptionError (coded).
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { assertAgentWebhookUrlPublic, validateWebhookUrl, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { assertAgentWebhookUrlPublic, assertWakeTargetUrl, validateWebhookUrl, validateWakeTargetUrl, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
 import { EVENT_TYPES } from "../src/events.js";
 
 class WebhookSubscriptionError extends Error {
@@ -49,13 +49,23 @@ const WILDCARD = "*";
 // collapse to one entry before the cap is checked.
 export const MAX_SUBSCRIPTION_EVENTS = 32;
 const unknownEvents = events => events.filter(e => e !== WILDCARD && !EVENT_CATALOG.includes(e));
+// WAKE0-3a: a subscription whose events are exactly the wake ping is a
+// wake surface — its URL may be an operator-armed self-host target. A "*"
+// or mixed subscription also receives room content, so it stays under the
+// strict public gate: arming never relaxes a content-bearing door.
+export const isWakeOnlyEvents = events =>
+  Array.isArray(events) && events.length > 0 && events.every(e => e === WAKE_PING_EVENT);
+
 // Subscribe-time public-address gate. Shape errors stay
 // invalid_subscription. A hostname that resolves into blocked space, or a
 // known metadata name, is 422 webhook_url_not_public and is not stored.
 // `lookup` is injectable (dns.lookup-compatible, { all: true }); omitted,
 // Node uses dns.lookup and Workers resolves through DNS-over-HTTPS.
+// Callers pass `events` so a wake-only subscription takes the wake-scoped
+// gate (operator allowlist) instead of the strict one.
 export async function assertSubscriptionWebhookUrl(url, options) {
   try {
+    if (isWakeOnlyEvents(options?.events)) return await assertWakeTargetUrl(url, options);
     return await assertAgentWebhookUrlPublic(url, options);
   } catch (error) {
     if (error?.code === "webhook_url_not_public") {
@@ -123,7 +133,10 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
     check(typeof agentId === "string" && AGENT_ID_PATTERN.test(agentId),
       "agentId must match [A-Za-z0-9_-]{1,64}");
     try {
-      validateWebhookUrl(url);
+      // WAKE0-3a: wake-only subscriptions validate wake-scoped, matching
+      // the async gate in assertSubscriptionWebhookUrl.
+      if (isWakeOnlyEvents(events)) validateWakeTargetUrl(url);
+      else validateWebhookUrl(url);
     } catch (err) {
       fail("invalid_subscription", err.message);
     }

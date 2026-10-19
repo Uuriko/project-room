@@ -1,22 +1,32 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { agentConnectionFromEnvironment, ConnectionError, connectionDiagnostic } from '../client/agent-connection.mjs';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
 import { isTransientWakeError, wakeRetryDelayMs } from '../client/wake-retry.mjs';
 import { roomEventPointer, serveClaudeRoomChannel } from '../client/claude-channel.mjs';
 
-const MODES = new Set(['channel', 'poll', 'webhook']);
+const MODES = new Set(['channel', 'poll', 'webhook', 'bridge']);
+// The push doorbell event types (server/agent-heartbeats.mjs PUSH_EVENT_TYPES)
+// plus the wake ping itself: the two envelope shapes a bridge endpoint can
+// be registered for. Anything else POSTed here is ignored, never acted on.
+const BRIDGE_WAKE_EVENT_TYPES = new Set(['agent.wake', 'message.posted', 'dm.posted', 'bond.proposed', 'assignment.created', 'land.updated']);
+const BRIDGE_BODY_CAP_BYTES = 16 * 1024;
 
 function parseArgs(argv) {
   if (!Array.isArray(argv) || argv[0] !== '--mode' || !MODES.has(argv[1])) throw new ConnectionError('usage_error');
   const mode = argv[1];
-  let host, cadence, webhookUrl;
+  let host, cadence, webhookUrl, port, bind, listenerMode;
   for (let i = 2; i < argv.length; i += 1) {
     const flag = argv[i], value = argv[i + 1];
     if (value === undefined) throw new ConnectionError('usage_error');
     if (flag === '--host') host = value;
     else if (flag === '--cadence-seconds') cadence = value;
     else if (flag === '--webhook-url') webhookUrl = value;
+    else if (flag === '--port') port = value;
+    else if (flag === '--bind') bind = value;
+    else if (flag === '--listener-mode') listenerMode = value;
     else throw new ConnectionError('usage_error');
     i += 1;
   }
@@ -24,7 +34,15 @@ function parseArgs(argv) {
   if ((mode === 'webhook') !== (webhookUrl !== undefined)) throw new ConnectionError('usage_error');
   const cadenceSeconds = Number(cadence);
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(host) || !Number.isInteger(cadenceSeconds) || cadenceSeconds < 1 || cadenceSeconds > 3600) throw new ConnectionError('invalid_config');
-  return { mode, host, cadenceSeconds, webhookUrl };
+  if (mode !== 'bridge' && (port !== undefined || bind !== undefined || listenerMode !== undefined)) throw new ConnectionError('usage_error');
+  let bridgePort;
+  if (mode === 'bridge') {
+    bridgePort = Number(port);
+    if (!Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535) throw new ConnectionError('invalid_config');
+    if (bind !== undefined && (typeof bind !== 'string' || bind.length === 0 || bind.length > 255 || /\s/.test(bind))) throw new ConnectionError('invalid_config');
+    if (listenerMode !== undefined && listenerMode !== 'poll' && listenerMode !== 'channel') throw new ConnectionError('invalid_config');
+  }
+  return { mode, host, cadenceSeconds, webhookUrl, bridgePort, bind: bind ?? '127.0.0.1', listenerMode: listenerMode ?? 'poll' };
 }
 
 function webhookCall(url, token) {
@@ -42,6 +60,88 @@ async function writeLine(output, value) {
   await new Promise((resolve, reject) => output.write(line, error => error ? reject(error) : resolve()));
 }
 
+// Bridge mode (WAKE0-3a): the receiving half of a self-host wake setup.
+// The operator registers this endpoint as the host's wake target (push
+// doorbell URL, wakeUrl, or an agent.wake subscription URL) after arming
+// its host in the deployment's ROOM_WAKE_TARGET_ALLOWLIST. A wake ping is
+// an untrusted, content-free pointer: the bridge never acts on its
+// contents — it only makes sure the listener child (poll or channel mode
+// of this same script) is running, and the listener reads the real work
+// through its own authenticated door. A duplicate ping while the listener
+// is alive is a no-op. The bridge starts no model and holds no room
+// credential of its own; the child reads ROOM_AGENT_CONFIG from the
+// inherited environment exactly like a directly-run listener.
+export async function serveWakeBridge({ host, cadenceSeconds, listenerMode = 'poll', port, bind = '127.0.0.1',
+  env = process.env, spawnImpl = spawn, scriptPath = fileURLToPath(new URL('./room-listen.mjs', import.meta.url)),
+  log = value => console.error(JSON.stringify(value)) } = {}) {
+  let child = null;
+  const listenerRunning = () => child !== null;
+  const ensureListener = () => {
+    if (child) return false;
+    const spawned = spawnImpl(process.execPath,
+      [scriptPath, '--mode', listenerMode, '--host', host, '--cadence-seconds', String(cadenceSeconds)],
+      { env, stdio: ['ignore', 'inherit', 'inherit'] });
+    child = spawned;
+    spawned.once('exit', (code, signal) => {
+      if (child === spawned) child = null;
+      log({ type: 'bridge_listener_exit', code, signal });
+    });
+    log({ type: 'bridge_listener_started', mode: listenerMode, host });
+    return true;
+  };
+  const readBody = req => new Promise(resolve => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size <= BRIDGE_BODY_CAP_BYTES) chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(''));
+  });
+  const isWakePing = body => {
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { return false; }
+    if (!parsed || typeof parsed !== 'object') return false;
+    // agent.wake envelope: { event: "agent.wake", ... } or a journaled
+    // delivery envelope { eventType: "agent.wake", data: {...} }; push
+    // doorbell: { eventType: <doorbell type>, roomId, id, ts }.
+    const type = parsed.event ?? parsed.eventType ?? parsed.data?.event ?? parsed.data?.eventType;
+    return typeof type === 'string' && BRIDGE_WAKE_EVENT_TYPES.has(type);
+  };
+  const server = createServer(async (req, res) => {
+    const send = (status, value) => {
+      const text = JSON.stringify(value);
+      res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
+      res.end(text);
+    };
+    if (req.method === 'GET' && req.url === '/health') {
+      send(200, { ok: true, mode: 'bridge', listenerRunning: listenerRunning() });
+      return;
+    }
+    if (req.method !== 'POST') { send(404, { ok: false, error: 'not_found' }); return; }
+    const body = await readBody(req);
+    if (!isWakePing(body)) { send(200, { ok: true, ignored: true }); return; }
+    const started = ensureListener();
+    send(200, { ok: true, listenerRunning: true, started });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, bind, resolve);
+  });
+  const address = server.address();
+  return Object.freeze({
+    port: typeof address === 'object' && address ? address.port : port,
+    bind,
+    listenerRunning,
+    ensureListener,
+    close: async () => {
+      if (child) { try { child.kill('SIGTERM'); } catch { /* already gone */ } child = null; }
+      await new Promise(resolve => server.close(() => resolve()));
+    },
+  });
+}
+
 // One receiving entry. Channel speaks MCP. Poll prints pointers. Webhook prints
 // the subscribe call and does not listen. None of the modes start a model.
 export async function listen(argv = process.argv.slice(2), io = {}) {
@@ -49,11 +149,25 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
   const output = io.output ?? process.stdout;
   const env = io.env ?? process.env;
   const report = io.report ?? (value => { console.error(JSON.stringify(value)); process.exitCode = 1; });
-  const { mode, host, cadenceSeconds, webhookUrl } = parseArgs(argv);
+  const { mode, host, cadenceSeconds, webhookUrl, bridgePort, bind, listenerMode } = parseArgs(argv);
   if (!env.ROOM_AGENT_CONFIG) throw new ConnectionError('usage_error');
   const connection = agentConnectionFromEnvironment(env);
   if (mode === 'webhook') {
     await writeLine(output, webhookCall(webhookUrl, connection.token));
+    return;
+  }
+  if (mode === 'bridge') {
+    // The bridge validates the saved connection up front (a bad config
+    // fails here, not inside the first woken child) but never uses the
+    // credential itself: only the listener child talks to the room.
+    void connection;
+    const bridge = await serveWakeBridge({ host, cadenceSeconds, listenerMode, port: bridgePort, bind, env,
+      spawnImpl: io.spawnImpl, log: value => console.error(JSON.stringify(value)) });
+    await writeLine(output, { type: 'bridge_listening', bind: bridge.bind, port: bridge.port, listenerMode });
+    await new Promise(resolve => {
+      const stop = () => { void bridge.close().then(resolve, resolve); };
+      process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    });
     return;
   }
   if (mode === 'channel') {

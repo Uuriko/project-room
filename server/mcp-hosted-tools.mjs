@@ -220,7 +220,7 @@ export const hostedInboxTools = [
 ];
 
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
-const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
+const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused — unless the deployment operator armed this exact host for wake targets via the ROOM_WAKE_TARGET_ALLOWLIST deployment config (self-host arming is operator-side only, never through this API). Same checks as POST /api/agent-heartbeats." };
 const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). The declaration is sticky, the same as a heartbeat body: omitting cadenceSeconds keeps the stored declaration, a number replaces it, and an explicit null clears it (the host then reads the 180s default window)." };
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
@@ -231,7 +231,7 @@ const pushAuthField = {
 };
 const pushNotificationField = {
   type: "object", additionalProperties: false, required: ["url", "token"],
-  description: "Optional push doorbell for this host. url is HTTPS and must resolve to a public address before it is stored. token and authentication.credentials are stored and never returned. Omitting this field leaves an existing subscription in place.",
+  description: "Optional push doorbell for this host. url is HTTPS and must resolve to a public address before it is stored (an operator-armed self-host target excepted — see wakeUrl). token and authentication.credentials are stored and never returned. Omitting this field leaves an existing subscription in place.",
   properties: {
     url: { type: "string", minLength: 1, maxLength: 2000 },
     token: { type: "string", minLength: 1, maxLength: 500 },
@@ -247,7 +247,7 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl (a self-host target on loopback or a private address is accepted only when the deployment operator armed that exact host via ROOM_WAKE_TARGET_ALLOWLIST). Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
@@ -258,7 +258,7 @@ export const hostedWakeTools = [
     hostId: hostIdField,
     listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS (operator-armed self-host targets excepted — see wake_register). mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,
@@ -284,7 +284,7 @@ export const hostedWakeTools = [
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
     reason: { type: ["string", "null"], maxLength: 200, description: "Optional note. Accepted and not required." }
   }, ["roomId"]), false),
-  tool("webhook_subscribe", "Subscribe this identity to signed room-event delivery. Same call as POST /api/agent-webhooks: url and events are required; secret is optional. url must be public HTTPS. events are dotted names, agent.wake, or \"*\". Unknown names are refused with the known list. A server-generated signing secret is returned once. A caller-supplied secret is never echoed. This does not read the delivery journal.", schema({
+  tool("webhook_subscribe", "Subscribe this identity to signed room-event delivery. Same call as POST /api/agent-webhooks: url and events are required; secret is optional. url must be public HTTPS — except a wake-only subscription (events exactly [\"agent.wake\"]), whose url may be an operator-armed self-host target (ROOM_WAKE_TARGET_ALLOWLIST). events are dotted names, agent.wake, or \"*\". Unknown names are refused with the known list. A server-generated signing secret is returned once. A caller-supplied secret is never echoed. This does not read the delivery journal.", schema({
     url: { type: "string", minLength: 1, maxLength: 2000, description: "Public HTTPS endpoint. Same checks as POST /api/agent-webhooks." },
     events: webhookEventsField,
     secret: { type: "string", minLength: 16, maxLength: 2000, description: "Optional signing secret, at least 16 characters. Never echoed. Omit to receive a server-generated secret once." }

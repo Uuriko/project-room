@@ -480,8 +480,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (data.secret !== undefined && data.secret !== null && typeof data.secret !== "string")
       reject(422, "invalid_subscription_request", "secret must be a string when given");
     // QA2 finding P2-8: resolve before the write. Private answers are 422
-    // webhook_url_not_public and are not stored.
-    await store.agentPlugin.assertWebhookUrl(data.url);
+    // webhook_url_not_public and are not stored. WAKE0-3a: the events ride
+    // along so a wake-only subscription takes the operator-allowlist gate.
+    await store.agentPlugin.assertWebhookUrl(data.url, { events: distinctEvents });
     const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: auth.identityId,
       url: data.url,

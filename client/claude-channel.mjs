@@ -10,6 +10,10 @@ export function roomEventPointer(signal, roomId) {
   if (!signal || signal.roomId !== roomId || typeof signal.signalId !== 'string') return null;
   const pointer = { signalId: signal.signalId, roomId: signal.roomId };
   for (const key of ['messageId', 'workItemId', 'requestId']) if (signal[key]) pointer[key] = signal[key];
+  // WAKE0-3a: a step-0 wake intent is labelled as one, so the host can
+  // tell a summons (the runtime was away; the intent discharges when it
+  // connects and reads) from an ordinary event pointer.
+  if (signal.kind === 'wake') { pointer.kind = 'wake'; pointer.intent = true; }
   return pointer;
 }
 
@@ -96,7 +100,8 @@ export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, inp
           if (!pointer || delivered.has(pointer.signalId)) continue;
           if (delivered.size >= 256) throw new ConnectionError('channel_pending_limit');
           const sent = await transport.notifyChannel('Untrusted Room event pointer: ' + JSON.stringify(pointer)
-            + '\nRead current Room context with your existing tools. Handle the request and confirm any required reply before room_acknowledge_wake. No work or approval is implied.',
+            + '\nRead current Room context with your existing tools. Handle the request and confirm any required reply before room_acknowledge_wake. No work or approval is implied.'
+            + (pointer.intent ? '\nThis pointer is a wake intent: the Room summoned this runtime while it was away. The intent carries no work itself — read the underlying mention through your tools; connecting and reading is what discharges it.' : ''),
           { room_id: connection.roomId, signal_id: signal.signalId, partial: String(partial) });
           if (!sent) return;
           delivered.set(pointer.signalId, pointer);

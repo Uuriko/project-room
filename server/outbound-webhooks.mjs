@@ -6,7 +6,7 @@
 // node:dns on Node and DNS-over-HTTPS on Workers. Malformed inputs throw
 // WebhookError.
 import { promises as dns } from "node:dns";
-import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
+import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, extractEmbeddedIpv4, isWorkersRuntime } from "./ip-blocklist.mjs";
 
 class WebhookError extends Error { constructor(code, message) { super(message); this.name = "WebhookError"; this.code = code; } }
 const fail = (code, message) => { throw new WebhookError(code, message); };
@@ -181,6 +181,37 @@ async function resolveWebhookAddressesViaDoh(hostname, { dohFetch = globalThis.f
   return addresses;
 }
 
+// Resolve a hostname to its A/AAAA answers with the injectable machinery
+// the strict resolver honours (test lookup / resolve4 / resolve6, or
+// DNS-over-HTTPS on Workers). No range verdict is applied here — callers
+// decide which answers are acceptable — and an empty result means the
+// name did not resolve (callers fail closed on it).
+async function resolveHostAddresses(host, options = {}) {
+  if (isWorkersRuntime()) {
+    try {
+      return await resolveWebhookAddressesViaDoh(host, options);
+    } catch (error) {
+      if (error?.name === "WebhookError") throw error;
+      fail("invalid_webhook", "webhook hostname does not resolve to a public address");
+    }
+  }
+  const explicit4 = typeof options.resolve4 === "function";
+  const explicit6 = typeof options.resolve6 === "function";
+  const explicitLookup = typeof options.lookup === "function";
+  if (explicitLookup || (!explicit4 && !explicit6)) {
+    const lookup = explicitLookup ? options.lookup : dns.lookup;
+    try {
+      return normalizeLookup(await lookup(host, { all: true, verbatim: true }));
+    } catch {
+      return [];
+    }
+  }
+  const resolve4 = explicit4 ? options.resolve4 : async () => [];
+  const resolve6 = explicit6 ? options.resolve6 : async () => [];
+  const settled = await Promise.allSettled([resolve4(host), resolve6(host)]);
+  return settled.flatMap(result => (result.status === "fulfilled" ? result.value : []));
+}
+
 export async function resolveWebhookTarget(url, options = {}) {
   let host;
   try { host = new URL(validateWebhookUrl(url)).hostname.toLowerCase().replace(/\.$/, ""); }
@@ -188,38 +219,7 @@ export async function resolveWebhookTarget(url, options = {}) {
   if (host.startsWith("[") || parseIpv4(host) !== null) {
     return { url, addresses: [stripBrackets(host)] };
   }
-  const explicit4 = typeof options.resolve4 === "function";
-  const explicit6 = typeof options.resolve6 === "function";
-  const explicitLookup = typeof options.lookup === "function";
-  if (isWorkersRuntime()) {
-    let addresses;
-    try {
-      addresses = await resolveWebhookAddressesViaDoh(host, options);
-    } catch (error) {
-      if (error?.name === "WebhookError") throw error;
-      fail("invalid_webhook", "webhook hostname does not resolve to a public address");
-    }
-    for (const answer of addresses) {
-      if (answerIsBlocked(answer)) {
-        fail("invalid_webhook", "webhook hostname resolves to a private or reserved IP address");
-      }
-    }
-    return { url, addresses };
-  }
-  let answers;
-  if (explicitLookup || (!explicit4 && !explicit6)) {
-    const lookup = explicitLookup ? options.lookup : dns.lookup;
-    try {
-      answers = normalizeLookup(await lookup(host, { all: true, verbatim: true }));
-    } catch {
-      answers = [];
-    }
-  } else {
-    const resolve4 = explicit4 ? options.resolve4 : async () => [];
-    const resolve6 = explicit6 ? options.resolve6 : async () => [];
-    const settled = await Promise.allSettled([resolve4(host), resolve6(host)]);
-    answers = settled.flatMap(result => (result.status === "fulfilled" ? result.value : []));
-  }
+  const answers = await resolveHostAddresses(host, options);
   if (answers.length === 0) fail("invalid_webhook", "webhook hostname does not resolve to a public address");
   for (const answer of answers) {
     if (answerIsBlocked(answer)) {
@@ -288,6 +288,155 @@ export async function assertAgentWebhookUrlPublic(url, options = {}) {
 // the address-returning form used by the dispatch path.
 export async function assertWebhookHostDnsPublic(url, opts = {}) {
   return (await resolveWebhookTarget(url, opts)).url;
+}
+
+// --- Operator wake-target allowlist (WAKE0-3a) ------------------------------
+// The synthesis ruling stands: loopback/private wake targets stay refused
+// on the public doors — no API call can arm one. A SELF-HOST deployment
+// arms specific hosts through operator config only: the env var below
+// names hosts (comma-separated hostnames or IP literals, exact match
+// after lowercasing and trailing-dot/bracket normalisation; no wildcards,
+// no subdomain implication) that the WAKE surfaces may use — heartbeat
+// push targets, host wakeUrls, wake-only (agent.wake) webhook
+// subscriptions, and deliveries to those targets. An armed host may be
+// reached over http or https, on any port, at loopback/RFC1918/ULA
+// addresses: the operator named the machine, and the wake payload is a
+// content-free pointer, so the dial is the operator's own doorbell.
+// Everything else is unchanged: an unarmed host gets the strict checks
+// above with identical codes and messages, general webhooks are never
+// relaxed, userinfo stays refused everywhere, and the platform metadata
+// plane (metadata hostnames and the 169.254.0.0/16 / fe80::/10 link-local
+// ranges that carry it) can NEVER be armed — naming it in the env is
+// ignored, not honoured.
+export const WAKE_TARGET_ALLOWLIST_ENV = "ROOM_WAKE_TARGET_ALLOWLIST";
+
+function normalizeArmedHostName(value) {
+  let name = String(value ?? "").trim().toLowerCase();
+  if (!name) return "";
+  if (name.includes("://")) {
+    try { name = new URL(name).hostname.toLowerCase(); } catch { return ""; }
+  }
+  name = name.replace(/\.$/, "");
+  if (name.startsWith("[")) {
+    // "[::1]" or "[::1]:8787" — the host is inside the brackets.
+    const close = name.indexOf("]");
+    if (close > 0) name = name.slice(1, close);
+  } else if (/^[^:[\]]+:\d+$/.test(name)) {
+    name = name.slice(0, name.lastIndexOf(":"));
+  }
+  return name;
+}
+
+export function operatorWakeTargetHosts(env = process.env) {
+  const raw = env?.[WAKE_TARGET_ALLOWLIST_ENV];
+  const hosts = new Set();
+  if (typeof raw !== "string") return hosts;
+  for (const part of raw.split(",")) {
+    const name = normalizeArmedHostName(part);
+    if (name) hosts.add(name);
+  }
+  return hosts;
+}
+
+// Hosts that name the platform metadata plane are unarmable even when the
+// operator lists them: the allowlist arms the operator's own machines,
+// never the cloud's control plane.
+function isUnarmableWakeHost(name) {
+  if (isMetadataHostname(name)) return true;
+  const bare = stripBrackets(name);
+  const v4 = parseIpv4(bare);
+  if (v4 !== null) return (v4 >>> 16) === 0xa9fe; // 169.254.0.0/16
+  const embedded = extractEmbeddedIpv4(bare);
+  if (embedded !== null) return (embedded >>> 16) === 0xa9fe;
+  const v6 = parseIpv6(bare);
+  if (v6 !== null) return (v6 >> 118n) === 0x3fan; // fe80::/10 link-local
+  return false;
+}
+
+export function isOperatorWakeTarget(hostname, env = process.env) {
+  const name = String(hostname ?? "").toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  if (!name || isUnarmableWakeHost(name)) return false;
+  return operatorWakeTargetHosts(env).has(name);
+}
+
+// Wake-scoped URL validation: identical to validateWebhookUrl for an
+// unarmed host (same codes, same messages — the public refusal is the
+// ruling, not a bug). For an operator-armed host only the public-posture
+// checks relax: http is allowed, any port is allowed, and loopback /
+// private / local names pass. Shape checks (length, control characters,
+// a parseable URL, no credentials) never relax.
+export function validateWakeTargetUrl(url, { env = process.env } = {}) {
+  check(typeof url === "string" && url.length > 0 && url.length <= 2000, "url must be 1-2000 chars");
+  check(!/[\u0000-\u001f\u007f-\u009f]/.test(url), "url must not contain control characters");
+  let parsed;
+  try { parsed = new URL(url); } catch { return validateWebhookUrl(url); }
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (!isOperatorWakeTarget(host, env)) return validateWebhookUrl(url);
+  if (!host) fail("invalid_webhook", "webhook url must include a hostname");
+  check(parsed.protocol === "https:" || parsed.protocol === "http:",
+    "url must be a valid http or https URL");
+  check(!parsed.username && !parsed.password, "url must be an http or https URL without credentials");
+  return url;
+}
+
+// Wake-scoped resolver: the strict resolver for unarmed hosts. For an
+// armed host, DNS answers in blocked ranges are accepted as the pinned
+// set (the operator named this host; pinning still applies, so a later
+// rebind cannot move the dial), but a name that does not resolve at all
+// still fails closed — armed is not the same as reachable.
+export async function resolveWakeTarget(url, options = {}) {
+  const env = options.env ?? process.env;
+  const clean = validateWakeTargetUrl(url, { env });
+  const host = new URL(clean).hostname.toLowerCase().replace(/\.$/, "");
+  if (!isOperatorWakeTarget(host, env)) return resolveWebhookTarget(url, options);
+  const bare = stripBrackets(host);
+  if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) {
+    return { url: clean, addresses: [bare] };
+  }
+  const answers = await resolveHostAddresses(bare, options);
+  if (answers.length === 0) fail("invalid_webhook", "webhook hostname does not resolve to a public address");
+  return { url: clean, addresses: [...new Set(answers)] };
+}
+
+// Subscribe-time gate for wake surfaces: assertAgentWebhookUrlPublic for
+// unarmed hosts; for an armed host the name must still resolve (to any
+// address, public or not) before the URL is stored.
+export async function assertWakeTargetUrl(url, options = {}) {
+  const env = options.env ?? process.env;
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ""); } catch { /* the strict gate throws below */ }
+  if (!isOperatorWakeTarget(host, env)) return assertAgentWebhookUrlPublic(url, options);
+  validateWakeTargetUrl(url, { env });
+  const bare = stripBrackets(host);
+  if (parseIpv4(bare) !== null || parseIpv6(bare) !== null) return url;
+  if (isWorkersRuntime()) {
+    try {
+      await resolveWakeTarget(url, options);
+    } catch (error) {
+      if (error?.name === "WebhookError" && /does not resolve/.test(error.message ?? "")) {
+        fail("webhook_url_not_public", "That wake target URL's hostname does not resolve.");
+      }
+      throw error;
+    }
+    return url;
+  }
+  const lookup = typeof options.lookup === "function" ? options.lookup : dns.lookup;
+  let records;
+  try {
+    records = await lookup(bare, { all: true, verbatim: true });
+  } catch {
+    fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
+  }
+  if (normalizeLookup(records).length === 0) {
+    fail("webhook_url_not_public", "webhook hostname does not resolve to a public address");
+  }
+  return url;
+}
+
+// DNS companion for the push-registration path (assertPushDns): the
+// wake-scoped form of assertWebhookHostDnsPublic.
+export async function assertWakeTargetHostDns(url, opts = {}) {
+  return (await resolveWakeTarget(url, opts)).url;
 }
 // The canonical wake-ping event name. An agent.wake delivery is journaled
 // pending when an offline wakeable agent is @-mentioned or DM'd; the same

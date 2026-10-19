@@ -23,7 +23,7 @@
 //   deliveryId — the dispatcher may retry the same deliveryId and redrives
 //   reuse it, so deliveryId is the idempotency key end to end.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { resolveWebhookTarget } from "./outbound-webhooks.mjs";
+import { resolveWebhookTarget, resolveWakeTarget, isOperatorWakeTarget } from "./outbound-webhooks.mjs";
 import { pinnedLookup, isWorkersRuntime } from "./ip-blocklist.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 
@@ -202,9 +202,13 @@ export async function pinnedDispatchPost(url, addresses, { headers, body, timeou
   });
 }
 
-async function checkDispatchTarget(target, dnsResolvers) {
+async function checkDispatchTarget(target, dnsResolvers, wakeTarget = false) {
   try {
-    const { url, addresses } = await resolveWebhookTarget(target, dnsResolvers ?? {});
+    // Wake deliveries (wakeTarget) resolve through the wake-scoped
+    // resolver: operator-armed hosts may sit at loopback/private
+    // addresses; everything else takes the strict path unchanged.
+    const resolve = wakeTarget ? resolveWakeTarget : resolveWebhookTarget;
+    const { url, addresses } = await resolve(target, dnsResolvers ?? {});
     return { ok: true, url, addresses };
   } catch (error) {
     const message = error?.message ?? "webhook target rejected";
@@ -250,7 +254,12 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // so the Workers egress sandbox stays the backstop and plain fetch is used.
 // fetchImpl remains as an injectable override (tests); when it is given,
 // pinning is the caller's responsibility.
-export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
+//
+// WAKE0-3a: wakeTarget marks a wake delivery (push doorbell or an
+// agent.wake ping). Its target resolves through the operator-allowlist
+// resolver instead, so a self-host bridge on loopback can be dialled;
+// non-wake deliveries never take that path.
+export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers, wakeTarget = false } = {}) {
   check(fetchImpl === undefined || typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
@@ -258,10 +267,11 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   check(Number.isInteger(timeoutMs) && timeoutMs > 0, "timeoutMs must be a positive integer");
   check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
     "dnsResolvers must be an object");
+  check(typeof wakeTarget === "boolean", "wakeTarget must be a boolean");
   const body = JSON.stringify(envelope);
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-    const checked = await checkDispatchTarget(current, dnsResolvers);
+    const checked = await checkDispatchTarget(current, dnsResolvers, wakeTarget);
     if (!checked.ok) return checked.result;
     let response;
     try {
@@ -296,7 +306,17 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
         return { ok: false, status, error: "redirect location is not a valid URL", classification: "dead" };
       }
       if (next.protocol !== "https:") {
-        return { ok: false, status, error: "redirect target must stay https (no protocol downgrade)", classification: "dead" };
+        // Wake deliveries to an operator-armed http target may follow an
+        // http redirect to another armed host (a bridge that moved its
+        // port answers this way). An https -> http downgrade stays dead
+        // even for wake deliveries: arming names a target, it does not
+        // waive downgrade protection.
+        const armedHttpHop = wakeTarget && next.protocol === "http:"
+          && new URL(current).protocol === "http:"
+          && isOperatorWakeTarget(next.hostname);
+        if (!armedHttpHop) {
+          return { ok: false, status, error: "redirect target must stay https (no protocol downgrade)", classification: "dead" };
+        }
       }
       current = next.toString();
       continue;
