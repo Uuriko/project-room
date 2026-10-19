@@ -1362,7 +1362,14 @@ export class AgentIdentities {
     // before binding was required) still may not be redeemed by a second
     // sponsor when the minter holds the sponsor position in the room —
     // only the account bound to the minter's owner member may redeem it.
-    if (!row.sponsorAccountId) {
+    // RULING 28(a): the check fires only when a sponsor context is
+    // PRESENTED at redemption (the enrollment door passes the enrolling
+    // account). link() presents none — it is sponsor-less by design (see
+    // requireLinkHolderProof) and writes the identity_links row that
+    // confers the position BEFORE the proof is consumed, so gating the
+    // sponsor-less path on the position would fail the designed
+    // owner-member link closed for any holder-minted code.
+    if (!row.sponsorAccountId && sponsorAccountId !== undefined) {
       const position = this.minterSponsorPosition(roomId, identityId);
       if (position.holdsPosition && position.accountId !== sponsorAccountId) proofFailed();
     }

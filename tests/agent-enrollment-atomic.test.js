@@ -382,6 +382,25 @@ test("TM-8: a legacy unbound code row is still refused to a second sponsor when 
   assert.equal(consumed.identityId, holder.identityId);
 });
 
+test("TM-8 (ruling 28a): an unbound code redeems when NO sponsor context is presented — the sponsor-less link() path", t => {
+  const f = fixture(t);
+  const { holder } = makeSponsorHolder(f);
+  // The same legacy unbound row as the second-sponsor pin above:
+  // room-bound, no sponsor binding, minter holding the position.
+  const code = randomBytes(16).toString("base64url");
+  const hash = createHash("sha256").update(code).digest("hex");
+  const now = f.now();
+  f.store.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,room_id,sponsor_account_id,created_at,expires_at,consumed_at) VALUES(?,?,'commons',NULL,?,?,NULL)")
+    .run(hash, holder.identityId, now, now + 10 * 60 * 1000);
+  // No sponsorAccountId is presented: the only sponsor-less caller is
+  // link() via requireLinkHolderProof, acting for a room member on the
+  // holder's own minted code. TM-8's contract governs redemption BY a
+  // sponsor, so the position check does not fire and the code redeems —
+  // the designed owner-member link path (ruling 28a).
+  const consumed = f.store.identities.consumeLinkCode(holder.identityId, code, { roomId: "commons" });
+  assert.equal(consumed.identityId, holder.identityId);
+});
+
 test("TM-8: a second sponsor in the same room cannot redeem the sponsor-holder's code at the connections door", t => {
   const f = fixture(t);
   const { holder, accountId } = makeSponsorHolder(f);
