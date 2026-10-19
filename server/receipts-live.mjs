@@ -23,6 +23,7 @@ import {
   publicReceiptById as byIdUnderlying,
   listPublicReceiptSitemap as sitemapUnderlying,
   collectPublicReceipts as collectUnderlying,
+  publicReceiptCounters as countersUnderlying,
   roomProofRows as proofRowsUnderlying,
 } from "./public-read-model.mjs";
 
@@ -136,6 +137,14 @@ export function collectPublicReceipts(store) {
   const receipts = collectUnderlying(store);
   const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
   return receipts.filter(receipt => !hidden.has(receipt.id));
+}
+
+// Front-door counters. The read model applies both hiding mechanisms as
+// SQL predicates (the same predicates its list query uses), so unlike
+// collectPublicReceipts there is no id set here to post-filter — and no
+// corpus to materialise. `latest` is the newest visible receipt, composed.
+export function collectPublicReceiptCounters(store) {
+  return countersUnderlying(store);
 }
 
 // One room's proof-page rows with the owner toggle applied, newest first.
