@@ -16,16 +16,26 @@
 //   after a restore. #3599: placeholders are never loaded as live values —
 //   sanitized cells resolve to safe substitutes and are counted in the
 //   result's sanitizedCells (see createSanitizedCellTracker).
-// - Restore is fail-closed: it replays only into a store whose rooms table is
-//   empty. It never overwrites a live room.
-// - A restore resurrects authority exactly as it was at backup time. Anything
-//   revoked between the backup and the loss must be re-applied by the operator
-//   (docs/BACKUP-DR.md); there is no "current" store left to reconcile against.
+// - Restore is fail-closed on integrity: a torn, tampered or
+//   foreign-key-broken export is refused and nothing lands.
+// - IR-2: a restore REPLACES the store's contents (the pre-IR-2 doors
+//   refused a non-empty store outright; disaster recovery's real case is
+//   a store whose data is corrupt or whose room is bricked, so refusal
+//   protected nothing and blocked the cure). The replace is gated: the
+//   door captures a pre-restore authority extract from the live store,
+//   and after the replay the restore gate (server/restore-reconcile.mjs)
+//   reconciles the restored authority against it, re-applies every
+//   post-watermark revocation, and writes the reconcile report into
+//   operator_actions in the restored store. A restore that cannot be
+//   reconciled (no valid extract) still lands, but the store stays
+//   restored-unreconciled: agent authentication is refused until an
+//   operator runs the reconcile or acknowledges the restore.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
+import { captureAuthorityExtract, extractIsEmpty, parseAuthorityExtract, runRestoreGate, runRestoreGateLocked, markRestoredUnreconciled, restoreReconcileState, storeRestoredUnreconciled, acknowledgeRestoredUnreconciled } from "./restore-reconcile.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -38,7 +48,17 @@ const FIRST = ["accounts", "rooms", "events", "commands", "member_accounts", "ac
 // export's version marker could downgrade the writer fence and brick the DO.
 // (On node the schema version lives in PRAGMA user_version, so these tables
 // only ever appear in DO-produced exports.)
-const RESTORE_SKIP_TABLES = new Set(["room_runtime_version", "room_writer_permit"]);
+const RESTORE_SKIP_TABLES = new Set(["room_runtime_version", "room_writer_permit",
+  // IR-2 (defect found by the gate's door fixture, present at the stack
+  // base): membership_delegation_pending is target-side machinery, not
+  // store data — trigger-generated transition records for the delegation
+  // journal. The journal itself is restored and already accounts for
+  // the restored grants; importing pending rows (or keeping the ones
+  // the replay's own grant inserts generate) leaves records the
+  // journal's verify rejects, which failed EVERY restore of a backup
+  // carrying a delegation grant at the recovery audit. The replay
+  // discards them after the load (see replayNdjsonInto / finish()).
+  "membership_delegation_pending"]);
 // #3324: the public work-claim writer permit is the TARGET's own authority,
 // never the export's. The file replay drops the exported row and opens the
 // target's seeded permit for the bulk load; an imported enabled=1 row would
@@ -68,6 +88,36 @@ function quoteIdent(name) {
 function tableNames(db) {
   return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
     .map(row => row.name).filter(name => IDENT.test(name));
+}
+
+// IR-2: clearing a table for the replay walk. The pre-IR-2 doors only
+// ever restored into empty stores, so a plain DELETE sufficed; a gated
+// replace can face a populated store, where several tables are
+// deletion-proof by design (append-only journals and receipt tables
+// whose BEFORE DELETE triggers abort unconditionally — the membership
+// delegation journal is the authority-bearing one). DROP TABLE does not
+// fire delete triggers, so the walk drops each table and recreates it
+// from its own sqlite_master DDL (indexes and triggers included,
+// verbatim) before inserting the export's rows. Inside the buffered
+// replay's transaction a later failure rolls the drops back with
+// everything else; the recovery audit after the restore verifies the
+// recreated schema like any other.
+function collectTableDdl(db) {
+  const ddl = new Map();
+  const dependents = [];
+  for (const row of db.prepare("SELECT type, name, tbl_name AS tblName, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all()) {
+    if (row.type === "table") ddl.set(row.name, [row.sql]);
+    else if (row.type === "index" || row.type === "trigger") dependents.push(row);
+  }
+  for (const row of dependents) if (ddl.has(row.tblName)) ddl.get(row.tblName).push(row.sql);
+  return ddl;
+}
+
+function recreateTable(db, ddl, table) {
+  const statements = ddl.get(table);
+  if (!statements) throw new Error(`Restore cannot clear table ${table}: its schema is not readable`);
+  db.exec(`DROP TABLE IF EXISTS ${quoteIdent(table)}`);
+  for (const sql of statements) db.exec(sql);
 }
 
 function tableColumns(db, table) {
@@ -127,6 +177,61 @@ function insertOrder(names) {
   return ordered;
 }
 
+// IR-2: capture the gate's inputs from the live store BEFORE a restore
+// replaces it. When the store is already locked by an earlier restore
+// attempt, the extract that attempt persisted with its stamp is the
+// reference — an abandoned streamed session leaves partial backup data
+// behind, and capturing a fresh "current" from that mixture would
+// launder the very revocations the first attempt was about to re-apply.
+// With no persisted extract, a locked store holding authority yields
+// none (its contents are an unreconciled restore, not a reference); a
+// locked store holding nothing yields its empty extract, so a retry
+// completes through the vacuous gate instead of locking forever.
+function prepareRestoreGate(store, source) {
+  const state = restoreReconcileState(store.db);
+  const locked = storeRestoredUnreconciled(store.db);
+  if (locked && state?.extractJson) {
+    const reused = parseAuthorityExtract(state.extractJson);
+    if (reused) return { extract: reused, reusedExtract: true, lockedAtEntry: false, extractError: null, source };
+  }
+  let extract = null;
+  let extractError = null;
+  try { extract = captureAuthorityExtract(store); }
+  catch (error) { extractError = String(error?.message ?? error).slice(0, 200); }
+  if (locked && extract && !extractIsEmpty(extract)) extract = null;
+  return { extract, reusedExtract: false, lockedAtEntry: locked && !extract, extractError, source };
+}
+
+// Run the gate (or record the locked outcome) once restored data has
+// landed. The caller owns the surrounding transaction where one exists.
+// The projection cache is dropped first: it is keyed by (room, sequence),
+// and a restored room can collide with the pre-restore room's sequence —
+// the gate (and every later read) must see the restored projections.
+function settleRestoreGate(store, gateContext, backedUpAt) {
+  store._dropProjectionCache?.();
+  if (gateContext.extract) return runRestoreGate(store, gateContext.extract, { backedUpAt, source: gateContext.source, extractReused: gateContext.reusedExtract });
+  return runRestoreGateLocked(store, {
+    backedUpAt, source: gateContext.source,
+    reason: gateContext.lockedAtEntry
+      ? "the store was itself restored-unreconciled when this restore began, so its contents were not a valid current reference; post-watermark revocations were NOT re-applied"
+      : `the pre-restore authority extract could not be captured (${gateContext.extractError ?? "unknown error"}); post-watermark revocations were NOT re-applied`,
+  });
+}
+
+// The gate's shape on a restore result / door response: the outcome and
+// the counts, with the full stale list in the restored store's
+// operator_actions journal (the response body stays bounded).
+function reconcileSummary(reconcile) {
+  if (!reconcile) return null;
+  return {
+    status: reconcile.status,
+    stale: reconcile.stale.length,
+    reapplied: reconcile.reapplied.length,
+    skipped: reconcile.skipped.length,
+    ...(reconcile.status === "locked" ? { remedy: "POST /api/operator/restore-acknowledge, or scripts/restore-reconcile.mjs against a surviving current store" } : {}),
+  };
+}
+
 // Foreign-key shape of the store's own schema: which tables reference which
 // (PRAGMA foreign_key_list), and which tables reference themselves (e.g.
 // credentials.parent_hash). Self-references cannot be ordered between tables;
@@ -165,8 +270,13 @@ function topologicalTableOrder(names, deps) {
   return order;
 }
 
-// Replay a whole-store NDJSON export into an open store. The store must be
-// empty (no rooms row); a non-empty store is refused, never overwritten.
+// Replay a whole-store NDJSON export into an open store, replacing its
+// contents. IR-2 gate: the pre-restore authority extract is captured
+// first (unless the store is itself an unreconciled restore, whose
+// contents are not a valid current reference), the store is stamped
+// restored-unreconciled inside the replay transaction, and the gate runs
+// before the transaction commits — a gate failure rolls the whole
+// restore back rather than landing unreconciled authority.
 // audit "strict" (default) refuses a store the recovery audit rejects;
 // audit "report" lands the data and returns the audit failure as a named
 // qualification on the result instead — the semantics of the file replay's
@@ -179,7 +289,8 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
-  if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  const gateContext = prepareRestoreGate(store, "operator-restore");
+  const ddl = collectTableDdl(db);
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
@@ -188,9 +299,11 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   // legacy resolutions for the two columns the old exporter over-hashed.
   const tracker = createSanitizedCellTracker(db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
   // A migrated-but-empty store still holds migration-seeded singleton rows.
-  // Clear each replayed table first, exactly like the file-based replay;
-  // foreign keys go off for the walk and the foreign_key_check below proves
-  // the result (same shape as server/room-export.mjs replayNdjson).
+  // Clear each replayed table first (drop + recreate from its own DDL —
+  // see collectTableDdl), exactly like the file-based replay clears its
+  // fresh store; foreign keys go off for the walk and the
+  // foreign_key_check below proves the result (same shape as
+  // server/room-export.mjs replayNdjson).
   // Verification runs INSIDE the transaction: any failure rolls the replay
   // back, so a failed restore leaves the store empty and retryable instead
   // of half-restored.
@@ -204,7 +317,13 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
       // parent-first sort) no longer matters, because every referenced row is
       // present before the single COMMIT.
       db.exec("PRAGMA defer_foreign_keys=ON");
-      for (const table of order) db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+      // IR-2: stamp the store restored-unreconciled inside the replay
+      // transaction — if anything below fails, the stamp rolls back with
+      // the data; if the replay commits, the gate below either clears
+      // the stamp or the store stays locked. The extract rides with the
+      // stamp so a later retry reconciles against this same reference.
+      markRestoredUnreconciled(db, watermark.backedUpAt ?? null, typeof store.now === "function" ? store.now() : Date.now(), gateContext.extract);
+      for (const table of order) recreateTable(db, ddl, table);
       // #3324: the claim fence aborts any write to a public namespace's
       // claims unless the permit is open. Mirror the file replay: open the
       // TARGET's own seeded permit for the bulk load (the exported permit
@@ -232,6 +351,13 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
         db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
         verifyPublicWorkClaimFence(db);
       }
+      // IR-2: discard the delegation-journal transition records the
+      // replay's own grant inserts generated (see RESTORE_SKIP_TABLES) —
+      // restorations are not grants, and the restored journal already
+      // accounts for the restored grants. The gate's own re-apply
+      // transitions, by contrast, are real and are imported through the
+      // journal's reconcileRollback() inside the gate.
+      if (existing.has("membership_delegation_pending")) db.prepare("DELETE FROM membership_delegation_pending").run();
       if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
       const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
       if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
@@ -259,7 +385,8 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
+      const reconcile = settleRestoreGate(store, gateContext, watermark.backedUpAt ?? null);
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult, reconcile };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -276,8 +403,9 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
 // memory is one part plus one line plus the event tuples the trailer check
 // needs — the total size is unbounded. Room transactions must stay
 // synchronous, so inserts commit in bounded batches; any failure runs
-// abort(), which deletes every table the replay touched (the target was
-// verified empty first), leaving the store empty and retryable.
+// abort(), which recreates-empty every table the replay touched, leaving
+// the store empty and retryable (and, since IR-2, stamped
+// restored-unreconciled until a restore completes its gate).
 const REPLAY_BATCH_ROWS = 500;
 const REPLAY_BATCH_BYTES = 4 * 1024 * 1024;
 
@@ -285,7 +413,12 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
   const db = store.db;
-  if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  // IR-2: capture the gate's extract before the first batch lands, and
+  // stamp the store restored-unreconciled for the whole session — an
+  // abandoned session leaves partial data behind a locked store, never
+  // behind working agent credentials.
+  const gateContext = prepareRestoreGate(store, "operator-restore-from-backup");
+  const ddl = collectTableDdl(db);
   const existing = new Set(tableNames(db));
   const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
   const skippedTables = {};
@@ -330,6 +463,12 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   // #3324, as in replayNdjsonInto: open the target's own permit for the
   // load; the exported permit row is skipped in writeLine and never lands.
   if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=1 WHERE singleton=1`).run();
+  // IR-2: the boot-lock stamp lands at session creation (the watermark is
+  // not known until the stream's first line; finish() refines it through
+  // the gate), carrying the captured extract so a retry after an
+  // abandonment reconciles against this same reference. abort()
+  // deliberately does not clear either.
+  markRestoredUnreconciled(db, null, typeof store.now === "function" ? store.now() : Date.now(), gateContext.extract);
 
   const columnsOf = table => {
     if (!knownColumns.has(table)) knownColumns.set(table, new Set(tableColumns(db, table)));
@@ -379,7 +518,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     store.transaction(() => {
       db.exec("PRAGMA defer_foreign_keys=ON");
       if (!cleared.has(table)) {
-        db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+        recreateTable(db, ddl, table);
         cleared.add(table);
       }
       const known = columnsOf(table);
@@ -470,11 +609,10 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     let cleanupError = null;
     try {
       store.transaction(() => {
-        // Children before parents (reverse topological order): the Worker
-        // enforces foreign keys, so deleting a parent row while its child
-        // rows remain fails the cleanup and leaves half-restored data.
-        for (const table of [...cleared].sort((a, b) => topoIndex.get(b) - topoIndex.get(a)))
-          db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+        // Recreate-empty, not DELETE: the same deletion-proof triggers
+        // the replay walk routes around (see collectTableDdl) guard
+        // these tables, and an abort must be able to empty them.
+        for (const table of cleared) recreateTable(db, ddl, table);
       });
     } catch (error) { cleanupError = error; }
     try {
@@ -539,6 +677,9 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
         verifyPublicWorkClaimFence(db);
       }
+      // IR-2: discard replay-generated delegation-journal transition
+      // records before the audit, as in replayNdjsonInto.
+      if (existing.has("membership_delegation_pending")) db.prepare("DELETE FROM membership_delegation_pending").run();
       // Report mode: as in replayNdjsonInto, the recovery audit's refusal
       // becomes the result's audit qualification; the data lands.
       let recovery = null, invitations = {}, auditResult = { ok: true };
@@ -549,9 +690,16 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
+      // IR-2 gate, in its own transaction after every verification above:
+      // reconcile the landed data against the pre-restore extract and
+      // re-apply post-watermark revocations. A gate failure throws into
+      // the catch below, which aborts the replay — the restore fails
+      // loudly and the store returns to empty-and-locked rather than
+      // landing unreconciled authority.
+      const reconcile = store.transaction(() => settleRestoreGate(store, gateContext, watermark.backedUpAt ?? null));
       settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult, reconcile };
     } catch (error) {
       abort();
       throw error;
@@ -626,9 +774,9 @@ function jsonResponse(status, body) {
 }
 
 // POST /api/operator/restore — replay a whole-store NDJSON export into this
-// Durable Object's storage. Fail-closed: 404 when the operator token is not
-// configured, 401 on a bad token, 405 on non-POST, 409 when the store already
-// holds rooms, 413 over the body cap, 422 on a malformed export. The
+// Durable Object's storage, replacing its contents under the IR-2 gate.
+// Fail-closed: 404 when the operator token is not
+// configured, 401 on a bad token, 405 on non-POST, 413 over the body cap, 422 on a malformed export. The
 // ?audit=report query parameter is the operator's explicit opt-in to land a
 // backup whose stored projections have drifted from current-reducer replay:
 // the restore then succeeds with the drift named in the result's audit
@@ -663,7 +811,6 @@ export async function operatorRestoreResponse(request, token, store) {
     result = replayNdjsonInto(ndjson, store, { audit: auditParam ?? "strict" });
   } catch (error) {
     const message = error?.message ?? String(error);
-    if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
     if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
@@ -679,11 +826,12 @@ export async function operatorRestoreResponse(request, token, store) {
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
     sanitizedCells: result.sanitizedCells,
-    note: "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
+    reconcile: reconcileSummary(result.reconcile),
+    note: RESTORE_NOTE,
   });
 }
 
-const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
+const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore. IR-2: revocations made after the backup were reconciled against the pre-restore store and re-applied automatically; the reconcile outcome is in the reconcile field and in full in the restored store's operator_actions journal. If reconcile.status is \"locked\", no extract was available, nothing was re-applied, and agent authentication stays refused until an operator runs the reconcile or acknowledges the restore.";
 const BACKUP_KEY_PATTERN = /^room-backups\/\d{4}-\d{2}-\d{2}\.ndjson$/;
 
 function kvBytes(value) {
@@ -701,7 +849,7 @@ function kvBytes(value) {
 // apply because nothing larger than one backup part is ever held. Same
 // operator token and fail-closed posture as /api/operator/restore: 404 when
 // the token is unconfigured, 401 on a bad token, 404 when the named backup
-// does not exist, 409 on a non-empty store, 422 on a malformed or
+// does not exist, 422 on a malformed or
 // unverifiable backup. The optional JSON body names the backup:
 // { "key": "room-backups/2026-10-14.ndjson" } (default: today's key) and
 // may carry the same audit opt-in as the body endpoint:
@@ -754,8 +902,6 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
   try {
     session = createBackupReplaySession(store, { audit: auditMode ?? "strict" });
   } catch (error) {
-    const message = error?.message ?? String(error);
-    if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed before replay" } });
   }
   const whole = createHash("sha256");
@@ -788,6 +934,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       bytes: total,
       skippedTables: result.skippedTables,
       sanitizedCells: result.sanitizedCells,
+      reconcile: reconcileSummary(result.reconcile),
       note: RESTORE_NOTE,
     });
   } catch (error) {
@@ -801,4 +948,42 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }
+}
+
+// POST /api/operator/restore-acknowledge — the operator action that
+// clears a restored-unreconciled store when no current reference exists
+// anywhere (a true loss): the restore stands as of its watermark, the
+// post-watermark revocations are unknowable and were NOT re-applied, and
+// this acknowledgement — journaled in operator_actions — is what unlocks
+// agent authentication. When a surviving current store DOES exist, the
+// reconcile itself is the remedy (scripts/restore-reconcile.mjs), not
+// this door. Same token posture as the restore doors: 404 when the
+// token is unconfigured, 401 on a bad token, 405 on non-POST, 409 when
+// the store is not locked.
+export async function operatorRestoreAcknowledgeResponse(request, token, store) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/api/operator/restore-acknowledge") return null;
+  const auth = authorizeOperatorRestore(request.headers.get("authorization"), token);
+  if (auth === "unconfigured") return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (request.method !== "POST") return jsonResponse(405, { error: { code: "method_not_allowed", message: "Use POST" } });
+  if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
+  if (!store) return jsonResponse(503, { error: { code: "unavailable", message: "Restore unavailable" } });
+  let reason = null;
+  try {
+    const text = await request.text();
+    if (text.trim()) {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.reason === "string" && parsed.reason.trim()) reason = parsed.reason.trim().slice(0, 500);
+    }
+  } catch {
+    return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the request body" } });
+  }
+  const { acknowledged, state } = acknowledgeRestoredUnreconciled(store, { reason });
+  if (!acknowledged) return jsonResponse(409, { error: { code: "restore_not_locked", message: "This store is not restored-unreconciled; there is nothing to acknowledge" } });
+  return jsonResponse(200, {
+    ok: true,
+    acknowledged: true,
+    restoredFrom: state?.restoredFrom ? new Date(state.restoredFrom).toISOString() : null,
+    note: "The restore stands as of its backup watermark. Post-watermark revocations are unknowable and were NOT re-applied; the acknowledgement is journaled in operator_actions. Prefer the reconcile (scripts/restore-reconcile.mjs) whenever a current reference survives anywhere.",
+  });
 }

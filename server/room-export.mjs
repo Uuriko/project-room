@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
+import { markRestoredUnreconciled } from "./restore-reconcile.mjs";
 import { Buffer } from "node:buffer";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -491,7 +492,15 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // IR-2: the restore boot-lock state is target-side by definition — a
+  // backup exports the source store's row, but no restore may import it;
+  // the gate stamps the restored store's own state after the rewind.
+  "restore_reconcile_state",
+  // IR-2: delegation-journal transition records are target-side
+  // machinery (see RESTORE_SKIP_TABLES in server/restore-ndjson.mjs);
+  // the journal itself replays and already accounts for the grants.
+  "membership_delegation_pending"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
@@ -565,6 +574,11 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       }
       if (claimPermit) store.db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
     });
+    // IR-2: discard the delegation-journal transition records the load's
+    // grant inserts generated — restorations are not grants, and the
+    // restored journal already accounts for the restored grants (the
+    // audit below verifies the journal with no pendings allowed).
+    if (existing.has("membership_delegation_pending")) store.db.prepare("DELETE FROM membership_delegation_pending").run();
     store.db.exec("PRAGMA foreign_keys=ON");
     if (store.db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
     if (store.db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new Error("Restored store failed quick_check");
@@ -586,6 +600,11 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
     }
     chmodSync(filename, 0o600);
-    return { verified: true, events, trailer: trailerState, contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report() };
+    // IR-2: a store produced by a file replay boots restored-unreconciled
+    // — the file path has no live store to capture an extract from, so
+    // the gate runs later (scripts/restore-reconcile.mjs against a
+    // surviving current store) or the operator acknowledges the restore.
+    markRestoredUnreconciled(store.db, watermark.backedUpAt ?? null);
+    return { verified: true, events, trailer: trailerState, contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report(), reconcile: { status: "locked", reason: "file replay carries no pre-restore extract; run the restore gate before agent authentication" } };
   } finally { store.close(); }
 }

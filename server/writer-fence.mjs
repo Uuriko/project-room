@@ -449,6 +449,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
   "operator_actions",
+  // restore_reconcile_state (IR-2): the restore boot-lock singleton.
+  // Purely additive and intentionally NOT fenced, same as
+  // operator_actions — older writers have no path to it; the gate in
+  // server/restore-reconcile.mjs is the only writer.
+  "restore_reconcile_state",
   // wake_queue_pause_by (R327-1: who set a member's wake pause) is purely
   // additive and intentionally NOT fenced, same as wake_queue_pause's sibling
   // registries: the patch ships it as a separate schema string (the

@@ -23,8 +23,9 @@ honestly cannot survive yet.
     2026-10-07: 14,489 events, digests matched. Nothing in this path writes to
     Cloudflare.
   - *DO-native restore:* `POST /api/operator/restore` replays an export into
-    an empty Durable Object, fail-closed (404 token unconfigured, 401 bad
-    token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
+    a Durable Object under the IR-2 gate (see "What a restore recovers"
+    point 2), fail-closed (404 token unconfigured, 401 bad
+    token, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
   - *KV-native restore (the #3409 fix; deployed to production in revision
@@ -37,7 +38,8 @@ honestly cannot survive yet.
     watermark, recovery, and invitation audits must pass before the restore
     reports verified. Body: `{"key": "room-backups/YYYY-MM-DD.ndjson"}`
     (optional; defaults to today's key). A failed replay deletes everything
-    it touched, leaving the store empty and retryable. Verified end to end
+    it touched, leaving the store empty and retryable — and, since IR-2,
+    stamped restored-unreconciled until a restore completes its gate. Verified end to end
     on 2026-10-15 against a 90,688,789-byte production-shaped backup (the
     live backup that day was 89,652,872 bytes): the KV restore and file
     replay of the same backup both verified, ~30s each (#3409).
@@ -104,13 +106,31 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    the export's sha256 placeholder as a live value. The restore result's
    `sanitizedCells` counts every substitution per table and column. **All
    of them must be re-issued** after a restore before agents can act again.
-2. A restore resurrects authority exactly as it was **at backup time**.
-   Anything revoked between the backup and the loss (keys, share links,
-   memberships, delegations) comes back looking current. The operator must
-   re-apply those revocations from external records. The node-side
-   `reconcileRestoredAuthority` (`server/backup.mjs`) names this hazard;
-   after a true loss there is no "current" store left to reconcile against,
-   so this step is manual.
+2. A restore resurrects authority exactly as it was **at backup time** —
+   but since IR-2 the restore doors close that hole themselves. Before
+   replaying, the door captures a pre-restore authority extract from the
+   live store and persists it with the restore's boot-lock stamp; after
+   the replay, the gate (`server/restore-reconcile.mjs`) reconciles the
+   restored store against the extract across all 30 authority classes,
+   re-applies every post-watermark revocation in one transaction, and
+   writes the reconcile report into `operator_actions` in the restored
+   store (the restore result's `reconcile` field summarises it). A
+   restore that cannot be reconciled — no extract, or a store that was
+   itself an unreconciled restore — still lands, but the store stays
+   **restored-unreconciled**: agent authentication is refused
+   (`restored_unreconciled`) until an operator runs the reconcile
+   (`scripts/restore-reconcile.mjs --restored <db> --current <db>`) or
+   acknowledges the restore (`POST /api/operator/restore-acknowledge`,
+   or the script's `--acknowledge --reason`), recording that no current
+   reference survives and the backup-time authority stands. A backup
+   file swapped in directly (or produced by the file replay) boots
+   restored-unreconciled the same way. Two honest limits: share-link
+   joins spent after the backup cannot be re-accounted (the link's
+   scope is immutable and the join rows reference invitations the
+   backup never held), so the gate cancels such a link and journals the
+   compensation; and one class of post-watermark change — a member's
+   exit — is re-applied as the seat's own leave event in the restored
+   log.
 
 ## Restore runbook (operator)
 
@@ -122,13 +142,17 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    before replaying; from a saved export file, use the same script with
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
-3. Re-issue every credential, and re-apply post-backup revocations (see
-   above). Treat the restored room as authoritative **as of `backedUpAt`**.
+3. Re-issue every credential (see above). Post-backup revocations are
+   re-applied by the gate automatically on the DO-native doors; for a
+   file replay, run `scripts/restore-reconcile.mjs` against a surviving
+   current store, or acknowledge the restore on the record. Treat the
+   restored room as authoritative **as of `backedUpAt`**, plus the
+   gate's re-applied revocations.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
-cap: confirm the DO store is empty — the endpoints refuse a non-empty store
-with 409 — then POST the NDJSON with
-`Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
+cap: POST the NDJSON with `Authorization: Bearer <ROOM_BACKUP_TOKEN>` — the
+door replaces the store's contents under the IR-2 gate rather than
+refusing a non-empty store. For the current over-cap
 backup, use the KV-native endpoint above with the backup's key instead.)
 
 ## What was deliberately not done

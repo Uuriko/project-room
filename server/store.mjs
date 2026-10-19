@@ -42,6 +42,7 @@ import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } fr
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
+import { ensureRestoreReconcileSchema, storeRestoredUnreconciled } from "./restore-reconcile.mjs"; // IR-2: restore boot-lock state.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
 import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
@@ -1112,6 +1113,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
+  [ensureRestoreReconcileSchema, "ensureRestoreReconcileSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
@@ -1658,6 +1660,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // version bump, intentionally outside the writer fence (see
       // unfencedAdditiveTables). Append-only triggers reject UPDATE and DELETE.
       ensureOperatorActionsSchema(this.db);
+      // IR-2: restore boot-lock singleton. IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Written only by the restore gate.
+      ensureRestoreReconcileSchema(this.db);
       // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant
       // edges — purely additive table, IF NOT EXISTS is idempotent, no
       // schema version bump.
@@ -4526,6 +4532,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch,identity_secret_hash) VALUES(?,?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null, identitySecretHash);
     return token;
   }
+  // IR-2: a store produced by an unreconciled restore refuses AGENT
+  // authentication until the restore gate has run (or the operator has
+  // acknowledged that no current reference exists). Human sign-in is
+  // never gated: the operator must be able to sign in to run the remedy.
+  // The refusal names the remedy: POST /api/operator/restore-acknowledge,
+  // or scripts/restore-reconcile.mjs against a surviving current store.
+  assertRestoredReconciled() {
+    if (storeRestoredUnreconciled(this.db)) {
+      fail(403, "restored_unreconciled", "This store was restored from a backup and its restored authority has not been reconciled, so agent authentication is refused. An operator clears this with POST /api/operator/restore-acknowledge, or by running the restore reconcile (scripts/restore-reconcile.mjs) against a surviving current store.");
+    }
+  }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
     // Round-2 #101: multi-room agent identities. One identity secret works in
     // every room the identity is linked to; rooms keep sovereignty via link/unlink.
@@ -4534,6 +4551,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // null — a key can never grant human-account access, so account-session
     // gates (e.g. /api/inbox/*) remain unreachable to keys.
     if (isApiKeyToken(token)) {
+      this.assertRestoredReconciled();
       const record = this.agentPlugin.verifyPresentedApiKey(token);
       if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
       const roomScopes = record.scopes.filter(scope => scope.startsWith("mcp:room:"));
@@ -4550,6 +4568,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
     if (isIdentitySecret(token)) {
+      this.assertRestoredReconciled();
       const resolved = this.identities.resolveIdentityAuth(token, roomId);
       if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
       // Owner delegates (server/owner-delegates.mjs): an active per-room
@@ -4594,6 +4613,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const members = this.roomAuthority(row.room_id).members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
     if (!member || member.active === false) fail(403, "access_denied", "Room membership is inactive");
+    if (member.kind === "agent") this.assertRestoredReconciled();
     this.verifyInvitedMembership(row.room_id, member);
     let account = null;
     if (member.kind === "human") {

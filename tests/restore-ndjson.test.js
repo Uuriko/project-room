@@ -57,11 +57,19 @@ test("replayNdjsonInto restores a whole-store export into an empty open store", 
   assert.ok(target.room("commons").state.members.agent, "restored members are present");
 });
 
-test("replayNdjsonInto refuses a non-empty store — restore never overwrites live data", t => {
+test("replayNdjsonInto replaces a non-empty store under the IR-2 gate (was: refusal)", t => {
   const { ndjson, store } = seed(t);
-  assert.throws(() => replayNdjsonInto(ndjson, store), /non-empty/);
-  // The refused store is untouched.
-  assert.ok(store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "live store keeps its rooms row");
+  // Restoring a store from its own current export: the gate reconciles
+  // the restored contents against the pre-restore extract of the same
+  // store, so nothing is stale and nothing is re-applied.
+  const result = replayNdjsonInto(ndjson, store);
+  assert.equal(result.verified, true);
+  assert.equal(result.reconcile.status, "reconciled");
+  assert.equal(result.reconcile.stale.length, 0);
+  assert.equal(result.reconcile.reapplied.length, 0);
+  assert.ok(store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "the store keeps its rooms row");
+  const row = store.db.prepare("SELECT body FROM events WHERE body LIKE '%history that must survive the restore%'").get();
+  assert.ok(row, "history survives the gated replace");
 });
 
 test("a truncated export fails the watermark check instead of restoring partial", t => {
@@ -124,10 +132,13 @@ test("operator restore stays closed until the backup token is set, then enforces
   assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "denied attempts write nothing");
 });
 
-test("operator restore refuses a live store and oversized bodies", async t => {
+test("operator restore replaces a live store under the gate, and still refuses oversized bodies", async t => {
   const { ndjson, store } = seed(t);
   const response = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, store);
-  assert.equal(response.status, 409, "restore into a non-empty store is a conflict, never an overwrite");
+  assert.equal(response.status, 200, "IR-2: a live store is restored by gated replace, not refused");
+  const payload = await response.json();
+  assert.equal(payload.reconcile.status, "reconciled");
+  assert.equal(payload.reconcile.stale, 0);
   const target = openStore(t, "restore-ndjson-413-");
   const tooBig = await operatorRestoreResponse(
     fakeRequest({ body: "x".repeat(10), contentLength: 64 * 1024 * 1024 + 1 }), OPERATOR_TOKEN, target);
