@@ -623,12 +623,16 @@ test("trigger: bond proposal enqueues a durable bond wake that survives a dead p
   assert.equal(rows[0].message_id, bondId);
   assert.equal(rows[1].kind, "wake");
   assert.equal(rows[1].message_id, `wake:${bondId}`);
-  // The durable channel carries it even though the doorbell failed: the
-  // party's next wake poll shows both rows, and ack drains them.
+  // The durable channel carries it even though the doorbell failed.
+  // WAKE0-2: the poll itself is a connect — discharge-on-connect retires
+  // the wake intent before the page composes, so the poll shows the
+  // bond alone and the intent row stands discharged; ack drains the bond.
   const poll = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
-  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId], ["wake", `wake:${bondId}`]]);
-  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: rows.map(r => r.signal_id) }, identity.secret)).json();
-  assert.deepEqual(ack.acknowledged, rows.map(r => r.signal_id));
+  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId]]);
+  const intentRow = f.store.db.prepare("SELECT delivered_at AS deliveredAt FROM agent_wake_signals WHERE signal_id=?").get(rows[1].signal_id);
+  assert.notEqual(intentRow.deliveredAt, null, "the poll discharged the wake intent");
+  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [rows[0].signal_id] }, identity.secret)).json();
+  assert.deepEqual(ack.acknowledged, [rows[0].signal_id]);
   const quiet = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
   assert.deepEqual(quiet.pendingWakes, []);
   // The proposer is never woken about their own proposal.

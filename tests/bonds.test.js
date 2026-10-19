@@ -311,7 +311,10 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
   const wakeDeliveries = journal.body.deliveries.filter(row => row.eventType === "agent.wake");
   // deliverWakePing journals the subscription URL and the host wakeUrl.
   // Both are agent.wake. Neither is a room broadcast of dm.posted.
-  assert.equal(wakeDeliveries.length, 4);
+  // WAKE0-2: the OFFLINE DM also emitted a wake intent, and the intent
+  // journals its own directed pair — 2 (online DM) + 2 (offline DM)
+  // + 2 (the offline DM's wake intent) = 6.
+  assert.equal(wakeDeliveries.length, 6);
   const directed = fixture.store.db.prepare("SELECT d.event_id,d.agent_id,COALESCE(d.target_url,s.url) AS target_url FROM agent_webhook_deliveries d JOIN agent_webhook_subs s ON s.subscription_id=d.subscription_id WHERE d.subscription_id=? AND d.event_type='agent.wake'")
     .all(wakeSub.body.subscriptionId);
   for (const signal of wakes) {
