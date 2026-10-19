@@ -23,7 +23,7 @@
 // The webhook secret is never read here as a value for storage and never
 // leaves the process; only its env var NAME is documented (ops__STATE.md).
 import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
-import { applyPullRequestWebhook, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { applyPullRequestWebhook, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
@@ -162,6 +162,14 @@ function autoLinkShape(parsed) {
 // exists (the owner can still link more by hand). Emits one
 // work_claim.updated receipt with reason pr_autolinked.
 export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unknown" } = {}, { nowMs = Date.now() } = {}) {
+  // A public-work namespace claim must never gain a pull link: the door
+  // settles by receipt and escrow attach, not by PR outcome, and a link
+  // would arm the claim-pr poll to settle it with room semantics — no
+  // receipt, no criteria attestation, no escrow attach. (findClaimForPull
+  // passes repo-less claims, and every door claim is repo-less, so the
+  // webhook path can reach this function with a namespace room today;
+  // only the fence's abort has been holding it back — CP-ADVERSARY H-3.)
+  if (isPublicClaimNamespace(store, roomId)) return { linked: false, reason: "public_namespace" };
   const item = store?.workClaims?.get(roomId, claimId);
   if (!item || !LIVE_CLAIM_STATES.has(item.state) || !item.owner || item.supersededBy) {
     return { linked: false, reason: "not_active" };
@@ -406,6 +414,9 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
   }
   store.workClaims.transaction(() => {
     for (const roomId of roomIds) {
+      // Deploy revisions are room-board facts; the door's items never
+      // carry one and are never stamped with one.
+      if (isPublicClaimNamespace(store, roomId)) continue;
       for (const item of store.workClaims.list(roomId)) {
         if (item.state !== "done") continue;
         if (item.revision !== revision) continue;

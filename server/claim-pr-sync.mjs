@@ -51,6 +51,26 @@ function noteSkippedInvalidClaim(skipped, roomId, claimId, error) {
   return entry;
 }
 
+// --- public-work namespace boundary ---------------------------------------
+// Rows whose room_id is a public-work namespace key (minted by the
+// public-work module's enable()) are partitions of work_claims owned
+// end-to-end by that module: the door is their sole lifecycle authority —
+// generation-fenced, journaled, settled by receipt and escrow attach under
+// its writer permit, never by PR outcome or board housekeeping. The sync
+// family's whole-registry phases therefore never select namespace rows for
+// any transition (lease release, stale retirement, deployed close, PR
+// settlement, autolink, deploy link). Selecting them is what wedged
+// claim-prs at 307 consecutive failures: the writer fence
+// (server/public-work-claim-fence.mjs) aborts the write, and in the lease
+// sweep the aborted write was the release itself, so the row re-tripped
+// every tick. (CP-DIAG diagnosis, CP-CENSUS G1–G5, CP-ADVERSARY verdict.)
+export function isPublicClaimNamespace(store, roomId) {
+  if (!store?.db || typeof store.db.prepare !== "function" || typeof roomId !== "string") return false;
+  try {
+    return Boolean(store.db.prepare("SELECT 1 FROM public_work_tasks WHERE namespace_key=?").get(roomId));
+  } catch { return false; }
+}
+
 const LOOKUP_LIMIT = 4;
 const LOOKUP_LIMIT_NO_TOKEN = 1;
 const MAX_BODY_CHARS = 65_536;
@@ -474,12 +494,17 @@ export function writeClaimPullBudget(store, until, nowMs) {
     .run(BUDGET_ROOM, JSON.stringify({ rateLimitedUntil: until }), nowMs);
 }
 
-function holdDue(registry, roomId, items, until, nowMs) {
+function holdDue(store, roomId, items, until, nowMs) {
+  // Defense in depth behind the poll's candidate exclusion: a namespace
+  // room's claims are never held by the sync (the door owns their
+  // lifecycle), and this set is uncaught inside the batch transaction —
+  // one refused hold would roll back every settlement in the batch.
+  if (isPublicClaimNamespace(store, roomId)) return;
   for (const item of items) {
-    const current = registry.get(roomId, item.id);
+    const current = store.workClaims.get(roomId, item.id);
     if (!current?.pullRequest?.url || current.pullRequest.outcome) continue;
     if (!["claimed", "in_progress", "blocked"].includes(current.state)) continue;
-    registry.set(roomId, holdForRateLimit(current, nowMs, until));
+    store.workClaims.set(roomId, holdForRateLimit(current, nowMs, until));
   }
 }
 
@@ -521,6 +546,7 @@ function loadDueClaims(store, nowMs) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -573,6 +599,7 @@ function loadVerificationClaims(store, nowMs, limit) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -634,6 +661,7 @@ function heldPullIndex(store) {
   }
   const index = new Map();
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     let urls = [];
     try { urls = (JSON.parse(row.links) ?? []).map(pull => pull?.url); } catch { /* fall back to the primary link */ }
     if (typeof row.url === "string") urls.push(row.url);
@@ -842,7 +870,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
         list.push(entry.item);
         byRoom.set(entry.roomId, list);
       }
-      for (const [roomId, items] of byRoom) holdDue(store.workClaims, roomId, items, batch.rateLimitedUntil, nowMs);
+      for (const [roomId, items] of byRoom) holdDue(store, roomId, items, batch.rateLimitedUntil, nowMs);
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
@@ -894,6 +922,10 @@ function writeHousekeepingState(store, state, nowMs) {
 // rotation. #3464: closeWhenLive re-validates the stored row; isolate per
 // item so one invalid row cannot abort the phase for every other room.
 function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
+  // Namespace rows are public-work tasks, never land/deploy board
+  // claims: kind and revision are room-board facts the door's items do
+  // not carry, so a deployed close can never legitimately select one.
+  if (isPublicClaimNamespace(store, roomId)) return;
   let item;
   try {
     item = store.workClaims.get(roomId, claimId);
@@ -1009,6 +1041,11 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
 }
 
 function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
+  // Namespace partitions are the public-work door's jurisdiction: their
+  // lapsed leases are released by the door's own sweep inside apply(),
+  // under the permit. The cron never selects them (see the namespace
+  // boundary note above) — this set is the one that wedged claim-prs.
+  if (isPublicClaimNamespace(store, roomId)) return 0;
   const candidates = [];
   for (const claimId of claimIds) {
     let item;
@@ -1114,6 +1151,10 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
       if (progress) progress.complete = false;
       return closed;
     }
+    // Namespace partitions belong to the public-work module's lifecycle;
+    // the board stale sweep never retires their rows, whatever a config
+    // row says (a namespace's claim row projects a live public task).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
     const items = unclaimedRoomItems(store, roomId, skipped);
     let pairs;
@@ -1207,6 +1248,8 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
     throw error;
   }
   for (const roomId of roomIds) {
+    // The door's claims never settle by PR outcome (receipts, not pulls).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
         if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
