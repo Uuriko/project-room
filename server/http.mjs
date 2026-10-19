@@ -41,7 +41,8 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -172,6 +173,14 @@ function warnEmailGatesRelaxed() {
   if (emailGatesRelaxedWarned) return;
   emailGatesRelaxedWarned = true;
   console.warn("No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer");
+}
+const bootConfigWarningsShown = new Set();
+function warnBootConfigOnce(warning) {
+  if (bootConfigWarningsShown.has(warning)) return;
+  bootConfigWarningsShown.add(warning);
+  // Same channel and prefix server.mjs used when the gate lived there, so
+  // boot logs keep one shape after the move (BG-1).
+  console.error(`[boot-config] ${warning}`);
 }
 function warnMissingSecurityContact() {
   if (securityContactWarned) return;
@@ -333,8 +342,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   fetchPullRequest = null,
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
+  // (server/boot-config.mjs) runs here, in the shared boot path every entry
+  // converges on — the node entry (server.mjs), the Worker entry
+  // (cloudflare/room.mjs) and every fixture boot — instead of only in
+  // server.mjs, whose fixture boots never saw it. Production entries pass
+  // `production: true` and throw on broken critical config before any side
+  // effect; other boots surface the gate's warnings once per process (the
+  // mailer warning below follows the same once-per-process rule). The
+  // Worker entry's card is additionally covered at build time by
+  // scripts/sign-agent-card.mjs, which fails closed without the key.
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
