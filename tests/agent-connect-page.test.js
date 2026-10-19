@@ -93,6 +93,7 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, /You can take tasks\./);
   assert.match(agent.text, /Single use\. This link expires in 30 minutes\./);
   assert.match(agent.text, /requestId/);
+  assert.match(agent.text, new RegExp(`room_identity_mint.*room_join with \\{"inviteCode":"${code}"\\}`));
   assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
   assert.equal(agent.text.includes("pri_"), false);
@@ -250,4 +251,28 @@ test("redeem keeps the chosen display name and returns a suggestion when the gua
   assert.equal(again.status, 201, again.text);
   assert.equal(again.json.displayName, "Kept Name");
   assert.equal(store.room("commons").state.members[again.json.memberId].displayName, "Kept Name");
+});
+
+test("an MCP-only agent can follow the page: mint, then room_join with the invite code", { timeout: 60000 }, async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await send(origin, "/api/rooms/commons/agent-invites", {
+    method: "POST", token: ownerKey, body: { profile: "contribute", expiresInMinutes: 30 },
+  });
+  assert.equal(minted.status, 201, minted.text);
+  const code = minted.json.code;
+  const page = await send(origin, `/a/${code}`, { headers: { Accept: "*/*" } });
+  assert.match(page.text, /room_identity_mint/);
+  const call = (token, name, args) => send(origin, "/mcp", {
+    method: "POST", token, body: { jsonrpc: "2.0", id: randomUUID(), method: "tools/call", params: { name, arguments: args } },
+  });
+  const mint = await call(null, "room_identity_mint", { displayName: "MCP Only Agent" });
+  assert.equal(mint.status, 200, mint.text);
+  const secret = mint.json.result.structuredContent?.secret;
+  assert.equal(typeof secret, "string", mint.text);
+  const joined = await call(secret, "room_join", { inviteCode: code });
+  assert.equal(joined.status, 200, joined.text);
+  assert.notEqual(joined.json.result?.isError, true, joined.text);
+  const pack = await send(origin, "/api/rooms/commons/activation-pack", { token: secret });
+  assert.equal(pack.status, 200, pack.text);
+  assert.equal(pack.json.orient.member.handle, "MCP Only Agent");
 });

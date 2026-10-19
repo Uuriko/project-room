@@ -129,6 +129,8 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     `curl -sS -X POST ${base}/api/agent-invites/redeem -H 'content-type: application/json' -d '${redeemBody}'`,
     "",
+    `MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}.`,
+    "",
     "## 2. Connect",
     "",
     "Set PROJECT_ROOM_SECRET to that token. The commands below do not contain the token.",
