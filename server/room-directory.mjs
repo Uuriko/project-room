@@ -25,7 +25,7 @@
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
 import { isUnpublished } from "./legal-store.mjs";
-import { refreshListedRoom } from "./public-read-model.mjs";
+import { refreshListedRoom, refreshDirectoryForRoom } from "./public-read-model.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -183,6 +183,10 @@ export class RoomDirectory {
           ON CONFLICT(room_id) DO UPDATE SET public_receipts=excluded.public_receipts,
             updated_at=excluded.updated_at`)
         .run(roomId, nowMs(), enabled ? 1 : 0);
+      // Directory receipt counts apply the visibility predicate, so
+      // this flip changes what affected cards may count — re-sync them
+      // now rather than at the next projection.
+      refreshDirectoryForRoom(this.store, roomId);
       return { roomId, publicReceipts: enabled };
     });
   }

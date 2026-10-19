@@ -1,11 +1,12 @@
-import { normalizePoll } from "./polls.js";
+import { createWorkReducers } from "./work-reducers.js";
+import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
-import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
+import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
-import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
+import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
-import { SESSION_EVENT_TYPES, applySessionFields, ensureWorkControlDefaults } from "./work-item-session.js";
+import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
 
 // message.posted and message.edited bodies. Other event strings stay at 4,096.
 // 65,536 characters is far under the 4 MiB room projection and Durable Object
@@ -580,13 +581,13 @@ function lightMessageCloneIds(incoming) {
   if (typeof messageId !== "string" || !messageId) return null;
   return new Set([messageId, `${messageId}:channel`]);
 }
-function cloneStateForApply(current, incoming) {
-  const state = { ...current };
-  if (Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
-  if (current.seenEvents && typeof current.seenEvents === "object") {
+function cloneStateForApply(current, incoming, journal = null) {
+  const state = { ...current, ...(journal ?? {}) };
+  if (!journal && Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
+  if (!journal && current.seenEvents && typeof current.seenEvents === "object") {
     state.seenEvents = { ...current.seenEvents };
   }
-  if (current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
+  if (!journal && current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
     state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
   }
   const lightMessages = lightMessageCloneIds(incoming);
@@ -604,7 +605,24 @@ function cloneStateForApply(current, incoming) {
 }
 
 export function applyEvent(current, incoming) {
-  const state = cloneStateForApply(current, incoming);
+  return applyEventWithJournal(current, incoming);
+}
+
+// A replay owns its journal for the entire fold. Clone it once, rather than
+// copying every accumulated event ID and log entry for each subsequent event.
+// Domain state still goes through the same immutable reducer path; callers never
+// observe intermediate journal aliases and the input state remains untouched.
+export function replayEvents(current, events) {
+  const journal = {eventLog:[...(current.eventLog ?? [])],
+    seenEvents:{...(current.seenEvents ?? {})},
+    seenIdempotencyKeys:{...(current.seenIdempotencyKeys ?? {})}};
+  let state = current;
+  for (const incoming of events) state = applyEventWithJournal(state,incoming,journal);
+  return state;
+}
+
+function applyEventWithJournal(current, incoming, journal = null) {
+  const state = cloneStateForApply(current, incoming, journal);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.
@@ -1262,99 +1280,6 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   }
 }
 
-function postMessage(state, incoming) {
-  const actor = requireMember(state, incoming.actorId);
-  // --- PRIV-1 message redaction ---
-  // A rewritten log stores body null and redacted true. Replay still has to
-  // build the same message, including a channel copy, without the text.
-  const redacted = isRedactedBody(incoming.data);
-  if (!redacted) requireFields(incoming.data, ["body"]);
-  // --- end PRIV-1 message redaction ---
-  const requestMode = prepareReplyPost(state, incoming);
-  if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
-  if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
-  // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
-  // Polls (missing-features #5): kind "poll" carries a validated poll payload.
-  if (incoming.data.kind != null && !["receipt_card", "poll"].includes(incoming.data.kind)) throw new Error("Message kind must be receipt_card or poll");
-  const poll = incoming.data.kind === "poll" ? normalizePoll(incoming.data) : null;
-  if (incoming.data.kind === "receipt_card") {
-    requireFields(incoming.data, ["claimId", "title", "closedBy", "deliveryMode", "evidence"]);
-    if (!["result", "merged", "production"].includes(incoming.data.deliveryMode)) throw new Error("Invalid deliveryMode");
-  }
-  if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
-  // Replies pin to their thread root's channel so a thread can't drift across
-  // channels, no matter what channelId the command carries.
-  let channelId = incoming.data.channelId || DEFAULT_CHANNEL_ID;
-  if (incoming.data.replyToId) {
-    let root = state.messages.find(m => m.id === incoming.data.replyToId);
-    if (!root) throw new Error("Reply must reference a message in this Room");
-    while (root.replyToId) {
-      const parent = state.messages.find(m => m.id === root.replyToId);
-      if (!parent) break;
-      root = parent;
-    }
-    channelId = messageChannelId(root);
-  }
-  const channel = state.channels[channelId];
-  if (!channel) throw new Error("Unknown channel");
-  if (channel.archivedAt) {
-    const error = new Error("Channel is archived");
-    error.code = CHANNEL_ARCHIVED_CODE;
-    throw error;
-  }
-  const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
-  if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
-  state.messages.push({
-    id: incoming.data.messageId || incoming.id,
-    authorId: actor.id,
-    body: incoming.data.body,
-    ...(redacted ? { redacted: true } : {}),
-    channelId,
-    workItemId: incoming.data.workItemId || null,
-    replyToId: incoming.data.replyToId || null,
-    toMemberId: incoming.data.toMemberId || null,
-    createdAt: incoming.at,
-    ...(proposal ? { proposal } : {}),
-    ...(Array.isArray(incoming.data.actions) ? { actions: incoming.data.actions.map(action => ({ claimId: action.claimId, label: action.label })) } : {}),
-    ...(incoming.data.kind === "receipt_card" ? {
-      kind: "receipt_card",
-      claimId: incoming.data.claimId,
-      // Run-receipt link (rc_<claimId>): newer posters carry receiptId on the
-      // event; older cards derive it so every card projects the link the
-      // receipts surface resolves.
-      receiptId: incoming.data.receiptId || `rc_${incoming.data.claimId}`,
-      title: incoming.data.title,
-      closedBy: incoming.data.closedBy,
-      deliveryMode: incoming.data.deliveryMode,
-      evidence: incoming.data.evidence,
-      ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {})
-    } : {}),
-    ...(poll ? { kind: "poll", poll } : {})
-  });
-  // "Also send to channel": a public thread reply also lands as a top-level
-  // message in the thread's channel, in the same event. The derived id is
-  // deterministic (validId-safe suffix) so replay and retried commands stay
-  // idempotent. DMs and work proposals never copy — a DM copy would leak the
-  // private body, and a proposal's work context doesn't survive as a plain
-  // message.
-  if (incoming.data.alsoSendToChannel && incoming.data.replyToId && !incoming.data.toMemberId && !incoming.data.workItemId) {
-    const copyId = `${incoming.data.messageId || incoming.id}:channel`;
-    if (state.messages.some(m => m.id === copyId)) throw new Error("Message already exists");
-    state.messages.push({
-      id: copyId,
-      authorId: actor.id,
-      body: incoming.data.body,
-      ...(redacted ? { redacted: true } : {}),
-      channelId,
-      workItemId: null,
-      replyToId: null,
-      toMemberId: null,
-      createdAt: incoming.at
-    });
-  }
-  recordReplyPost(state, incoming, requestMode);
-}
-
 function requireChannelOwner(state, actor) {
   if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may manage channels");
 }
@@ -1392,330 +1317,6 @@ function archiveChannel(state, incoming) {
   if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be archived");
   channel.archivedAt ??= incoming.at;
 }
-// A message named by a completed work item's receipt is that work's result.
-// src/work-packet.js puts it plainly: "the immutable stored message is the
-// artifact". Nothing enforced it, so an edit was accepted and then broke
-// everything downstream at once - server/text-results.mjs storedText requires
-// the posted body to still equal the stored one, so GET work-result answered
-// 422 result_unavailable for that item forever while it went on reporting
-// state: completed with an evidenceVersion hash matching nothing retrievable,
-// and auditTextResults failed, which takes backupRoom down for the whole
-// database.
-//
-// Scoped to receipts, deliberately. auditTextResults only walks work.completed
-// events carrying room_text evidence, and a draft is meant to be revised.
-//
-// This refuses an owner's delete as well as an author's edit, which is the
-// uncomfortable half: removing harmful content that happens to be bound as
-// evidence now needs the receipt invalidated first, and there is no event for
-// that yet. That is worth building. It is still better than the present
-// behaviour, where the delete is accepted and silently destroys the artifact
-// plus the room's backups, because a refusal says so at the moment it happens.
-const evidenceReceipt = (state, messageId) => {
-  for (const work of Object.values(state.workItems ?? {})) {
-    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
-      if (receipt?.nativeText?.messageId === messageId) return work;
-    }
-  }
-  return null;
-};
-
-// Withdrawing text a work item recorded as its result. The receipt keeps
-// everything it ever claimed - who reported it, the hash a verifier signed off
-// against - and gains the fact that the text behind it is gone, so a reader
-// finds a withdrawal instead of a reference to a message the room no longer
-// shows. Every auditor that reconstructs a receipt has to replay this; see
-// auditTextResults in server/text-results.mjs.
-function withdrawTextEvidence(state, messageId, incoming) {
-  for (const work of Object.values(state.workItems ?? {})) {
-    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
-      if (receipt?.nativeText?.messageId !== messageId) continue;
-      receipt.nativeText.withdrawnAt = incoming.at;
-      receipt.nativeText.withdrawnBy = incoming.actorId;
-    }
-  }
-}
-
-// `evidence: "refuse"` is for an edit, which would move the text behind a hash
-// somebody already verified, leaving the work item claiming a result that no
-// longer says what it said. `evidence: "withdraw"` is for a deletion, which
-// must stay available to whoever has to take harmful text out of a room: it
-// removes the text and records the withdrawal on the receipt.
-function findEditableMessage(state, incoming, { evidence = "refuse" } = {}) {
-  const message = state.messages.find(m => m.id === incoming.data.messageId);
-  if (!message) throw new Error("Message not found");
-  if (message.deletedAt) throw new Error("Message was deleted");
-  const evidenceFor = evidence === "refuse" ? evidenceReceipt(state, message.id) : null;
-  if (evidenceFor) throw new Error(`This message is the recorded result of ${evidenceFor.id} and cannot be changed`);
-  const actor = requireMember(state, incoming.actorId);
-  if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
-  if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
-  return { message, actor };
-}
-
-// Edit history is bounded. Each edit used to append the previous body with no
-// cap, so enough edits of a long message pushed the room projection into the
-// 4 MiB pilot cap and refused every later write in the room (muse-room 12457
-// item 3, evidence 12458). Keep the most recent EDIT_HISTORY_MAX_ENTRIES prior
-// versions, each body capped at EDIT_HISTORY_MAX_BODY_CHARS, dropping the
-// oldest first; the newest entry is always kept so an edit is still marked.
-const EDIT_HISTORY_MAX_ENTRIES = 25;
-const EDIT_HISTORY_MAX_BODY_CHARS = 20000;
-// One message's history may never hold more than a 128th of the 4 MiB room
-// projection, so even the cap's ceiling cannot crowd out the room's writes.
-const EDIT_HISTORY_MAX_TOTAL_CHARS = 32768;
-
-function appendEditHistory(history, entry) {
-  const size = (e) => (typeof e.body === "string" ? e.body.length : 0) + 64;
-  const trimmed = typeof entry.body === "string" && entry.body.length > EDIT_HISTORY_MAX_BODY_CHARS
-    ? { ...entry, body: entry.body.slice(0, EDIT_HISTORY_MAX_BODY_CHARS) }
-    : entry;
-  let prior = [...(history ?? []), trimmed];
-  while (prior.length > 1 && (prior.length > EDIT_HISTORY_MAX_ENTRIES || prior.reduce((sum, e) => sum + size(e), 0) > EDIT_HISTORY_MAX_TOTAL_CHARS)) prior = prior.slice(1);
-  return prior;
-}
-
-function editMessage(state, incoming) {
-  const { message } = findEditableMessage(state, incoming);
-  // --- PRIV-1 message redaction ---
-  if (!isRedactedBody(incoming.data) && (typeof incoming.data.body !== "string" || !incoming.data.body.trim())) throw new Error("Message body must be text");
-  // --- end PRIV-1 message redaction ---
-  message.editHistory = appendEditHistory(message.editHistory, { body: message.body, editedAt: incoming.at });
-  message.body = incoming.data.body;
-  message.revision = (message.revision ?? 0) + 1;
-  message.editedAt = incoming.at;
-}
-
-function deleteMessage(state, incoming) {
-  const { message } = findEditableMessage(state, incoming, { evidence: "withdraw" });
-  message.body = null;
-  // Deletion hides every earlier version too; the tombstone keeps only who/when.
-  message.editHistory = [];
-  message.deletedAt = incoming.at;
-  message.deletedBy = incoming.actorId;
-  dropPinsForMessage(state, message.id); // issue #6 B2: the tombstone drops the pin too
-  withdrawTextEvidence(state, message.id, incoming);
-  message.revision = (message.revision ?? 0) + 1;
-}
-
-// --- PRIV-1 message redaction ---
-function isRedactedBody(data) {
-  return data?.redacted === true && data.body == null;
-}
-
-// Server-emitted. Owner delete, author delete, and account deletion all append
-// this after the text has been removed from earlier events. Replay must match
-// a live delete: bodies stay null, a prior delete's timestamp wins, and the
-// posted byte length is kept so a receipt can still name its hash.
-function redactMessage(state, incoming) {
-  const actor = requireMember(state, incoming.actorId);
-  const messageId = incoming.data?.messageId;
-  if (!validId(messageId)) throw new Error("Event data missing messageId");
-  const primary = state.messages.find(message => message.id === messageId);
-  if (!primary) throw new Error("Message not found");
-  if (primary.authorId !== actor.id && actor.id !== state.room.ownerId) {
-    throw new Error("Only the author or the Room owner can change this message");
-  }
-  const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
-  for (const id of ids) {
-    const message = state.messages.find(entry => entry.id === id);
-    if (!message) continue;
-    message.body = null;
-    message.redacted = true;
-    if (Array.isArray(message.editHistory)) {
-      message.editHistory = message.editHistory.map(entry => ({ ...entry, body: null }));
-    }
-    if (message.attachments != null) message.attachments = null;
-    if (!message.deletedAt) {
-      message.deletedAt = incoming.at;
-      message.deletedBy = incoming.actorId;
-      dropPinsForMessage(state, message.id);
-      message.revision = (message.revision ?? 0) + 1;
-    }
-  }
-  if (!messageId.endsWith(":channel") && Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0) {
-    primary.redactedByteLength = incoming.data.byteLength;
-  }
-  for (const work of Object.values(state.workItems ?? {})) {
-    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
-      if (receipt?.nativeText?.messageId !== messageId) continue;
-      if (!receipt.nativeText.withdrawnAt) {
-        receipt.nativeText.withdrawnAt = incoming.at;
-        receipt.nativeText.withdrawnBy = incoming.actorId;
-      }
-      receipt.nativeText.evidence = "removed";
-    }
-  }
-}
-
-// A receipt that cited this message keeps its hash and gains one ledger line.
-function recordEvidenceWithdrawn(state, incoming) {
-  requireMember(state, incoming.actorId);
-  const messageId = incoming.data?.messageId;
-  if (!validId(messageId)) throw new Error("Event data missing messageId");
-  if (incoming.data?.evidence !== "removed") throw new Error("Evidence withdrawal must record removed");
-  let cited = false;
-  for (const work of Object.values(state.workItems ?? {})) {
-    let here = false;
-    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
-      if (receipt?.nativeText?.messageId !== messageId) continue;
-      here = true;
-      cited = true;
-      receipt.nativeText.evidence ??= "removed";
-    }
-    if (!here) continue;
-    work.evidenceWithdrawals ??= [];
-    if (!work.evidenceWithdrawals.some(entry => entry.messageId === messageId)) {
-      work.evidenceWithdrawals.push({
-        messageId,
-        evidence: "removed",
-        at: incoming.at,
-        by: incoming.actorId,
-        ...(Number.isInteger(incoming.data.byteLength) && incoming.data.byteLength > 0 ? { byteLength: incoming.data.byteLength } : {})
-      });
-    }
-  }
-  if (!cited) throw new Error("Message not found");
-}
-// --- end PRIV-1 message redaction ---
-
-// Polls: poll.voted { messageId, option, active } records one member's vote
-// on option index `option`. Votes live on the message as pollVotes, an array
-// of sorted member-id lists aligned with poll.options. Single-choice polls
-// move the vote; allowMultiple polls keep the others.
-function votePoll(state, incoming) {
-  const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "option", "active"]);
-  const { messageId, option, active } = incoming.data;
-  const message = state.messages.find(m => m.id === messageId);
-  if (!message) throw new Error("Vote must reference a message in this Room");
-  if (message.deletedAt) throw new Error("Message was deleted");
-  if (message.kind !== "poll" || !Array.isArray(message.poll?.options)) throw new Error("Vote must reference a poll");
-  if (!Number.isInteger(option) || option < 0 || option >= message.poll.options.length || typeof active !== "boolean") throw new Error("Invalid poll vote");
-  const votes = message.poll.options.map((_, i) => Array.isArray(message.pollVotes?.[i]) ? message.pollVotes[i] : []);
-  message.pollVotes = votes.map((voters, i) => {
-    const set = new Set(voters);
-    if (i === option) { if (active) set.add(actor.id); else set.delete(actor.id); }
-    else if (active && message.poll.allowMultiple !== true) set.delete(actor.id);
-    return [...set].sort();
-  });
-}
-
-function proposeWork(state, incoming) {
-  requirePermission(state, incoming.actorId, "steer");
-  requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
-  if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
-  requireMember(state, incoming.data.accountableMemberId);
-  // Trust off refuses a cross-owner assign before the item is recorded.
-  // Same-owner assigns, including an owner handing work to their own agent,
-  // are unchanged. Replay applies the Trust value in force at this point
-  // in the log, so an earlier assign stays valid after a later flip.
-  assertRoomTrust(state, incoming.actorId, incoming.data.accountableMemberId);
-  if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
-  // RC-2026-09-23: optional machine-readable labels (e.g. "friction" for
-  // friction reports from agent feedback). Validated as an array of short
-  // slugs; stored on the projection for filtering and digests. The field is
-  // omitted entirely when the event lacks it, so pre-label legacy rows replay
-  // to a projection without the key (recovery audit byte-compatibility).
-  let labels;
-  if (incoming.data.labels !== undefined) {
-    if (!Array.isArray(incoming.data.labels) || incoming.data.labels.length > 10
-      || incoming.data.labels.some(l => typeof l !== "string" || !/^[a-z0-9-]{1,32}$/.test(l)))
-      throw new Error("labels must be an array of up to 10 slugs ([a-z0-9-], max 32 chars)");
-    labels = [...incoming.data.labels];
-  }
-  // Room policy overrides the proposer's choice: altered client fields cannot
-  // disable a mandatory gate. The recorded event keeps what the client sent;
-  // the projection (and every replay) applies the policy in force at this point
-  // of the log, so earlier items are untouched by a later flip.
-  const policy = roomPolicy(state);
-  const independentVerificationRequired = policy.requireIndependentReview || incoming.data.independentVerificationRequired === true;
-  const ownerDecisionRequired = policy.requireOwnerDecision || incoming.data.ownerDecisionRequired === true;
-  const humanDecisionMakerId = incoming.data.humanDecisionMakerId || (policy.requireOwnerDecision ? state.room.ownerId : null);
-  if (independentVerificationRequired && !incoming.data.verifierMemberId) {
-    throw new Error(policy.requireIndependentReview ? "Room policy requires independent review: name a verifier" : "Independent work requires a verifier");
-  }
-  if (ownerDecisionRequired && !humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
-  if (incoming.data.verifierMemberId) requireMember(state, incoming.data.verifierMemberId);
-  if (humanDecisionMakerId) {
-    const decisionMaker = requireMember(state, humanDecisionMakerId);
-    if (decisionMaker.kind !== "human") throw new Error("Decision-maker must be a human member");
-  }
-  if (independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
-    throw new Error("Independent verification requires a different accountable member and verifier");
-  }
-  if (incoming.data.sourceMessageId && !state.messages.some((message) => message.id === incoming.data.sourceMessageId)) {
-    throw new Error("Source message must exist in this Room");
-  }
-
-  state.workItems[incoming.data.workItemId] = {
-    id: incoming.data.workItemId,
-    title: incoming.data.title,
-    definitionOfDone: incoming.data.definitionOfDone,
-    accountableMemberId: incoming.data.accountableMemberId,
-    verifierMemberId: incoming.data.verifierMemberId || null,
-    independentVerificationRequired,
-    ownerDecisionRequired,
-    humanDecisionMakerId,
-    mode: incoming.data.mode || "read",
-    sourceMessageId: incoming.data.sourceMessageId || null,
-    ...(labels !== undefined ? { labels } : {}),
-    // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
-    // wherever the envelope exists; it is never read from data and never inferred from the
-    // source message's author. Pre-field legacy rows simply lack the key and render unknown.
-    proposedById: incoming.actorId,
-    state: WORK_STATES.PROPOSED,
-    revision: 0,
-    claim: null,
-    receipt: null,
-    receiptHistory: [],
-    verification: null,
-    verificationHistory: [],
-    decision: null,
-    decisionHistory: [],
-    blocker: null,
-    supersededBy: null,
-    createdAt: incoming.at,
-    updatedAt: incoming.at
-  };
-}
-
-function acceptWork(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.PROPOSED]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may accept work");
-  requirePermission(state, incoming.actorId, "accept_work");
-  item.state = WORK_STATES.ACCEPTED;
-  commitMutation(item, incoming);
-}
-
-function startWork(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.BLOCKED]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may start work");
-  requirePermission(state, incoming.actorId, "accept_work");
-  if (item.mode === "write") requirePermission(state, incoming.actorId, "write_external");
-  if (item.state === WORK_STATES.BLOCKED) requireFields(incoming.data, ["resolvedBlocker"]);
-  if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
-    throw new Error("Contested writes require a current exact-scope claim");
-  }
-  if (item.state === WORK_STATES.BLOCKED) archiveDecision(item);
-  item.state = WORK_STATES.WORKING;
-  item.blocker = null;
-  if (item.handoff) item.handoff.open = false;
-  commitMutation(item, incoming);
-}
-
-function blockWork(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.COMPLETED]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may block work; verifier findings use verification.recorded");
-  requirePermission(state, incoming.actorId, "accept_work");
-  requireFields(incoming.data, ["reason", "nextAction"]);
-  if (item.state === WORK_STATES.COMPLETED) retireApproval(item, incoming, "rework");
-  item.state = WORK_STATES.BLOCKED;
-  item.blocker = { reason: incoming.data.reason, nextAction: incoming.data.nextAction, eventId: incoming.id };
-  if (item.handoff) item.handoff.open = false;
-  commitMutation(item, incoming);
-}
-
 
 // Capability registry: members advertise what they can do so other agents can
 // discover and delegate. Self-advertised only; replaces the previous list.
@@ -1918,293 +1519,17 @@ function recordReferral(state, incoming) {
   requireMember(state, refereeMemberId);
 }
 
-function recordHandoff(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may record a handoff");
-  requirePermission(state, incoming.actorId, "accept_work");
-  requireFields(incoming.data, ["doneSummary", "nextAction", "limitReason"]);
-  if (incoming.data.evidenceUrl !== undefined || incoming.data.evidenceVersion !== undefined) {
-    requireFields(incoming.data, ["evidenceUrl", "evidenceVersion"]);
-    try {
-      const url = new URL(incoming.data.evidenceUrl);
-      if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-    } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
-  }
-  // A handoff never advances or closes the state; review and decision gates stay untouched.
-  if (item.handoff) {
-    item.handoffHistory = item.handoffHistory || [];
-    item.handoffHistory.push(item.handoff);
-    if (item.handoffHistory.length > 20) item.handoffHistory.shift();
-  }
-  item.handoff = {
-    open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
-    // An open handoff is triage work addressed to the Room owner, so needs-me
-    // views and attention inboxes can surface it to a named member.
-    triageMemberId: state.room.ownerId,
-    doneSummary: incoming.data.doneSummary,
-    evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
-    nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,
-    haltAll: incoming.data.haltAll === true
-  };
-  if (incoming.data.haltAll === true) {
-    state.agentHalts = state.agentHalts || {};
-    state.agentHalts[incoming.actorId] = { eventId: incoming.id, at: incoming.at, reason: incoming.data.limitReason, workItemId: item.id };
-  }
-  commitMutation(item, incoming);
-}
-
-function clearHalt(state, incoming) {
-  requireMember(state, incoming.actorId);
-  const permissions = state.members[incoming.actorId]?.permissions || [];
-  if (!permissions.includes("steer") && !permissions.includes("decide")) throw new Error("Clearing a halt requires steer or decide");
-  requireFields(incoming.data, ["memberId", "haltEventId"]);
-  const halt = state.agentHalts?.[incoming.data.memberId];
-  if (!halt || halt.eventId !== incoming.data.haltEventId) throw new Error("Stale or unknown halt");
-  delete state.agentHalts[incoming.data.memberId];
-}
-
-function resolveBlocker(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.BLOCKED]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may resolve the blocker");
-  requirePermission(state, incoming.actorId, "accept_work");
-  requireFields(incoming.data, ["resolution"]);
-  archiveDecision(item);
-  item.state = WORK_STATES.ACCEPTED;
-  item.blocker = null;
-  if (item.handoff) item.handoff.open = false;
-  commitMutation(item, incoming);
-}
-
-function completeWork(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING]);
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may report completion");
-  requirePermission(state, incoming.actorId, "complete_work");
-  if (item.mode === "write") {
-    requirePermission(state, incoming.actorId, "write_external");
-    if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
-  }
-  let nativeText = null, signedEvidence = null;
-  if (incoming.data.evidenceKind === "room_text") {
-    requireFields(incoming.data, ["summary", "evidenceVersion", "nextAction"]);
-    nativeText = nativeTextEvidence(state, item, incoming.data);
-  }
-  else {
-    if (["evidenceKind", "evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId"].some(key => Object.hasOwn(incoming.data, key))) throw new Error("Choose one evidence format");
-    // Integration map slice 5: external evidence is a signed object
-    // (room-signed-evidence/1). The live command path rejects an external
-    // completion whose evidence does not verify against the agent key
-    // registry; the applier only records it. The freeform evidenceUrl /
-    // evidenceVersion pair stays for display but authenticates nothing.
-    requireFields(incoming.data, ["summary", "nextAction"]);
-    signedEvidence = incoming.data.signedEvidence ?? null;
-    if (incoming.data.evidenceUrl !== undefined && incoming.data.evidenceUrl !== null) {
-      try {
-        const url = new URL(incoming.data.evidenceUrl);
-        if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-      } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
-    }
-  }
-  const attribution = reportedProducer(incoming.data), { producerId } = attribution;
-  if (producerId !== null) knownMember(state, producerId);
-  if (item.receipt) item.receiptHistory.push(item.receipt);
-  if (item.verification) item.verificationHistory.push(item.verification);
-  if (item.decision) item.decisionHistory.push(item.decision);
-  item.receipt = {
-    // The authenticated envelope actor reports completion. Producer attribution is a
-    // separate, nullable assertion: omission is explicitly unknown, never guessed from
-    // the reporter. This also lets verification enforce independence when a producer is
-    // actually known.
-    reportedById: incoming.actorId,
-    ...attribution,
-    summary: incoming.data.summary,
-    evidenceUrl: nativeText ? null : (incoming.data.evidenceUrl ?? null),
-    ...(nativeText ? { nativeText } : {}),
-    // Slice 5: the verified signed evidence rides the receipt so readers
-    // can check the signature without fetching any URL.
-    ...(!nativeText && signedEvidence !== null ? { signedEvidence } : {}),
-    evidenceVersion: incoming.data.evidenceVersion ?? null,
-    checksClaimed: incoming.data.checksClaimed || [],
-    // RC-2026-09-19-063: optional fact/inference/proposal marks, validated on
-    // the way in. Unmarked completions replay exactly as before — the field
-    // is present but null, never guessed.
-    segments: validateResultSegments(incoming.data.segments),
-    nextAction: incoming.data.nextAction,
-    eventId: incoming.id
-  };
-  item.verification = null;
-  item.decision = null;
-  item.blocker = null;
-  item.state = WORK_STATES.COMPLETED;
-  if (item.handoff) item.handoff.open = false;
-  commitMutation(item, incoming);
-}
-
-function supersedeWork(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED, WORK_STATES.COMPLETED]);
-  requirePermission(state, incoming.actorId, "steer");
-  requireFields(incoming.data, ["supersededByWorkItemId", "reason"]);
-  const replacement = requireWorkItem(state, incoming.data.supersededByWorkItemId);
-  if (replacement.id === item.id) throw new Error("A Work Item cannot supersede itself");
-  if (replacement.state === WORK_STATES.SUPERSEDED || replacement.supersededBy) throw new Error("Replacement Work Item must not already be superseded");
-  if (item.claim && claimIsActive(item.claim, incoming.at)) {
-    item.claim.status = "superseded";
-    item.claim.supersededAt = incoming.at;
-  }
-  retireApproval(item, incoming, "superseded");
-  item.state = WORK_STATES.SUPERSEDED;
-  item.supersededBy = incoming.data.supersededByWorkItemId;
-  if (item.handoff) item.handoff.open = false;
-  commitMutation(item, incoming);
-}
-
-function acquireClaim(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
-  if (item.mode !== "write") throw new Error("Read-only work does not use a write claim");
-  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may acquire this claim");
-  // A claim records scope. It does not grant write_external; write-mode
-  // completion still requires that permission. Live commands admit only a
-  // board writer (mayWriteBoardClaims). Replaying an older claim is unchanged.
-  requireFields(incoming.data, ["repository", "ref", "paths", "expiresAt"]);
-  if (!Array.isArray(incoming.data.paths) || incoming.data.paths.length === 0) throw new Error("Claim paths must be explicit");
-  if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
-  if (item.claim && claimIsActive(item.claim, incoming.at)) throw new Error("A current claim already exists");
-  // Warn, never block: record which other active claims in this room already
-  // hold one of these paths in the same repository. Live admission already
-  // refuses an overlap on the same ref (server/claim-scopes.mjs); this catches
-  // the cross-branch case, where two agents edit the same files on their own
-  // branches and only collide at merge.
-  const overlaps = claimOverlaps(state, item.id, incoming.data.repository, incoming.data.paths, incoming.at);
-  item.claim = {
-    holderId: incoming.actorId,
-    repository: incoming.data.repository,
-    ref: incoming.data.ref,
-    paths: [...incoming.data.paths],
-    acquiredAt: incoming.at,
-    expiresAt: incoming.data.expiresAt,
-    status: "active",
-    ...(overlaps.length ? { overlaps } : {})
-  };
-  commitMutation(item, incoming);
-}
-
-function releaseClaim(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED, WORK_STATES.COMPLETED]);
-  if (!item.claim || !claimIsActive(item.claim, incoming.at)) throw new Error("No current claim to release");
-  if (incoming.actorId !== item.claim.holderId && !hasPermission(state, incoming.actorId, "manage_claims")) {
-    throw new Error("Only the holder or claim manager may release a claim");
-  }
-  item.claim.status = "released";
-  item.claim.releasedAt = incoming.at;
-  commitMutation(item, incoming);
-}
-
 // Lease-renewal check-ins: a claim's lease is extended only when the holder
 // posts a public progress update in the room after the current lease window
 // began. Renewals are discussed in the channel — never silent extensions —
 // so a stale holder can't hold scope indefinitely without showing work.
-function renewClaim(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
-  if (!item.claim || !claimIsActive(item.claim, incoming.at)) throw new Error("No active claim to renew — acquire a fresh claim instead");
-  if (incoming.actorId !== item.claim.holderId) throw new Error("Only the claim holder may renew this claim");
-  requireFields(incoming.data, ["expiresAt"]);
-  if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
-  if (incoming.data.progressMessageId != null) {
-    requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
-    item.claim.progressMessageId = incoming.data.progressMessageId;
-  }
-  item.claim.expiresAt = incoming.data.expiresAt;
-  item.claim.renewedAt = incoming.at;
-  item.claim.renewals = (item.claim.renewals ?? 0) + 1;
-  commitMutation(item, incoming);
-}
+
 
 // The cited progress check-in must be a live public message in this room,
 // authored by the claim holder, and newer than the current lease window's
 // start (the acquisition, or the previous renewal). The same room's
 // projection is the lookup, so a cross-room id never resolves, and a DM
 // (toMemberId) can never serve as the public check-in.
-function requireProgressCheckin(state, claim, holderId, progressMessageId) {
-  const message = state.messages.find(m => m.id === progressMessageId);
-  if (!message || message.deletedAt) {
-    throw new Error("Renewal needs a progress message in this room — post a progress update in the room first");
-  }
-  if (message.toMemberId) {
-    throw new Error("Renewal needs a public progress message — post the update in the room, not as a DM");
-  }
-  if (message.authorId !== holderId) {
-    throw new Error("Renewal needs the claim holder's own progress message");
-  }
-  const leaseStart = claim.renewedAt ?? claim.acquiredAt;
-  if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
-    throw new Error("Renewal needs a progress message newer than the current lease start");
-  }
-}
-
-function recordVerification(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.COMPLETED, WORK_STATES.BLOCKED]);
-  if (incoming.actorId !== item.verifierMemberId) throw new Error("Only the designated verifier may verify");
-  requirePermission(state, incoming.actorId, "verify");
-  if (item.independentVerificationRequired && incoming.actorId === item.accountableMemberId) {
-    throw new Error("Independent verification requires a different actor");
-  }
-  requireFields(incoming.data, ["result", "completionEventId", "evidenceVersion", "summary"]);
-  const matchesCurrentReceipt = matchesReceipt(incoming.data, item.receipt);
-  const matchedReceipt = matchesCurrentReceipt ? item.receipt
-    : item.receiptHistory.find(receipt => matchesReceipt(incoming.data, receipt));
-  if (!matchedReceipt) {
-    throw new Error("Verification must identify the exact current completion and evidence version");
-  }
-  const producerKnown = receiptHasKnownProducer(matchedReceipt);
-  if (item.independentVerificationRequired && producerKnown && matchedReceipt.producerId === incoming.actorId) {
-    throw new Error("Independent verification requires a verifier different from the known producer");
-  }
-  if (!["pass", "fail"].includes(incoming.data.result)) throw new Error("Verification result must be pass or fail");
-
-  const verification = {
-    verifierId: incoming.actorId,
-    result: incoming.data.result,
-    completionEventId: incoming.data.completionEventId,
-    evidenceVersion: incoming.data.evidenceVersion,
-    summary: incoming.data.summary,
-    // A useful exact-version check may still be recorded when the producer is unknown,
-    // but only an explicitly attributed, different producer establishes independence.
-    independenceConfirmed: producerKnown && matchedReceipt.producerId !== incoming.actorId,
-    eventId: incoming.id
-  };
-
-  if (!matchesCurrentReceipt) {
-    item.verificationHistory.push({ ...verification, historical: true });
-    commitMutation(item, incoming);
-    return;
-  }
-
-  if (item.verification) item.verificationHistory.push(item.verification);
-  item.verification = verification;
-  if (incoming.data.result === "fail") {
-    retireApproval(item, incoming, "verification_failed");
-    item.state = WORK_STATES.BLOCKED;
-    item.blocker = {
-      reason: incoming.data.summary,
-      nextAction: incoming.data.nextAction || "Accountable member addresses the finding",
-      eventId: incoming.id
-    };
-  }
-  commitMutation(item, incoming);
-}
-
-function applySession(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [
-    WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED, WORK_STATES.COMPLETED
-  ]);
-  const actor = requireMember(state, incoming.actorId);
-  const accountable = actor.id === item.accountableMemberId && hasPermission(state, actor.id, "accept_work");
-  if (!accountable && !hasPermission(state, actor.id, "steer")) {
-    throw new Error("Only the accountable member or a steerer may change this session");
-  }
-  applySessionFields(item, incoming);
-  commitMutation(item, incoming);
-}
-
 
 // Decision register (backlog F2): promoting a conversation point into policy is
 // an explicit, source-backed act. The reducer only validates - the event itself
@@ -2225,81 +1550,6 @@ function recordDecision(state, incoming) {
     && (typeof incoming.data.note !== "string" || incoming.data.note !== incoming.data.note.trim() || incoming.data.note.length > 500)) {
     throw new Error("Decision note must be trimmed text up to 500 characters");
   }
-}
-
-function recordOwnerDecision(state, incoming) {
-  const item = mutableWorkItem(state, incoming, [WORK_STATES.COMPLETED]);
-  const actor = requireMember(state, incoming.actorId);
-  requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human" || actor.id !== item.humanDecisionMakerId) {
-    throw new Error("Only the designated human decision-maker may decide");
-  }
-  requireFields(incoming.data, ["decision", "completionEventId", "evidenceVersion", "reason"]);
-  if (!["approved", "changes_requested", "rejected"].includes(incoming.data.decision)) {
-    throw new Error("Unsupported owner decision");
-  }
-  if (!matchesReceipt(incoming.data, item.receipt)) {
-    throw new Error("Decision must identify the exact current completion and evidence version");
-  }
-  if (incoming.data.decision === "approved" && item.independentVerificationRequired && !hasConfirmedIndependentPass(item)) {
-    throw new Error("Approval requires the designated independent PASS with confirmed producer independence");
-  }
-
-  if (item.decision) item.decisionHistory.push(item.decision);
-  item.decision = {
-    actorId: actor.id,
-    decision: incoming.data.decision,
-    completionEventId: incoming.data.completionEventId,
-    evidenceVersion: incoming.data.evidenceVersion,
-    reason: incoming.data.reason,
-    eventId: incoming.id
-  };
-  // F2: a decision must cite the public room message carrying its rationale —
-  // decisions get discussed in the channel, not handed down. Events recorded
-  // before the requirement carry no sourceMessageId and must still replay, so
-  // the reducer only validates a source when one is present; every new
-  // command is required to include one (see validateCommand).
-  if (incoming.data.sourceMessageId != null) {
-    requirePublicDecisionSource(state, incoming.data.sourceMessageId);
-    item.decision.sourceMessageId = incoming.data.sourceMessageId;
-  }
-  if (incoming.data.decision !== "approved") {
-    item.state = WORK_STATES.BLOCKED;
-    item.blocker = {
-      reason: incoming.data.reason,
-      nextAction: "Accountable member accepts a revised direction before another attempt",
-      eventId: incoming.id
-    };
-  }
-  commitMutation(item, incoming);
-}
-
-function mutableWorkItem(state, incoming, allowedStates) {
-  requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["workItemId"]);
-  const item = requireWorkItem(state, incoming.data.workItemId);
-  if (!allowedStates.includes(item.state)) throw new Error(`Invalid transition from ${item.state}`);
-  // Optional compare-and-swap. Absent means last-writer-wins. Present and
-  // stale is still a conflict.
-  if (incoming.data.expectedRevision != null && incoming.data.expectedRevision !== item.revision)
-    throw new Error(`Stale Work Item revision: expected ${item.revision}`);
-  return item;
-}
-
-function commitMutation(item, incoming) {
-  item.revision += 1;
-  item.updatedAt = incoming.at;
-}
-
-function archiveDecision(item) {
-  if (item.decision) item.decisionHistory.push(item.decision);
-  item.decision = null;
-}
-
-function retireApproval(item, incoming, reason) {
-  if (item.decision?.decision !== "approved") return;
-  item.decisionHistory.push({ ...item.decision, historical: true, invalidatedByEventId: incoming.id, invalidatedReason: reason });
-  item.decision = null;
 }
 
 // Same path grammar as server/claim-scopes.mjs: a file, folder/** or **.
@@ -2447,55 +1697,6 @@ export const PIN_COMMAND_SHAPES = Object.freeze({
   [EVENT_TYPES.MESSAGE_UNPINNED]: "messageId"
 });
 
-function pinTarget(incoming) {
-  const messageId = incoming.data?.messageId;
-  if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Missing required field: messageId");
-  return messageId;
-}
-
-function pinMessage(state, incoming) {
-  requireMember(state, incoming.actorId);
-  const messageId = pinTarget(incoming);
-  const message = state.messages.find(m => m.id === messageId);
-  if (!message) throw new Error("Pin must reference a message in this Room");
-  // A DM can only be pinned by one of its parties; the read paths filter
-  // pins per viewer, but pinning a DM you cannot read is never legitimate.
-  // Pins recorded before the policy stamp existed are legitimate history:
-  // replay accepts them (the read paths still filter per viewer), while
-  // every new pin carries the stamp (injected at live admission) and is
-  // checked. Without this, one old non-party pin in a room log would make
-  // rebuildProjection / log replay throw.
-  if (message.toMemberId && message.authorId !== incoming.actorId && message.toMemberId !== incoming.actorId
-      && incoming.data?.pinDmPartyPolicyVersion === PIN_DM_PARTY_POLICY_VERSION) {
-    throw new Error("Cannot pin a direct message you are not a party to");
-  }
-  // A redacted post keeps body null in the log before message.deleted. Replay
-  // still has to accept the pin that happened while the text was readable.
-  if (message.deletedAt || (message.body == null && message.redacted !== true)) throw new Error("A deleted message cannot be pinned");
-  state.pins ??= [];
-  if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
-  if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);
-  state.pins.push({ messageId, pinnedById: incoming.actorId, pinnedAt: incoming.at });
-}
-
-function unpinMessage(state, incoming) {
-  requireMember(state, incoming.actorId);
-  const messageId = pinTarget(incoming);
-  // A DM's pin can only be removed by one of its parties. Same stamp rule as
-  // pinMessage: unpin events recorded before the stamp keep replaying.
-  const message = state.messages.find(m => m.id === messageId);
-  if (message?.toMemberId && message.authorId !== incoming.actorId && message.toMemberId !== incoming.actorId
-      && incoming.data?.pinDmPartyPolicyVersion === PIN_DM_PARTY_POLICY_VERSION) {
-    throw new Error("Cannot unpin a direct message you are not a party to");
-  }
-  if (!state.pins?.length) return; // idempotent
-  state.pins = state.pins.filter(pin => pin.messageId !== messageId);
-}
-
-function dropPinsForMessage(state, messageId) {
-  if (state.pins?.some(pin => pin.messageId === messageId)) state.pins = state.pins.filter(pin => pin.messageId !== messageId);
-}
-
 export function isPinned(state, messageId) {
   return Boolean(state?.pins?.some(pin => pin.messageId === messageId));
 }
@@ -2509,3 +1710,13 @@ export function pinnedMessages(state) {
     return message && !message.deletedAt && message.body != null ? [{ ...pin, message }] : [];
   });
 }
+
+// Compose the message domain once; replay and live commands use identical guards.
+const { postMessage, editMessage, deleteMessage, redactMessage, recordEvidenceWithdrawn,
+  votePoll, pinMessage, unpinMessage } = createMessageReducers({ requireMember,
+  knownMember, requireFields, requireWorkItem, proposalContext, validId, messageChannelId,
+  defaultChannelId: DEFAULT_CHANNEL_ID, channelArchivedCode: CHANNEL_ARCHIVED_CODE,
+  pinLimit: PIN_LIMIT, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION });
+
+// Compose work transitions once with the same authority guards as other domains.
+const { proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision } = createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource });

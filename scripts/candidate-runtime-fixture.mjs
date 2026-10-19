@@ -10,8 +10,15 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  paths.add('server/message-entity-projection.mjs');
+  paths.add('server/message-replay-snapshot.mjs');
+  paths.add('server/work-repository.mjs');
+  paths.add('server/message-command-service.mjs');
+  paths.add('src/message-reducers.js');
+  paths.add('src/work-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
   paths.add('client/work-preparation.mjs'); // Restored from #908 revert: MCP work-preparation helper (imported by client/mcp-stdio.mjs)
+  paths.add('client/work-brief.mjs');
   paths.add('client/host-result.mjs'); paths.add('client/host-subprocess.mjs'); paths.add('client/host-verification.mjs');
   paths.add('src/agent-error.mjs');
   paths.add('client/request-notices.mjs');
@@ -177,6 +184,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
+  paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)

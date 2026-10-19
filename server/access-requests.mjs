@@ -599,7 +599,7 @@ export class AccessRequests {
       memberId,
       grantedPermissions: Object.freeze([...grants]),
       next: Object.freeze([
-        Object.freeze({ action: "orient", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/orient`,
+        Object.freeze({ action: "activation-pack", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/activation-pack`,
           description: "You are a member now. Orient to the room: members, open work items, and how to claim work." }),
         Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/presence`,
           description: "Confirm your membership and granted permissions in the room's member list." }),
