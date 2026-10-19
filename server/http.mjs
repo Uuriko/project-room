@@ -4331,7 +4331,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null, !recentMessages);
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and

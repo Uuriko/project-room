@@ -116,6 +116,32 @@ test("activity negotiation preserves private-message filtering and rejects inval
 });
 
 
+test("the store snapshot defaults to the live window on an archived room; full history is opt-in", async t => {
+ const f=await fixture(t);f.store.roomFlood={consume(){}};
+ for(let i=0;i<12;i++)f.post(f.keys.producer,`Windowed public ${i}.`);
+ const before=f.store.snapshot(f.keys.owner,'commons');
+ const total=before.state.messages.length;
+ assert.ok(total>12,'the fixture seeds its own messages ahead of the posted twelve');
+ assert.equal(Object.hasOwn(before,'messagesWindow'),false,'pre-archive the default is the whole live history');
+ while(!f.store.backfillMessages({limit:1000}).done){}
+ assert.equal(f.store.checkMessagesParity().ok,true);
+ assert.equal(f.store.archiveMessages('commons',{keepNewest:3,dryRun:false}).ok,true);
+ const def=f.store.snapshot(f.keys.owner,'commons');
+ assert.deepEqual(def.state.messages,f.store.room('commons').state.messages,
+   'the default snapshot is exactly the live window — no archived history materialized');
+ assert.ok(def.state.messages.length<total);
+ assert.deepEqual(def.messagesWindow,{mode:'recent',limit:def.state.messages.length,omitted:total-def.state.messages.length,older:'conversation'});
+ const full=f.store.snapshot(f.keys.owner,'commons',null,'full',false,false,'full',null,true);
+ assert.deepEqual(full.state.messages.map(m=>m.id),before.state.messages.map(m=>m.id),
+   'the explicit opt-in returns the identical full history');
+ assert.equal(Object.hasOwn(full,'messagesWindow'),false);
+ const bounded=f.store.snapshot(f.keys.owner,'commons',null,'full',false,false,'full',5);
+ assert.deepEqual(bounded.state.messages.map(m=>m.id),before.state.messages.slice(-5).map(m=>m.id));
+ assert.equal(bounded.messagesWindow.omitted,total-5);
+ assert.throws(()=>f.store.snapshot(f.keys.owner,'commons',null,'full',false,false,'full',5,true),
+   error=>error.code==='invalid_snapshot_view','a window and full history are conflicting selectors');
+});
+
 test("recent and full snapshots preserve visible history, counts and older pins after compaction", async t => {
  const f=await fixture(t);f.store.roomFlood={consume(){}};
  const pinned=f.post(f.keys.producer,'An old pinned message.').event.data.messageId;

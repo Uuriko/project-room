@@ -4,6 +4,10 @@ import { archiveMarker } from './messages-store.mjs';
 import { DEFAULT_CHANNEL_ID } from '../src/events.js';
 import { messageInHistory } from './history-visibility.mjs';
 
+// S-6: per-store retained-set seq maps (see liveSeqs below). WeakMap so a
+// discarded store takes its cache with it.
+const seqCaches = new WeakMap();
+
 export function decodeMessageRecord(row) {
   const record = JSON.parse(row.record_json);
   if (!record || typeof record !== 'object' || record.id !== row.message_id) throw new Error('Invalid archived message record');
@@ -14,6 +18,40 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
   const live = state.messages ?? [];
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = marker ? [roomId, marker.throughSeq, marker.retainedJson] : [];
+  // The retained set's id→seq map. A message row's seq is fixed at insert (no
+  // update path touches it) and the room sequence advances on every command,
+  // so (room sequence, archive marker) pins the map: cache it per store and
+  // let any write move the key past the stale entry. Stores that cannot key
+  // it (test doubles without room()) build it fresh, as before.
+  function liveSeqs(ids) {
+    let cache = null, key = null;
+    if (marker && typeof store.room === 'function') {
+      key = `${store.room(roomId).sequence}|${marker.throughSeq}|${marker.retainedJson}`;
+      cache = seqCaches.get(store);
+      if (!cache) { cache = new Map(); seqCaches.set(store, cache); }
+      const hit = cache.get(roomId);
+      if (hit && hit.key === key) return hit.seqs;
+    }
+    const seqs = new Map();
+    for (let start = 0; start < ids.length; start += 256) {
+      for (const row of store.db.prepare('SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))').all(roomId, JSON.stringify(ids.slice(start,start+256)))) seqs.set(row.message_id,row.seq);
+    }
+    if (cache) cache.set(roomId, { key, seqs });
+    return seqs;
+  }
+  // Archived-leg viewer count with both visibility halves pushed into SQL:
+  // the targeted-DM rule and the PRIV-2 history floor (created_at window +
+  // same-instant exclusions, encoded exactly as records()' visibleSql).
+  function countArchivedForViewer(viewerId, floor = null) {
+    if (!marker) return 0;
+    const at = floor?.at ?? null;
+    const row = store.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${archived}
+      AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
+      AND (? IS NULL OR created_at>=?)
+      AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))`)
+      .get(...params, viewerId, viewerId, at, at, at, at, JSON.stringify([...(floor?.sameInstant ?? [])]));
+    return Number(row?.n ?? 0);
+  }
   function* records({ bodyPrefix = null, descending = false, afterId = null, visibility = null } = {}) {
     if (afterId !== null && typeof afterId !== 'string') throw new TypeError('Message cursor must be an ID');
     if (bodyPrefix !== null && typeof bodyPrefix !== 'string') throw new TypeError('Message prefix must be text');
@@ -40,11 +78,8 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       else { for (let i = cursor === null ? 0 : cursor + 1; i < live.length; i++) if (matches(live[i])) yield live[i]; }
       return;
     }
-    const seqs = new Map();
     const ids = live.map(m => m.id);
-    for (let start = 0; start < ids.length; start += 256) {
-      for (const row of store.db.prepare('SELECT message_id,seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))').all(roomId, JSON.stringify(ids.slice(start,start+256)))) seqs.set(row.message_id,row.seq);
-    }
+    const seqs = liveSeqs(ids);
     const order = (a,b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     let cursor = null;
     if (afterId !== null) {
@@ -92,6 +127,16 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       }
       return count;
     },
+    // Viewer-visible totals without decoding archived bodies: the live leg
+    // applies the predicate snapshot() hands countMetadata; the archived leg
+    // is the single SQL COUNT above. The boundary suite pins agreement with
+    // countMetadata over the equivalent predicate (DM mixes, floor shapes).
+    countForViewer(viewerId, floor = null) {
+      return live.filter(m => messageInHistory(m, floor)
+        && (!m.toMemberId || m.authorId === viewerId || m.toMemberId === viewerId)).length
+        + countArchivedForViewer(viewerId, floor);
+    },
+    countArchivedForViewer,
     recent(limit, visible = () => true) {
       if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1000) throw new RangeError('Recent-message limit must be 0 to 1000');
       const out=[];if(!limit)return out;

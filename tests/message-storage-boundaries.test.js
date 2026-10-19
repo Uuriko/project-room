@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { referenceMessageEntities, hydrateMessageEntities } from '../server/message-entity-projection.mjs';
 import { messageQueries, decodeMessageRecord } from '../server/message-queries.mjs';
+import { messageInHistory } from '../server/history-visibility.mjs';
 import { migrateMessageReplaySnapshots, readMessageReplaySnapshot, writeMessageReplaySnapshot,
   discardMessageReplaySnapshot } from '../server/message-replay-snapshot.mjs';
 
@@ -60,6 +61,59 @@ test('archived and retained queries merge in sequence order with cursors and vie
   assert.throws(() => ids({ afterId: 'missing' }), /Unknown message cursor/);
   assert.throws(() => q.recent(1001), /Recent-message limit/);
   assert.throws(() => decodeMessageRecord({ message_id: 'wrong', record_json: '{"id":"a"}' }), /Invalid archived/);
+});
+
+test('viewer counts push visibility into SQL and agree with countMetadata', t => {
+  const { db, put } = messagesDb(t);
+  const T0 = '2026-01-01T00:00:00.000Z', T1 = '2026-01-02T00:00:00.000Z', T2 = '2026-01-03T00:00:00.000Z';
+  put('r', 'm1', 1, { createdAt: T0 });
+  put('r', 'm2', 2, { createdAt: T1 });
+  put('r', 'm3', 3, { createdAt: T1 });
+  put('r', 'm4', 4, { createdAt: T2, toMemberId: 'bob' });
+  const retained = put('r', 'm5', 5, { createdAt: T2 });
+  const q = messageQueries({ db }, 'r', { messages: [retained] },
+    { throughSeq: 5, retainedJson: JSON.stringify(['m5']) });
+  const floor = { at: T1, sameInstant: new Set(['m2']) };
+  const equivalent = (viewer, fl) => m => messageInHistory(m, fl)
+    && (!m.toMemberId || m.authorId === viewer || m.toMemberId === viewer);
+  for (const viewer of ['alice', 'bob', 'eve']) {
+    for (const fl of [null, floor]) {
+      assert.equal(q.countForViewer(viewer, fl), q.countMetadata(equivalent(viewer, fl)),
+        `${viewer} floor=${Boolean(fl)}`);
+    }
+  }
+  // Spot-check the actual numbers behind the equivalence (archived leg only):
+  // floor hides m1 (before) and m2 (same instant); m4 is bob's DM.
+  assert.equal(q.countArchivedForViewer('alice', floor), 2);
+  assert.equal(q.countArchivedForViewer('alice', null), 4);
+  assert.equal(q.countArchivedForViewer('eve', floor), 1);
+  assert.equal(q.countArchivedForViewer('eve', null), 3);
+  // No marker: the count is the live leg alone.
+  const plain = messageQueries({ db }, 'plain', { messages: [retained, { id: 'dm', authorId: 'alice', toMemberId: 'bob', createdAt: T2 }] });
+  assert.equal(plain.countForViewer('alice', null), 2);
+  assert.equal(plain.countForViewer('eve', null), 1);
+  assert.equal(plain.countArchivedForViewer('alice', null), 0);
+});
+
+test('the retained-set seq map is cached under (room sequence, archive marker)', t => {
+  const { db, put } = messagesDb(t);
+  put('c', 'a', 1);
+  put('c', 'private', 2, { toMemberId: 'bob' });
+  const retained = put('c', 'retained', 3);
+  put('c', 'z', 4);
+  let sequence = 7;
+  const store = { db, room: () => ({ sequence }) };
+  const marker = { throughSeq: 4, retainedJson: JSON.stringify(['retained']) };
+  const ids = () => [...messageQueries(store, 'c', { messages: [retained] }, marker).records()].map(m => m.id);
+  assert.deepEqual(ids(), ['a', 'private', 'retained', 'z']);
+  // Move the retained row ahead of 'a' in the table: at the same room
+  // sequence the cached map still pins the old order (the sequence is the
+  // projection's identity, so the map cannot have changed under it)…
+  db.prepare("UPDATE messages SET seq=0 WHERE room_id='c' AND message_id='retained'").run();
+  assert.deepEqual(ids(), ['a', 'private', 'retained', 'z']);
+  // …and the next command (sequence advances) rebuilds it.
+  sequence = 8;
+  assert.deepEqual(ids(), ['retained', 'a', 'private', 'z']);
 });
 
 test('replay migration preserves snapshots and event identity, is repeatable, and honors rollback', t => {
