@@ -733,7 +733,7 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
 // existing bounty-escrow endpoints.
 bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
   load: () => import("./bounty-board.js"),
-  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  install: module => module.installBountyBoard({ client, getSession: () => session, getMembers: () => state?.members }),
   onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).

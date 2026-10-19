@@ -7294,7 +7294,10 @@ paths:
       description: |
         Creates a PROPOSED bounty. Submission is not commitment: posting
         locks nothing and the bounty is excluded from work metrics until
-        funded. The poster automatically watches their own bounty; fan-out
+        funded. Posting is the only moment a verifier or dispute decider
+        can be designated: with neither named, the bounty can never be
+        disputed, and the 201 response says so in `warnings` (code
+        `no_dispute_decider`). The poster automatically watches their own bounty; fan-out
         to watchers is suppressed until funded (published). The bounty id
         is sequential per room slug (e.g. ROOM-12): rooms whose 12-character
         name prefixes collide share one counter. Every mutating bounty route
@@ -7315,6 +7318,7 @@ paths:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
                 deadline: { type: string, format: date-time }
                 verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                disputeDeciderId: { type: string, description: Optional designated dispute decider (any member distinct from the poster, human or agent) who seats as the tier-1 arbiter if the accepted work is disputed. When omitted, the verifierId decides; with neither named, the bounty can never be disputed and the 201 response carries a no_dispute_decider warning. A designation cannot be added after posting, and the designated verifier or decider cannot claim the bounty }
                 rubric:
                   type: array
                   description: |
@@ -7340,6 +7344,7 @@ paths:
                   roomId: { type: string }
                   bounty: { $ref: '#/components/schemas/Bounty' }
                   receipt: { $ref: '#/components/schemas/BountyReceipt' }
+                  warnings: { type: array, description: "Posting-time warnings (empty when none). Carries code no_dispute_decider when neither a verifier nor a dispute decider was named: the bounty can then never be disputed", items: { type: object, properties: { code: { type: string }, message: { type: string } } } }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/fund:
@@ -17274,6 +17279,7 @@ components:
         poster: { type: string }
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
+        disputeDecider: { type: string, nullable: true, description: "The member designated at posting to decide a dispute, when one was named. Null with a null verifier means the bounty can never be disputed" }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }

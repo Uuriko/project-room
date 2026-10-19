@@ -115,8 +115,29 @@ function normalizeReceipt(row) {
   };
 }
 
+// The create form's dispute-decider options: every other active member.
+// A designation can only be made at posting (the escrow has no endpoint to
+// add one later), and the decider must be a third party — never the poster,
+// and (enforced at claim time) never the member who ends up doing the work.
+// Members arrive either as the room state's id-keyed map or as an array.
+export function deciderOptionsFor(members, selfId) {
+  const self = canonicalLaneId(selfId);
+  const rows = Array.isArray(members) ? members : Object.values(members ?? {});
+  const seen = new Set();
+  const options = [];
+  for (const member of rows) {
+    if (!member || typeof member.id !== "string" || !member.id || member.active === false) continue;
+    const lane = canonicalLaneId(member.id);
+    if (!lane || lane === self || seen.has(lane)) continue;
+    seen.add(lane);
+    options.push({ id: member.id,
+      label: typeof member.displayName === "string" && member.displayName ? member.displayName : member.id });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
+
 // Pure view model over the three endpoint payloads. Tested without DOM.
-export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) {
+export function bountyBoardModel({ bounties, balances, receipts, selfId, members } = {}) {
   const self = canonicalLaneId(selfId);
   const rows = Array.isArray(bounties) ? bounties : [];
   const items = rows.map(row => normalizeBounty(row, self));
@@ -124,6 +145,7 @@ export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) 
   const history = (Array.isArray(receipts) ? receipts : []).map(normalizeReceipt);
   return {
     self,
+    deciderOptions: deciderOptionsFor(members, self),
     balance: {
       payable: typeof balance.payable === "number" ? balance.payable : 0,
       locked: typeof balance.locked === "number" ? balance.locked : 0,
@@ -254,19 +276,24 @@ export function defaultDeadlineLocal(nowMs = Date.now()) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-export function bountyFormHtml(nowMs = Date.now()) {
+export function bountyFormHtml(nowMs = Date.now(), deciderOptions = []) {
+  const options = (Array.isArray(deciderOptions) ? deciderOptions : [])
+    .map(option => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`).join("");
   return `<form id="bounty-post-form" class="bounty-form"><h4>Post a bounty</h4>` +
     `<label class="field">Title <input id="bounty-title" type="text" required maxlength="256"></label>` +
     `<label class="field">What done looks like <textarea id="bounty-criteria" required rows="2" maxlength="2000"></textarea></label>` +
     `<label class="field">Amount (credits) <input id="bounty-amount" type="number" required min="0.001" step="0.001"></label>` +
     `<label class="field">Deadline <input id="bounty-deadline" type="datetime-local" required value="${escapeHtml(defaultDeadlineLocal(nowMs))}"></label>` +
+    `<label class="field">Dispute decider (optional) <select id="bounty-dispute-decider">` +
+    `<option value="">No one — this bounty can never be disputed</option>${options}</select></label>` +
+    `<p class="form-hint">If the accepted work is disputed, the decider rules on it. Naming a decider is the only way this bounty can ever be disputed — one cannot be added later.</p>` +
     `<div class="bounty-actions"><button class="button primary" type="submit">Post &amp; fund escrow</button></div></form>`;
 }
 
 // Form values -> POST /bounties body. Throws Error with a human message on
 // the same rules the server enforces (title 1..256, criteria 1..2000,
 // positive amount, future ISO deadline) so the panel fails before the wire.
-export function buildPostPayload({ title, criteria, amount, deadlineLocal } = {}) {
+export function buildPostPayload({ title, criteria, amount, deadlineLocal, disputeDeciderId } = {}) {
   const cleanTitle = typeof title === "string" ? title.trim() : "";
   if (cleanTitle.length < 1 || cleanTitle.length > 256) throw new Error("Give the bounty a title (1–256 characters).");
   const cleanCriteria = typeof criteria === "string" ? criteria.trim() : "";
@@ -276,7 +303,11 @@ export function buildPostPayload({ title, criteria, amount, deadlineLocal } = {}
   const deadlineMs = typeof deadlineLocal === "string" ? new Date(deadlineLocal).getTime() : NaN;
   if (!Number.isFinite(deadlineMs)) throw new Error("Pick a deadline.");
   if (deadlineMs <= Date.now()) throw new Error("Deadline must be in the future.");
-  return { title: cleanTitle, criteria: cleanCriteria, amount: value, deadline: new Date(deadlineMs).toISOString() };
+  const payload = { title: cleanTitle, criteria: cleanCriteria, amount: value, deadline: new Date(deadlineMs).toISOString() };
+  // Omitted entirely when no decider is picked: the server then posts the
+  // bounty undisputable and says so in its response warnings.
+  if (typeof disputeDeciderId === "string" && disputeDeciderId) payload.disputeDeciderId = disputeDeciderId;
+  return payload;
 }
 
 // Accept body: the escrow requires a citation per pinned rubric criterion
@@ -294,7 +325,7 @@ export function buildAcceptAttestation(bounty, verdicts = {}, nowIso = new Date(
 const newIdempotencyKey = () =>
   globalThis.crypto?.randomUUID?.() ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-export function installBountyBoard({ client, getSession }) {
+export function installBountyBoard({ client, getSession, getMembers }) {
   const panel = $("#bounty-panel");
   const chip = $("#bounty-count");
   const host = $("#bounty-board-host");
@@ -314,7 +345,7 @@ export function installBountyBoard({ client, getSession }) {
     lastModel = model;
     if (chip) chip.textContent = String(model.count);
     const focusKey = typeof host.contains === "function" && host.contains(document.activeElement) ? bountyFocusKey(document.activeElement) : null;
-    host.innerHTML = bountyFormHtml() +
+    host.innerHTML = bountyFormHtml(Date.now(), model.deciderOptions) +
       `<div id="bounty-balance-host">${bountyBalanceHtml(model)}</div>` +
       `<div id="bounty-list-host">${bountyListHtml(model)}</div>` +
       `<div id="bounty-receipts-host">${bountyReceiptsHtml(model, highlightReceiptId)}</div>`;
@@ -338,6 +369,7 @@ export function installBountyBoard({ client, getSession }) {
       render(bountyBoardModel({
         bounties: list?.bounties, balances: balances?.balances,
         receipts: history?.receipts, selfId: session.member.id,
+        members: typeof getMembers === "function" ? getMembers() : null,
       }));
       loadedFor = roomId;
       setStatus("");
@@ -376,6 +408,7 @@ export function installBountyBoard({ client, getSession }) {
         criteria: form.querySelector("#bounty-criteria")?.value,
         amount: form.querySelector("#bounty-amount")?.value,
         deadlineLocal: form.querySelector("#bounty-deadline")?.value,
+        disputeDeciderId: form.querySelector("#bounty-dispute-decider")?.value,
       });
     } catch (error) { setStatus(error.message, true); return; }
     let created = null;
@@ -387,7 +420,15 @@ export function installBountyBoard({ client, getSession }) {
       await client.request(client.path(`/bounties/${encodeURIComponent(bountyId)}/fund`),
         { method: "POST", data: { idempotencyKey: newIdempotencyKey() } });
     }, null);
-    if (ok) setStatus(`Posted and funded “${payload.title}” — ${formatCredits(payload.amount)} credits are locked in escrow.`);
+    if (ok) {
+      // The create response carries the server's own warnings (today: the
+      // no-dispute-decider warning) — surface them verbatim rather than
+      // letting a posted-but-undisputable bounty look identical to a
+      // disputable one.
+      const warningText = Array.isArray(created?.warnings) && created.warnings.length
+        ? ` Note: ${created.warnings.map(w => String(w?.message ?? "")).filter(Boolean).join(" ")}` : "";
+      setStatus(`Posted and funded “${payload.title}” — ${formatCredits(payload.amount)} credits are locked in escrow.${warningText}`);
+    }
     else if (created?.bounty?.bountyId) {
       // Posted but unfunded: the reload inside runAction already failed over
       // to the error status; make the recovery path explicit.

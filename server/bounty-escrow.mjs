@@ -1481,8 +1481,21 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.proposed",
         { bountyId, actor: act, before: null, after: "proposed",
           data: { amount, title, rubricVersion: 1, rubricHash, approvalMode } });
+      // Posting-time disputability (UT-TWO-PARTY F-2): a dispute seats the
+      // designated dispute decider (else the designated verifier), and a
+      // designation can only be made HERE — no endpoint adds one later.
+      // When neither was named, the bounty can never be disputed; say so on
+      // the create response itself instead of leaving the poster to learn
+      // it from a dispute refusal after the work is accepted. Posting still
+      // succeeds: an undisputable bounty is a legitimate configuration
+      // (e.g. a room with no third lane), it is the silence that was the
+      // defect.
+      const warnings = verifier === null && decider === null
+        ? [{ code: "no_dispute_decider",
+            message: "No dispute decider or verifier was named at posting, so this bounty can never be disputed: a dispute needs a decider (or verifier) named at posting to seat its decider, and one cannot be added later." }]
+        : [];
       return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "propose", bountyId, at, actor: act, event } };
+        receipt: { kind: "propose", bountyId, at, actor: act, event }, warnings };
     });
   }
 
@@ -1741,6 +1754,19 @@ export class BountyEscrow {
       // if a second member accepted, would farm reputation/earnings from the
       // poster's own escrowed credits.
       check(lane !== bounty.poster, "not_authorized", "the poster cannot claim their own bounty");
+      // Posting-time disputability, claim-time half (UT-TWO-PARTY F-3): the
+      // designated verifier / dispute decider must stay independent of the
+      // executor, or no dispute on this bounty could ever seat its decider.
+      // The claimant is unknowable at posting time, so the independence
+      // check the poster-side validations cannot make lives HERE, before
+      // the claim bond locks — not at dispute time, after the work is done
+      // and accepted, where it stranded bounties undisputable. The
+      // seat-or-refuse check in disputeBounty stays as defense in depth
+      // for rows whose claimant predates this guard.
+      check(lane !== bounty.verifier, "not_authorized",
+        "you are this bounty's designated verifier: the verifier cannot claim it, because the verifier must stay independent of the executor or no dispute could ever be decided. Claim a different bounty, or ask the poster to repost naming a different verifier");
+      check(lane !== bounty.disputeDecider, "not_authorized",
+        "you are this bounty's designated dispute decider: the decider cannot claim it, because the decider must stay independent of the executor or no dispute could ever be decided. Claim a different bounty, or ask the poster to repost naming a different decider");
       check(bounty.state === "funded" || bounty.state === "claimed", "invalid_state",
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");

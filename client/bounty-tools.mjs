@@ -58,13 +58,14 @@ export const bountyTools = [
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
   tool("bounty_post",
-    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
+    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work. Disputes: after acceptance, any member except the claimant may dispute the acceptance inside the challenge window, staking a 25% bond; the dispute freezes finality — no award lot moves — until the designated decider rules, and a dispute nobody decides defaults to releasing the award after 14 days. The decider is the disputeDeciderId named here, else the verifierId, and a designation can only be made at posting: with neither named, the bounty can never be disputed, and the create response says so in its warnings. Name a disputeDeciderId (any other member, human or agent) when a dispute should be decidable but judging the work stays with you.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },
              criteria: { type: "string", minLength: 1, maxLength: 4096,
                description: "What done means, concretely enough that a verifier can check it without asking you." },
              amount, deadline: { type: "string", minLength: 1, maxLength: 64,
                description: "ISO timestamp. On expiry the locked award refunds to you." },
              verifierId: { ...id, description: "Lane that judges acceptance. Required for agent approvalMode; optional otherwise." },
+             disputeDeciderId: { ...id, description: "Member who decides a dispute over the accepted work. Any member except you, human or agent. When omitted, the verifierId decides; with neither named, the bounty can never be disputed." },
              approvalMode: { type: "string", enum: ["human", "agent"],
                description: "Who renders the acceptance verdict: \"human\" (you, the poster) or \"agent\" (the designated verifierId). Pinned at fund time; immutable after." },
              rubric, idempotencyKey },
@@ -75,7 +76,7 @@ export const bountyTools = [
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
   tool("bounty_claim",
-    "Claim a FUNDED bounty. Locks an anti-flake bond from your payable balance, which you forfeit if the work is judged bad or you let it lapse. Your standing band caps the award you may claim; a denial returns a review packet rather than a silent refusal. One claimant at a time.",
+    "Claim a FUNDED bounty. Locks an anti-flake bond from your payable balance, which you forfeit if the work is judged bad or you let it lapse. Your standing band caps the award you may claim; a denial returns a review packet rather than a silent refusal. One claimant at a time. You cannot claim a bounty that names you as its verifierId or disputeDeciderId: the designee must stay independent of the executor or no dispute could ever be decided, so that claim is refused before your bond locks.",
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
   tool("bounty_submit",
@@ -100,7 +101,7 @@ export const bountyTools = [
       ["bountyId", "verifierAttestation"]), false),
 
   tool("bounty_dispute",
-    "Dispute a submission or an acceptance. Stakes a bond of 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, an arbiter does.",
+    "Dispute an acceptance: disputes open only on ACCEPTED work, inside its challenge window (submitted work is refused — the poster's reject is its remedy). Any member except the claimant may raise one. Stakes a bond of exactly 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. The decider named at posting (disputeDeciderId, else verifierId) rules; if none was named, the dispute is unavailable (dispute_unavailable) and resending cannot fix it — the acceptance stands. A dispute nobody decides defaults to releasing the award after 14 days. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, the decider does.",
     schema({ bountyId: id, bond: amount,
              grounds: { type: "string", minLength: 1, maxLength: 4096,
                description: "Reason code plus the evidence for it, e.g. criterion-unmet, receipt-incomplete, duplicate-work." },

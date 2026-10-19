@@ -879,6 +879,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("get_room_context"), command("Retry get_room_context with the last context_version, or omit since_version")]
     };
   }
+  // A dispute that cannot seat its decider is NOT an input refusal: no field
+  // on the dispute request can fix it — the designation had to be made when
+  // the bounty was posted, and a posted bounty cannot gain one. It must
+  // never fall into the inputRefused bucket below, whose "correct the named
+  // fields and resend" advice is unfollowable here (UT-TWO-PARTY F-3). The
+  // errors catalog says the same: do not retry unchanged; the acceptance
+  // stands.
+  if (reasonCode === "dispute_unavailable") {
+    return {
+      status: "action_required", reason: "dispute_unavailable",
+      hint: "No decider can be seated for this bounty, so the dispute cannot open and no bond was locked. Resending cannot fix it: the decider had to be named at posting.",
+      next: [command("Do not retry the dispute. The acceptance stands and the award pays out when the challenge window closes. On future bounties, name disputeDeciderId (or verifierId) at posting so a dispute can be seated.")]
+    };
+  }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_arguments") {
       return {
