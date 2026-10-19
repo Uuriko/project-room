@@ -1823,3 +1823,8 @@ body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
 
 #signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
+
+.result-row:has(> .inline-result:not([hidden])) > button[data-read-result],
+.result-row:has(> .inline-result:not([hidden])) > p,
+.result-row:has(> .inline-result:not([hidden])) > .result-meta { display: none; }
+.result-row > .inline-result { border: 0; padding: 0; margin: 0; background: transparent; }

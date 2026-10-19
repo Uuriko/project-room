@@ -510,5 +510,7 @@
   "entry.invite.createFirst": "Create an invite link below to share this room.",
   "human.roomNotesHtml": "<details {open}><summary id=\"cockpit-notes-title\">Room notes</summary>{content}</details>",
   "human.replyResult": "Reply",
-  "human.workOwner": "Assigned to {name}"
+  "human.workOwner": "Assigned to {name}",
+  "result.loadingConversation": "Loading conversation…",
+  "result.conversationUnavailable": "Conversation unavailable. Reopen the result to try again."
 }

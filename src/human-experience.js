@@ -1,3 +1,4 @@
+import { canReplyToResult } from "./result-availability.js";
 import { uiText } from './strings.js';
 import { currentResult } from './work-selectors.js';
 import { conversationIntent } from './conversation-intent.js';
@@ -174,7 +175,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         // Original prompt and Open result stay reachable while the row is folded.
         sourceDeleted ? '' : ["<button type=\"button\" class=\"text-button\" data-assistant-message=\"", esc(run.sourceMessageId), "\">Original prompt</button>"].join(''),
         !sourceDeleted && run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '',
-        resultMessage && !resultMessage.deletedAt && !resultMessage.toMemberId ? `<button type="button" class="text-button" data-assistant-reply="${esc(resultMessage.id)}">${esc(uiText('human.replyResult'))}</button>` : '',
+        canReplyToResult(getState(), resultMessage) ? `<button type="button" class="text-button" data-assistant-reply="${esc(resultMessage.id)}">${esc(uiText('human.replyResult'))}</button>` : '',
         pauseButton, stopButton, "</summary>",
         "<div class=\"assistant-run-detail\">",
         (sourceDeleted ? [] : run.activity ?? []).filter((a, index, list) => a.summary !== statusLabel && (index === 0 || a.summary !== list[index - 1].summary)).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''),
@@ -187,8 +188,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     const current = faceRun(contextualRuns.filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current, Date.now(), projection.assistant);
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
     const resultMessage = current?.resultMessageId && getState().messages.find(message => message.id === current.resultMessageId);
-    const replyable = current?.status === 'done' && resultMessage && !resultMessage.deletedAt && !resultMessage.toMemberId
-      && !getState().room.archivedAt && !getState().channels?.[resultMessage.channelId ?? 'general']?.archivedAt;
+    const replyable = current?.status === 'done' && canReplyToResult(getState(), resultMessage);
     const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
     const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, Boolean(replyable), faceControls, faceSource?.body?.slice(0, 120)]) : '';
     if (face._key !== faceKey) {

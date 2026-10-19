@@ -92,6 +92,7 @@
   "src/reminders.js",
   "src/reply-requests.js",
   "src/request-access.js",
+  "src/result-availability.js",
   "src/result-reader.js",
   "src/retention-ui.js",
   "src/return-brief.js",

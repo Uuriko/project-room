@@ -1,5 +1,6 @@
+import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
-import { WORK_STATES as S, isRoomArchived, messageChannelId } from "./events.js";
+import { WORK_STATES as S, isRoomArchived } from "./events.js";
 import { matchesReceipt } from "./workflow.js";
 import { currentResult } from "./work-selectors.js";
 
@@ -34,8 +35,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
       || isRoomArchived(getState())) return null;
     // The ordinary thread composer does not inherit a DM audience.
-    return getState().messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
-      && !message.deletedAt && message.body === view.body && !getState().channels?.[messageChannelId(message)]?.archivedAt);
+    return getState().messages.find(message => canReplyToResult(getState(), message) && message.id === view.textMessageId && message.workItemId === view.workItemId
+      && message.body === view.body);
+  }
+  function needsConversation(view) {
+    return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
+      && !getState().messages.some(message => message.id === view.textMessageId));
   }
   function resultStatus() {
     mountResultReader();
@@ -57,8 +62,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
     const retry = resultElement("result-retry");
-    resultElement("result-discuss").hidden = !resultDiscussionMessage(view);
-    resultElement("result-discuss").disabled = !canDiscuss();
+    resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
+    resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
     retry.hidden = !view.error && !view.retrying;
     retry.disabled = !view.error;
     for (const action of ["result-copy-text", "result-download"]) {
@@ -95,7 +100,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
     view.copying = true; resultStatus();
     resultElement("result-use-status").textContent = "";
     try {
-      await navigator.clipboard.writeText(view.body);
+      let timer;
+      try {
+        await Promise.race([navigator.clipboard.writeText(view.body), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error()), 1500);
+        })]);
+      } finally { clearTimeout(timer); }
       if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copied");
     } catch {
       if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copyFailed");
@@ -114,10 +124,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   resultElement("result-discuss").textContent = uiText("result.discuss");
-  resultElement("result-discuss").addEventListener("click", () => {
-    const message = resultDiscussionMessage(resultView);
-    if (!message || !canDiscuss()) return;
-    // A protected destination draft must not dismiss the result being read.
+  resultElement("result-discuss").addEventListener("click", async () => {
+    const view = resultView;
+    if (!view || view.resolving || !canDiscuss()) return;
+    if (needsConversation(view)) {
+      view.resolving = true; resultStatus();
+      resultElement("result-use-status").textContent = uiText("result.loadingConversation");
+      try {
+        await client.refresh(null, { fill: true });
+      } catch {
+        if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
+        return;
+      } finally {
+        view.resolving = false;
+        if (resultView === view) resultStatus();
+      }
+    }
+    if (resultView !== view || !usableText(view) || !canDiscuss()) return;
+    const message = resultDiscussionMessage(view);
+    if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
+    resultElement("result-use-status").textContent = "";
     if (onDiscuss(message) === false) return;
     closeResult(false);
   });

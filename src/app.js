@@ -1,3 +1,4 @@
+import { canReplyToResult } from "./result-availability.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
 import { createSigninNavigation } from "./signin-navigation.js";
@@ -4062,8 +4063,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 installRoomLayout();
 function replyToSharedResult(messageId) {
   const message = state?.messages.find(entry => entry.id === messageId);
-  if (!message || message.deletedAt || message.toMemberId || isRoomArchived(state)
-    || state.channels?.[messageChannelId(message)]?.archivedAt || busy || requestReading
+  if (!canReplyToResult(state, message) || busy || requestReading
     || pendingMessage || composerFiles.some(file => file.status === "uploading")) return false;
   const destination = conversation.rootById.get(message.id);
   if (!destination || !conversation.threads.has(destination)) return false;
@@ -6201,6 +6201,10 @@ function openSettings(panelId) {
   }
   renderRecordPanel();
 }
+$("#results-panel > summary").addEventListener("click", event => {
+  event.preventDefault();
+  openSettings("results-panel");
+});
 function openCatchUp() {
   const dialog = $("#catchup-dialog");
   if (!dialog) return;

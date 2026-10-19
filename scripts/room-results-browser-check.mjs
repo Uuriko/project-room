@@ -11,8 +11,16 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false } = {}) {
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false } = {}) {
   const f = createResultsFixture();
+  if (olderResult) {
+    const now = f.store.now; let offset = 0;
+    f.store.now = () => now() + offset;
+    for (let i = 0; i < 130; i++) {
+      offset += 2500;
+      f.send("owner", T.MESSAGE_POSTED, { messageId: `later-${i}`, body: `Later conversation ${i}` });
+    }
+  }
   if (privateResult) {
     f.send("owner", T.WORK_PROPOSED, { workItemId: "private-result", title: "Private notes", definitionOfDone: "Private result",
       accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
@@ -98,7 +106,7 @@ test("results update after review and reopening; a pinned open reader becomes ea
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   assert.equal(await f.row("native-result").count(), 0);
   await p.locator("#close-result").click();
-  assert.equal(await p.locator("#results-panel > summary").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#room-results-list").evaluate(node => node === document.activeElement), true);
   f.reopen("pending-result"); f.reopen("approved-result");
   await p.locator("#room-results-list .empty-note").waitFor();
   assert.match(await p.locator("#room-results-list").textContent(), /No completed results yet/);
@@ -507,4 +515,23 @@ test("saved scoped channel: human assignment to inline result, continuation and 
     requests: traffic.length, finishedRequests: traffic.filter(row => row.status).length,
     requestsByMethod: Object.fromEntries([...new Set(traffic.map(row => row.method))].map(method => [method, traffic.filter(row => row.method === method).length])),
     scope: "local sign-in through saved scoped channel, deterministic MCP result, restart, continuation reply/ack; no external model or human think time" }));
+});
+
+for (const mobile of [false, true]) test(`older result resolves its reply conversation: ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { olderResult: true, mobile }), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
+});
+
+test("stalled clipboard recovers without losing the result or download", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
+  await p.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => new Promise(() => {}) } }));
+  await p.locator("#result-copy-text").click();
+  await p.locator("#result-use-status").filter({ hasText: "Could not copy" }).waitFor();
+  assert.equal(await p.locator("#result-copy-text").isDisabled(), false);
+  assert.equal(await p.locator("#result-download").isVisible(), true);
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
 });
