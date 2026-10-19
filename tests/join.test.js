@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  shareJoinHref,
   parseJoinCode,
   parseInviteCodeInput,
   joinCodeFromLocation,
@@ -266,4 +267,50 @@ test("join names are 1–80 characters", () => {
   assert.equal(validateJoinName("x".repeat(80)), "x".repeat(80));
   assert.equal(validateJoinName("x".repeat(81)), null);
   assert.equal(validateJoinName(null), null);
+});
+
+// Room event 14347: the entry form's copy says "paste the whole invite
+// link", but the human share-link shape (https://host/#join/<43-char
+// token>) was rejected inline while /join/RM- was accepted. The fix hands
+// the #join/ fragment back to the app (same door), which owns the human
+// share-link join flow; the RM- agent-invite path is unchanged.
+const entryLocation = { origin: "https://room.trydemigod.com", pathname: "/join" };
+
+test("the entry form accepts a pasted whole human share link and hands it to the app", () => {
+  const token = "a".repeat(43);
+  assert.equal(
+    shareJoinHref(`https://room.trydemigod.com/?ref=chat#join/${token}`, entryLocation),
+    `https://room.trydemigod.com/#join/${token}`,
+  );
+  assert.equal(
+    shareJoinHref(`#join/${token}`, entryLocation),
+    `https://room.trydemigod.com/#join/${token}`,
+  );
+});
+
+test("a pasted share link keeps its purpose focus and honors the www door", () => {
+  const token = "b".repeat(43);
+  assert.equal(
+    shareJoinHref(`https://other.example/#join/${token}/work/42`, entryLocation),
+    `https://room.trydemigod.com/#join/${token}/work/42`,
+  );
+  assert.equal(
+    shareJoinHref(`https://room.trydemigod.com/#join/${token}`, { origin: "https://room.trydemigod.com", pathname: "/room/join" }),
+    `https://room.trydemigod.com/room/#join/${token}`,
+  );
+});
+
+test("a pasted legacy share code fragment is accepted too", () => {
+  assert.equal(
+    shareJoinHref("https://room.trydemigod.com/#join/ABCDEFGHJ", entryLocation),
+    "https://room.trydemigod.com/#join/ABCDEFGHJ",
+  );
+});
+
+test("non-share-link input still goes through the RM- code parser, not the fragment route", () => {
+  assert.equal(shareJoinHref("RM-ABC123", entryLocation), null);
+  assert.equal(shareJoinHref("#join/short", entryLocation), null);
+  assert.equal(shareJoinHref("", entryLocation), null);
+  assert.equal(shareJoinHref("https://room.trydemigod.com/#room/x", entryLocation), null);
+  assert.equal(parseInviteCodeInput("https://room.trydemigod.com/join/RM-ABC123"), "RM-ABC123");
 });
