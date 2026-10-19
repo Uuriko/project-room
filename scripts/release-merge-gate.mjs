@@ -182,7 +182,7 @@ async function main() {
       openAuthorizations: openAuthorizations(after => gh(['api', 'graphql', '--input', '-'], { query: OPEN_PR_QUERY, variables: { after } }).data?.repository?.pullRequests),
       claims,
       pr: gh(['pr', 'view', String(candidate.pr), '--repo', repo, '--json', 'state,isDraft,headRefOid,baseRefName,mergeable,statusCheckRollup']),
-      main: gh(['api', `repos/${repo}/commits/main`]).sha,
+      main: gh(['api', `repos/${repo}/git/ref/heads/main`]).object.sha,
       protection: { ...fullProtection.required_status_checks, enforceAdmins: fullProtection.enforce_admins?.enabled === true } };
   };
   const before = await inspect();
