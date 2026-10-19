@@ -466,3 +466,29 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
 });
+
+test("result reply refusal keeps the reader and private destination draft intact", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete();
+  await messageAction(f.page, "native-draft", "reply");
+  await f.page.locator("#message-input").fill("Private feedback draft");
+  await f.page.locator("#message-to-select").evaluate(el => { el.value = "human-checker"; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  await f.page.locator("#thread-back").click();
+  await f.page.locator("#message-input").fill("Room draft");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), true, "refused handoff leaves exact result visible");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Room draft", "refusal must not navigate or replace the current draft");
+  await f.page.locator("#close-result").click();
+  await messageAction(f.page, "native-draft", "reply");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
+  assert.equal(await f.page.locator("#message-to-select").inputValue(), "human-checker");
+  await f.page.locator("#message-to-select").evaluate(el => { el.value = ""; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  await f.page.locator("#thread-back").click();
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), false);
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
+  assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
+});

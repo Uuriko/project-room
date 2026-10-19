@@ -4065,10 +4065,15 @@ function replyToSharedResult(messageId) {
   if (!message || message.deletedAt || message.toMemberId || isRoomArchived(state)
     || state.channels?.[messageChannelId(message)]?.archivedAt || busy || requestReading
     || pendingMessage || composerFiles.some(file => file.status === "uploading")) return false;
+  const destination = conversation.rootById.get(message.id);
+  if (!destination || !conversation.threads.has(destination)) return false;
+  const draft = destination === composerKey()
+    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value }
+    : drafts.get(destination);
+  if (draft.pending || draft.toMemberId) { notice(uiText("result.replyBlocked")); return false; }
   setActiveChannel(messageChannelId(message));
   revealMessage(message.id);
-  switchThread(conversation.rootById.get(message.id), true);
-  if (pendingMessage || $("#message-to-select").value) return false;
+  switchThread(destination, true);
   replyToId = message.id;
   updateReply(); saveComposer(); persistDrafts();
   $("#message-input").focus();
@@ -6256,7 +6261,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) { replyToSharedResult(message.id); },
+  onDiscuss(message) { return replyToSharedResult(message.id); },
   onOriginal(messageId) {
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }

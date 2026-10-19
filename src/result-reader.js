@@ -107,8 +107,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-discuss").addEventListener("click", () => {
     const message = resultDiscussionMessage(resultView);
     if (!message || !canDiscuss()) return;
+    // A protected destination draft must not dismiss the result being read.
+    if (onDiscuss(message) === false) return;
     closeResult(false);
-    onDiscuss(message);
   });
   resultElement("result-original").addEventListener("click", () => {
     const view = resultView;
