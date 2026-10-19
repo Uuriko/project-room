@@ -615,13 +615,13 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   await page.waitForFunction(() => document.querySelector('#assistant-runs').textContent.includes('can you help?'));
 });
 
-test('ask card shows not-picked-up and stalled statuses with the result on the card', { timeout: 60000 }, async t => {
+for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask card shows not-picked-up and stalled statuses with the result on the card (${width}, ${colorScheme})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({headless:true});
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
   const errors = [];
-  const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
+  const context = await browser.newContext({viewport:{width,height:900}, colorScheme}), page = await context.newPage();
   page.on('pageerror', e=>errors.push(e.message)); await page.goto(origin); await signInFixture(page,f.keys.owner);
   await page.locator('#main').waitFor({state:'visible'}); await page.waitForFunction(()=>document.body.classList.contains('human-experience'));
   const api = async (actor, input) => {
@@ -638,18 +638,22 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
   // A queued run nobody claims for 10s reads not picked up on the card.
   const base = f.store.now(); f.store.now = () => base + 11000;
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Not picked up'));
+  await page.waitForFunction(()=>document.querySelector('.assistant-face-status').dataset.faceStatus === 'not_picked_up');
   let run = (await api('producer')).runs[0]; assert.equal(run.status,'queued'); assert.equal(run.displayStatus,'not_picked_up');
   run = (await api('producer',{action:'claim',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision})).result;
   assert.equal(run.status,'working');
   // A working run whose host goes silent for 2min reads stalled on the card.
   const claimedAt = f.store.now(); f.store.now = () => claimedAt + 121000;
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stalled'));
+  await page.waitForFunction(()=>document.querySelector('.assistant-face-status').dataset.faceStatus === 'stalled');
   assert.equal((await api('producer')).runs[0].displayStatus,'stalled');
   // The published answer lands on the card itself.
   run = (await api('producer',{action:'publish',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision,summary:'Plan ready.',body:'The plan is to ship the fence first.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   assert.equal(run.status,'done');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('The plan is to ship the fence first.'));
   assert.equal(await page.locator('#assistant-runs .assistant-run-result').count(),1);
+  await page.waitForFunction(()=>document.querySelector('.assistant-face-status').dataset.faceStatus === 'done');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors,[]);
 });
 
