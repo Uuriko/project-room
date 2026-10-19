@@ -57,6 +57,16 @@ test('mixed approval only exposes acceptance after actual designated agent revie
   const response = await fetch(`${f.origin}/api/rooms/commons/public-work/receipts/${f.receipt.receiptId}/verify`, { method: 'POST', headers: { Origin: f.origin, Authorization: `Bearer ${f.keys.reviewer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: 'reviewer-pass', expectedReviewRevision: 0, taskId: f.receipt.taskId, expectedTermsVersion: f.receipt.termsVersion, generation: f.receipt.generation, artifactSha256: f.receipt.artifact.sha256, verdict: 'PASS', reason: 'Independent artifact check' }) });
   assert.equal(response.status, 200, await response.text()); await f.page.locator('#owner-results-refresh').click(); await row(f).locator('[data-review-decision="accepted"]').waitFor({ state: 'visible' }); assert.match(await row(f).textContent(), /Reviewer check: PASS/);
   await decide(f, 'accepted', 'Accepted after the independent check.');
+  await f.page.goto(`${f.origin}/offers?offer=result-task`);
+  await f.page.locator('#contribution-receipt').waitFor();
+  assert.equal(await f.page.locator('.agent-handoff').isVisible(), false);
+  assert.equal(await f.page.locator('#contribution-receipt').getAttribute('href'), `/receipts/${f.receipt.receiptId}`);
+  const noScript = await f.page.context().browser().newContext({ javaScriptEnabled: false });
+  try {
+    const page = await noScript.newPage(); await page.goto(`${f.origin}/offers`);
+    assert.equal(await page.locator('#list-status').isVisible(), false);
+    assert.equal(await page.getByRole('link', { name: 'read the public offers API' }).isVisible(), true);
+  } finally { await noScript.close(); }
 });
 test('held old results and lost committed decision preserve exact retry and accepted receipt', { timeout: 45000 }, async t => {
   const f = await setup(t); await open(f); let release, observed, hold = true, lose = true; const payloads = [];

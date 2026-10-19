@@ -452,14 +452,20 @@ test('a long room opens at its newest message on a phone, and older history fill
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await signInFixture(page, ownerKey);
     await page.locator('[data-message-record-id="long-open-600"] .message-body').waitFor({ state: 'attached' });
-    await page.waitForFunction(() => document.querySelectorAll('#message-list > li').length > 150);
-    await page.waitForTimeout(1500);
-    const seen = await page.evaluate(() => {
+    const newestView = () => page.evaluate(() => {
       const list = document.querySelector('#message-list'), pill = document.querySelector('#new-messages-button');
       const last = document.querySelector('[data-message-record-id="long-open-600"]').getBoundingClientRect(), box = list.getBoundingClientRect();
       return { gap: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight), lastOnScreen: last.bottom <= Math.min(box.bottom, innerHeight) + 1 && last.top < innerHeight, pill: pill.hidden ? null : pill.textContent };
     });
-    assert.deepEqual(seen, { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px open lands on the newest message with no new-messages pill`);
+    await page.waitForTimeout(1500);
+    assert.deepEqual(await newestView(), { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px open lands on the newest message with no new-messages pill`);
+    // Lazy history waits for activation. Request it without scrolling the
+    // reader away from the newest message: this isolates the fill/layout
+    // regression from intentional reader navigation to an older position.
+    await page.locator('[data-timeline-earlier]').evaluate(button => button.click());
+    await page.waitForFunction(() => document.querySelectorAll('#message-list > li').length > 150);
+    await page.waitForTimeout(1500);
+    assert.deepEqual(await newestView(), { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px older history preserves the newest pin without a new-messages pill`);
     assert.deepEqual(errors, []);
     await context.close();
   }
