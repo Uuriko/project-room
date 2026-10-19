@@ -151,7 +151,7 @@ const EVIDENCE = [
 
   // ---- terms facts ----
   [TERMS, "TERMS_VERSION", [
-    ["server/legal-store.mjs", /export const TERMS_VERSION = "2026-10-02"/],
+    ["server/legal-store.mjs", /export const TERMS_VERSION = "2026-10-18"/],
   ]],
   [TERMS, "accepted_at", [
     ["server/legal-store.mjs", /accepted_at INTEGER NOT NULL/],

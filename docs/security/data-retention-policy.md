@@ -79,7 +79,12 @@ ROOM_RETENTION_ALLOW_DELETION=1 node scripts/retention-plan.mjs --db /path/to/ro
 2. `server/account-deletion.mjs` executes the purge list; the receipt names
    purged vs retained categories.
 3. Backups: the operator follows `docs/BACKUPS.md` — account-deleted data in
-   backups ages out with the backup rotation; it is not surgically removed.
+   backups ages out with the backup rotation (nightly copies expire after
+   35 days); it is not surgically removed. After any restore from a backup
+   taken before a deletion, the operator re-applies the recorded deletions
+   before the room reopens (mandatory step in the restore runbook in
+   `docs/BACKUPS.md`); the public privacy policy discloses both the 35-day
+   tail and the re-apply commitment.
 
 ### Incident (compromise)
 

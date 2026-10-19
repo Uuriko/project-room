@@ -34,7 +34,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.7.0",
+  version: "1.8.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
@@ -51,7 +51,13 @@ export const RETENTION_POLICY = Object.freeze({
     + "the deactivated account tombstone are retained under legal hold; "
     + "room history already shared with other members is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
-    + "blocks deletion until ownership is transferred.",
+    + "blocks deletion until ownership is transferred. Data deleted from the "
+    + "live store is not surgically removed from nightly backups already "
+    + "written: it remains in those encrypted backups for up to 35 days, "
+    + "until they expire. If an operator restores a backup taken before the "
+    + "deletion, the recorded deletions are re-applied before the room "
+    + "reopens, so the restore does not resurrect the deleted account or "
+    + "its authority.",
   purged: Object.freeze([
     Object.freeze({ category: "personal_room_content", description: "Messages and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
     Object.freeze({ category: "credentials", description: "Account access keys (account_credentials) are deleted; outstanding keys stop working immediately." }),
@@ -81,6 +87,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
     Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
     Object.freeze({ category: "bounty_journal", reason: "bounty_journal entries are the room's tamper-evident payment ledger (#3550): every entry is one leg of a two-account movement, hash-chained to the account's other entries and cited by counterparties' signed receipts. Deleting one account's legs would orphan the counterparty legs, break the hash chain and the conservation audit, and void those receipts. Entries stay in place, attributed only to the deactivated account tombstone — profile scrubbed, credentials and memberships purged — like the retained audit rows." }),
+    Object.freeze({ category: "backups", reason: "Nightly backups are written before the deletion and are not surgically edited: account data captured in a backup remains in that encrypted backup until it expires, no later than 35 days after it was taken. If an operator restores a backup taken before the deletion, the recorded deletions are re-applied — from the retained deactivated account ids — before the room reopens, so the restore does not resurrect the deleted account, its credentials, or its authority. The re-apply step is a mandatory step in the restore runbook (docs/BACKUPS.md)." }),
   ]),
 });
 

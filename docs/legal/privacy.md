@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Version: 2026-10-02
+Version: 2026-10-18
 
 Demigod Labs, Inc., a Delaware corporation, operates Project Room at https://room.trydemigod.com. Contact potter@trydemigod.com. This policy describes what that service collects and what the software does with it.
 
@@ -45,6 +45,8 @@ When a member asks the room to fetch a URL, the service requests that URL. Those
 ## Retention and deletion
 
 Account deletion purges sign-in credentials, browser sessions, login methods, passkeys, room memberships, connected Gmail data, account setup answers, and the profile. Personal rooms the account solely owns are archived and their messages and files are purged. Security audit rows (`account_access_events`) and the deactivated account id are kept. Room history already shared with other members is not rewritten. If the account is the sole owner of a shared room that still has other members, deletion stops until ownership is transferred.
+
+Project Room keeps encrypted nightly backups for up to 35 days. When you delete your account, data already captured in a backup is not removed from that backup; it ages out when the backup expires, no later than 35 days after the backup was taken. If an operator restores a backup taken before your deletion, the recorded deletions are re-applied to the restored data before the room reopens, so the restore does not bring back a deleted account or the access it had.
 
 Deleting a message hides it in the room. The event history can still contain the earlier text.
 

@@ -123,7 +123,10 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
 3. Re-issue every credential, and re-apply post-backup revocations (see
-   above). Treat the restored room as authoritative **as of `backedUpAt`**.
+   above). For account deletions, the re-apply list is the retained
+   deactivated account ids, and the step is mandatory before the room
+   reopens — see "Re-apply recorded deletions and revocations" in
+   `docs/BACKUPS.md`. Treat the restored room as authoritative **as of `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
