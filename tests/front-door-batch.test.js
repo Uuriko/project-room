@@ -32,12 +32,24 @@ test("B-6: Overview recent decisions include owner decisions on work results (#3
 test("B-4: receipt page states a named verification tier, not the self-disclaimer", () => {
   const base = { id: "wcr_x", title: "T", at: "2026-10-15T00:00:00.000Z", agents: [], humans: [], startHref: "/" };
   const merged = renderReceiptDetailHtml({ ...base, mergedAt: "2026-10-15T00:00:00.000Z", pullRequest: "https://github.com/Uuriko/project-room/pull/1" });
-  assert.match(merged, /Verification tier: bytes re-verified/);
+  assert.match(merged, /Verification tier: merge recorded/);
   const selfAttested = renderReceiptDetailHtml({ ...base, verification: { state: "self_attested" } });
-  assert.match(selfAttested, /Verification tier: bundle unaltered \(self-asserted\)/);
+  assert.match(selfAttested, /Verification tier: self-attested \(no independent check\)/);
   const memberVerified = renderReceiptDetailHtml({ ...base, verification: { state: "verified" } });
   assert.match(memberVerified, /Verification tier: human verdict \(member-verified\)/);
-  for (const html of [merged, selfAttested, memberVerified]) {
+  const plain = renderReceiptDetailHtml({ ...base });
+  assert.match(plain, /Verification tier: recorded \(no verification\)/);
+  // #4071: with a verification run present, the note defers to the block
+  // above it (successful, contradicted and partial runs alike) — the
+  // stored-record tiers below must not leak into that arm.
+  const rechecked = renderReceiptDetailHtml({ ...base, mergedAt: "2026-10-15T00:00:00.000Z", pullRequest: "https://github.com/Uuriko/project-room/pull/1" },
+    { verification: { verdict: "contradicted", verdictLabel: "Contradicted", summary: "The source no longer matches.", checkedAt: "2026-10-15T01:00:00.000Z", scope: { by: "the server", notChecked: [] }, checks: [] } });
+  assert.match(rechecked, /The verification block above is what the server re-checked/);
+  assert.doesNotMatch(rechecked, /Verification tier: merge recorded/);
+  for (const html of [merged, selfAttested, memberVerified, plain]) {
+    // #4071: no stored-record arm may claim a completed byte or bundle
+    // check — those claims shipped uncorrected in #3953 and are gone.
+    assert.doesNotMatch(html, /bytes re-verified|bundle unaltered/);
     // The tier leads; the factual caveats (stored hashes, unsigned
     // envelope) follow it instead of standing as the whole statement.
     const noteAt = html.indexOf("Verification tier:");
@@ -46,9 +58,12 @@ test("B-4: receipt page states a named verification tier, not the self-disclaime
   }
 });
 
-test("B-4: View receipt links the human page; JSON stays as the secondary link", () => {
+test("B-4: View receipt links the human page only when the receipt is public; JSON stays as the secondary link", () => {
   const owner = read("src/owner-project-offers-ui.js");
-  assert.match(owner, /href="\/receipts\/\$\{encodeURIComponent\(id\)\}"[^>]*>View receipt<\/a>/);
+  // #4071: the public link is offered only in the state where it resolves
+  // (row.publicPage, computed server-side with the detail route's own
+  // visibility rule); the authenticated JSON link is always present.
+  assert.match(owner, /row\.publicPage \? ` · <a href="\/receipts\/\$\{encodeURIComponent\(id\)\}"[^>]*>View receipt<\/a>` : ''/);
   assert.match(owner, />Receipt JSON<\/a>/);
   const offers = read("src/project-offers-ui.js");
   assert.match(offers, /id="contribution-receipt" href="\/receipts\//);

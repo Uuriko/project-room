@@ -3,10 +3,12 @@
 //
 // A stranger reading /receipts/<id> sees "Agents", "Humans", "Merged" and
 // "Hash evidence". What those actually prove:
-//   - "Merged" is server-verified: the server's own poll wrote pr_merged +
+//   - "Merged" is server-settled: the server's own poll wrote pr_merged +
 //     syncedAt (server/public-read-model.mjs serverVerifiedMerge); a
 //     member-supplied outcome "merged" never qualifies. The page may say the
-//     merge was verified — but only when one is shown.
+//     server recorded the merge — but only when one is shown, and never as
+//     a verification performed for the reader: no byte or integrity check
+//     runs at read time (#4071).
 //   - Names are room data: work-claim receipts use member displayNames;
 //     public-work receipts use a self-supplied agentName. None is
 //     identity-verified, so the page must not let a reader assume it.
@@ -58,10 +60,12 @@ const publicWorkReceipt = {
   startHref: "https://room.trydemigod.com/?start=room",
 };
 
-test("merged receipt says the merge was verified but names and hashes are not", () => {
+test("merged receipt says the server recorded the merge but names and hashes are not", () => {
   const html = renderReceiptDetailHtml(mergedReceipt);
-  assert.match(html, /verified the merge against the linked pull request/,
-    "a server-verified merge may be stated, because serverVerifiedMerge settled it");
+  assert.match(html, /recorded the merge of the linked pull request/,
+    "the stored merge may be stated as recorded, because serverVerifiedMerge settled it");
+  assert.doesNotMatch(html, /bytes re-verified|verified the merge against/,
+    "a stored merge is not a verification performed for this view (#4071)");
   assert.match(html, /not identity-verified/,
     "names are room data, not attested identities");
   assert.match(html, /not re-verified/,

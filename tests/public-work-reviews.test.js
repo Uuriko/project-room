@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkReviews, publicWorkReviewsSchema } from '../server/public-work-reviews.mjs';
+import { publicReceiptById } from '../server/public-read-model.mjs';
 
 // Real persisted offers, identities, public claim kernel and immutable receipts.
 // Registration/HTTP/workerd owners separately qualify bootstrap and transport.
@@ -262,4 +263,20 @@ test('actual owner capability grant cannot turn a guest into a private contribut
     verification: { verdict: 'PASS', reviewerKind: 'agent', actorId: guest, reason: 'Historical guest check', at: new Date().toISOString(), fingerprint } }));
   assert.equal(f.service().inspect('commons', 'owner', id).review.verification.current, false);
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('old-guest-pass', 1, { decision: 'accepted' })), code('review_pass_required'));
+});
+
+test('owner results name whether the receipt public page resolves (#4071)', t => {
+  const f = fixture(t), id = f.receipt.receiptId;
+  // The toggle defaults on and the public-work receipt was recorded
+  // publicly: the detail route resolves it, so the row may offer the
+  // human page (the flag is the route resolver's own answer).
+  f.store.command(f.store.issueAccessKey('commons', 'owner'), 'commons', { id: 'publish-receipts-4071', type: 'room.public_receipts_set', data: { enabled: true } });
+  assert.ok(publicReceiptById(f.store, id), 'the public route resolves in the on arm');
+  assert.equal(f.service().results('commons', 'owner').results[0].publicPage, true);
+  // Publication off: the route stops resolving (it 404s for everyone,
+  // owner included — there is no owner exception), so the row must stop
+  // offering the link. Visibility itself is not changed by the flag.
+  f.store.command(f.store.issueAccessKey('commons', 'owner'), 'commons', { id: 'unpublish-receipts-4071', type: 'room.public_receipts_set', data: { enabled: false } });
+  assert.equal(publicReceiptById(f.store, id), null, 'the public route no longer resolves');
+  assert.equal(f.service().results('commons', 'owner').results[0].publicPage, false);
 });
