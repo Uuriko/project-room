@@ -510,7 +510,10 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(steps.find(step => step.name === "Receipt to muse-room").run, /recoveryDescription/);
   assert.doesNotMatch(steps.find(step => step.name === "Receipt to muse-room").run, /FAILED · rolled back/);
   for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
-    assert.match(step.run, /--keep-vars --var ROOM_BODIES_AT_REST:1/);
+    assert.match(step.run, /--keep-vars/);
+    // ROOM_BODIES_AT_REST is carried by cloudflare/wrangler.jsonc (#4166);
+    // the workflow no longer re-pins it on each deploy command.
+    assert.doesNotMatch(step.run, /--var ROOM_BODIES_AT_REST/);
     assert.ok(step.env.ROOM_AGENT_CARD_SIGNING_KEY);
   }
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
