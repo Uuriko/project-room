@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS public_work_review_versions (
   PRIMARY KEY(receipt_id, revision)
 );
 CREATE TABLE IF NOT EXISTS public_work_review_reads (
-  receipt_id TEXT NOT NULL, room_id TEXT NOT NULL, reader_id TEXT NOT NULL,
-  at TEXT NOT NULL, revision INTEGER NOT NULL
+  id INTEGER PRIMARY KEY, receipt_id TEXT NOT NULL, room_id TEXT NOT NULL,
+  reader_id TEXT NOT NULL, at TEXT NOT NULL, revision INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS public_work_review_requests (
   room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -209,7 +209,7 @@ export class PublicWorkReviews {
     // read-only connection, a write error) is swallowed here and only here.
     try {
       if (seen && seen.roomId && this.hasTable('public_work_review_reads')) {
-        this.db.prepare('INSERT INTO public_work_review_reads VALUES (?,?,?,?,?)')
+        this.db.prepare('INSERT INTO public_work_review_reads (receipt_id, room_id, reader_id, at, revision) VALUES (?,?,?,?,?)')
           .run(receiptId, seen.roomId, seen.readerId, new Date(this.store.now()).toISOString(), seen.revision);
       }
     } catch { /* best-effort journal: the read above is the contract */ }
