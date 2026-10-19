@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 import { gmailImportAuth } from './gmail-import-authority.mjs';
 import { createHash } from "node:crypto";
 import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
@@ -945,7 +946,7 @@ export class Inbox {
     // replay, which must reproduce journaled receipts from the stored text.
     if (viewerId !== null) {
       const member = state.members[viewerId];
-      const message = state.messages.find(m => m.id === item.receipt.nativeText.messageId);
+      const message = messageRepository({ db: this.db }, state.room.id, state).get(item.receipt.nativeText.messageId);
       if (!member || member.active === false || !message
         || !messageVisibleToViewer(message, viewerId, historyFloor(this.db, state, state.room.id, viewerId)))
         return { ...base, status: "no_native_result", resultVersion: null };

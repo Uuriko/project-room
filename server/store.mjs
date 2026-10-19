@@ -1,3 +1,7 @@
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
+import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
+import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
@@ -26,7 +30,7 @@ import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
-  applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
+  applyEvent, replayEvents, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
@@ -46,10 +50,11 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
-import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -68,7 +73,9 @@ import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
-import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
+import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
+import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
+import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
@@ -704,12 +711,6 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
-// Commands that name an existing message, and which field names it.
-const ARCHIVED_REF_FIELDS = Object.freeze({
-  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
-  [T.POLL_VOTED]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
-  [T.MESSAGE_POSTED]: "replyToId"
-});
 
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
@@ -1145,7 +1146,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1301,7 +1302,9 @@ const LOOKUP_INDEXES = `
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+// SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
+// They must invalidate too now that metadata-only commits keep their cache.
+const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -1315,10 +1318,14 @@ function deepFreeze(value) {
 // arrays, -0, accessors, etc.) must still take the canonical cold-read path.
 // Freezing in this same walk prevents later command helpers changing a
 // candidate after its bytes have been persisted.
+// Only this validator can establish JSON stability; externally frozen objects
+// may still contain undefined, accessors or other non-canonical values.
+const verifiedJsonStates = new WeakSet();
 function freezeJsonState(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
   if (typeof value !== "object") return false;
+  if (verifiedJsonStates.has(value)) return true;
   const array = Array.isArray(value);
   if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
   const keys = Object.keys(value);
@@ -1330,6 +1337,7 @@ function freezeJsonState(value) {
     if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
   }
   Object.freeze(value);
+  verifiedJsonStates.add(value);
   return true;
 }
 
@@ -1359,11 +1367,17 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
+    if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
+      throw new Error("messageProjectionWindow must be a positive integer or null");
+    if (messageEntityProjection && messageProjectionWindow === null) throw new Error("Entity projection requires a bounded message projection window");
+    this.messageEntityProjection = messageEntityProjection === true;
+    this.messageProjectionWindow = messageProjectionWindow;
+    this.maintainMessageCertification = maintainMessageCertification === true || messageProjectionWindow !== null;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -1393,6 +1407,7 @@ export class RoomStore {
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
+    this.workEntities = workEntities === true;
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
@@ -1599,6 +1614,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    this.db.exec(WORK_REPOSITORY_SCHEMA);
     if (version > 0 && version < 26 && (
       this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
       || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
@@ -2007,9 +2023,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
         this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
       }
+      // v39 keeps bounded reducer history off the room projection. Old rows
+      // remain null until backfill or archive; opening never replays history.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='reducer_extras_json'").get()) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN reducer_extras_json TEXT");
+      }
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      migrateMessageReplaySnapshots(this.db);
       // MSG-2 blocks: rooms parked on an un-replayable event, named for the
       // operator. Unfenced and additive, like the cursor.
       this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
@@ -2020,7 +2042,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
       }
       if (version > 0 && version < 38) {
+        this.db.prepare("DELETE FROM message_replay_snapshots").run();
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
+        this.db.prepare("DELETE FROM messages_backfill_state").run();
       }
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
@@ -2098,6 +2122,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         console.error("work-item board backfill failed at open", error);
       }
     }
+    configureWorkRepository(this.db, this.workEntities);
+    if (this.workEntities && version < 42) this.migrateWorkProjections();
+  }
+
+  // Convert one room atomically; interrupted multi-room runs resume by
+  // skipping already normalized carriers. Reverse reconstructs inline state.
+  migrateWorkProjections({ reverse = false } = {}) {
+    let converted = 0;
+    for (const { id } of this.db.prepare("SELECT id FROM rooms ORDER BY id").all()) {
+      this.transaction(() => {
+        const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(id);
+        const raw = JSON.parse(row.projection);
+        const state = hydrateWorkItems(this.db, id, raw);
+        const projection = storedProjection(this.db, id, state, { enabled: this.bodiesAtRest, workEntities: !reverse });
+        if (projection !== row.projection) {
+          this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(projection, id);
+          converted++;
+        }
+        if (reverse) this.db.prepare("DELETE FROM work_entities WHERE room_id=?").run(id);
+        const actual = hydrateWorkItems(this.db, id, JSON.parse(projection));
+        if (JSON.stringify(actual.workItems) !== JSON.stringify(state.workItems)) throw new Error("Work migration comparison failed");
+      });
+    }
+    this._dropProjectionCache();
+    return { converted, reverse };
   }
 
   // Decision #10 operator/test surface: run (or re-run, with force) the
@@ -2175,8 +2224,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   backfillMessages(options = {}) {
     return runMessagesBackfill(this, options);
   }
-  checkMessagesParity() {
-    return verifyMessagesParity(this);
+  checkMessagesParity(options = {}) {
+    return verifyMessagesParity(this, options);
   }
   // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
   // it writes only patrol_* tables and files findings; see server/patrol.mjs.
@@ -2257,7 +2306,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // "" is not a room, so the moot-room rule below must not eat it.
       if (row.step !== "messages_backfill" || !row.recordId || failedNow.has(row.recordId)) continue;
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
-      if (!roomExists || messagesBackfillCaughtUp(this.db, row.recordId)) {
+      // r52: a room whose park was lifted (its block re-diagnosed clean) and
+      // that did not fail in this call is lagging, not failing: lag is not
+      // an integrity failure for any other room. Without this the record
+      // stood until the room fully caught up, keeping integrity red for days
+      // after the cause was fixed. A later failure re-parks and re-records.
+      const parked = this.db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      if (!roomExists || !parked || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
       }
     }
@@ -2269,6 +2324,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to the next room in the same visit; a room that certifies clears any
   // earlier record.
   runIntegrityParityStep() {
+    // Legacy record shapes would fail parity forever; upgrade them first.
+    this.upgradeLegacyMessageShapes();
     const result = runMessagesParityCheck(this, {
       report: ({ roomId, error }) => {
         if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
@@ -2559,7 +2616,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => Boolean(this.db.prepare(`
       SELECT 1 AS present FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
       UNION
-      SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      SELECT 1 FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
       WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
       UNION
       SELECT 1 FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
@@ -2719,7 +2776,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const roomHelp = idsWithHelp(`
         SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
-        SELECT rooms.id AS id FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        SELECT rooms.id AS id FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
         WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
       const checkpointHelp = idsWithHelp(`
@@ -2746,10 +2803,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
         const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
         if (collect) {
-          try { auditWorkHelp(JSON.parse(row.projection), history, checkpoint); }
+          try { auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint); }
           catch (error) { collect.push({ roomId: row.id, error }); }
         } else {
-          auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
+          auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint);
         }
       }
       return { checked, auditable: [...new Set([...helpRooms, ...roomHelp, ...checkpointHelp])] };
@@ -3139,11 +3196,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Reads only the authority and history fields, not the full projection, so
   // event polling stays cheap.
   historyFloor(roomId, memberId, headSequence = null) {
-    const { sequence, ownerId, members } = this.roomAuthority(roomId);
-    const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
-    let visibility = null;
-    try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
-    const state = { room: { ownerId, historyVisibility: visibility, historyDefaultsVersion: row?.defaults ?? null }, members };
+    const { sequence, ownerId, members, historyVisibility, historyDefaultsVersion } = this.roomAuthority(roomId, { includeHistory: true });
+    const state = { room: { ownerId, historyVisibility, historyDefaultsVersion }, members };
     return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? sequence);
   }
   // --- end PRIV-2 ---
@@ -3155,7 +3209,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
       WHERE json_type(item.value) = 'object' AND (
         json_type(item.value, '$.proposedById') IS NULL
         OR (json_type(item.value, '$.receipt') = 'object' AND (
@@ -3169,20 +3223,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       )
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.receiptHistory') AS receipt
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.receiptHistory') AS receipt
       WHERE json_type(receipt.value) = 'object' AND (
         json_type(receipt.value, '$.reportedById') IS NULL
         OR json_type(receipt.value, '$.producerId') IS NULL
         OR json_type(receipt.value, '$.producerAttribution') IS NULL)
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.verificationHistory') AS verification
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.verificationHistory') AS verification
       WHERE json_type(verification.value) = 'object'
         AND json_type(verification.value, '$.independenceConfirmed') IS NULL
     `).all().map(row => row.id);
     return new Set(ids);
   }
+  // Projection shape upgrade v1 (server/legacy-message-shape.mjs): stored
+  // message records the current reducer no longer builds. Idempotent.
+  upgradeLegacyMessageShapes({ skipIds = new Set() } = {}) {
+    if (this.readOnly) return { rooms: 0, reactionsRemoved: 0, receiptIdsAdded: 0 };
+    return runLegacyMessageShapeUpgrade(this, { skipIds });
+  }
   repairProjectionShape(skipIds) {
+    this.upgradeLegacyMessageShapes({ skipIds });
     const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
     const missingChannel = this.db.prepare(`
       SELECT id, projection FROM rooms
@@ -3192,7 +3253,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     `).all();
     for (const row of missingChannel) {
       if (skipIds.has(row.id)) continue;
-      const state = JSON.parse(row.projection);
+      const state = hydrateProjection(this.db, row.id, JSON.parse(row.projection)).state;
       if (!ensureDefaultChannelState(state)) continue;
       update.run(this.storedProjection(row.id, state), row.id);
     }
@@ -3200,15 +3261,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
       FROM rooms
       WHERE EXISTS (
-        SELECT 1 FROM json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_extract(item.value, '$.state') = 'superseded'
+        SELECT 1 FROM work_projection_items AS item
+        WHERE item.room_id=rooms.id AND json_extract(item.value, '$.state') = 'superseded'
           AND json_type(item.value, '$.supersededBy') = 'text'
       )
     `).all();
     for (const row of linked) {
       if (skipIds.has(row.id)) continue;
-      if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      if (!repairInvalidSupersessions(hydrateWorkItems(this.db, row.id, { workItems: parseStoredJson(row.workItems, {}) }))) continue;
+      const state = hydrateWorkItems(this.db, row.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection));
       if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
     }
   }
@@ -3221,7 +3282,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const room of rooms) {
       const events = findEvents.all(room.id, ...PROVENANCE_EVENT_TYPES).map(row => JSON.parse(row.body));
       if (upgradeV1) {
-        const state = JSON.parse(room.projection);
+        const state = hydrateWorkItems(this.db, room.id, JSON.parse(room.projection));
         const changed = applyProvenanceRepair(state, events);
         if (changed) update.run(this.storedProjection(room.id, state), room.id);
         // Checkpoints keep full bodies (replay applies edits to them).
@@ -3229,13 +3290,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         continue;
       }
       const slices = slicesOf.get(room.id);
-      const partial = {
+      const partial = hydrateWorkItems(this.db, room.id, {
         room: parseStoredJson(slices?.room, null),
         channels: parseStoredJson(slices?.channels, undefined),
         workItems: parseStoredJson(slices?.workItems, {})
-      };
+      });
       if (!applyProvenanceRepair(partial, events)) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+      const state = hydrateWorkItems(this.db, room.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection));
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
@@ -3258,7 +3319,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight });
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3268,7 +3329,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
-      const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
       if (!roomsWrite && !eventAppend) return stmt;
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
@@ -3285,7 +3346,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
+        if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
     }
@@ -3348,7 +3409,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (boundary) {
       const pending = frames.pop();
-      this._projectionCache?.clear();
+      // ROOMS_WRITE invalidates immediately in the projection watch. A commit
+      // of heartbeat/cursor/claim metadata must not discard unrelated parses.
       if (!outermost) {
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
@@ -3424,7 +3486,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
     return { value: Object.freeze({ sequence, state }),
-      weight: Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
+      weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -3440,7 +3502,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -3451,7 +3513,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+        // Migration validates stored authority, never a previously hydrated cache.
+        this._dropProjectionCache();
         restoreArchivedMessages(this, id);
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
@@ -3482,7 +3546,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return out;
     });
   }
-  roomAuthority(roomId) {
+  roomAuthority(roomId, { includeHistory = false } = {}) {
+    // History policy travels in the same validated prefix as membership. This
+    // keeps fresh permission reads independent of conversation JSON parsing.
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
     // WRITE-PATH-WINS win 5: ownerId and members are the first two
@@ -3494,14 +3560,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // falls back to the full-projection extract below, so the values
     // returned are always the stored ones, read fresh.
     const prefix = (this._roomAuthorityPrefixStmt ??= this.db.prepare(
-      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members') END AS authority FROM rooms WHERE id=?"));
+      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members', '$.room.historyVisibility', '$.room.historyDefaultsVersion') END AS authority FROM rooms WHERE id=?"));
     let row = prefix.get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     let authority = null;
     try { authority = JSON.parse(row.authority); } catch { /* fall through to the full extract */ }
     let [ownerId, members] = Array.isArray(authority) ? authority : [];
     if (typeof ownerId !== "string" || !members || typeof members !== "object") {
-      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?"));
+      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members','$.room.historyVisibility','$.room.historyDefaultsVersion') AS authority FROM rooms WHERE id=?"));
       row = full.get(roomId);
       if (!row) fail(404, "room_not_found", "Room not found");
       authority = JSON.parse(row.authority);
@@ -3509,7 +3575,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (typeof ownerId !== "string" || !members || typeof members !== "object")
         fail(500, "projection_corrupt", "Room projection is missing authority fields");
     }
-    return { sequence: row.sequence, ownerId, members };
+    return { sequence: row.sequence, ownerId, members,
+      ...(includeHistory ? { historyVisibility: authority[2] ?? null, historyDefaultsVersion: authority[3] ?? null } : {}) };
   }
   rebuildProjection(roomId, through = null) {
     return this._replayRoom(roomId, through ?? this.room(roomId).sequence);
@@ -3530,18 +3597,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     ensureDefaultChannelState(state);
     if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
     const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
-    for (const row of rows) {
-      if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
-      state = applyEvent(state, JSON.parse(row.body));
-      sequence = row.sequence;
-    }
+    state = replayEvents(state, (function* () {
+      for (const row of rows) {
+        if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
+        yield JSON.parse(row.body);
+        sequence = row.sequence;
+      }
+    })());
     if (sequence !== through) throw new Error("Event sequence does not reach the room projection");
     return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.
   initialize(events) {
     return this.transaction(() => {
-      const state = events.reduce(applyEvent, emptyRoomState());
+      const state = replayEvents(emptyRoomState(), events);
       const stored = compact(state);
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
@@ -4359,7 +4428,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -4622,7 +4691,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
     return { ...room, state: { ...room.state, members } };
   }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -4637,6 +4706,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
+      let messages = room.state.messages, pins = room.state.pins, messagesWindow;
+      if (messageLimit !== null || room.state.messagesArchive) {
+        const repository = messageRepository(this, roomId, room.state);
+        if (messageLimit !== null) {
+          const floor = this.historyFloor(roomId, auth.member.id);
+          const visible = message => messageInHistory(message, floor)
+            && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
+          messages = repository.recent(messageLimit, visible);
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
+          pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
+        } else {
+          // Explicit legacy full-snapshot contract. Recent and conversation reads
+          // stay bounded; full export-compatible reads explicitly request history.
+          messages = [...repository.records()];
+        }
+      }
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       // Preserve the same committed tail and its activity-dependent selectors.
       // Message bodies already travel in the projection; the complete audit
@@ -4646,7 +4733,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || /^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(event.type)
         || event.data?.workItemId !== undefined) : events;
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 
@@ -5041,7 +5128,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return e;
       });
       let state;
-      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      try { state = compact(replayEvents(emptyRoomState(), events)); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
@@ -5053,6 +5140,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
       // Replacing history may preserve the head id and sequence. Invalidate
       // message replay snapshots and full-record certification explicitly.
+      discardMessageReplaySnapshot(this.db,roomId);
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
       // A parked room's block described the replaced log; it does not carry.
       this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
@@ -5061,6 +5149,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {
         this.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
       }
+      this.db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
@@ -5244,13 +5333,105 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { ...built, ...identity };
     });
   }
+  // C-06 room digest: one bounded read composed from the context, needs-me,
+  // and updates projections plus journal window aggregates. `since` is the
+  // caller's last-handled seq (a wake's seq for the since-wake delta); the
+  // viewer's history floor (PRIV-2) clamps the window and is reported via
+  // `since`/`requestedSince`/`floorApplied`, never silently. Message rows use
+  // the current projection body through messageVisibleToViewer, so deleted,
+  // edited, DM, and pre-join text follows the same rules as every other
+  // summary read. Bodies themselves are never reproduced (see room-digest.mjs).
+  roomDigest(token, roomId, { since = 0, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(since) || since < 0) fail(422, "invalid_cursor", "since must be a sequence number");
+      const room = this.room(roomId);
+      const through = room.sequence;
+      if (since > through) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      const viewerId = auth.member.id;
+      const identityId = auth.identityId ?? this.bonds?.identityForMember?.(roomId, viewerId) ?? null;
+      const floor = this.historyFloor(roomId, viewerId, through);
+      const effectiveSince = floor ? Math.max(since, floor.sequence - 1) : since;
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, viewerId)?.sequence ?? 0;
+      const context = buildRoomContext({ state: room.state, sequence: through, viewerId, caughtUp, now: this.now() });
+      // Group the journal window once; retain exact known-type coverage and
+      // coalesce future event types into the same `other` compatibility bucket.
+      // File-backed Node and Workers read-only transactions are parity-tested.
+      const knownTypes = new Set(Object.values(T));
+      const byType = {};
+      for (const row of this.db.prepare(
+        "SELECT json_extract(body,'$.type') AS type, COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=? GROUP BY json_extract(body,'$.type')"
+      ).all(roomId, effectiveSince, through)) {
+        const type = knownTypes.has(row.type) ? row.type : "other";
+        byType[type] = (byType[type] ?? 0) + row.count;
+      }
+      // Changed work: one descending pass over the window's work_claim.updated
+      // rows; the first sighting of a claim is its latest change. The distinct
+      // total is exact from the same pass.
+      const workRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.data.workClaim') AS claimId,
+                json_extract(body,'$.data.action') AS action, json_extract(body,'$.data.claimState') AS state,
+                json_extract(body,'$.data.title') AS title FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='work_claim.updated'
+           AND json_extract(body,'$.data.workClaim') IS NOT NULL
+         ORDER BY sequence DESC`
+      ).all(roomId, effectiveSince, through);
+      const seenClaims = new Set();
+      const workChanged = [];
+      for (const row of workRows) {
+        if (seenClaims.has(row.claimId)) continue;
+        seenClaims.add(row.claimId);
+        if (workChanged.length < 25) workChanged.push({ id: row.claimId, seq: row.seq, action: row.action, state: row.state, title: row.title });
+      }
+      const decisions = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.actorId') AS actorId FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type') IN ('decision.recorded','owner.decision_recorded')
+         ORDER BY sequence DESC LIMIT 10`
+      ).all(roomId, effectiveSince, through);
+      const messageRecords = messageRepository(this, roomId, room.state);
+      const messageRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.id') AS eventId, json_extract(body,'$.data.messageId') AS messageId,
+                json_extract(body,'$.data.body') AS body, json_extract(body,'$.data.toMemberId') AS toMemberId,
+                json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.at') AS at FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='message.posted'
+         ORDER BY sequence DESC LIMIT 50`
+      ).all(roomId, effectiveSince, through);
+      const currentById = messageRecords.getMany ? messageRecords.getMany(messageRows.map(row => row.messageId ?? row.eventId)) : messageRecords;
+      const messages = [];
+      for (const row of messageRows) {
+        const id = row.messageId ?? row.eventId;
+        const current = id ? currentById.get(id) : null;
+        const pseudo = current ?? { id, body: row.body, authorId: row.actorId, toMemberId: row.toMemberId, createdAt: row.at };
+        if (!messageVisibleToViewer(pseudo, viewerId, floor)) continue;
+        messages.push({ seq: row.seq, id, actorId: row.actorId, summary: pseudo.body });
+        if (messages.length >= 10) break;
+      }
+      const attention = roomAttention(this, roomId, viewerId, identityId, effectiveSince)
+        .filter(item => !floor || item.seq >= floor.sequence)
+        .map(({ kind, seq, id, summary }) => ({ kind, seq, id, summary }));
+      const projected = projectRoomUpdates(this, roomId, viewerId, identityId);
+      const byKind = {};
+      let actionableTotal = 0;
+      for (const item of projected.items) {
+        if (item.state !== "unread" && item.state !== "read") continue;
+        byKind[item.kind] = (byKind[item.kind] ?? 0) + 1;
+        actionableTotal += 1;
+      }
+      const digest = buildRoomDigest({
+        roomId, viewerId, since: effectiveSince, requestedSince: since, through, now: this.now(),
+        context, byType, workChanged, workChangedTotal: seenClaims.size,
+        attention, messages, decisions, actionable: { total: actionableTotal, byKind }
+      });
+      return digest;
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers,
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -5274,7 +5455,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor, scope }),
+        floor, scope, messageRecords: messageRepository(this, roomId, room.state) }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -5379,7 +5560,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = viewerId === authority.ownerId;
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
-      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
       const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
@@ -5522,12 +5703,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // projection is the current state. A mention deleted after posting must
     // not surface at all (it listed a tombstone with a room_reply next step),
     // and an edited mention must show its current body, not the pre-edit
-    // text. Messages missing from the projection fall back to the logged
-    // body, as the #2941 fix did for room DMs. Deleted rows are skipped
+    // text. Archived messages resolve through current normalized records;
+    // only genuinely absent legacy records fall back to the logged body. Deleted rows are skipped
     // inside the scan so they never consume one of the caller's limit slots.
-    let liveMessages = [];
-    try { liveMessages = this.room(roomId).state?.messages ?? []; } catch { /* unknown room: no overlay */ }
-    const currentById = new Map(liveMessages.map(message => [message.id, message]));
+    let currentById = { get: () => undefined, hasReply: () => false };
+    try { currentById = messageRepository(this, roomId); }
+    catch (error) { if (error?.code !== 'room_not_found') throw error; }
     const rows = [];
     try {
       const stmt = this.db.prepare(
@@ -5564,16 +5745,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     // timed_out is terminal, so a late reply does not flip the row. Once this
     // member has replied to that message, it is no longer waiting in the inbox.
-    const answeredBy = new Map();
-    if (rows.some(row => row.state === "timed_out")) {
-      for (const message of this.room(roomId).state.messages ?? []) {
-        if (message.authorId === memberId && message.replyToId) answeredBy.set(message.replyToId, true);
-      }
-    }
     return rows.map(row => ({ row, event: JSON.parse(row.body) }))
       .filter(({ event }) => event?.type === T.MESSAGE_POSTED
         && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
-      .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
+      .filter(({ row, event }) => row.state !== "timed_out" || !currentById.hasReply(memberId, event.data.messageId ?? row.eventId))
       .map(({ row, event }) => Object.freeze({
         sequence: row.sequence,
         eventId: row.eventId,
@@ -5609,7 +5784,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
-      const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId, room.state) : null;
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, this.archivedDmPartiesReader(roomId)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
@@ -5696,15 +5871,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       let room = this.room(roomId);
       refuseArchivedWrite(room.state);
-      // The author or the Room owner can still delete an archived message: bring
-      // that one message back into the projection (it stays retained) and let the
-      // normal delete and redaction run. Anyone else falls through to the
-      // archived-message refusal below, which confirms nothing to a non-party.
-      if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
-        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId);
-        if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
-            && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
-      }
+      room = prepareMessageCommand(this, roomId, room, command, auth.member.id);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
@@ -5774,36 +5941,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
-      // Archived messages are not in the projection, so the reducer cannot change
-      // them or thread under them. Refuse with a clear error. A DM the actor is
-      // not a party to reads like an unknown id, so nothing about it is confirmed.
-      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
-      if (archivedRef) {
-        const refId = command.data?.[archivedRef];
-        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
-          const archivedRow = archivedMessageRow(this.db, roomId, refId);
-          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
-          // An archived message can still hold a pin (older archives did not retain pins).
-          // Unpinning is allowed for anyone who may see the message and refused, like a
-          // live DM, for a non-party; the reducer cannot check it without the message.
-          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
-          if (archivedRow && stillPinned) {
-            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
-          } else if (party) {
-            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
-          }
-        }
-      }
-      // A new post cannot reuse the id of an archived message: the reducer only
-      // sees the projection, so it would otherwise accept a second message under
-      // that id. Same refusal as a live duplicate; it reads the same for a DM.
-      if (command.type === T.MESSAGE_POSTED) {
-        const newId = command.data?.messageId || command.id;
-        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
-            && archivedMessageRow(this.db, roomId, newId)) {
-          fail(409, "command_rejected", "Message already exists");
-        }
-      }
+      assertMessageCommandReferences(this, roomId, room.state, command, auth.member.id);
       // A vote on a DM poll is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
       if (command.type === T.POLL_VOTED && typeof command.data?.messageId === "string") {
@@ -5969,9 +6107,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
+      const messageWrite = prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence});
+      const { projection } = messageWrite;
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the
@@ -5995,10 +6134,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (WORK_ITEM_BOARD_SYNC_TYPES.has(incoming.type)) {
           syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
-        // MSG-1: double-write the messages table in this same transaction.
-        // A throw here rolls the event back with the row. No read path uses
-        // the table yet. Older events wait for the MSG-2 backfill.
-        syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        // Persist the message domain in the same transaction as event/receipt.
+        // A failure rolls back both the entity and its projection reference.
+        messageWrite.persistEntities();
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }
@@ -6152,6 +6290,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
       }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
+      if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
+        // Archive only at an exact certified head; unsafe transitions defer to
+        // backfill. This is the existing reversible format, not another store.
+        this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
+      }
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });

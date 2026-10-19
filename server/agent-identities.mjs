@@ -524,7 +524,7 @@ export class AgentIdentities {
       // NOT EXISTS re-parsed every projection once per identity candidate.
       clauses.push(`AND identity_id NOT IN (
         SELECT json_extract(item.value, '$.claim.holderId')
-        FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+        FROM work_projection_items AS item
         WHERE json_extract(item.value, '$.claim.status') = 'active'
           AND json_extract(item.value, '$.claim.holderId') IS NOT NULL
       )`);

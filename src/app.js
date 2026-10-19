@@ -1,3 +1,4 @@
+import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
@@ -406,6 +407,9 @@ const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
+  // Older history loads on a reader gesture, not 250 ms after open: on a busy
+  // room the background fill was most of a phone's bytes (~3 MB per open).
+  lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
@@ -2316,7 +2320,13 @@ function renderMessages() {
     if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  // Lazy history: a reply whose thread root is older than the held window
+  // indexes as a root; it stays in its (unloaded) thread, as it would with
+  // full history, instead of posing as a top-level message.
+  const owesHistory = client.owesHistory;
+  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
+  if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
+  const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
@@ -2373,7 +2383,7 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
-  if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
+  if (hiddenCount || showPager) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
   // after them on every arrival. They are repainted after each render.
@@ -2464,7 +2474,7 @@ function renderMessages() {
   for (const [key, node] of previous) if (key?.startsWith("work:") && !workById.has(key.slice(5))) node.remove();
   let wi = 0;
   const merged = [];
-  if (hiddenCount) {
+  if (hiddenCount || showPager) {
     let pager = previous.get(TIMELINE_PAGER_KEY);
     if (!pager) {
       pager = document.createElement("li");
@@ -2751,11 +2761,12 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
-  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room${loadingOlder ? " · loading older messages…" : ""}`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
@@ -3019,6 +3030,7 @@ function switchThread(threadId, focusComposer = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
+  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) { pendHashReveal(id); return; }
   if (!state || busy || !conversation.byId.has(id)) return;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
@@ -3401,6 +3413,7 @@ function decodeFragment(value) {
 function pendHashReveal(messageId) {
   pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
     generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+  client.loadHistory();
 }
 // Runs on every snapshot. The pending reveal fires only when this
 // snapshot first holds the target and nothing about the navigation
@@ -3938,27 +3951,28 @@ function openEmailAuth(mode, { recordHistory = true } = {}) {
   focusSignin();
 }
 function handleSigninBack() { return signinNavigation.back(); }
-// Preserve guide deep links through sign-in, then open the Advanced guide.
+// The connection guide is public; reading it does not require room access.
 $("#connect-guide-copy").innerHTML = uiText("guide.instructions");
 let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
-  if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
+  if (!pendingAgentGuide) return;
   pendingAgentGuide = false;
-  $("#connect-guide-dialog").showModal();
+  if (!$("#connect-guide-dialog").open) $("#connect-guide-dialog").showModal();
 }
 $("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
 $("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
 $("#signout-button").addEventListener("click", () => $("#connect-guide-dialog").close(), true);
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
-const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
+const agentGuideBase = () => [location.origin, location.pathname.startsWith("/room/") || location.pathname === "/room" ? "/room" : ""].join("");
+const joinAgentPrompt = () => `Read ${agentGuideBase()}/llms.txt and join using the original shared invitation I gave you.`;
 function fillJoinAgent() {
   const field = $("#join-agent-prompt");
   if (!field) return;
   field.value = joinAgentPrompt();
   for (const [id, path] of [["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
     const link = $(id);
-    if (link) link.href = `${location.origin}${path}`;
+    if (link) link.href = new URL(path.slice(1), agentGuideBase() + "/").href;
   }
 }
 fillJoinAgent();
@@ -4366,6 +4380,7 @@ function expandTimelineTo(id) {
 }
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
+    if (client.loadHistory()) return; // older history first; it renders on arrival
     const view = `room:${activeChannelId}`;
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
@@ -5078,8 +5093,6 @@ document.addEventListener("keydown", event => {
 });
 new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) closeRoomActions(false); })
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
-new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
-  .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 // Attention: advancing the read horizon is scroll-driven (debounced). Both the
 // message list and the window can be the scroller depending on layout. Only a
 // reader's scroll counts: one that follows wheel, touch, a scroll key or a
@@ -5100,6 +5113,8 @@ for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
     noteReaderScroll();
+    // Lazy history: reading up toward the oldest held message loads the rest.
+    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
@@ -5147,6 +5162,7 @@ window.addEventListener("popstate", () => {
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
+  if (location.hash === "#join-agent") pendingAgentGuide = true;
   revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (redirectAgentInvite(fragment)) return;
@@ -6039,22 +6055,6 @@ const actionSpecs = {
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
-let resultView = null;
-const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
-const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
-function mountResultReader() {
-  if (!resultView) return;
-  const host = resultView.fromResults
-    ? [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === resultView.workItemId) ?? $("#results-panel")
-    : workRecord(resultView.workItemId);
-  if (host && resultReader.parentElement !== host) host.append(resultReader);
-}
-function preserveResultFocus(container, render) {
-  const focus = resultView && container.contains(resultReader) && resultReader.contains(document.activeElement) ? document.activeElement : null;
-  render();
-  if (resultView) mountResultReader();
-  if (focus?.isConnected) focus.focus({ preventScroll: true });
-}
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
@@ -6170,122 +6170,31 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
     box.hidden = false;
   });
 }
-function resultDiscussionMessage(view) {
-  if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
-    || isRoomArchived(state)) return null;
-  // The ordinary thread composer does not inherit a DM audience.
-  return state.messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
-    && !message.deletedAt && message.body === view.body && !state.channels?.[messageChannelId(message)]?.archivedAt);
-}
-function resultStatus() {
-  mountResultReader();
-  const view = resultView;
-  if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
-  const item = state.workItems[view.workItemId];
-  const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
-  resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
-    : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
-    : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
-  const retry = resultElement("result-retry");
-  resultElement("result-discuss").hidden = !resultDiscussionMessage(view);
-  resultElement("result-discuss").disabled = busy || requestReading || composerFiles.some(file => file.status === "uploading");
-  retry.hidden = !view.error && !view.retrying;
-  retry.disabled = !view.error;
-  if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
-}
-function closeResult(restore = true) {
-  const view = resultView;
-  resultView = null; resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
-  resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
-  resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-  resultElement("result-discuss").hidden = true;
-  clearResultComparison(resultElement("result-diff"));
-  if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
-    if (view.fromResults) {
-      const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
-      (row?.querySelector("[data-read-result]") || ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary"))).focus({ preventScroll: true });
-      return;
-    }
-    const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
+const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult } = installResultReader({
+  client, getState: () => state, getSession: () => session, sameSession,
+  isBusy: () => busy,
+  canDiscuss: () => !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
+  memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  onDiscuss(message) {
+    revealMessage(message.id);
+    switchThread(conversation.rootById.get(message.id), true);
+    // An uncertain send owns its exact reply target until resolved.
+    if (!pendingMessage) replyToId = message.id;
+    updateReply(); saveComposer(); persistDrafts();
+  },
+  onOriginal(messageId) {
+    history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }
-}
-resultElement("close-result").addEventListener("click", () => closeResult());
-resultElement("result-discuss").textContent = uiText("result.discuss");
-resultElement("result-discuss").addEventListener("click", () => {
-  const message = resultDiscussionMessage(resultView);
-  if (!message || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
-  closeResult(false);
-  revealMessage(message.id);
-  switchThread(conversation.rootById.get(message.id), true);
-  // An uncertain send already owns its exact reply target until it is resolved.
-  if (!pendingMessage) replyToId = message.id;
-  updateReply(); saveComposer(); persistDrafts();
 });
-resultElement("result-original").addEventListener("click", () => {
-  const view = resultView;
-  if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
-    || !state.messages.some(message => message.id === view.originalId && message.workItemId === view.workItemId)) return;
-  closeResult(false);
-  history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
-});
-resultReader.addEventListener("keydown", event => {
-  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeResult(); }
-});
-function loadExactResult(view) {
-  const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
-  client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
-    if (!owns() || !value) return;
-    if (value.result.receipt?.evidenceVersion !== view.receipt.evidenceVersion) throw new Error("Pinned version changed");
-    // Text taken out of the room is served as an absence, so say so rather
-    // than showing an empty box: the result was still reported and verified,
-    // and the receipt still names what it was verified against.
-    view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
-    resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
-    resultElement("result-body").hidden = Boolean(view.withdrawn);
-    const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
-      && message.body === value.result.text.body);
-    view.discussionId = message?.id; view.body = value.result.text.body;
-    const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
-    view.originalId = original?.id; resultElement("result-original").hidden = !original;
-    view.loaded = true; view.retrying = false;
-    if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
-    resultStatus();
-    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, resultElement("result-diff"), owns);
-  }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
-}
-resultElement("result-retry").addEventListener("click", () => {
-  const view = resultView;
-  if (!view?.error || busy || !sameSession(view.generation, view.roomId, view.memberId)) return;
-  if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
-  view.error = false; view.retrying = true; resultStatus();
-  loadExactResult(view);
-});
-function readResult(e) {
-  const read = e.target.closest("[data-read-result]");
-  if (read && state && !busy) {
-    const item = state.workItems[read.dataset.readResult], receipt = item?.receipt;
-    if (!receipt?.nativeText) return;
-    const fromResults = Boolean(read.closest("#room-results-list"));
-    if (fromResults && !currentResult(item)) return;
-    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
-      fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-    resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
-    resultElement("result-original").hidden = true;
-    resultElement("result-discuss").hidden = true;
-    const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
-    resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-    mountResultReader(); resultReader.hidden = false;
-    resultElement("result-title").focus();
-    loadExactResult(view);
-    return;
-  }
-  const button = e.target.closest("[data-action]"); if (!button || busy) return;
+function readResultOrAction(event) {
+  if (readResult(event)) return;
+  const button = event.target.closest("[data-action]"); if (!button || busy) return;
   openWorkAction(state.workItems[button.dataset.workId], button.dataset.action, null, button.dataset.offerId);
 }
-$("#message-list").addEventListener("click", readResult);
-$("#room-results-list").addEventListener("click", e => {
-  readResult(e);
-  const work = e.target.closest("[data-result-work]");
+$("#message-list").addEventListener("click", readResultOrAction);
+$("#room-results-list").addEventListener("click", event => {
+  readResultOrAction(event);
+  const work = event.target.closest("[data-result-work]");
   if (work) revealWork(work.dataset.resultWork);
 });
 function openWorkAction(item, action, draftMessageId = null, offerId = null) {
