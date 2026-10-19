@@ -1187,7 +1187,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
@@ -1322,10 +1322,29 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = null;
   }
   if (released) verification = null;
+  // #3753: a send-back (delivered -> in_progress) starts a new work round,
+  // so the lease window restarts with it (freshLeaseWindow) — whether or
+  // not the old window had already lapsed while the delivery waited.
+  // #3753: a write against a claim whose lease has lapsed fails loudly,
+  // never applies-and-evaporates at the next sweep. The guard sits after
+  // every field validation above (a malformed write is refused for its
+  // own reason) and before the transition is built. The release
+  // transition is exempt (ending the round is the recovery), and the
+  // idempotent replay near the top has already returned for landed
+  // requestIds. Delivered claims never trip this: isLeaseExpired is
+  // false for them by definition — their lease no longer governs, so
+  // verify, send-back and notes on a delivery stay possible however
+  // late the reviewer arrives.
+  if (state !== "unclaimed" && isLeaseExpired(item, atMs)) {
+    fail("claim_lease_lapsed",
+      `work "${item.id}" lease lapsed at ${item.leaseExpiresAt} — the claim auto-releases; claim it again instead of writing to the lapsed claim`);
+  }
+  const sendBack = item.state === "delivered" && state === "in_progress";
+  const leaseWindow = sendBack ? freshLeaseWindow(item, atMs, room) : null;
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
-    leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
-    leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
+    leaseStartAt: released ? null : sendBack ? leaseWindow.leaseStartAt : item.leaseStartAt, // a released claim holds no lease
+    leaseExpiresAt: released ? null : sendBack ? leaseWindow.leaseExpiresAt : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
     // lapsed owner's round of work, never to whoever claims next
     attestations: released ? Object.freeze([]) : item.attestations,
@@ -1374,6 +1393,14 @@ export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryL
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
+  // #3753: a lapsed claim cannot take the pause step — it is a write
+  // against an active claim, which updateWork refuses post-lapse, and
+  // in_progress/blocked have no direct release transition anyway. The
+  // round already ended by lapse in effect; the release outcome is the
+  // sweep's own form (unclaimed, owner cleared, the lease_expired stamp
+  // recording the true cause). The round preconditions above have
+  // already bound this call to the round the caller read.
+  if (isLeaseExpired(item, atMs)) return releaseExpired([item], atMs)[0];
   let current = item;
   if (current.state === "in_progress" || current.state === "blocked") {
     current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
@@ -1588,7 +1615,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const round = fresh
     ? { delivery: null, verification: null, ci: null, deliveryGeneration: 0 }
     : item.state === "delivered"
-      ? { state: "in_progress", verification: null }
+      ? { state: "in_progress", verification: null, ...freshLeaseWindow(item, atMs, room) }
       : {};
   return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
     atMs, agent, `reassigned:${target}`, note);
@@ -1599,6 +1626,35 @@ export function isLeaseExpired(work, now) {
   const item = workOf(work);
   if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null) return false;
   return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
+}
+// #3753: a delivered claim's lease no longer governs it — the delivery is
+// immune to expiry — but the lapse is still a fact a reviewer must be able
+// to see while the delivery waits: the claim's slot clock ran out, and a
+// send-back will restart the window (freshLeaseWindow below). Presentation
+// layers stamp this as `leaseLapsed: true` on the claim.
+export function deliveryLeaseLapsed(work, now) {
+  const item = workOf(work);
+  if (item.state !== "delivered" || item.leaseExpiresAt === null) return false;
+  return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
+}
+// The lease window for a round that re-enters an active state from
+// delivered (a reviewer's send-back, an owner's reopen, a reassign of a
+// delivered claim). The window restarts at now for the claim's own lease
+// duration (leaseExpiresAt - leaseStartAt) when both stamps survive, else
+// the room default — the same duration rules claimWork applies. A claim
+// that opted out of leases stays leaseless. Carrying the old stamps over
+// instead was the S-3 mechanism: the item landed in an active state with
+// a dead lease and the next sweep destroyed the round, delivery included.
+function freshLeaseWindow(item, atMs, room) {
+  if (item.leaseExpiresAt === null || item.leaseExpiresAt === undefined) {
+    return { leaseStartAt: item.leaseStartAt ?? null, leaseExpiresAt: null };
+  }
+  const startMs = Date.parse(item.leaseStartAt ?? ""), endMs = Date.parse(item.leaseExpiresAt);
+  const hours = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? (endMs - startMs) / 3600000
+    : roomWorkClaimConfig(room).defaultLeaseHours;
+  if (hours === null || hours === undefined) return { leaseStartAt: null, leaseExpiresAt: null };
+  return { leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + hours * 3600 * 1000) };
 }
 // Sweep a list: expired claims are auto-released to unclaimed (owner
 // cleared, lease cleared, history stamped). Everything else passes through

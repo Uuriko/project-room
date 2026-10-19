@@ -29,7 +29,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
-import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, deliveryLeaseLapsed, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
@@ -522,6 +522,7 @@ function changesRequestedOf(item) {
 export function myClaimsOf(store, roomId, memberId, claims = null) {
   const list = claims ?? claimBoardOf(store, roomId);
   if (!list) return null;
+  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const mine = list.filter(item => item && item.owner === memberId && MY_CLAIM_STATES.has(item.state) && !item.supersededBy);
   if (!mine.length) return null;
   const rank = { blocked: 0, in_progress: 1, claimed: 2, delivered: 3 };
@@ -541,6 +542,9 @@ export function myClaimsOf(store, roomId, memberId, claims = null) {
       state: item.state,
       next: ownerNextAction(item),
       ...(item.leaseExpiresAt ? { leaseExpiresAt: item.leaseExpiresAt } : {}),
+      // #3753: the same leaseLapsed fact the board and single-claim read
+      // stamp — a delivery waiting past its lease says so in the inbox.
+      ...(deliveryLeaseLapsed(item, nowMs) ? { leaseLapsed: true } : {}),
       ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
       ...(item.ci?.state ? { ci: item.ci.state } : {}),
       ...(changesRequestedOf(item) ? { changesRequested: true } : {})

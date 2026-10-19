@@ -40,7 +40,11 @@ const itemOf = (id, owner, history, state = "claimed") =>
 // extended with review/done stamps at controlled times.
 const claimedItem = (id, memberId, claimAtMs) => {
   const created = createWork({ id }, { now: claimAtMs - H });
-  return claimWork(created, memberId, { now: claimAtMs });
+  // Leaseless: these fixtures age claims across retention windows (days)
+  // and complete them at controlled times; a default 24h lease would
+  // lapse mid-fixture and — since #3753 — the completion write would be
+  // refused as a post-lapse write. Leases are not this file's subject.
+  return claimWork(created, memberId, { now: claimAtMs, leaseHours: null });
 };
 const withStamps = (item, ...stamps) => ({
   ...item,

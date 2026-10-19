@@ -39,7 +39,7 @@ import {
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
-  openClaimCount, STALE_UNCLAIMED_DAYS,
+  openClaimCount, STALE_UNCLAIMED_DAYS, deliveryLeaseLapsed, creatorOf,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -361,7 +361,12 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     // its pull record (verified / asserted / pending; link-less claims
     // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
+      claims: page.claims.map(item => {
+        const settled = withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES));
+        // #3753: the expiry-warning fact — a delivered claim whose lease
+        // has lapsed carries it visibly while the delivery waits.
+        return deliveryLeaseLapsed(settled, nowMs) ? { ...settled, leaseLapsed: true } : settled;
+      }) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
@@ -808,6 +813,30 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // #3753: the room sweep above has already released any claim whose
+  // lease lapsed. A write aimed at the held claim must learn that —
+  // 409 claim_lease_lapsed — not a bare "owned by nobody" or a 422 that
+  // never names the cause. The latest round-ending history stamp tells
+  // whether this item's last round died by lapse; after a deliberate
+  // release the ordinary refusals stand. History trimming may drop the
+  // stamp, in which case the ordinary refusals stand too.
+  const ROUND_ENDER_ACTIONS = new Set(["claimed", "state:unclaimed", "closed", "cancelled", "lease_expired"]);
+  const lapsedRoundStamp = item => {
+    const history = item.history ?? [];
+    for (let i = history.length - 1; i >= 0; i--) {
+      const action = history[i]?.action;
+      if (!ROUND_ENDER_ACTIONS.has(action)) continue;
+      return action === "lease_expired" ? history[i] : null;
+    }
+    return null;
+  };
+  const refuseLapsedRound = (item, onlyCallersRound = false) => {
+    if (item.state !== "unclaimed") return;
+    const stamp = lapsedRoundStamp(item);
+    if (!stamp || (onlyCallersRound && stamp.agentId !== caller)) return;
+    reject(409, "claim_lease_lapsed",
+      `Work "${item.id}" is unclaimed: its lease lapsed and the claim auto-released — claim it again to continue the work`);
+  };
   // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
   // the claim route. create-with-assignee and reassign are acquire paths
   // too — they must refuse overlapping leases with the same 409 body, or a
@@ -998,8 +1027,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
-    // settlement state as the board page.
-    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
+    // settlement state as the board page. #3753: and the same
+    // leaseLapsed fact on a delivered claim whose lease has run out.
+    const readItem = withPullSettlement(load(claimIdOf(reject, workClaimId)));
+    return json(res, 200, withContentTrust(stampClaim(
+      deliveryLeaseLapsed(readItem, nowMs) ? { ...readItem, leaseLapsed: true } : readItem, caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1102,6 +1134,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
+    // #3753: the caller's own round died by lapse in the sweep above —
+    // name it before the owner check calls this "owned by nobody".
+    refuseLapsedRound(item, true);
     // #3546: two transitions on a delivered item belong to its reviewer,
     // not its owner — verify (delivered -> done) and the changes_requested
     // send-back (delivered -> in_progress). Each carries its own gate
@@ -1259,7 +1294,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
         delivery: data.delivery, policy,
         jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
-        requestId: data.requestId, now: nowMs,
+        requestId: data.requestId, now: nowMs, room: roomLike,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
     if (data.state === "done" && jevDecision) {
       try {
@@ -1293,6 +1328,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
       const item = load(claimIdOf(reject, workClaimId));
+      // #3753: a review aimed at a claim whose round died by lapse in the
+      // sweep above names the lapse, not "work is unclaimed".
+      refuseLapsedRound(item);
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
       // #2966: expectedBasis names the basis the reviewer actually read;
       // a stale one is a 409 work_claim_conflict (same as the release and
@@ -1342,6 +1380,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
     requireWriter();
     const item = load(claimIdOf(reject, workClaimId));
+    // #3753: the lapsed holder hears the lapse, not "owned by nobody";
+    // managers and the item's creator keep their ordinary close path.
+    if (!mayManageAnyClaim(access) && creatorOf(item) !== caller) refuseLapsedRound(item, true);
     requireEventBudget();
     const reason = text("reason", data.reason, { multiline: true });
     const closed = retire(reject, item, caller, workClaimRoute, reason, mayManageAnyClaim(access), nowMs);
@@ -1351,6 +1392,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
     const item = load(claimIdOf(reject, workClaimId));
+    // #3753: the holder releasing a claim the sweep already auto-released
+    // hears the lapse named, not a stale-round conflict.
+    refuseLapsedRound(item, true);
     const authority = authorityOver(item);
     // E5/D4 (QA-200 2026-10-08): ownership is checked before the body
     // shape, so a non-holder is always refused with 403 work_not_owner
