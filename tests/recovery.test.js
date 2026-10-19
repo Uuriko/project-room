@@ -8,6 +8,7 @@ import { request } from "node:http";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
+import { captureAuthorityExtract, runRestoreGate } from "../server/restore-reconcile.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { seedRecoveryCoverage } from "../scripts/recovery-coverage.mjs";
@@ -41,8 +42,8 @@ test("online capture preserves all application tables, identity boundaries and e
   });
   while (!f.store.backfillMessages({ limit: 1000 }).done) {}
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 205,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +1: wake_queue_pause_by (R327-1 pause-setter side table); +10: scoped trial/vetting/offer/signoff records; +1: squads; +1: human_push_preferences; +1: agent_wake_polls; +1: projection_bodies; +3: room_assistant_config/runs/ops; +1: share_link_access; +2: room_code_drops, room_code_checks (code drops: shared patch metadata and review checks; bytes stay in room_attachments); +1: agent_wants_work (BOARD-WAKE-2 opt-in ready-work filter, empty until an agent opts in); +1: messages_backfill_cursor (cron message backfill cursor, empty until the integrity job); +2: private_update_marks, private_update_commands (Updates read/done/clear marks); +1: account_security_events; +1: messages (fenced message rows, schema v37); +1: operator_actions (append-only operator audit); +4: public_receipts, public_rooms, public_directory_entries, public_read_model_backfill (public page read model); +1: integrity_snapshot (cold-start checksum; empty until the yielding verify writes it); +2: public_work_successors/public_work_successor_requests; +2: public_work_reviews/public_work_review_requests; +4: public_work_tasks/public_work_requests/public_work_receipts/public_work_claim_writer_permit; +2: project_offers/project_offer_requests (public offer records and exact retry journal); +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025); +2: private_next_action_dismissals, private_next_action_suppressions (ranked next-actions private state RC-2026-09-25-911); +1: telegram_live_status (durable Telegram live-delivery/send facts, task #10); +2: guest_selfserve, guest_selfserve_idem (self-serve guest entry RC-2026-09-25-912); +4: board_vtwo_claims, board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency (board-v2 durable registry PR #1144); +1: agent_capability_grants (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728); +2: owner_delegate_grants, owner_delegate_journal (owner-delegated agent authority PR #1182); +2: agent_work_wake_hosts, agent_work_wakes (opt-in work delivery on host heartbeats); +1: room_access_auto_approve (self-serve auto-approve rules RC-2026-09-29-3603); +2: room_schema_stamp, integrity_job_cursor (schema hash and deferred integrity cursor); +1: integrity_room_state (per-room sequence and projection size for the incremental check) +3: account_terms, public_abuse_reports, public_unpublish (terms acceptance, public abuse reports, operator unpublish) +2: spend_grant_terms, spend_authorizations (spend-primitive MVP: per-agent spend grant terms and charge authorizations) +1: spend_room_reservations (spend-primitive: cumulative room-allowance reservations, qaD-fix-spend-race) +1: guest_link_exchanges (GA-2 single-use link redemption records, issue #941); +1: activity_fanout_failures (activity fan-out failure journal #3261); +1: public_work_settlements (First Shift settlement rail escrow link); +1: room_public_receipts_setting (recorded public-receipts opt-in/out, #3594); +1: messages_backfill_blocks (rooms parked by the messages backfill on an un-replayable event, empty until a room is parked); +1: guest_invite_authority (guest-invite mint provenance, delegate-lifecycle F-5)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 206,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +1: wake_queue_pause_by (R327-1 pause-setter side table); +10: scoped trial/vetting/offer/signoff records; +1: squads; +1: human_push_preferences; +1: agent_wake_polls; +1: projection_bodies; +3: room_assistant_config/runs/ops; +1: share_link_access; +2: room_code_drops, room_code_checks (code drops: shared patch metadata and review checks; bytes stay in room_attachments); +1: agent_wants_work (BOARD-WAKE-2 opt-in ready-work filter, empty until an agent opts in); +1: messages_backfill_cursor (cron message backfill cursor, empty until the integrity job); +2: private_update_marks, private_update_commands (Updates read/done/clear marks); +1: account_security_events; +1: messages (fenced message rows, schema v37); +1: operator_actions (append-only operator audit); +4: public_receipts, public_rooms, public_directory_entries, public_read_model_backfill (public page read model); +1: integrity_snapshot (cold-start checksum; empty until the yielding verify writes it); +2: public_work_successors/public_work_successor_requests; +2: public_work_reviews/public_work_review_requests; +4: public_work_tasks/public_work_requests/public_work_receipts/public_work_claim_writer_permit; +2: project_offers/project_offer_requests (public offer records and exact retry journal); +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025); +2: private_next_action_dismissals, private_next_action_suppressions (ranked next-actions private state RC-2026-09-25-911); +1: telegram_live_status (durable Telegram live-delivery/send facts, task #10); +2: guest_selfserve, guest_selfserve_idem (self-serve guest entry RC-2026-09-25-912); +4: board_vtwo_claims, board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency (board-v2 durable registry PR #1144); +1: agent_capability_grants (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728); +2: owner_delegate_grants, owner_delegate_journal (owner-delegated agent authority PR #1182); +2: agent_work_wake_hosts, agent_work_wakes (opt-in work delivery on host heartbeats); +1: room_access_auto_approve (self-serve auto-approve rules RC-2026-09-29-3603); +2: room_schema_stamp, integrity_job_cursor (schema hash and deferred integrity cursor); +1: integrity_room_state (per-room sequence and projection size for the incremental check) +3: account_terms, public_abuse_reports, public_unpublish (terms acceptance, public abuse reports, operator unpublish) +2: spend_grant_terms, spend_authorizations (spend-primitive MVP: per-agent spend grant terms and charge authorizations) +1: spend_room_reservations (spend-primitive: cumulative room-allowance reservations, qaD-fix-spend-race) +1: guest_link_exchanges (GA-2 single-use link redemption records, issue #941); +1: activity_fanout_failures (activity fan-out failure journal #3261); +1: public_work_settlements (First Shift settlement rail escrow link); +1: room_public_receipts_setting (recorded public-receipts opt-in/out, #3594); +1: messages_backfill_blocks (rooms parked by the messages backfill on an un-replayable event, empty until a room is parked); +1: guest_invite_authority (guest-invite mint provenance, delegate-lifecycle F-5); +1: restore_reconcile_state (IR-2 restore-gate boot lock, store-global singleton)
   for (const table of before.tables) {
     if (table.table === "membership_delegation_pending") {
       assert.equal(table.rows, 0, "no rollback-era transitions remain after reconciliation");
@@ -108,6 +109,10 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "invite authority provenance is recorded when an invite is minted; the fixture seeds its invite rows directly");
       continue;
     }
+    if (table.table === "restore_reconcile_state") {
+      assert.equal(table.rows, 0, "the IR-2 boot-lock row is written by a restore, a backup stamp, or a file replay — the fixture store was never restored");
+      continue;
+    }
     if (table.table === "public_work_settlements") {
       assert.equal(table.rows, 0, "settlement links exist only once a paid public task is enabled (First Shift settlement rail)");
       continue;
@@ -116,13 +121,35 @@ test("online capture preserves all application tables, identity boundaries and e
   }
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
-  assert.deepEqual(receipt.recovery, before);
+  // IR-2: the copy carries the boot-lock stamp (one restore_reconcile_state
+  // row; its digest carries the backup watermark, so it cannot be pinned
+  // against the source audit). The stamp is asserted on the reopened copy
+  // below and the table is normalised out of the audit comparisons.
+  const auditComparable = audit => ({ ...audit, tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) });
+  // Post-stamp audits also fold the stamp row into the whole-store digest.
+  // The gate's footprint is normalised where it is asserted exactly below:
+  // operator_actions (its journal), credentials (the re-applied revocation
+  // is an UPDATE — row count kept, digest dropped), restore_reconcile_state.
+  const auditComparablePostStamp = audit => ({ ...audit, dataSha256: "ir2-stamp",
+    tables: audit.tables.map(entry => {
+      if (entry.table === "restore_reconcile_state") return { table: entry.table, rows: "ir2-stamp" };
+      if (entry.table === "operator_actions") return { table: entry.table, rows: "ir2-journal" };
+      if (entry.table === "credentials") return { table: entry.table, rows: entry.rows };
+      return entry;
+    }) });
+  assert.deepEqual(auditComparable(receipt.recovery), auditComparable(before));
   assert.equal(statSync(receipt.filename).mode & 0o777, 0o600);
   assert.equal(statSync(join(receipt.filename, "..")).mode & 0o777, 0o700);
   for (const privateValue of [f.keys.owner, f.pending.token, f.command.data.body, "recovery-target", f.projectOffers[0].record.summary]) assert.equal(JSON.stringify(before).includes(privateValue), false);
   const bytes = readFileSync(receipt.filename);
   const readonly = new RoomStore(receipt.filename, { readOnly: true, now: f.now });
-  try { assert.deepEqual(auditRecovery(readonly), before); } finally { readonly.close(); }
+  try {
+    const copyAudit = auditRecovery(readonly);
+    assert.equal(copyAudit.tables.find(entry => entry.table === "restore_reconcile_state")?.rows, 1,
+      "the backup copy carries exactly the IR-2 stamp row");
+    assert.deepEqual(auditComparablePostStamp(copyAudit), auditComparablePostStamp(before));
+  } finally { readonly.close(); }
   assert.deepEqual(readFileSync(receipt.filename), bytes, "verification is not repair or migration");
 
   // A captured copy intentionally lacks later revocations and writes. Do not
@@ -131,12 +158,29 @@ test("online capture preserves all application tables, identity boundaries and e
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Synthetic post-capture write" } });
   assert.throws(() => f.store.authenticate(f.validSession.token), { code: "unauthenticated" });
   let recovered = new RoomStore(receipt.filename, { now: f.now });
+  // IR-2: the copy boots restored-unreconciled — agent authentication is
+  // refused until the gate runs. The drill reconciles it against the
+  // surviving source store, which re-applies the post-capture session
+  // revocation above; only then is the copy driven.
+  const gate = runRestoreGate(recovered, captureAuthorityExtract(f.store), {
+    backedUpAt: JSON.parse(readFileSync(receipt.watermark, "utf8")).backedUpAt,
+    source: "recovery-drill",
+  });
+  assert.deepEqual(gate.stale.map(entry => entry.kind), ["credential"],
+    "the only post-capture authority drift is the session revocation");
+  assert.equal(gate.reapplied.length, 1);
+  // The gate's journal footprint: the copy's operator_actions plus one
+  // re-apply row and the summary row.
+  const copyActions = receipt.recovery.tables.find(entry => entry.table === "operator_actions")?.rows;
+  const recoveredActions = auditRecovery(recovered).tables.find(entry => entry.table === "operator_actions")?.rows;
+  assert.equal(recoveredActions, copyActions + gate.reapplied.length + 1,
+    "the gate journals exactly its re-applications plus the summary");
   assert.deepEqual(recovered.workClaims.get("commons", "recovery-claim"), f.store.workClaims.get("commons", "recovery-claim"));
   assert.equal(recovered.workClaims.configFor("commons").defaultLeaseHours, 6);
   try {
     assert.equal(recovered.requestRuns.list(f.keys.owner, "commons").runs[runRequest.id].state, "working");
     assert.throws(() => recovered.requestRuns.apply(f.keys.agent, "commons", { ...runInput, attemptId: "replacement-host" }), { code: "request_run_owned" });
-    assert.deepEqual(auditRecovery(recovered), before);
+    assert.deepEqual(auditComparablePostStamp(auditRecovery(recovered)), auditComparablePostStamp(before));
     assert.deepEqual(recovered.projectOffers.ownerList("commons", "owner"), offerRecords);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "claim", publicClaimInput), publicClaimed);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "finish", publicFinishInput), publicFinished);
@@ -172,7 +216,8 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.projectOffers.list().offers.map(offer => offer.id), ["follow-child", "follow-parent", "public-recovery", "recovery-offer:published"]);
     assert.throws(() => recovered.projectOffers.read("recovery-offer:withdrawn"), { code: "offer_not_found" });
 
-    assert.equal(recovered.authenticate(f.validSession.token).member.id, "owner");
+    assert.throws(() => recovered.authenticate(f.validSession.token), { code: "unauthenticated" },
+      "IR-2: the session revoked after the capture stays revoked on the recovered store — the gate re-applied it");
     for (const token of [f.revokedSession.token, f.keys.oldAgent, f.keys.commonsShared, f.keys.secondShared, f.loggedOut.token, f.sharedSession.token]) assert.throws(() => recovered.authenticate(token));
     assert.equal(recovered.authenticate(f.keys.agent).member.kind, "agent");
     assert.equal(recovered.authenticateAccountSession(f.owner.token, "commons", f.owner.session.sessionBinding).account.id, f.owner.session.account.id);

@@ -1859,7 +1859,13 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // IR-2 restore gate (server/restore-reconcile.mjs): a store-global
+  // singleton holding the restored-unreconciled boot lock. It carries no
+  // room/identity/account key, so no purge target can own it; retained
+  // explicitly — purging rooms or identities must never clear a lock
+  // that only the restore gate or an operator acknowledgement clears.
+  { table: "restore_reconcile_state", key: "singleton", action: "retain", reason: "IR-2 restore-gate boot lock is store-global operator state, not room/identity/account data; only the restore gate or an operator acknowledgement clears it", match: {} }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
