@@ -61,18 +61,18 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
   }
 
   function render(doc) {
-    section.hidden = false;
     const { decisions, exceptions, rooms } = doc;
+    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length);
     const parts = [`${decisions.waiting} waiting`];
     if (decisions.oldestAgeMs > 0) parts.push(`oldest ${formatAge(decisions.oldestAgeMs).replace("waiting ", "")}`);
     if (decisions.overdue > 0) parts.push(`${decisions.overdue} overdue`);
     if (rooms.label) parts.push(`across ${rooms.label}`);
-    summary.textContent = parts.join(" · ");
+    summary.textContent = decisions.total ? parts.join(" · ") : "";
     decisionsBox.innerHTML = decisions.total === 0
-      ? `<p class="form-hint">Inbox zero — nothing needs you.</p>`
+      ? ""
       : decisions.items.map(renderItem).join("");
     exceptionsBox.innerHTML = exceptions.total === 0
-      ? `<p class="form-hint">No exceptions in window.</p>`
+      ? ""
       : `<h4>Exceptions</h4>` + exceptions.items.map(renderException).join("");
     stubsBox.innerHTML = (doc.roomErrors ?? []).map(stub =>
       `<p class="form-hint">Couldn't read room ${esc(stub.roomId)} (${esc(stub.error)}) — it is excluded from these totals.</p>`).join("");

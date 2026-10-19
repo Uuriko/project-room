@@ -165,7 +165,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#main").hidden = active || browsing || !getRoom();
     $("#account-rooms-panel").hidden = !browsing && (active || Boolean(getRoom()));
     $("#inbox-ask").disabled = Boolean(getRoom()) && !room.ownsAccountSession();
-    $("#choose-room").hidden = !getRoom();
+    $("#choose-room").hidden = true;
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
   const channelLabel = { email: "Email", telegram: "Telegram", whatsapp: "WhatsApp" };
@@ -896,7 +896,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-ask").addEventListener("click", ask);
     $("#inbox-thread-toggle").addEventListener("click", () => { if (selected) loadThread(selected); });
   $("#nav-inbox").addEventListener("click", () => load(true));
-  $("#nav-rooms").addEventListener("click", () => show("rooms", true, true));
+  $("#nav-rooms").addEventListener("click", () => showRoomList(true));
   $("#inbox-refresh").addEventListener("click", async () => {
     const sourceId = selected, d = drafts.get(sourceId);
     if (d && !d.busy && !d.pending) { await review(sourceId, d); if (owns() && selected === sourceId) { render(); loadResults(sourceId); } }

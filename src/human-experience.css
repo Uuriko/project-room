@@ -8,9 +8,12 @@
 .human-experience:not(.human-advanced) .presence-member:has(.member-avatar.agent) { display: none; }
 .human-single-conversation:not(.human-advanced) #room-sidebar nav[aria-label="Channels"] { display: none; }
 .human-composer-actions { display: contents; }
-.human-experience .human-composer-actions { display: flex; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
+.human-experience .human-composer-actions { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
 #ask-room { font-size: var(--text-sm); white-space: nowrap; }
-#room-assistant { margin: .5rem 1rem; padding: .6rem .9rem; border-radius: .8rem; border: 1px solid var(--border); }
+#room-assistant { margin: .25rem 1rem; padding: .25rem 0; }
+#assistant-error:empty { display: none; }
+.human-composer-actions #composer-attach span { display: none; }
+.human-composer-actions #composer-attach { min-width: 44px; min-height: 44px; }
 .assistant-heading { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
 #room-assistant-status { flex: 1; font-size: var(--text-sm); color: var(--muted); }
 #assistant-activity { margin-top: .5rem; }
@@ -44,3 +47,8 @@
 .assistant-face-status { font-size: var(--text-sm); color: var(--muted); }
 .assistant-face-status[data-face-status="not_picked_up"], .assistant-face-status[data-face-status="host_paused"], .assistant-face-status[data-face-status="stalled"] { color: var(--amber); }
 #assistant-face .assistant-face-actions > .text-button { margin-right: .6rem; margin-block: .2rem; }
+
+@media (max-width: 600px) {
+  .human-experience .human-composer-actions { order: 1; flex: 1 1 0; }
+  .human-experience .composer-row > button[type="submit"] { order: 2; }
+}

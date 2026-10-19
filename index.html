@@ -112,16 +112,13 @@
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h2 id="account-rooms-title" class="view-title" role="heading" aria-level="1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
-        <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
-          <h3 id="owner-cockpit-title">Needs you</h3>
-          <p id="cockpit-summary" role="status"></p>
-          <div id="cockpit-decisions"></div>
-          <div id="cockpit-exceptions"></div>
-          <div id="cockpit-room-stubs"></div>
-        </section>
+        <label for="account-rooms-search">Search your rooms</label>
+        <input id="account-rooms-search" type="search" autocomplete="off">
+        <p id="account-rooms-filter-status" role="status"></p>
+        <p><a class="button" href="./join">Join room</a></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
-        <p class="form-hint">Join a room through its invitation.</p>
+
         <!-- Request access lives at the room address now: the join page
              carries the one request-access door (human-map §8.1, #3293
              step 2). The acquisition-intent consumer in src/app.js sends
@@ -152,6 +149,13 @@
             <p id="acq-invite-link" class="form-hint" hidden></p>
           </div>
         </details>
+        <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
+          <h3 id="owner-cockpit-title">Needs you</h3>
+          <p id="cockpit-summary" role="status"></p>
+          <div id="cockpit-decisions"></div>
+          <div id="cockpit-exceptions"></div>
+          <div id="cockpit-room-stubs"></div>
+        </section>
         <details id="account-settings" class="account-settings">
           <summary>Sign-in &amp; security</summary>
           <div id="account-settings-body"></div>

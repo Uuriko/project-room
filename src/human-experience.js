@@ -61,7 +61,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
-  composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
+  composerActions.append($('#composer-attach'), $('#composer-options'), ask); $('.composer-row').append(composerActions);
   ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
@@ -107,7 +107,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   function paint() {
     if (!human() || !projection) return;
     const assistant = projection.assistant;
-    section.querySelector('strong').textContent = assistant.name || 'Room';
+    section.querySelector('strong').textContent = uiText('human.assistantLabel', { name: assistant.name || 'Room' });
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : assistant.availability === 'paused' ? uiText("human.assistantPaused") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';

@@ -398,7 +398,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       // magic-request submit it does not consult beforeSignIn (asking
       // for a link signs nothing in and clears nothing; the host's gate
       // applies when a password is presented or a code/link redeemed).
-      const linkRequest = passwordMode !== "signup" && !fields.password && mailConfigured;
+      const linkRequest = passwordMode !== "signup" && mailConfigured && (event.submitter?.value === "email" || !fields.password);
       if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();

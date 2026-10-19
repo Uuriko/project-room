@@ -927,10 +927,7 @@ summary { overflow-wrap: anywhere; }
   .room-main { overflow: visible; min-height: 32rem; }
   .timeline { flex: 1 0 auto; min-height: 12rem; overflow: visible; }
 }
-@media (max-height: 500px) {
-  .app-shell > #main { flex: 0 0 auto; }
-  .room-main { min-height: 32rem; }
-}
+/* Short windows retain bounded room scrolling so navigation cannot cover the composer. */
 @container room-shell (max-width: 40em) {
   .topbar { flex-direction: row; align-items: center; gap: .5rem; }
   .brand div { display: none; }
@@ -1814,3 +1811,13 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
 .inline-result .portable-actions { flex-wrap: wrap; }
+
+#account-rooms-panel { max-width: 40rem; margin: 1.5rem auto; }
+#account-rooms-search { width: 100%; }
+#account-rooms-filter-status:empty, #account-rooms-status:empty { display: none; }
+#account-rooms-panel #owner-cockpit { margin-top: 1.5rem; }
+body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
+@media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }
+
+#account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
+body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }

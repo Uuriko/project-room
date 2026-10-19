@@ -913,19 +913,44 @@ const initialSignin = signinUI.mount($("#auth-signin-ui"));
 // (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
 // the same component and endpoints; the wall keeps only the labeled
 // link (#agent-signin-button).
-function openAccountSettings() {
+async function openAccountSettings() {
   setSessionMenuOpen(false);
-  if (!accountClient.session?.authenticated) return;
+  const owned = accountClient.session;
+  if (!owned?.authenticated) return;
   inboxUI.showRoomList();
   const details = $("#account-settings");
   details.open = true;
-  accountSettingsUI.mount($("#account-settings-body"));
-  details.scrollIntoView({ block: "nearest" });
+  await mountAccountSettings();
+  if (!details.open || accountClient.session !== owned) return;
+  details.scrollIntoView({ block: "start" });
+  details.querySelector("summary").focus({ preventScroll: true });
 }
+let accountSettingsFlight = null;
+function mountAccountSettings() {
+  const owned = accountClient.session;
+  if (accountSettingsFlight?.session === owned) return accountSettingsFlight.promise;
+  const promise = Promise.resolve(accountSettingsUI.mount($("#account-settings-body")))
+    .finally(() => { if (accountSettingsFlight?.promise === promise) accountSettingsFlight = null; });
+  accountSettingsFlight = { session: owned, promise };
+  return promise;
+}
+$("#account-settings").addEventListener("toggle", () => {
+  if ($("#account-settings").open && accountClient.session?.authenticated) void mountAccountSettings();
+});
+function filterAccountRooms() {
+  const query = $("#account-rooms-search").value.trim().toLocaleLowerCase();
+  const rows = [...$("#account-rooms-list").children];
+  for (const row of rows) row.hidden = Boolean(query) && !row.textContent.toLocaleLowerCase().includes(query);
+  $("#account-rooms-filter-status").textContent = query && rows.length && rows.every(row => row.hidden)
+    ? uiText("entry.rooms.noMatches") : "";
+}
+$("#account-rooms-search").addEventListener("input", filterAccountRooms);
 function clearPrivateWorkspace(options) {
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
   inboxUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
+  $("#account-rooms-search").value = ""; $("#account-rooms-filter-status").textContent = "";
+  accountSettingsUI.reset();
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
   $("#account-settings").open = false; $("#account-settings-body").replaceChildren();
 }
@@ -1117,6 +1142,7 @@ async function loadAccountRooms(more = false) {
       button.setAttribute("aria-label", `${archived ? "Read archived room" : "Open"} ${named ? title : room.id}`);
       button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
     }
+    filterAccountRooms();
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
     // RC-2026-09-19-088: first sign-in must never land in an empty void. A
