@@ -19,6 +19,9 @@
 //   P2: interleaved release/reclaim -> final state always legal, never torn.
 //   P3: renew racing release -> exactly one wins, loser gets a clean conflict
 //       (never a silent double effect).
+//   P6: a renewal storm cannot hold a claim past its round budget — the
+//       (MAX_RENEWALS_PER_CLAIM + 1)th renewal is refused by name and the
+//       lease then lapses for real.
 //
 // FAIL-FIRST: each property has a companion test that runs it against a
 // guard-weakened copy of server/work-claims.mjs (generated at test time into
@@ -261,6 +264,51 @@ describe("P3: renew racing release -> exactly one wins, loser conflicts cleanly"
 });
 
 // ---------------------------------------------------------------------------
+// P6: a renewal storm cannot hold a claim past its round budget.
+// #3707 capped renewals per claim round on the public-work door after a
+// squatting proof; TIME-CLOCK-AUDIT T-1 proved the board machine beneath
+// it had no bound (2,500/2,500 renewals granted by probe). The bound now
+// lives in renewWork itself. The storm is sequential, not a race — the
+// property is that NO sequence of renewals, however patient, holds the
+// claim past claim window + MAX_RENEWALS_PER_CLAIM windows.
+// ---------------------------------------------------------------------------
+function runP6(claimsModule, seed) {
+  const store = createRaceStore();
+  const clock = createClock(BASE_MS + seed * 1000);
+  const id = "p6-item";
+  const owner = "owner-a";
+  const created = claimsModule.createWork({ id, title: id }, { now: clock.now, agentId: "system" });
+  store.insert(created);
+  store.set(claimsModule.claimWork(created, owner, { leaseHours: 1, now: clock.now }));
+  let granted = 0, refusal = null;
+  // Renew 30 minutes before each lapse, well past the round budget.
+  for (let i = 0; i < claimsModule.MAX_RENEWALS_PER_CLAIM + 5 && !refusal; i++) {
+    clock.now = Date.parse(store.get(id).leaseExpiresAt) - 30 * 60 * 1000;
+    try {
+      store.set(claimsModule.renewWork(store.get(id), owner, { leaseHours: 1, now: clock.now }));
+      granted++;
+    } catch (err) { refusal = err; }
+  }
+  assert.equal(granted, claimsModule.MAX_RENEWALS_PER_CLAIM,
+    `seed ${seed}: a round grants exactly ${claimsModule.MAX_RENEWALS_PER_CLAIM} renewals, got ${granted}`);
+  assert.ok(refusal instanceof claimsModule.ClaimError && refusal.code === "work_claim_renewal_limit",
+    `seed ${seed}: the renewal past the budget is refused as work_claim_renewal_limit, got ${refusal?.code ?? refusal}`);
+  // Past the budget the lease lapses for real and the sweep releases it.
+  clock.now = Date.parse(store.get(id).leaseExpiresAt);
+  const [released] = claimsModule.releaseExpired([store.get(id)], clock.now);
+  assert.equal(released.state, "unclaimed", `seed ${seed}: the capped claim lapses and releases`);
+  assert.equal(released.owner, null);
+  assert.equal(released.leaseExpiresAt, null);
+  return released;
+}
+
+describe("P6: a renewal storm cannot hold a claim past its round budget", () => {
+  it("renewals stop at MAX_RENEWALS_PER_CLAIM and the lease lapses for real", () => {
+    for (let seed = 1; seed <= SEEDS; seed++) runP6(claims, seed);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Wiring contract behind P3: a renew computed from a stale pre-release
 // snapshot and committed blindly (WITHOUT the route's read->apply->set in one
 // transaction) silently rewrites committed history — the release's
@@ -336,6 +384,14 @@ describe("fail-first: weakened guards are caught", () => {
       const forcedOrder = [opRenew(id, owner), opRelease(id, "manager-b", { authority: true })];
       assert.throws(() => runP3Release(weak, seed, forcedOrder), /lease on ownerless claim/,
         `seed ${seed}: P3 did not catch the weakened release guard`);
+    }
+  });
+
+  it("P6 catches a weakened renewal bound (unbounded hold)", async () => {
+    const weak = await loadWeakenedClaimModule("p6");
+    for (const seed of [1, 2, 3, 4, 5]) {
+      assert.throws(() => runP6(weak, seed), /grants exactly|refused as work_claim_renewal_limit/,
+        `seed ${seed}: P6 did not catch the weakened renewal bound`);
     }
   });
 });

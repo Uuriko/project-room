@@ -463,6 +463,38 @@ export const STALE_SWEEP_REASON = `stale_sweep: unclaimed with no activity for $
 // each of these). Used by appendWorkPullRequest to prove a previous round
 // existed when an outcome timestamp ties the current round's claimedAt.
 const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired"]);
+// #3707's renewal ceiling, generalised to the board machine
+// (TIME-CLOCK-AUDIT T-1): the public-work door capped renewals per claim
+// round at 12 after a squatting proof (99/99 renewals granted, one task
+// held 72h+ on renewals alone); the board machine underneath it never
+// carried the bound, so any board claim could be held forever by renewing
+// before each lapse (audit probe: 2,500/2,500 renewals granted, ≈2
+// simulated years of continuous hold). The bound lives here, in the
+// machine, so every door inherits it. #3707 has no separate absolute
+// hold ceiling — its maximum hold is this count times the round's lease
+// window — and neither does this mirror. The public-work door keeps its
+// own identical check ahead of this one, so a refusal on that door keeps
+// its name (public_work_renewal_limit).
+export const MAX_RENEWALS_PER_CLAIM = 12;
+// Stamps that bound a renewal round for the count below: the round-ending
+// stamps (ROUND_ENDED_ACTIONS), the claim stamp that opens a round, and —
+// #4179 — a delivery. Renewals are impossible while delivered, and a
+// delivered claim that re-enters an active state (a reviewer's send-back,
+// a reassign) restarts its lease via freshLeaseWindow, opening a new
+// round — so every "renewed" stamp older than the latest "state:delivered"
+// belongs to the previous round. (Mirrors CLAIM_ROUND_BOUNDARY_ACTIONS in
+// public-work-claims.mjs, plus the delivered boundary #4179 created.)
+const RENEWAL_ROUND_BOUNDARY_ACTIONS = new Set([...ROUND_ENDED_ACTIONS, "claimed", "state:delivered"]);
+const renewalsThisRound = item => {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  let count = 0;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const action = history[index]?.action;
+    if (action === "renewed") count++;
+    else if (RENEWAL_ROUND_BOUNDARY_ACTIONS.has(action)) break;
+  }
+  return count;
+};
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
@@ -1079,13 +1111,18 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
 // Renew a claim's lease: starts a fresh lease window from now, extending
-// leaseExpiresAt by the lease duration (explicit leaseHours, else the
-// room's default). Only the owner may renew, only while the claim is
-// active, and only when the claim carries a lease (claims that opted out
-// of leases have nothing to renew; lapsed leases must be claimed again).
-// The route layer requires the owner's public progress message — posted
-// in the room after the prior lease start — before calling this; the pure
-// machine records the renewal, never the message check.
+// leaseExpiresAt by the lease duration (explicit leaseHours, else — RQ-12 —
+// the claim's own current window, never the room default). Only the owner
+// may renew, only while the claim is active, and only when the claim
+// carries a lease (claims that opted out of leases have nothing to renew;
+// lapsed leases must be claimed again). A claim round carries at most
+// MAX_RENEWALS_PER_CLAIM renewals (#3707, mirrored into the machine by
+// TIME-CLOCK-AUDIT T-1); past the bound the lease is not extended again —
+// it lapses for real at its current expiry and the sweep returns the work
+// to the board. The route layer requires the owner's public progress
+// message — posted in the room after the prior lease start — before
+// calling this; the pure machine records the renewal, never the message
+// check.
 export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
@@ -1095,13 +1132,31 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
+  // The per-round renewal bound (#3707 in the machine): counted from the
+  // round's own "renewed" history stamps, so no new state is carried and
+  // a re-claim or a delivered claim's re-entry starts the count fresh.
+  if (renewalsThisRound(item) >= MAX_RENEWALS_PER_CLAIM) {
+    fail("work_claim_renewal_limit",
+      `This claim has used all ${MAX_RENEWALS_PER_CLAIM} renewals for this claim round. Its lease runs to ${item.leaseExpiresAt} and then lapses — finish or release before then.`);
+  }
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
   // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  // RQ-12 (ruling A2+B1): an omitted leaseHours reuses the claim's current
+  // window — its own lease duration, extended from now — never the room
+  // default. freshLeaseWindow encodes that duration rule (the claim's own
+  // leaseExpiresAt - leaseStartAt when both stamps survive, else the room
+  // default); it is the same helper that restarts the window when a
+  // delivered claim re-enters an active state (#4179). The leaseExpiresAt
+  // null case cannot reach it — refused above as "nothing to renew".
+  const fresh = wanted === null ? null
+    : wanted !== undefined
+      ? { leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + wanted * 3600 * 1000) }
+      : freshLeaseWindow(item, atMs, room);
+  const effective = fresh === null ? null : (Date.parse(fresh.leaseExpiresAt) - atMs) / 3600000;
   const renewed = { ...item,
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+    leaseStartAt: fresh === null ? null : fresh.leaseStartAt,
+    leaseExpiresAt: fresh === null ? null : fresh.leaseExpiresAt };
   return withHistory(renewed, atMs, agent, "renewed",
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }

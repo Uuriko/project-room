@@ -16,11 +16,13 @@ const iso = ms => new Date(ms).toISOString();
 
 // Probe A: a heartbeat renew (no progressMessageId, no leaseHours) must keep
 // the original lease duration — not silently upgrade to the 24h default.
-// NOTE (2026-10-08): this test FAILS on current code — the footgun is live.
-// renewWork currently applies the room default (24h) when leaseHours is
-// omitted, and tests/lease-renewal.test.js pins that ("the room's default 24h").
-// Kept skipped until the renew semantics are decided.
-test.skip("MUT-04-A: heartbeat renew without progressMessageId keeps the original lease duration", () => {
+// NOTE (2026-10-08): this test FAILED on the code of the day — the footgun
+// was live, and tests/lease-renewal.test.js pinned the room-default
+// behaviour. The renew semantics have since been DECIDED: RQ-12 (ruling
+// A2+B1) — an omitted leaseHours reuses the claim's current window, extended
+// from now. Un-skipped by the LEASE-RENEWAL-BOUNDS fix, which implements
+// the ruling in renewWork.
+test("MUT-04-A: heartbeat renew without progressMessageId keeps the original lease duration", () => {
   const claimed = claimWork({ id: "wA" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseExpiresAt, iso(T0 + 6 * H));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H }); // no progressMessageId, no leaseHours
@@ -29,10 +31,10 @@ test.skip("MUT-04-A: heartbeat renew without progressMessageId keeps the origina
 
 // Probe B: renew with an explicit duration must stack on the OLD expiry,
 // not restart the window from now.
-// NOTE (2026-10-08): this test FAILS on current code — the footgun is live.
-// renewWork currently computes now+duration, and tests/lease-renewal.test.js
-// pins that ("starts a fresh lease window from now").
-// Kept skipped until the renew semantics are decided.
+// NOTE: the renew semantics have been DECIDED against this probe — RQ-12
+// (ruling A2+B1) rules that renewal extends FROM NOW (main's behaviour),
+// for omitted and explicit leaseHours alike. Kept skipped as the record of
+// the rejected alternative.
 test.skip("MUT-04-B: renew extends from the old expiry, not from now", () => {
   const claimed = claimWork({ id: "wB" }, "quill", { leaseHours: 0.25, now: T0 }); // 15-min lease
   const atRenew = T0 + 6 * 60 * 1000; // +6min

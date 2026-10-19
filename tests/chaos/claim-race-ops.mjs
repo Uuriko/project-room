@@ -387,6 +387,15 @@ const WEAKENINGS = {
     [`leaseStartAt: released ? null : sendBack ? leaseWindow.leaseStartAt : item.leaseStartAt,`, `leaseStartAt: sendBack ? leaseWindow.leaseStartAt : item.leaseStartAt,`],
     [`leaseExpiresAt: released ? null : sendBack ? leaseWindow.leaseExpiresAt : item.leaseExpiresAt,`, `leaseExpiresAt: sendBack ? leaseWindow.leaseExpiresAt : item.leaseExpiresAt,`],
   ],
+  // P6: renewWork's per-round renewal bound (#3707 in the machine) is
+  // disabled: a renewal storm then holds the claim past its round budget
+  // without limit — the unbounded hold TIME-CLOCK-AUDIT T-1 proved.
+  // (P4/P5 are the route-level weakenings further down; the claims series
+  // continues at P6.)
+  p6: [
+    [`if (renewalsThisRound(item) >= MAX_RENEWALS_PER_CLAIM) {`,
+     `if (false) {`],
+  ],
 };
 
 export async function loadWeakenedClaimModule(kind) {
