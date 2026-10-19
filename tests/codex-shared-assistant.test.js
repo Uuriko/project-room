@@ -33,9 +33,9 @@ async function setup(t, during) {
       ...(input ? { body: JSON.stringify({ requestId: randomUUID(), ...input }) } : {}) });
     const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result;
   };
-  const message = (actor, id, body) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type: "message.posted", data: { messageId: id, body } });
+  const message = (actor, id, body, references = {}) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type: "message.posted", data: { messageId: id, body, ...references } });
   await api("owner", { action: "configure", expectedRevision: 0, name: "Room", coordinatorMemberId: "producer" });
-  message("owner", "shared-question", "Improve the login flow"); message("guest", "shared-friend", "Keep the page simple");
+  message("owner", "shared-question", "Improve the login flow"); message("guest", "shared-friend", "Keep the page simple", { replyToId: "shared-question" });
   await api("owner", { action: "invoke", runId: "shared", sourceMessageId: "shared-question" });
   await api("guest", { action: "contribute", runId: "shared", sourceMessageId: "shared-friend", expectedRevision: 0 });
   const calls = [], listeners = new Set(); let state = "inProgress", turnNumber = 0; const pastTurns = [];
@@ -68,6 +68,9 @@ test("two humans' public ask runs through Codex and atomic publication without p
   assert.equal(envelope.interaction.version, 1);
   assert.deepEqual(envelope.interaction, createSharedAssistantEnvelope({}).interaction);
   assert.deepEqual(envelope.context.inputs.map(x => x.memberId), ["owner", "guest"]);
+  assert.equal(envelope.context.inputs[1].replyToId, "shared-question", "the agent receives the same reply target the human selected");
+  assert.equal(envelope.context.inputs[0].replyToId, undefined);
+  assert.equal(envelope.context.inputs.length, 2, "references do not pull unrelated history into the request");
   assert.equal(Object.keys(f.f.store.room("commons").state.replyRequests ?? {}).length, 0);
   const retry = await f.run(); assert.equal(retry.result.resultMessageId, result.result.resultMessageId);
   assert.equal(f.calls.filter(x => x.method === "turn/start").length, 1);

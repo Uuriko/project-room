@@ -132,7 +132,13 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   const inputs = async current => Promise.all(current.inputs.map(async entry => {
     const message = await room.message(entry.sourceMessageId);
     if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
+    // Preserve the conversation links a human sees when replying. References
+    // are context, not authority: do not expand them into ambient room history
+    // or treat a linked work item as permission to act on it.
     return { messageId: entry.sourceMessageId, memberId: entry.memberId, body: message.body,
+      ...Object.fromEntries(["replyToId", "workItemId", "channelId"]
+        .filter(field => typeof message[field] === "string" && message[field])
+        .map(field => [field, message[field]])),
       conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
   }));
   if (run.status === "resume_requested") {
