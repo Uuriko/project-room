@@ -5,7 +5,7 @@
 // exactly one place: if the DDL patterns or the walker ever change, both
 // coverage suites move together and cannot silently diverge.
 //
-// Enumerates every CREATE TABLE in server/** source — including lazily
+// Enumerates every table declared in server/** source — including lazily
 // created additive tables and tables whose DDL names them through a
 // same-file const. A real DDL statement names the table and opens its
 // column list; requiring the "(" keeps comment prose ("the CREATE TABLE
@@ -44,7 +44,7 @@ export function enumerateSourceTables(repoRoot) {
       const constPattern = new RegExp(`(?:export\\s+)?const\\s+${ident}\\s*=\\s*['"\`]([A-Za-z_][A-Za-z0-9_]*)['"\`]`);
       const resolved = constPattern.exec(text);
       if (!resolved) {
-        unresolvable.push(`${rel}: CREATE TABLE names its table through \${${ident}}, which does not resolve to a string-literal const in the same file`);
+        unresolvable.push(`${rel}: a DDL statement names its table through \${${ident}}, which does not resolve to a string-literal const in the same file`);
         continue;
       }
       if (!tables.has(resolved[1])) tables.set(resolved[1], []);

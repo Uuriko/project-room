@@ -28,7 +28,7 @@
 //                state: retention is a telemetry-and-expiry tool, and
 //                entity lifetime is owned by purge.
 //
-// tests/retention-source-coverage.test.js enumerates every CREATE TABLE in
+// tests/retention-source-coverage.test.js enumerates every table declared in
 // server/** source with the same enumerator as
 // tests/purge-source-coverage.test.js and fails if a table has no row
 // here, or a row names a table that no longer exists. A new table is not

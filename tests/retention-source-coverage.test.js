@@ -34,7 +34,7 @@ const { tables: sourceTables, unresolvable } = enumerateSourceTables(repoRoot);
 const registryTables = RETENTION_DISPOSITIONS.map(row => row.table);
 
 test("source enumeration is complete enough to trust", () => {
-  assert.deepEqual(unresolvable, [], "every dynamically named CREATE TABLE must resolve in-file");
+  assert.deepEqual(unresolvable, [], "every dynamically named table must resolve in-file");
   assert.ok(sourceTables.size >= 200, `expected >= 200 source tables, enumerated ${sourceTables.size} — the walker or the DDL pattern is broken`);
   for (const sentinel of ["rooms", "web_fetch_log", "analytics_events", "operator_actions", "agent_webhook_deliveries"]) {
     assert.ok(sourceTables.has(sentinel), `sentinel table ${sentinel} was not enumerated from source`);
@@ -54,7 +54,7 @@ test("every table created in server/** source has exactly one retention disposit
       "drain (with its rule), keep (with the reason), or purge-only (deleted by room/identity/account purge).",
   );
   const stale = registryTables.filter(table => !sourceTables.has(table)).sort();
-  assert.deepEqual(stale, [], "retention registry rows naming tables with no CREATE TABLE in server/** source — remove the stale rows");
+  assert.deepEqual(stale, [], "retention registry rows naming tables with no matching DDL in server/** source — remove the stale rows");
 });
 
 test("dispositions are well-formed and mechanism citations still exist", () => {
