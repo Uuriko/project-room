@@ -17,6 +17,7 @@ import { test } from "node:test";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { patrolPending, patrolStatus } from "../server/patrol.mjs";
+import { operatorStatus } from "../server/operator-status.mjs";
 import { jobByName } from "../server/jobs.mjs";
 import { applyOutcomes, jobHealthView, runCronJobs } from "../cloudflare/job-heartbeat.mjs";
 import { claimWork, createWork, updateWork } from "../server/work-claims.mjs";
@@ -335,9 +336,15 @@ test("a parked room is retried once its head moves, and a repair unparks it", ()
     });
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("aaa-poison", movedHead, raw.id, JSON.stringify(raw));
     store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead);
+    const blockedAt = store.patrolBlocks()[0].blockedAt;
     const retried = store.patrolTick();
-    assert.equal(retried.errors, 1, "the moved head earns one re-diagnosis, surfaced once");
+    // r67: the retry throws the same way at the same cursor, so the park is
+    // standing, not fresh: a busy parked room must not fail the job on every
+    // post (prod Oct 18: 46 failures in a row, one per post-minute).
+    assert.equal(retried.errors, undefined, "the moved head earns one retry; the same park does not re-fail the job");
+    assert.equal(retried.parked, 1);
     assert.equal(store.patrolBlocks()[0].headSeq, movedHead, "the park now names the new head");
+    assert.equal(store.patrolBlocks()[0].blockedAt, blockedAt, "a standing park keeps its blocked_at");
     assert.equal(store.patrolTick().errors, undefined, "and then it is parked again, not wedged");
 
     // Repair the stored projection in place (the head does not move: the
@@ -444,5 +451,80 @@ test("a long log is tailed in bounded batches, never rescanned whole", () => {
     assert.equal(patrolStatus(store).rooms[0].sequence, base + 450);
     assert.equal(third.fresh, 0);
     assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+// r67: the production shape. A parked room that keeps being posted to was
+// retried on every head move and every retry counted as a fresh park, so
+// the job failed once per post and never recorded a success.
+test("job wiring: a parked room's later posts keep the patrol job green", async () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "poison room message", "aaa-poison");
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    const job = jobByName("patrol");
+    let records = {};
+    const tick = async at => {
+      const outcomes = await runCronJobs(
+        { patrol: () => job.run(store, { deadline: Date.now() + 5000 }) },
+        { now: () => at, log: () => {} }
+      );
+      records = applyOutcomes(records, outcomes);
+      return jobHealthView(records, at).jobs.find(candidate => candidate.name === "patrol");
+    };
+    assert.equal((await tick(1_000)).consecutiveFailures, 1, "the fresh park fails once");
+    for (let i = 0; i < 5; i += 1) {
+      const head = headOf(store, "aaa-poison") + 1;
+      const raw = makeEvent({
+        id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+        actorId: "owner", roomId: "aaa-poison", at: new Date().toISOString(),
+        data: { messageId: `later${i}`, body: `later ${i}` }
+      });
+      store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run("aaa-poison", head, raw.id, JSON.stringify(raw));
+      store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(head);
+      assert.equal(patrolPending(store), true, "a moved head still earns a retry");
+      const entry = await tick(2_000 + i * 60_000);
+      assert.equal(entry.consecutiveFailures, 0, `post ${i + 1}: the standing park does not fail the job`);
+      assert.equal(entry.lastSummary.parked, 1);
+      assert.equal(store.patrolBlocks()[0].headSeq, head);
+    }
+  } finally { store.close(); }
+});
+
+test("a parked room whose retry fails differently surfaces as a fresh park", () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "first message", "aaa-poison");
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    assert.equal(store.patrolTick().errors, 1);
+    assert.equal(store.patrolBlocks()[0].errorClass, "SyntaxError");
+    // The head moves and the stored state now fails another way: a
+    // projection that parses but is not an object the agreement leg reads.
+    const head = headOf(store, "aaa-poison") + 1;
+    const raw = makeEvent({
+      id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+      actorId: "owner", roomId: "aaa-poison", at: new Date().toISOString(),
+      data: { messageId: "p2", body: "second message" }
+    });
+    store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run("aaa-poison", head, raw.id, JSON.stringify(raw));
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id='aaa-poison'").run(head, "null");
+    const retried = store.patrolTick();
+    assert.equal(retried.errors, 1, "a park whose error class changed is fresh");
+    assert.equal(store.patrolBlocks()[0].errorClass, "TypeError");
+  } finally { store.close(); }
+});
+
+test("operator status names the parked room the public health surface cannot", () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "first message", "aaa-poison");
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    assert.deepEqual(operatorStatus(store).patrolBlocks, [], "no park, no rows");
+    store.patrolTick();
+    const [row] = operatorStatus(store).patrolBlocks;
+    assert.equal(row.roomId, "aaa-poison");
+    assert.equal(row.errorClass, "SyntaxError");
+    assert.equal(row.headSeq, headOf(store, "aaa-poison"));
+    assert.ok(row.error.length > 0 && row.error.length <= 240);
   } finally { store.close(); }
 });

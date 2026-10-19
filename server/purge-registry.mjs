@@ -1414,6 +1414,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_review_versions",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_successor_requests",
     "key": "room_id",
     "action": "delete",
@@ -1844,6 +1854,16 @@ const ROWS = [
   },
   {
     "table": "work_claims",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "work_claim_history",
     "key": "room_id",
     "action": "delete",
     "match": {

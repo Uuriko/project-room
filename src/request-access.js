@@ -10,7 +10,7 @@
 //
 // The pure orchestration (build/submit) is exported for tests; callers
 // inject the client + storage.
-import { roomIdFromNext } from "./room-deep-link.js";
+import { roomIdFromNext, ROOM_ID_PATTERN } from "./room-deep-link.js";
 import {
   FALLBACK_REQUEST_PERMISSIONS,
   validateAccessRequestForm,
@@ -31,9 +31,18 @@ export function buildGeneralAccessRequest({ roomId, displayName, note, referredB
   // A pasted room link (?room=<id> or #room/<id>) resolves to its room id,
   // so nobody has to dig a raw id out of an address bar.
   const typed = typeof roomId === "string" ? roomId.trim() : "";
-  const room = (typed && roomIdFromNext(typed)) || typed;
-  if (!room) throw new Error("Paste the link of the room you want to join.");
-  if (room.length > GENERAL_REQUEST_ROOM_ID_MAX) {
+  if (!typed) throw new Error("Paste the link of the room you want to join.");
+  let room = roomIdFromNext(typed);
+  if (!room && typed.length <= 2048) {
+    try {
+      const url = new URL(typed, "https://room.invalid");
+      if (["http:", "https:"].includes(url.protocol)) {
+        const match = /^\/(?:room\/)?rooms\/([^/]+)\/?$/.exec(url.pathname);
+        if (match) room = decodeURIComponent(match[1]);
+      }
+    } catch { /* Invalid links are explained before minting an identity. */ }
+  }
+  if (!room || !ROOM_ID_PATTERN.test(room) || room.length > GENERAL_REQUEST_ROOM_ID_MAX) {
     throw new Error("That doesn't look like a room link. Paste the link someone sent you.");
   }
   const checked = validateAccessRequestForm({ displayName, note, referredBy });

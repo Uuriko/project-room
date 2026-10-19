@@ -232,8 +232,6 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
   for (const messageId of affected) {
     const message = byId.get(messageId);
     if (!message || typeof message.authorId !== "string" || typeof message.createdAt !== "string") continue;
-    const reactions = message.reactions && typeof message.reactions === "object" && Object.keys(message.reactions).length
-      ? JSON.stringify(message.reactions) : null;
     upsert.run(
       roomId, message.id, sequenceById.get(message.id),
       textOrNull(message.channelId),
@@ -246,7 +244,7 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
       message.createdAt,
       textOrNull(message.editedAt),
       textOrNull(message.deletedAt),
-      reactions,
+      null, // reactions_json: reactions were removed; the column stays for old rows
       pinned.has(message.id) ? 1 : 0,
       JSON.stringify(currentRecord(message)),
       JSON.stringify(reducerExtras(message))
@@ -526,7 +524,9 @@ function diagnoseBlock(db, roomId) {
 function diagnoseFromCursor(db, roomId, upTo) {
   const cursor = readCursor(db, roomId, true);
   if (!cursor || typeof cursor.state_json !== "string" || !Number.isInteger(cursor.state_seq) || cursor.state_seq <= 0 || cursor.state_seq < cursor.applied_seq) return undefined;
-  if (!(Number.isInteger(upTo) && upTo > cursor.state_seq) || !cursorMatches(db,roomId,cursor,upTo)) return undefined;
+  // A quiet room can already be at its replay head. Still validate the anchor
+  // and decode the snapshot before treating that empty suffix as healthy.
+  if (!(Number.isInteger(upTo) && upTo >= cursor.state_seq) || !cursorMatches(db,roomId,cursor,upTo)) return undefined;
   let state;
   try { state = decodeMessageReplaySnapshot(db, roomId, cursor.state_json); } catch { return undefined; }
   const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
@@ -541,11 +541,36 @@ function diagnoseFromCursor(db, roomId, upTo) {
   return null;
 }
 
+// A fresh park after fillRoom threw: the cursor holds every committed chunk,
+// so the failing event is after it. Replaying from sequence 0 instead can
+// name an older event the backfill already applied under an earlier reducer
+// and will never read again, parking the room on the wrong event.
+function diagnoseFreshBlock(db, roomId) {
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (maxSeq >= head) {
+    const resumed = diagnoseFromCursor(db, roomId, head);
+    if (resumed !== undefined) return resumed;
+  }
+  return diagnoseBlock(db, roomId);
+}
+
+// r71: a standing park can name an event at or below the cursor snapshot.
+// A from-zero diagnosis recorded such parks before diagnoseFreshBlock: an
+// event the backfill applied under an earlier reducer and will never read
+// again. Replaying "through the blocked sequence" from the snapshot is then
+// empty, so the old code fell back to the full replay, found the same event
+// and kept the park on every re-diagnosis. Ask the backfill's own question
+// instead: does the next chunk after the snapshot replay?
 function rediagnoseBlock(db, roomId, blockedSeq) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
   if (maxSeq >= head && Number.isInteger(blockedSeq) && blockedSeq > 0) {
-    const resumed = diagnoseFromCursor(db, roomId, Math.min(blockedSeq, head));
+    const stateSeq = readCursor(db, roomId)?.state_seq;
+    const upTo = Number.isInteger(stateSeq) && blockedSeq <= stateSeq
+      ? Math.min(stateSeq + BACKFILL_COMMIT, head)
+      : Math.min(blockedSeq, head);
+    const resumed = diagnoseFromCursor(db, roomId, upTo);
     if (resumed !== undefined) return resumed;
   }
   return diagnoseBlock(db, roomId);
@@ -564,9 +589,10 @@ function recordBlock(store, roomId, block) {
     db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at, last_diagnosed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
-        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at,
+        error=excluded.error, head_seq=excluded.head_seq,
+        blocked_at=CASE WHEN ? THEN excluded.blocked_at ELSE messages_backfill_blocks.blocked_at END,
         last_diagnosed_at=excluded.last_diagnosed_at`)
-      .run(roomId, block.sequence, block.eventId, block.error, head, now, now);
+      .run(roomId, block.sequence, block.eventId, block.error, head, now, now, fresh ? 1 : 0);
   });
   return fresh;
 }
@@ -882,7 +908,7 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     } catch (error) {
       if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
-      const block = diagnoseBlock(store.db, room.id);
+      const block = diagnoseFreshBlock(store.db, room.id);
       if (!block) throw error; // not a stored-event failure: propagate as before
       // Park the room durably (later calls skip it until the block goes
       // stale) and report it as this call's fresh failure for the unified
@@ -1041,8 +1067,8 @@ function certifyMessagesParity(store, target = null) {
   const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
   for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
-    let record, reactions, extras;
-    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
+    let record, extras;
+    try { record = JSON.parse(row.record_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
     catch { /* invalid records fail parity */ }
     if (!message || !isDeepStrictEqual(record, currentRecord(message))
       || (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message)))
@@ -1055,8 +1081,7 @@ function certifyMessagesParity(store, target = null) {
       || row.work_item_id !== textOrNull(message.workItemId)
       || row.created_at !== message.createdAt || row.edited_at !== textOrNull(message.editedAt)
       || row.deleted_at !== textOrNull(message.deletedAt)
-      || row.pinned !== (pinned.has(message.id) ? 1 : 0)
-      || !isDeepStrictEqual(reactions, message.reactions ?? {})) {
+      || row.pinned !== (pinned.has(message.id) ? 1 : 0)) {
       throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs`);
     }
   }
@@ -1081,46 +1106,90 @@ function retainedByState(state) {
   return keep;
 }
 
+// Message ids among `candidates` that any event after `afterSeq` names
+// anywhere in its body. Matching every string value, not a list of keys,
+// keeps this right for event types added later; it can only over-keep.
+function idsNamedAfter(db, roomId, afterSeq, candidates) {
+  const named = new Set();
+  if (!candidates.size) return named;
+  const visit = value => {
+    if (typeof value === "string") {
+      if (candidates.has(value)) named.add(value);
+      if (candidates.has(`${value}:channel`)) named.add(`${value}:channel`);
+    } else if (Array.isArray(value)) for (const item of value) visit(item);
+    else if (value && typeof value === "object") for (const [key, item] of Object.entries(value)) { visit(key); visit(item); }
+  };
+  for (const row of db.prepare("SELECT body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence").iterate(roomId, afterSeq)) {
+    let body;
+    try { body = JSON.parse(row.body); } catch { body = row.body; }
+    visit(body);
+  }
+  return named;
+}
+
 // Move old messages out of rooms.projection into the messages table only. Keeps
 // the newest `keepNewest` messages and everything retainedByState. Needs a
 // certified messages table (parity at the room head). dryRun reports what
 // would move and changes nothing. Returns { ok, ... } and never throws for
 // "not ready" conditions.
-export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true } = {}) {
+export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true, belowCursor = false } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
   if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
   return store.transaction(() => {
     const db = store.db;
     const head = db.prepare("SELECT sequence, projection FROM rooms WHERE id=?").get(roomId);
     if (!head) return { ok: false, reason: "room_not_found" };
-    const cursor = db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-    if (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence) return { ok: false, reason: "messages_table_not_certified" };
+    const cursor = db.prepare("SELECT applied_seq, applied_event_id, state_seq, replay_event_id, parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+    // belowCursor: a room whose backfill is behind its head (parked, or not
+    // yet caught up) can still shed history the table already holds. Only
+    // rows at or below the cursor's own exact-head fold may move, and only
+    // messages no later event mentions; everything newer stays.
+    let limitSeq = head.sequence;
+    if (belowCursor) {
+      if (!cursor || !(cursor.applied_seq > 0) || !cursorMatches(db, roomId, cursor, head.sequence)) return { ok: false, reason: "messages_cursor_unusable" };
+      limitSeq = cursor.applied_seq;
+    } else if (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence) return { ok: false, reason: "messages_table_not_certified" };
     const state = store.room(roomId).state;
     const inProjection = state.messages ?? [];
     // Once migrated, only the bounded tail/dependency set needs inspection.
     // Do not rescan every normalized history row on each compaction.
     const projectionIds = JSON.stringify(inProjection.map(message => message.id));
-    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))")
-      .all(roomId, projectionIds).map(row => [row.message_id, row.seq]));
-    if (inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
-    const ordered = [...inProjection].sort((a, b) => seqs.get(a.id) - seqs.get(b.id));
+    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=? AND seq<=? AND message_id IN (SELECT value FROM json_each(?))")
+      .all(roomId, limitSeq, projectionIds).map(row => [row.message_id, row.seq]));
+    // Below the cursor, a message with no row is newer than the cursor: it
+    // sorts after every row and never moves.
+    if (!belowCursor && inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
+    const seqOf = message => seqs.get(message.id) ?? Infinity;
+    const ordered = [...inProjection].sort((a, b) => {
+      const x = seqOf(a), y = seqOf(b);
+      return x === y ? 0 : x < y ? -1 : 1;
+    });
     if (ordered.length <= keepNewest) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: archiveMarker(db, roomId).throughSeq };
     const tail = ordered.slice(ordered.length - keepNewest);
-    const cutoff = seqs.get(tail[0].id);
+    const cutoff = Math.min(seqOf(tail[0]), limitSeq + 1);
     const keep = retainedByState(state);
+    let touchedKept = 0;
+    if (belowCursor && limitSeq < head.sequence) {
+      // A row is exact at its cursor; an event after the cursor that names a
+      // message (edit, reaction, pin, reply, delete...) may have changed it,
+      // so that message stays in the projection.
+      const touched = idsNamedAfter(db, roomId, limitSeq, new Set(ordered.filter(message => seqOf(message) < cutoff).map(message => message.id)));
+      for (const id of touched) if (!keep.has(id)) { keep.add(id); touchedKept += 1; }
+    }
     // Keep whole active threads and open questions: see closeKeepSet.
     for (const message of tail) keep.add(message.id);
     closeKeepSet(ordered, keep);
     const marker = archiveMarker(db, roomId);
-    const moving = ordered.filter(message => seqs.get(message.id) < cutoff && !keep.has(message.id));
-    if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq };
+    const moving = ordered.filter(message => seqOf(message) < cutoff && !keep.has(message.id));
+    const scope = belowCursor ? { belowCursor: true, cursorSeq: limitSeq, touchedKept } : {};
+    if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq, ...scope };
     // throughSeq only ever grows: the archived prefix is never shortened.
     const throughSeq = Math.max(marker.throughSeq, seqs.get(moving[moving.length - 1].id));
     const movingIds = new Set(moving.map(message => message.id));
-    const retainedIds = ordered.filter(message => seqs.get(message.id) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
+    const retainedIds = ordered.filter(message => seqOf(message) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
     // Every message at or below the cut that is not moving is explicitly retained.
     const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
-    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq };
+    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq, ...scope };
     // Spot-check before anything moves (dry run too): every moving message has a
     // table row equal to its projection record, and a sample is tied back to its
     // posting event in the log.

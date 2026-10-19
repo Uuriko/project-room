@@ -28,7 +28,7 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
+    await Promise.all(keys.filter(key => key.startsWith("room-pwa-") && key !== CACHE_NAME).map(key => caches.delete(key)));
     await self.clients.claim();
   })());
 });
@@ -70,12 +70,13 @@ self.addEventListener("push", event => {
 self.addEventListener("notificationclick", event => {
   event.notification.close();
   const data = event.notification.data || {};
-  const target = typeof data.url === "string" && data.url ? data.url : new URL(self.registration.scope).href;
+  const scope = new URL(self.registration.scope);
+  const path = roomPath(data.url);
+  const target = path && new URL(path, scope).origin === scope.origin ? path : scope.href;
   // Approve, reject, and reply are HB-3b. Until that decide path exists, an
   // action click opens the same item a plain click opens.
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const scope = new URL(self.registration.scope);
     for (const client of windows) {
       let origin = "";
       try { origin = new URL(client.url).origin; } catch { origin = ""; }

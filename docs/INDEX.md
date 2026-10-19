@@ -2,7 +2,7 @@
 
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
-Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md).
+Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 
 Planning: [total Project Room backlog](PROJECT-ROOM-TOTAL-BACKLOG.md) — source coverage, execution tasks, all brainstorm proposals, native acceptance checks, and captured open issues/PRs.
 
@@ -31,6 +31,8 @@ Hosted MCP is `https://room.trydemigod.com/mcp` (no OAuth). The alias `https://w
 The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md).
 
 The identity lifecycle (mint → link → rotate → revoke, with the honest gaps) is [IDENTITY-LIFECYCLE.md](IDENTITY-LIFECYCLE.md). Invite-code failures and lost secrets are covered in [FAQ.md](FAQ.md#troubleshooting).
+
+Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](EXECUTION-PORTABILITY-PLAN-20261018.md).
 
 ## Coordinate
 
