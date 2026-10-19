@@ -9,8 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
-  // NEW modules here.
-  "agent-key-registry.mjs",
+  // NEW modules here. (agent-key-registry.mjs left the list with IR-1:
+  // tests/restore-reconcile-coverage.test.js imports it.)
   "gmail-content.mjs",
   "inbox-collab-routes.mjs",
   "ip-blocklist.mjs",

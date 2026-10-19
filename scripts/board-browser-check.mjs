@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 async function openBoard(page) {
@@ -507,7 +508,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
+  const workId = "prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "work.proposed",
     data: { workItemId: workId, title: "Prepare the handoff", definitionOfDone: "Record the prerequisite result.",
@@ -624,9 +625,19 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.locator("#board-close").click();
   }
   await openBoard();
-  await post(page, origin, "/work-claims/prerequisite/claim", {});
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
+  const acceptance = page.locator('[data-focus-key="work-acceptance:prerequisite"]');
+  await acceptance.press("Enter");
+  await page.locator(`[data-work-record-id='${workId}']`).waitFor({ state: "visible" });
+  for (const [type, data] of [["work.accepted", {}], ["work.started", {}], ["work.completed", {
+    summary: "Handoff prepared", evidenceVersion: "v1", producerId: "owner", evidenceUrl: "https://example.com/handoff", nextAction: "Continue", signedEvidence: makeTestSigner(fixture.store)()
+  }]]) {
+    await post(page, origin, "/commands", { id: crypto.randomUUID(), type, data: {
+      workItemId: workId, expectedRevision: fixture.store.room("commons").state.workItems[workId].revision, ...data
+    } }, 201);
+  }
+  await page.locator("#work-navigation-return").press("Enter");
+  await dialog.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-acceptance:prerequisite");
   await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();
   assert.equal(await dependent.locator(".claim-waiting").count(), 0);
   assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");
@@ -1286,4 +1297,51 @@ test("board close returns focus to the opener, else the conversation title", { t
   await page.evaluate(() => document.querySelector("#message-input").remove());
   await closeWithEscape();
   await focusLandsOn("conversation-title");
+});
+
+test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "lifecycle", title: "Reviewable result", reviewPolicy: "self_attested", acceptanceCriteria: ["Result checked"] }, 201);
+  await post(page, origin, "/work-claims/lifecycle/claim", {});
+  await post(page, origin, "/work-claims/lifecycle/update", { state: "in_progress" });
+  await openBoard(page);
+  const card = page.locator('article[data-claim-id="lifecycle"]');
+  const form = card.locator('[data-claim-deliver="lifecycle"]');
+  await form.waitFor();
+  await form.locator('[name="artifactKind"]').fill("report");
+  await form.locator('[name="artifactRef"]').fill("room://artifacts/lifecycle");
+  await form.locator('[name="artifactSha256"]').fill("a".repeat(64));
+  await form.locator('[name="checkName"]').fill("Result checked");
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Send back", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").state, "delivered");
+  await card.getByRole("button", { name: "Send back", exact: true }).click();
+  await form.waitFor();
+  const sentBack = fixture.store.workClaims.get("commons", "lifecycle");
+  assert.equal(sentBack.state, "in_progress");
+  assert.equal(sentBack.verification.state, "changes_requested");
+  assert.ok(sentBack.delivery);
+  // The form retains the previous bundle. A new delivery creates a new
+  // review generation even when the artifact bytes are unchanged.
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Verify", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").deliveryGeneration, 2);
+  await card.getByRole("button", { name: "Verify", exact: true }).click();
+  await page.locator('[aria-labelledby="board-col-landed"] article[data-claim-id="lifecycle"]').waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").verification.state, "self_attested");
 });
