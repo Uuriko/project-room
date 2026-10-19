@@ -12,7 +12,8 @@ import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { changeDescription } from '../src/workflow.js';
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { claimWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
+import { claimWork, createWork, renewWork, updateWork, releaseExpired, isLeaseExpired,
+  MAX_RENEWALS_PER_CLAIM, ClaimError } from "../server/work-claims.mjs";
 
 const H = 3600 * 1000;
 const T0 = Date.parse("2026-09-24T07:00:00.000Z");
@@ -179,16 +180,19 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 // ---------------------------------------------------------------------------
 // Part 2: the pure renewWork state machine
 // ---------------------------------------------------------------------------
-test("renewWork starts a fresh lease window from now", () => {
+test("renewWork starts a fresh lease window from now, reusing the claim's window when leaseHours is omitted (RQ-12)", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
   assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  // RQ-12 (ruling A2+B1): an omitted leaseHours reuses the claim's current
+  // window (6h), never the room default (24h) — the pre-ruling behaviour
+  // this test used to pin.
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 8 * H));
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
 });
 
 test("renewWork records the caller's note in history", () => {
@@ -258,7 +262,11 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
     storeMessages: [liveMessage()], registry });
   assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  // RQ-12: the renewal re-anchors the claim's own 6h window at the renewal
+  // time (>=, not >: a same-millisecond renew extends by zero elapsed time;
+  // the pre-ruling room-default window made ">" true by slack, not by rule).
+  assert.ok(Date.parse(out.value.leaseExpiresAt) >= Date.parse(before));
+  assert.equal(Date.parse(out.value.leaseExpiresAt) - Date.parse(out.value.leaseStartAt), 6 * H);
   assert.ok(Date.parse(out.value.leaseStartAt) >= Date.parse(out.value.claimedAt));
   assert.equal(out.value.history.at(-1).action, "renewed");
 });
@@ -268,7 +276,8 @@ test("handler: renew without a progress message id extends the lease", async () 
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
   assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  assert.ok(Date.parse(out.value.leaseExpiresAt) >= Date.parse(before));
+  assert.equal(Date.parse(out.value.leaseExpiresAt) - Date.parse(out.value.leaseStartAt), 6 * H);
 });
 
 test("handler: renew with a DM check-in is refused", async () => {
@@ -302,6 +311,96 @@ test("handler: renew by a non-owner is refused", async () => {
     memberId: "grok", storeMessages: [liveMessage()], registry });
   assert.equal(error.status, 403);
   assert.equal(error.code, "work_not_owner");
+});
+
+// ---------------------------------------------------------------------------
+// Part 4: the renewal bound (#3707 mirrored into the board machine,
+// TIME-CLOCK-AUDIT T-1) + RQ-12 window reuse
+// ---------------------------------------------------------------------------
+// The audit's probe shape: an 8h lease renewed 1h before each lapse. On the
+// pre-fix machine 2,500/2,500 renewals were granted (~2 simulated years of
+// continuous hold, zero refusals). #3707 capped the public-work door at 12
+// renewals per claim round; the board machine now carries the same bound.
+test("renewal storm: renewals stop at the per-round cap and the lease then lapses for real", () => {
+  const room = { workClaims: { defaultLeaseHours: 24 } };
+  let work = claimWork({ id: "storm" }, "quill", { leaseHours: 8, room, now: T0 });
+  let now = T0, granted = 0, refusal = null;
+  for (let i = 0; i < 2500; i++) {
+    now = Date.parse(work.leaseExpiresAt) - H; // 1h before lapse
+    try { work = renewWork(work, "quill", { leaseHours: 8, room, now }); granted++; }
+    catch (err) { refusal = err; break; }
+  }
+  assert.equal(granted, MAX_RENEWALS_PER_CLAIM);
+  assert.equal(MAX_RENEWALS_PER_CLAIM, 12); // #3707's number, mirrored — not a second vocabulary
+  assert.ok(refusal instanceof ClaimError);
+  assert.equal(refusal.code, "work_claim_renewal_limit");
+  assert.match(refusal.message, /used all 12 renewals for this claim round/);
+  assert.ok(refusal.message.includes(work.leaseExpiresAt), "the refusal names the expiry the lease runs to");
+  // The total hold is bounded: claim window + 12 renewals of 8h, no more.
+  assert.ok(Date.parse(work.leaseExpiresAt) - T0 <= (MAX_RENEWALS_PER_CLAIM + 1) * 8 * H);
+  // Past the cap the lease lapses for real and the sweep releases the claim.
+  const expiry = Date.parse(work.leaseExpiresAt);
+  assert.equal(isLeaseExpired(work, expiry), true);
+  const [released] = releaseExpired([work], expiry);
+  assert.equal(released.state, "unclaimed");
+  assert.equal(released.owner, null);
+});
+
+test("the refused renewal at the cap changes nothing", () => {
+  let work = claimWork({ id: "cap-noop" }, "quill", { leaseHours: 8, now: T0 });
+  for (let i = 0; i < MAX_RENEWALS_PER_CLAIM; i++)
+    work = renewWork(work, "quill", { leaseHours: 8, now: T0 + H });
+  const before = JSON.stringify(work);
+  throwsCode(() => renewWork(work, "quill", { leaseHours: 8, now: T0 + H }), "work_claim_renewal_limit");
+  assert.equal(JSON.stringify(work), before);
+});
+
+test("RQ-12: a 100h lease renewed without leaseHours keeps its 100h window, not the 24h room default", () => {
+  const room = { workClaims: { defaultLeaseHours: 24 } };
+  const claimed = claimWork({ id: "rq12" }, "quill", { leaseHours: 100, room, now: T0 });
+  const renewed = renewWork(claimed, "quill", { room, now: T0 + H }); // no leaseHours
+  assert.equal(renewed.leaseStartAt, iso(T0 + H));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 101 * H)); // renewal time + the claim's own 100h
+  assert.match(renewed.history.at(-1).note, /lease: 100h/);
+});
+
+test("a delivered claim sent back to in_progress opens a new round: the renewal budget resets (#4179 interplay)", () => {
+  const bundle = {
+    artifact: { kind: "pull_request", ref: "https://github.com/Uuriko/project-room/pull/999",
+      sha256: "a".repeat(64) },
+    checks: [{ name: "unit tests", result: "pass" }],
+    criteria: [{ criterion: "criterion A", status: "met" }],
+  };
+  let item = createWork({ id: "reentry", title: "reentry", reviewPolicy: "distinct_member",
+    acceptanceCriteria: ["criterion A"] }, { now: T0, agentId: "poster" });
+  item = claimWork(item, "quill", { leaseHours: 8, now: T0 });
+  // Spend the whole first-round budget; the next renewal is refused.
+  for (let i = 0; i < MAX_RENEWALS_PER_CLAIM; i++)
+    item = renewWork(item, "quill", { leaseHours: 8, now: T0 + H });
+  throwsCode(() => renewWork(item, "quill", { leaseHours: 8, now: T0 + H }), "work_claim_renewal_limit");
+  // Deliver, then a send-back re-enters in_progress: #4179 restarts the
+  // lease window there (freshLeaseWindow), and the re-entry is a NEW round,
+  // so the renewal count restarts with it.
+  item = updateWork(item, "quill", { state: "in_progress", now: T0 + 2 * H });
+  item = updateWork(item, "quill", { state: "delivered", delivery: bundle, now: T0 + 3 * H });
+  item = updateWork(item, "quill", { state: "in_progress", now: T0 + 4 * H });
+  assert.equal(item.leaseStartAt, iso(T0 + 4 * H)); // freshLeaseWindow restarted the window
+  for (let i = 0; i < MAX_RENEWALS_PER_CLAIM; i++)
+    item = renewWork(item, "quill", { leaseHours: 8, now: T0 + 5 * H });
+  throwsCode(() => renewWork(item, "quill", { leaseHours: 8, now: T0 + 5 * H }), "work_claim_renewal_limit");
+});
+
+test("a lapsed claim re-claimed starts a fresh renewal budget", () => {
+  let work = claimWork({ id: "reclaim" }, "quill", { leaseHours: 8, now: T0 });
+  for (let i = 0; i < MAX_RENEWALS_PER_CLAIM; i++)
+    work = renewWork(work, "quill", { leaseHours: 8, now: T0 + H });
+  throwsCode(() => renewWork(work, "quill", { leaseHours: 8, now: T0 + H }), "work_claim_renewal_limit");
+  const [lapsed] = releaseExpired([work], Date.parse(work.leaseExpiresAt));
+  assert.equal(lapsed.state, "unclaimed");
+  let reclaimed = claimWork(lapsed, "quill", { leaseHours: 8, now: T0 + 100 * H });
+  for (let i = 0; i < MAX_RENEWALS_PER_CLAIM; i++)
+    reclaimed = renewWork(reclaimed, "quill", { leaseHours: 8, now: T0 + 101 * H });
+  throwsCode(() => renewWork(reclaimed, "quill", { leaseHours: 8, now: T0 + 101 * H }), "work_claim_renewal_limit");
 });
 
 test("handler: renew of a leaseless claim is refused", async () => {
