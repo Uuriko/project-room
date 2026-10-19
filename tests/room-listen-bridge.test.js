@@ -76,7 +76,7 @@ test("after the child exits, the next ping starts it again", async t => {
 });
 
 test("non-wake POSTs are ignored and start nothing; health reports state", async t => {
-  const { bridge, spawns, base, post } = await rig(t);
+  const { spawns, base, post } = await rig(t);
   const health = await (await fetch(`${base}/health`)).json();
   assert.deepEqual(health, { ok: true, mode: "bridge", listenerRunning: false });
   for (const body of [{ hello: "world" }, { eventType: "room.deleted" }, "not json", { event: "agent.wake.extra" }]) {

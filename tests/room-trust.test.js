@@ -159,14 +159,23 @@ test("Trust off does not enqueue a cross-owner wake; Trust on does", t => {
   assert.equal(f.state().messages.some(message => message.id === "no-wake"), true);
   assert.equal(f.store.agentHeartbeats.pendingWakes(identity.identityId).length, 0);
   f.post("owner", "@producer wake", { messageId: "home-wake" });
-  assert.equal(f.store.agentHeartbeats.pendingWakes(home.identityId).length, 1);
-  assert.equal(f.store.agentHeartbeats.pendingWakes(home.identityId)[0].messageId, "home-wake");
+  // WAKE0-3a stack repair (missed by WAKE0-2's suite alignment): an
+  // offline mention now enqueues the mention signal AND the coalesced
+  // wake intent (kind "wake"), so pendingWakes carries both. The trust
+  // assertions below target the mention signal; the intent's presence
+  // is asserted alongside it.
+  const homePending = f.store.agentHeartbeats.pendingWakes(home.identityId);
+  assert.equal(homePending.filter(s => s.kind === "mention").length, 1);
+  assert.equal(homePending.find(s => s.kind === "mention").messageId, "home-wake");
+  assert.ok(homePending.some(s => s.kind === "wake"), "the wake intent rides with the mention");
   f.setTrust(true);
   f.post("owner", "@foreign wake", { messageId: "yes-wake" });
   const pending = f.store.agentHeartbeats.pendingWakes(identity.identityId);
-  assert.equal(pending.length, 1);
-  assert.equal(pending[0].kind, "mention");
-  assert.equal(pending[0].messageId, "yes-wake");
+  const mentions = pending.filter(s => s.kind === "mention");
+  assert.equal(mentions.length, 1);
+  assert.equal(mentions[0].kind, "mention");
+  assert.equal(mentions[0].messageId, "yes-wake");
+  assert.ok(pending.some(s => s.kind === "wake"), "the wake intent rides with the mention");
 });
 
 test("trust_off HTTP body names the kill-switch and keeps the hint", async t => {
