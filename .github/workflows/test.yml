@@ -153,7 +153,23 @@ jobs:
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - name: Run unit shard
-        run: node scripts/unit-ci.mjs --shard=${{ matrix.shard }}/3
+        # Off main pushes, the shard also records V8 coverage (no measurable
+        # slowdown) so the coverage job can apply the ratchet without running
+        # the whole suite a second time. Raw data stays outside the worktree.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != "push" ]; then export NODE_V8_COVERAGE="$RUNNER_TEMP/v8-coverage"; fi
+          node scripts/unit-ci.mjs --shard=${{ matrix.shard }}/3
+      - name: Reduce coverage to covered lines per file
+        if: success() && github.event_name != 'push'
+        run: node scripts/coverage-thresholds.mjs --coverage-dir "$RUNNER_TEMP/v8-coverage" --lines-out "$RUNNER_TEMP/coverage-lines/shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: success() && github.event_name != 'push'
+        with:
+          name: unit-coverage-lines-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-lines/
+          if-no-files-found: error
       - name: Report failures to PR
         if: failure() && github.event_name == 'pull_request'
         run: |
@@ -327,57 +343,40 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
-    needs: [changes]
+    needs: [changes, unit-shards]
     # Skip only when the merge-base diff explicitly cannot move module line
     # coverage (no measured source, test, or gate-file changes). A skipped or
-    # failed filter, and every main push, still runs the suite: the verdict
-    # can only be skipped when it provably cannot change.
-    # Main pushes skip coverage (the ~12 min long pole); nightly + PRs run it.
+    # failed filter still evaluates: the verdict can only be skipped when it
+    # provably cannot change. Main pushes skip coverage; nightly + PRs run it.
     if: always() && !cancelled() && github.event_name != 'push' && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
-    # Per-module coverage ratchet (backlog Q015): runs the root unit suite
-    # with V8 coverage and fails when any module in coverage-thresholds.json
-    # drops below its threshold. Zero dependencies; the script points TMPDIR
-    # at a worktree-local .tmp/ and writes coverage data to ./coverage/
-    # (both gitignored) by itself.
+    # Per-module coverage ratchet (backlog Q015). The three unit shards record
+    # V8 coverage while they run and upload covered lines per file; this job
+    # unions them and fails when any module in coverage-thresholds.json drops
+    # below its threshold. Same per-payload union as a single full run (see
+    # coveredLinesFromRawDir), without running the suite a second time.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
+      - name: Refuse to evaluate coverage of a failed suite
+        if: needs.unit-shards.result != 'success'
+        env:
+          UNIT_SHARDS: ${{ needs.unit-shards.result }}
+        run: |
+          echo "coverage gate - unit shards $UNIT_SHARDS, not evaluating thresholds"
+          exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0 # secret-scan-diff and room-lifecycle tests read the origin/main tree.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: npm
-      - name: Install Linux host isolation for automatic-run unit tests
-        id: bwrap
-        background: true
-        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      - run: npm ci
-      - name: Wait for host isolation install
-        wait: bwrap
-      - name: Permit the sandbox launcher to create its isolated namespaces
-        # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
-        # unprivileged user namespaces without an application profile).
-        run: |
-          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
-            if [ -f /etc/apparmor.d/bwrap ]; then
-              sudo apparmor_parser -r /etc/apparmor.d/bwrap
-            else
-              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
-          abi <abi/4.0>,
-          include <tunables/global>
-          /usr/bin/bwrap flags=(unconfined) {
-            userns,
-          }
-          PROFILE
-              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
-            fi
-          fi
-      - name: Verify automatic host namespace support without operator input
-        run: node scripts/host-isolation-preflight.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          # All attempts: a re-run shard uploads under a new attempt number and
+          # the gate keeps the latest attempt per shard.
+          pattern: unit-coverage-lines-*
+          path: coverage-lines
+          merge-multiple: true
       - name: Enforce per-module coverage thresholds
-        run: node scripts/coverage-thresholds.mjs
+        run: node scripts/coverage-thresholds.mjs --lines-from coverage-lines --expect-shards 3
   test:
     needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
     if: always() && !cancelled()
