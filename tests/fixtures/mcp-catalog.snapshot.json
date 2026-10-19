@@ -374,7 +374,7 @@
       }
     },
     "bounty_post": {
-      "inputSchema": "a8ddaa10a4d90ed5",
+      "inputSchema": "25d7e111352ac6fd",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
