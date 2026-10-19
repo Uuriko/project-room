@@ -267,16 +267,17 @@ test('actual owner capability grant cannot turn a guest into a private contribut
 
 test('owner results name whether the receipt public page resolves (#4071)', t => {
   const f = fixture(t), id = f.receipt.receiptId;
-  // The toggle defaults on and the public-work receipt was recorded
-  // publicly: the detail route resolves it, so the row may offer the
-  // human page (the flag is the route resolver's own answer).
-  f.store.command(f.store.issueAccessKey('commons', 'owner'), 'commons', { id: 'publish-receipts-4071', type: 'room.public_receipts_set', data: { enabled: true } });
+  // The owner's public-receipts toggle defaults on and the public-work
+  // receipt was recorded publicly: the detail route resolves it, so the
+  // row may offer the human page (the flag is the route resolver's own
+  // answer, not a second visibility rule).
+  f.store.roomDirectory.setReceiptsVisibility('commons', 'owner', true);
   assert.ok(publicReceiptById(f.store, id), 'the public route resolves in the on arm');
   assert.equal(f.service().results('commons', 'owner').results[0].publicPage, true);
-  // Publication off: the route stops resolving (it 404s for everyone,
-  // owner included — there is no owner exception), so the row must stop
-  // offering the link. Visibility itself is not changed by the flag.
-  f.store.command(f.store.issueAccessKey('commons', 'owner'), 'commons', { id: 'unpublish-receipts-4071', type: 'room.public_receipts_set', data: { enabled: false } });
+  // Toggle off: the route stops resolving (it 404s for everyone, owner
+  // included — there is no owner exception), so the row must stop
+  // offering the link. The flag reports visibility; it does not set it.
+  f.store.roomDirectory.setReceiptsVisibility('commons', 'owner', false);
   assert.equal(publicReceiptById(f.store, id), null, 'the public route no longer resolves');
   assert.equal(f.service().results('commons', 'owner').results[0].publicPage, false);
 });
