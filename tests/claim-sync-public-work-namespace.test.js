@@ -80,3 +80,59 @@ test('stale sweep, PR webhook and autolink skip public-work namespaces instead o
   assert.doesNotThrow(() => linkDeployToSettledClaims(store, { revision: REV, nowMs: NOW }));
   assert.deepEqual(snapshot(), before, 'the public-work mirror is untouched');
 });
+
+// ADMISSION (15556, DELTA QA-4246-ADMISSION-1019): the reconcilers skip
+// public-work namespaces only AFTER the SQL LIMIT. With the registry seeded
+// so every candidate slot is an earlier-due public row, the private claim is
+// cut by LIMIT before privateRoomRows ever sees it: private reconciliation
+// starves silently, tick after tick. Both loader shapes must exclude public
+// namespaces in SQL, before ORDER BY/LIMIT, keeping the JS filter as the
+// mid-run backstop and the table-absent legacy fallback.
+function starvationFixture(t, shape) {
+  const dir = mkdtempSync(join(tmpdir(), 'claim-sync-starve-'));
+  const store = new RoomStore(join(dir, 'room.sqlite')); store.initialize(initialRoom());
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const offerId = 'public-sync';
+  store.projectOffers.create('commons', 'owner', { requestId: 'create', offerId, reviewerMemberIds: ['owner'],
+    terms: { repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'project', title: 'Sync proof',
+      summary: 'Disposable public task', acceptanceCriteria: ['Return an artifact'], reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
+  store.projectOffers.transition('commons', 'owner', offerId, 'publish', { requestId: 'publish', expectedRevision: 1 });
+  const registry = createDurableWorkClaimRegistry(store.db);
+  const task = store.publicWorkClaims.enable('commons', 'owner', offerId, {
+    requestId: 'enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['src/public-proof.js'] });
+  const ns = task.namespaceId;
+  const makeClaim = (id, at) => {
+    const base = claimWork(createWork({ id, title: `Claim ${id}` }, { now: NOW - 4 * HOUR, agentId: 'alice' }),
+      'alice', { now: NOW - 4 * HOUR, leaseHours: 6 });
+    const item = shape === 'live' ? base : { ...base, state: 'done', deliveryMode: 'merged', revision: REV };
+    // The reconcilers' SQL reads the singular $.data.pullRequest envelope;
+    // pullRequestDue reads the singular JS field. Set both shapes.
+    return { ...item, pullRequest: { url: PR, repo: 'Uuriko/project-room', number: 4999, nextPollAt: at }, pullRequests: [{ url: PR, nextPollAt: at }] };
+  };
+  withPublicWorkClaimWriter(store, () => {
+    for (let i = 0; i < 32; i++) registry.set(ns, makeClaim(`pub-${String(i).padStart(2, '0')}`, NOW - 10 * HOUR));
+  });
+  store.workClaims.set('commons', makeClaim('priv-starved', NOW - 1 * HOUR));
+  return { store, ns };
+}
+
+function countingFetch() {
+  const calls = [];
+  const impl = async () => { calls.push(Date.now()); return { ok: false, status: 404, headers: { get: () => null } }; };
+  impl.calls = calls;
+  return impl;
+}
+
+test('admission: 32 earlier-due public claims do not starve a due private claim from live settlement', async t => {
+  const { store } = starvationFixture(t, 'live');
+  const fetchImpl = countingFetch();
+  await syncClaimPullRequests(store, { token: null, fetchImpl, nowMs: NOW });
+  assert.ok(fetchImpl.calls.length > 0, `the private claim is polled (fetches: ${fetchImpl.calls.length})`);
+});
+
+test('admission: 32 earlier-due public claims do not starve a private done/merged verification', async t => {
+  const { store } = starvationFixture(t, 'done');
+  const fetchImpl = countingFetch();
+  await syncClaimPullRequests(store, { token: null, fetchImpl, nowMs: NOW });
+  assert.ok(fetchImpl.calls.length > 0, `the private verification candidate is polled (fetches: ${fetchImpl.calls.length})`);
+});

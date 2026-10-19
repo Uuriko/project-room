@@ -485,9 +485,27 @@ function holdDue(registry, roomId, items, until, nowMs) {
   }
 }
 
+
+// The reconcilers skip public-work namespaces (public-work-claim-fence.mjs),
+// but a row skipped only AFTER the SQL LIMIT still starves private rooms when
+// earlier-due public rows fill every candidate slot (15556). Exclude public
+// namespaces in SQL, before ORDER BY/LIMIT; privateRoomRows stays as the
+// mid-run backstop, and a registry without public_work_tasks keeps the
+// legacy no-exclusion shape.
+function publicNamespaceSqlExclusion(store) {
+  try {
+    store.db.prepare("SELECT 1 FROM public_work_tasks LIMIT 1").get();
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return "";
+    throw error;
+  }
+  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)";
+}
+
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -500,7 +518,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
         AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
@@ -508,7 +526,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -538,6 +556,7 @@ function loadDueClaims(store, nowMs) {
 // pullVerificationDue both require an unstamped outcome).
 function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -551,7 +570,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') = 'done'
         AND json_extract(item_json, '$.deliveryMode') = 'merged'
@@ -560,7 +579,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
