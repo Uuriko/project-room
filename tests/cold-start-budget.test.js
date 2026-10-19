@@ -13,6 +13,7 @@ import { applicationTables } from "../server/writer-fence.mjs";
 // Empty in the recovery fixture: cron tables, and update marks that exist only
 // after a member reads, finishes, or clears an item. Same exceptions as the recovery audit.
 const EMPTY_UNTIL_CRON = new Set([
+  "message_replay_snapshots", // Staging is empty outside an unfinished replay.
   "membership_delegation_pending",
   "room_access_auto_approve",
   "integrity_snapshot",
@@ -28,6 +29,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "private_update_commands",
   "messages_backfill_cursor",
   "messages_backfill_blocks",
+  // Replay state parts exist only while a state is over one row.
+  "messages_backfill_state",
   "agent_wants_work",
   // Code drops exist only after an agent shares a patch.
   "room_code_drops",
@@ -155,7 +158,7 @@ test("reopen still repairs a legacy channel and a missing proposer", () => {
     store.initialize(initialRoom());
     const legacy = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     delete legacy.channels;
-    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed" } };
+    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(
@@ -181,7 +184,7 @@ test("deferred open leaves a legacy projection until the integrity job repairs i
     store.initialize(initialRoom());
     const legacy = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     delete legacy.channels;
-    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed" } };
+    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(

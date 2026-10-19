@@ -47,7 +47,7 @@ test("a kept, redacted snapshot purges leftover split-snapshot parts", t => {
 )`).run();
   store.db.prepare("INSERT INTO messages_backfill_state (room_id, part, json) VALUES ('commons', 0, ?)").run(JSON.stringify({ messages: [{ id: "secret", body: "r35-part-needle-91" }] }));
   cmd(T.MESSAGE_DELETED, { messageId: "secret", expectedMessageRevision: 0, reason: "remove" });
-  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor LEFT JOIN message_replay_snapshots USING(room_id) WHERE room_id='commons'").get();
   assert.equal(typeof cursor.state_json, "string", "the snapshot is kept, redacted");
   assert.equal(String(cursor.state_json).includes("r35-part-needle-91"), false, "kept snapshot holds the needle");
   const parts = store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_state WHERE room_id='commons'").get().n;

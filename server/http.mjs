@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
@@ -12,6 +13,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
@@ -38,7 +40,7 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
-import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
+import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -87,7 +89,7 @@ import { listPins, setPin } from "./pins.mjs";
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
-import { receiptOgFields } from "./receipt-share.mjs";
+import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -1234,7 +1236,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
+        // r56: the store's SQLite value limit (read-only probe) tells which
+        // Durable Object row limit the runtime enforces; null when unknown.
+        const storageLimits = req.method === "HEAD" ? null : sqliteValueLimit(store?.db);
+        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField, ...(storageLimits ? { storage: storageLimits } : {}) }, req.method === "HEAD");
       }
       // A known liveness path with the wrong method is 405 with Allow, like the
       // route table, not a 404 that reads as "this path does not exist" (#1529).
@@ -2069,7 +2074,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
-      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/og\.png$/.exec(url.pathname);
+      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
@@ -2083,11 +2088,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!PUBLIC_RECEIPT_ID.test(receiptCard[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptCard[1]);
           if (!receipt) reject(404, "not_found", "Not found");
-          // The OG card is the one deliberate exception to no-store: a share
-          // card only travels if unfurlers may cache it. The TTL is minutes,
-          // the read above re-checks the owner toggle on every origin fetch,
-          // and the card restates the receipt's own public verdict line.
+          // The share images are the one deliberate exception to no-store:
+          // a share card or embedded badge only travels if unfurlers and
+          // image proxies may cache it. The TTL is minutes, the read above
+          // re-checks the owner toggle on every origin fetch, and both
+          // images restate the receipt's own public verdict line.
           res.setHeader("Cache-Control", "public, max-age=300");
+          if (receiptCard[2] === "badge.svg") {
+            const svg = Buffer.from(receiptBadgeSvg(receipt));
+            res.writeHead(200, { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Length": svg.length });
+            return res.end(req.method === "HEAD" ? undefined : svg);
+          }
           const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);
@@ -2192,8 +2203,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
+      const proofOg = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof\/og\.png$/.exec(url.pathname);
       const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
-        || url.pathname === "/agents" || templateDetail || roomPage || proofPage;
+        || url.pathname === "/agents" || templateDetail || roomPage || proofPage || proofOg;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
@@ -2226,6 +2238,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
           if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");
+        }
+        if (proofOg) {
+          // The proof page's share card, gated by the same view: a room
+          // that is not publicly listed or has receipts off gets no card.
+          // Same bounded cache exception as the receipt card.
+          const proof = roomProofView(store, proofOg[1]);
+          if (!proof || proof.error) reject(404, "not_found", "Not found");
+          const counts = proof.document.counts;
+          const png = Buffer.from(await renderOgPng({
+            title: `${proof.document.title} — proof of work`,
+            subtitle: counts.total
+              ? `${counts.total} published ${counts.total === 1 ? "result" : "results"} · ${counts.serverVerifiedMerges} server-verified ${counts.serverVerifiedMerges === 1 ? "merge" : "merges"}`
+              : "No published results yet",
+            badges: [
+              `${counts.roomRecordedCompletions} room-recorded ${counts.roomRecordedCompletions === 1 ? "completion" : "completions"}`,
+              `${counts.artifactHashRecorded} artifact-hash ${counts.artifactHashRecorded === 1 ? "record" : "records"}`,
+            ],
+            footer: "Project Room proof · hashes are stored values, not re-verified",
+          }));
+          res.setHeader("Cache-Control", "public, max-age=300");
+          res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+          return res.end(req.method === "HEAD" ? undefined : png);
         }
         if (proofPage) {
           const proof = roomProofView(store, proofPage[1], { cursor: url.searchParams.get("cursor") });
@@ -4008,7 +4042,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // A since_join reader also loses messages and events from before their
       // join (server/history-visibility.mjs). null for everyone else.
       const historyFloor = store.historyFloor(roomId, viewerId);
-      const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
+      const historyMessages = historyFloor ? messageRepository(store, roomId) : null;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
@@ -4276,7 +4310,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full");
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4292,11 +4326,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const nextState = { ...snapshot.state,
             messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
-          if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
-            omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
         return json(res, 200, snapshot);
       }
@@ -4430,9 +4462,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // re-resolve each hit against the projection and drop targeted DMs
         // the viewer is not a party to. Fail closed when a hit cannot be resolved.
         if (result.messages?.length) {
-          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          const byId = messageRepository(store, roomId);
           result.messages = result.messages.filter(hit => {
-            const message = byId.get(hit.id) ?? store.archivedMessage(roomId, hit.id);
+            const message = byId.get(hit.id);
             return message ? dmMessageVisible(message) : false;
           });
         }
@@ -4453,7 +4485,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // count recomputed) — otherwise the pin would leak the DM's body,
         // existence, and count. Fail closed when a pin cannot be resolved.
         const stripHiddenPinTargets = value => {
-          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          const byId = messageRepository(store, roomId);
           const pins = (value.pins ?? []).filter(pin => {
             const message = byId.get(pin.messageId);
             return message ? dmMessageVisible(message) : false;
