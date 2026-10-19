@@ -59,7 +59,7 @@ import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
-import { installHumanExperience, askFailureHint } from "./human-experience.js";
+import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
@@ -4257,7 +4257,7 @@ $("#message-form").addEventListener("submit", e => {
       updateReply(); syncRequestComposer(); persistDrafts();
     }
     maybeShowGuestUpgradeHint();
-  }, { failureHint: askFailureHint });
+  }, { failureHint: humanExperience.askFailureHint });
 });
 $("#composer-attach")?.addEventListener("click", () => { composerReselectId = null; $("#composer-file")?.click(); });
 $("#composer-file")?.addEventListener("cancel", () => { composerReselectId = null; });

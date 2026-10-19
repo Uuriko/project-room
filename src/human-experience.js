@@ -321,6 +321,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   };
   setInterval(() => { void refresh(); }, 500);
   return {
+    // The composer's failure hint for a send that carried an ask (user test 2026-10-19 #2).
+    askFailureHint,
     // Ask Room from the @ list: same state the Ask Room button toggles on.
     selectAsk() {
       if (!human() || document.body.classList.contains('human-advanced') || !askAvailable(projection?.assistant)) return false;

@@ -34,7 +34,8 @@ test('a refused ask with no assistant never tells the person to send again', () 
 });
 
 test('the composer and the Ask Room button use the availability gate', () => {
-  assert.match(app, /failureHint:\s*askFailureHint\b/, 'message-form passes the error-aware hint');
+  assert.match(app, /failureHint:\s*humanExperience\.askFailureHint\b/, 'message-form passes the error-aware hint');
+  assert.match(human, /^\s*askFailureHint,$/m, 'installHumanExperience hands the hint to app.js (no import-block edit, so the patch also applies on top of #4050)');
   assert.doesNotMatch(app, /failureHint:\s*"Draft kept\. Send again to retry\."/, 'no unconditional retry hint on the message form');
   assert.match(app, /typeof failureHint === "function"/, 'submit() resolves a hint from the error');
   assert.match(human, /ask\.hidden = !active \|\| !askAvailable\(projection\?\.assistant\)/, 'sync hides Ask Room with no assistant');
