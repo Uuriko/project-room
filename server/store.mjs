@@ -2774,17 +2774,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // NULL only when the key is absent, so this matches that check without
       // parsing message bodies.
       const roomHelp = idsWithHelp(`
-        SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        SELECT id FROM rooms WHERE json_valid(projection) AND json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
         SELECT rooms.id AS id FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
-        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+        WHERE json_valid(rooms.projection) AND json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
       const checkpointHelp = idsWithHelp(`
-        SELECT room_id AS id FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        SELECT room_id AS id FROM projection_checkpoints WHERE json_valid(projection) AND json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
         SELECT projection_checkpoints.room_id AS id
         FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
-        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+        WHERE json_valid(projection_checkpoints.projection) AND json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
       const checked = [];
       if (!helpRooms.size) {
@@ -2797,11 +2797,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
         return { checked, auditable: [...new Set([...roomHelp, ...checkpointHelp])] };
       }
-      for (const row of this.db.prepare("SELECT id, projection FROM rooms ORDER BY id").all()) {
+      for (const row of this.db.prepare("SELECT id, projection, json_valid(projection) AS projectionValid FROM rooms ORDER BY id").all()) {
         if (!helpRooms.has(row.id) && !roomHelp.has(row.id) && !checkpointHelp.has(row.id)) continue;
+        // #4126: an unreadable projection cannot be audited — the room is
+        // named by the boot quarantine record instead of throwing here and
+        // bricking the whole boot for one corrupt room.
+        if (!row.projectionValid) continue;
         checked.push(row.id);
         const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
-        const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
+        const checkpointRow = this.db.prepare("SELECT sequence, projection, json_valid(projection) AS valid FROM projection_checkpoints WHERE room_id=?").get(row.id);
+        // An unparseable checkpoint is an optimisation miss, never an audit
+        // input: audit from the full event history instead (#4126).
+        const checkpoint = checkpointRow?.valid ? checkpointRow : null;
         if (collect) {
           try { auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint); }
           catch (error) { collect.push({ roomId: row.id, error }); }
@@ -3182,13 +3189,47 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.storagePlatform.setVersion(this.db, 2);
         return;
       }
-      for (const row of this.db.prepare("SELECT projection FROM rooms WHERE json_valid(projection) = 0").all()) JSON.parse(row.projection);
+      this.noteCorruptProjections();
       const replayIds = this.roomsNeedingProvenanceReplay();
       this.repairProjectionShape(replayIds);
       if (!replayIds.size) return;
       const rooms = this.db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all().filter(row => replayIds.has(row.id));
       this.replayProvenance(rooms, { upgradeV1: false });
     });
+  }
+  // #4126: a room whose stored projection is not valid JSON is quarantined,
+  // never fatal. This scan runs inside repairProjectionProvenance — at boot
+  // and again on the integrity snapshot step — and records each unreadable
+  // room (id + error class) in the boot log and in corruptRoomReports();
+  // the boot-path scans skip such rooms behind json_valid guards, healthy
+  // rooms boot and serve, and the corrupt room's own reads keep failing
+  // loudly until the operator projection-repair path (or a restore)
+  // replaces its bytes. The record is refreshed on every pass, so a
+  // repaired room drops off it.
+  noteCorruptProjections() {
+    const corrupt = (this.corruptRooms ??= new Map());
+    const rows = this.db.prepare("SELECT id, projection FROM rooms WHERE json_valid(projection) = 0").all();
+    const live = new Set(rows.map(row => row.id));
+    for (const id of [...corrupt.keys()]) if (!live.has(id)) corrupt.delete(id);
+    for (const row of rows) {
+      if (corrupt.has(row.id)) continue;
+      let error = null;
+      try { JSON.parse(row.projection); } catch (caught) { error = caught; }
+      const report = {
+        roomId: row.id,
+        errorClass: typeof error?.name === "string" ? error.name : "SyntaxError",
+        error: String(error?.message ?? "invalid JSON").slice(0, 240),
+        at: Date.now()
+      };
+      corrupt.set(row.id, report);
+      console.error(`corrupt projection quarantined: room ${row.id} (${report.errorClass}: ${report.error}); healthy rooms continue — repair via the operator projection-repair path`);
+    }
+    return corrupt;
+  }
+  // The quarantine record from the most recent repairProjectionProvenance
+  // pass: [{ roomId, errorClass, error, at }]. Empty on a healthy store.
+  corruptRoomReports() {
+    return [...(this.corruptRooms ?? new Map()).values()];
   }
   // --- PRIV-2 history visibility ---
   // null when the member reads the whole history, else { sequence, at } of
@@ -3210,7 +3251,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const ids = this.db.prepare(`
       SELECT DISTINCT rooms.id AS id
       FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
-      WHERE json_type(item.value) = 'object' AND (
+      WHERE json_valid(rooms.projection) AND json_type(item.value) = 'object' AND (
         json_type(item.value, '$.proposedById') IS NULL
         OR (json_type(item.value, '$.receipt') = 'object' AND (
           json_type(item.value, '$.receipt.reportedById') IS NULL
@@ -3224,14 +3265,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       UNION
       SELECT DISTINCT rooms.id AS id
       FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.receiptHistory') AS receipt
-      WHERE json_type(receipt.value) = 'object' AND (
+      WHERE json_valid(rooms.projection) AND json_type(receipt.value) = 'object' AND (
         json_type(receipt.value, '$.reportedById') IS NULL
         OR json_type(receipt.value, '$.producerId') IS NULL
         OR json_type(receipt.value, '$.producerAttribution') IS NULL)
       UNION
       SELECT DISTINCT rooms.id AS id
       FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.verificationHistory') AS verification
-      WHERE json_type(verification.value) = 'object'
+      WHERE json_valid(rooms.projection) AND json_type(verification.value) = 'object'
         AND json_type(verification.value, '$.independenceConfirmed') IS NULL
     `).all().map(row => row.id);
     return new Set(ids);
@@ -3247,7 +3288,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
     const missingChannel = this.db.prepare(`
       SELECT id, projection FROM rooms
-      WHERE json_type(projection, '$.room') = 'object'
+      WHERE json_valid(projection) AND json_type(projection, '$.room') = 'object'
         AND (json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') IS NULL
           OR json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') = 'null')
     `).all();
@@ -3260,7 +3301,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const linked = this.db.prepare(`
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
       FROM rooms
-      WHERE EXISTS (
+      WHERE json_valid(rooms.projection) AND EXISTS (
         SELECT 1 FROM work_projection_items AS item
         WHERE item.room_id=rooms.id AND json_extract(item.value, '$.state') = 'superseded'
           AND json_type(item.value, '$.supersededBy') = 'text'
@@ -3587,8 +3628,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const room = { sequence: head.sequence };
     if (!Number.isSafeInteger(through) || through < 0 || through > room.sequence) throw new Error("Invalid historical room boundary");
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
-    let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
-    let sequence = checkpoint?.sequence ?? 0;
+    let state = emptyRoomState();
+    let sequence = 0;
+    if (checkpoint) {
+      // #4126: a checkpoint is an optimisation. Bytes that do not parse to
+      // a state object are ignored — the replay falls back to the full
+      // event history instead of throwing the rebuild (and, at boot, the
+      // whole server) away with it.
+      try {
+        const parsed = JSON.parse(checkpoint.projection);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("checkpoint is not a state object");
+        state = parsed;
+        sequence = checkpoint.sequence;
+      } catch (error) {
+        console.error(`projection checkpoint for room ${roomId} is unreadable (${error.message}); replaying the full event history`);
+      }
+    }
     // Work controls predate some stored projections and their checkpoints:
     // backfill the round/tool-call counters, suspension cause, and receipt
     // segments before replaying, so a checkpoint with no later events still
