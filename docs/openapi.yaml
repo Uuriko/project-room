@@ -2785,12 +2785,13 @@ paths:
       description: >-
         Live facts for the /about front door, no login. The counters
         are computed per request from the same public sources the hero
-        links to: the public receipts (issued, and verified = carrying
-        a merged pull request) and the public work board (claimable
-        count). latestReceipt is the newest public receipt, or null
-        when none is published. Never cached (Cache-Control no-store),
-        so the numbers always match the records a visitor can open
-        from the page itself.
+        links to: the public receipts (issued; verified = carrying a
+        server-verified merged pull request; tier-verified = carrying
+        a recorded verification tier, system_checked or hash_only) and
+        the public work board (claimable count). latestReceipt is the
+        newest public receipt, or null when none is published. Never
+        cached (Cache-Control no-store), so the numbers always match
+        the records a visitor can open from the page itself.
       security: []
       responses:
         '200':
@@ -2804,9 +2805,28 @@ paths:
                   schema: { type: string, enum: ['project-room-front-door/1'] }
                   counters:
                     type: object
-                    required: [resultsVerified, receiptsIssued, workAvailableNow]
+                    required: [resultsVerified, resultsTierVerified, receiptsIssued, workAvailableNow]
                     properties:
-                      resultsVerified: { type: integer }
+                      resultsVerified:
+                        type: integer
+                        description: >-
+                          Receipts whose result is a server-verified
+                          merged pull request: the receipt carries both
+                          a merge timestamp and a pull-request reference,
+                          recorded by the server's own merge poll. This
+                          is the /about hero's "server-verified merges"
+                          number. It does not count verification tiers —
+                          see resultsTierVerified.
+                      resultsTierVerified:
+                        type: integer
+                        description: >-
+                          Receipts carrying a recorded verification
+                          tier: system_checked (the platform executed
+                          the receipt's checks) or hash_only (the
+                          artifact hash is recorded and the checks are
+                          producer-reported). Receipts with no recorded
+                          tier are not counted, and a tier is not a
+                          merge — see resultsVerified.
                       receiptsIssued: { type: integer }
                       workAvailableNow: { type: integer }
                   latestReceipt:

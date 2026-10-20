@@ -57,7 +57,7 @@ test("front-door facts: empty store reports honest zeros", async t => {
   const { origin } = await serve(t);
   const facts = await (await fetch(`${origin}/api/public/front-door`)).json();
   assert.equal(facts.schema, "project-room-front-door/1");
-  assert.deepEqual(facts.counters, { resultsVerified: 0, receiptsIssued: 0, workAvailableNow: 0 });
+  assert.deepEqual(facts.counters, { resultsVerified: 0, resultsTierVerified: 0, receiptsIssued: 0, workAvailableNow: 0 });
   assert.equal(facts.latestReceipt, null);
 });
 

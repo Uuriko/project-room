@@ -16,7 +16,13 @@ export function frontDoorFacts(ctx) {
   return ctx.json(ctx.res, 200, {
     schema: "project-room-front-door/1",
     counters: {
+      // Two different proofs, two counters, never conflated:
+      // resultsVerified counts only receipts whose result the server
+      // itself recorded as a merged pull request; resultsTierVerified
+      // counts receipts carrying a recorded verification tier
+      // (system_checked or hash_only — the public-work outcome strings).
       resultsVerified: receipts.filter(r => r.mergedAt && r.pullRequest).length,
+      resultsTierVerified: receipts.filter(r => r.verification === "system_checked" || r.verification === "hash_only").length,
       receiptsIssued: receipts.length,
       workAvailableNow: ctx.store.publicWorkClaims.list({ limit: 1 }).claimableCount ?? 0,
     },
