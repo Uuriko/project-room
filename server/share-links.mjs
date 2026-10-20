@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
@@ -555,7 +555,13 @@ export class ShareLinks {
     const access = this.accessOf(row), role = access === "co_admin" ? "moderator" : access === "member" ? "member" : "guest";
     const admission = this.admissionIssuer(row, room), now = this.store.now();
     const rejoin = event({ id: randomUUID(), idempotencyKey: `link-rejoin:${row.id}:${redemptionId}`, roomId: row.room_id, actorId: admission.memberId, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
-      data: { memberId, expectedMemberRevision: member.revision, permissions: access === "co_admin" ? linkPermissions("co_admin") : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
+      data: { memberId, expectedMemberRevision: member.revision, permissions: access === "co_admin" ? linkPermissions("co_admin") : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+        // Display-name policy v3: this direct builder stands in for
+        // store.command, so it carries the stamp store.command would add —
+        // without it the reducer's reactivation guard (stamped events
+        // only, so pre-v3 history is never re-judged) cannot fire on this
+        // live path (CURE-4348-2 producer census).
+        displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } });
     const state = { ...applyEventWithGrowth(room.state, rejoin, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");

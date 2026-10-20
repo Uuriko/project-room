@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T, INVITATION_ROLES } from "../src/events.js";
+import { EVENT_TYPES as T, INVITATION_ROLES, event } from "../src/events.js";
+import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 function setup(t) {
   const directory = mkdtempSync(pathJoin(tmpdir(), "room-rejoin-"));
@@ -136,4 +137,34 @@ test("the integrity audit refuses a released binding when the old member was rem
   store.db.prepare("DELETE FROM member_accounts WHERE room_id='commons' AND member_id='friend-1'").run();
   store.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES('commons','friend-x','account-friend','forged')").run();
   assert.throws(() => store.verifyInvitationAudit(), /operator reconciliation/);
+});
+
+// CURE-4348-2 (producer census): reactivateSelfLeft builds its
+// MEMBER_ACCESS_CHANGED directly, outside store.command — it must carry
+// the display-name policy stamp itself, or the reducer's v3 reactivation
+// guard never fires on this live path and a returning member reactivates
+// over a distinct active holder of the same name. The holder here is
+// era history: admitted under display-name policy v2, whose admission
+// rules did not reserve inactive members' names (the population the
+// guard exists for).
+function addEraHolder(store, displayName) {
+  const room = store.room("commons");
+  const ev = event({ id: randomUUID(), idempotencyKey: `era-holder-${randomUUID()}`, roomId: "commons", actorId: "owner",
+    type: T.MEMBER_ADDED, at: new Date(store.now()).toISOString(),
+    data: { memberId: "era-holder", displayName, kind: "human", permissions: [], displayNamePolicyVersion: 2 } });
+  const state = { ...applyEventWithGrowth(room.state, ev, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+  const projection = store.storedProjection("commons", state), sequence = room.sequence + 1;
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("commons", sequence, ev.id, JSON.stringify(ev));
+  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, "commons");
+}
+
+test("a self-left member cannot reactivate over a distinct active holder of the name (link rejoin is stamped)", t => {
+  const { store, link, join, members, setActive } = setup(t);
+  const id = join(link()).session.member.id; // displayName "Friend"
+  setActive(store.issueAccessKey("commons", id), id, false); // self-leave
+  addEraHolder(store, "Friend");
+  assert.equal(members()["era-holder"].active, true);
+  assert.throws(() => join(link()), error => error.code === "display_name_unavailable");
+  assert.equal(members()[id].active, false, "the returning member stays inactive");
+  assert.equal(Object.values(members()).filter(m => m.active && m.displayName === "Friend").length, 1, "exactly one active holder of the name");
 });

@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { RoomStore, validateCommand } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, event } from "../src/events.js";
+import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   guestInviteContract, guestVoteExcluded, isGuestInviteCode,
@@ -750,4 +751,43 @@ test("guest upgrade diagnoses missing/invalid fields instead of 'not a guest'", 
   const missingTier = await upgrade({ memberId: "guest-agent-0000000000000000" });
   assert.equal(missingTier.status, 422);
   assert.match((await missingTier.json()).error.message, /tier is required/);
+});
+
+// CURE-4348-2 (producer census): reactivateGuestSeat builds its
+// MEMBER_ACCESS_CHANGED directly, outside store.command — it must carry
+// the display-name policy stamp itself, or the reducer's v3 reactivation
+// guard never fires on this live path and a returning guest reactivates
+// over a distinct active holder of the same (badged) name. The holder is
+// era history: admitted under display-name policy v2, whose admission
+// rules did not reserve inactive members' names.
+function addEraHolder(store, displayName) {
+  const room = store.room("commons");
+  const ev = event({ id: randomUUID(), idempotencyKey: `era-holder-${randomUUID()}`, roomId: "commons", actorId: "owner",
+    type: T.MEMBER_ADDED, at: new Date(store.now()).toISOString(),
+    data: { memberId: "era-holder", displayName, kind: "human", permissions: [], displayNamePolicyVersion: 2 } });
+  const state = { ...applyEventWithGrowth(room.state, ev, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+  const projection = store.storedProjection("commons", state), sequence = room.sequence + 1;
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("commons", sequence, ev.id, JSON.stringify(ev));
+  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, "commons");
+}
+
+test("a disconnected guest cannot reactivate over a distinct active holder of the badged name (seat reactivation is stamped)", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey } = s;
+  const guest = await redeemGuest(t, s, { name: "Returner" });
+  const memberId = guest.member.id;
+  const disc = await request("/api/rooms/commons/guest-invites-disconnect", { method: "POST", token: ownerKey, data: { memberId } });
+  assert.equal(disc.status, 200);
+  assert.equal(store.room("commons").state.members[memberId].active, false);
+  addEraHolder(store, "Returner (guest)");
+  const minted = await mintInvite(request, ownerKey, { guestLabel: "blocked encore" });
+  const keys = generateKeyPair();
+  const cardBody = { name: "Returner", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: guest.identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const re = await request("/api/guest-invites/redeem", { method: "POST", token: guest.identity.secret, data: { inviteCode: minted.code, card } });
+  assert.equal(re.status, 422, "reactivation over a distinct active holder is refused");
+  assert.equal(store.room("commons").state.members[memberId].active, false, "the guest seat stays inactive");
+  const journal = store.db.prepare("SELECT body FROM events WHERE room_id='commons'").all()
+    .map(r => JSON.parse(r.body)).filter(e => e.type === T.MEMBER_ACCESS_CHANGED && e.data.memberId === memberId && e.data.active === true);
+  assert.equal(journal.length, 0, "no reactivation was journaled");
 });
