@@ -46,6 +46,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_begin_work: { access: `write, ${MEMBER_WRITE}`, cost: "up to three writes (accept, claim, start), starts no AI", rest: `${COMMANDS} (work.started)` },
   room_submit_text_result: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.completed)` },
   room_record_handoff: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.handoff_recorded)` },
+  room_propose_work: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.proposed)` },
   room_join_packet: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static enrollment document" },
   room_join_kits: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static kits document" },
   room_join_prompt: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static door prompt document" },

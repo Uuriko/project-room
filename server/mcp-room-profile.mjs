@@ -11,6 +11,7 @@ import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
+import { buildWorkClaimPage } from "./work-claim-routes.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -424,13 +425,19 @@ function listWork(store, secret, args) {
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
     nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
   })) ?? null;
+  // Live file claims ride along on the default listing so the core profile
+  // can see who holds which paths without room_read_board.
+  const claims = focus === "all" && store.workClaims && member
+    ? buildWorkClaimPage(store.workClaims.list(args.roomId), args.roomId, member.id,
+      new URLSearchParams({ view: "summary" }), Date.now()).claims
+    : null;
   return stampWorkListing({
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     ...(sort ? { sort } : {}),
-    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
+    work, ...(claims ? { claims } : {}), ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
 
