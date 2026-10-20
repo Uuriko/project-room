@@ -150,7 +150,7 @@ test('catalog selection uses live usable membership, preserves Room core size an
  const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
  assert.deepEqual((await list()).body.result.tools,normal.result.tools);
  room.members[member].active=false;f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
- const inactive=(await list()).body;assert.deepEqual(inactive.result.tools.map(tool=>tool.name),publicFocus.result.tools.map(tool=>tool.name));
+ const inactive=(await list()).body;const focusNames=publicFocus.result.tools.map(tool=>tool.name);assert.deepEqual(inactive.result.tools.map(tool=>tool.name),[...focusNames.slice(0,4),'room_join','room_create',...focusNames.slice(4)]); // an inactive membership grants nothing beyond the roomless default, which lists the lobby-callable join verbs (qa-mcp-roomless-join)
  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM identity_links').get().n,1,'inactive link remains but is not authority');
 });
 

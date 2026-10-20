@@ -32,6 +32,10 @@ import { createRoomServer } from "../server/http.mjs";
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
+// The onboarding verbs listed for roomless identities only (qa-mcp-roomless-join):
+// callable from the lobby, so the roomless default list names them too.
+const ONBOARDING_VERBS = ["room_join", "room_create"];
+
 // The 18 essential tools the packet names for the member core profile.
 const CORE_18 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
@@ -126,11 +130,11 @@ test("anonymous catalog is exactly the packet's seven tools", async () => {
     "packet must name room_mcp_snippet among the four join tools");
 });
 
-test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+test("outside identity gets the packet's seven public-work tools, four join readers, and the two join verbs", async () => {
   const names = await toolsList(undefined, outsiderSecret);
-  // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  // Packet: "Outside identities get seven public-work tools, the four join
+  // documents, and room_join and room_create by default."
+  assert.deepEqual(names, [...JOIN_READERS, ...ONBOARDING_VERBS, ...PUBLIC_WORK_ALL]);
 });
 
 test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {

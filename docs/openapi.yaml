@@ -15311,7 +15311,8 @@ paths:
         plus public_work_recommend and public_work_read_task. These read
         public volunteer tasks, never private room history or claim mutations.
         A saved identity with no usable Room membership gets those four
-        documents plus seven public-work tools by default. Explicit
+        documents, room_join and room_create, plus seven public-work tools
+        by default. Explicit
         public_work_claim, public_work_renew, public_work_release,
         public_work_finish and public_work_my_review reuse the HTTP claim
         and review authority without admitting a room member. Exact domain
