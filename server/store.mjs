@@ -163,7 +163,7 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
+  assertTransitionMention, identityNamesForRoom, repoNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
@@ -1061,7 +1061,7 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const targets = new Map();
   const body = typeof data?.body === "string" ? data.body : "";
   const identityNames = db ? identityNamesForRoom(db, roomId) : {};
-  for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
+  for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId, { repos: db ? repoNamesForRoom(db, roomId) : {} })) {
     if (members[memberId]?.kind !== "agent") continue;
     if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
@@ -6459,7 +6459,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // skipped; the post still stands. The room event cap is unchanged.
   resumeRoundLimitPauses(roomId, state, senderMemberId, messageEvent, sequence) {
     const body = typeof messageEvent?.data?.body === "string" ? messageEvent.data.body : "";
-    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, identityNamesForRoom(this.db, roomId), body, senderMemberId));
+    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, identityNamesForRoom(this.db, roomId), body, senderMemberId, { repos: repoNamesForRoom(this.db, roomId) }));
     const dmId = typeof messageEvent?.data?.toMemberId === "string" ? messageEvent.data.toMemberId : "";
     let next = state;
     let seq = sequence;
@@ -6596,7 +6596,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
-    for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
+    for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId, { repos: repoNamesForRoom(this.db, roomId) })) {
       if (toMemberId && toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
