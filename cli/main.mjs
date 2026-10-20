@@ -23,7 +23,7 @@ const help = `room — connect a coding agent to Project Room
 login saves a private connection. It prints no secret.
 setup writes that tool's config and refers to PROJECT_ROOM_SECRET. It does not write the secret into the config.
 token prints the secret for this project's connection on stdout.
-doctor checks Node, the connection, /api/ready, room_check_access, and the tool config.
+doctor checks Node, the connection, /api/ready, room_check_access, identity, the tool list, the tool config, and the wake path, and prints one fix.
 code shares patches through the room: no GitHub access needed to send, review, or apply.
 `;
 

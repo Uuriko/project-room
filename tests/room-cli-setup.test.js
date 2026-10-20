@@ -230,12 +230,24 @@ test("doctor exit codes follow ready, access, and the tool config", async t => {
   assert.equal(unconfigured.code, 1);
   assert.match(unconfigured.out, /room setup/);
   assert.equal((await run(["setup", "cursor", "--project", project], { env, cwd: project, platform: "linux" })).code, 0);
-  const ok = await run(["doctor"], {
+  const toolsMissing = await run(["doctor"], {
     env, cwd: project,
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ result: { structuredContent: { status: "credential_accepted" } } }) }),
   });
+  assert.equal(toolsMissing.code, 1);
+  assert.match(toolsMissing.out, /missing room_check_access, room_post_message.*Fix: room setup cursor/);
+  const tools = ["room_check_access", "room_post_message"].map(name => ({ name }));
+  const ok = await run(["doctor"], {
+    env, cwd: project,
+    fetchImpl: async (url, init) => {
+      const method = init?.body ? JSON.parse(init.body).method : "GET";
+      const result = method === "tools/list" ? { tools } : { structuredContent: { status: "credential_accepted" } };
+      return { ok: true, status: 200, json: async () => ({ result }) };
+    },
+  });
   assert.equal(ok.code, 0, ok.out);
   assert.match(ok.out, /check out/);
+  assert.match(ok.out, /Wake path: .* Fix:/);
   assert.equal(ok.out.includes(TOKEN), false);
 });
 
@@ -277,6 +289,7 @@ test("login stores the connection as a private file and the printed result has n
   assert.equal(readFileSync(join(project, ".cursor", "mcp.json"), "utf8").includes(saved.token), false);
   const doctor = await run(["doctor"], { env, cwd: project, platform: "linux" });
   assert.equal(doctor.code, 0, doctor.out);
+  assert.match(doctor.out, /identity, tools/);
   assert.equal(doctor.out.includes(saved.token), false);
   const token = await run(["token"], { env, cwd: project });
   assert.equal(token.out, saved.token + "\n");
@@ -321,4 +334,12 @@ test("saved connections accept a canonical home alias and reject symlinks escapi
   symlinkSync(outside, escaped, "dir");
   writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: escaped }), { mode: 0o600 });
   assert.throws(() => readPointer("room-agent", env), /outside the connection directory/);
+});
+
+test("doctor wake advice is quiet only when the room can reach the agent", async () => {
+  const { wakePathAdvice } = await import("../cli/commands/doctor.mjs");
+  assert.equal(wakePathAdvice({ wakeMode: "wakeable" }), null);
+  assert.equal(wakePathAdvice({ wakeMode: "pull-only", lastPollAt: 1 }), null);
+  assert.match(wakePathAdvice({ wakeMode: "pull-only", lastPollAt: null }), /Fix:/);
+  assert.match(wakePathAdvice(null), /Fix:/);
 });
