@@ -5,7 +5,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -n \"$ROOM_AGENT_CONFIG\" ]; then echo \"Project Room identity: $ROOM_AGENT_CONFIG\"; else echo \"Project Room: set ROOM_AGENT_CONFIG to a private connection directory, then run node scripts/grok-room-host.mjs doctor\"; fi"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/room-mentions.mjs\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/room-mentions.mjs\" stop",
+            "timeout": 10
           }
         ]
       }
