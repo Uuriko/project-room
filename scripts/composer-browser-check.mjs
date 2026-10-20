@@ -119,6 +119,45 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.getByRole("button", { name: "Remove options-note.txt", exact: true }).click();
     await input.fill("");
 
+    await page.route("**/api/rooms/commons/files", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Try later" } }) }) : route.continue());
+    await page.locator('#composer-file').setInputFiles({ name: 'retry-note.txt', mimeType: 'text/plain', buffer: Buffer.from('Retry these exact bytes') });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await input.fill('A message with a recovered file');
+    const beforeFailedFile = store.room('commons').sequence;
+    await input.press('Enter');
+    assert.equal(await input.inputValue(), 'A message with a recovered file', 'unresolved attachment keeps the text draft');
+    assert.equal(store.room('commons').sequence, beforeFailedFile, 'no text-only message is posted behind a failed file');
+    await page.unroute('**/api/rooms/commons/files');
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click({ timeout: 2000 });
+    await page.locator('#composer-attachments .file-chip').getByText('retry-note.txt', { exact: true }).waitFor();
+    await page.locator('#composer-file').setInputFiles({ name: 'second-note.txt', mimeType: 'text/plain', buffer: Buffer.from('Second attachment') });
+    await page.locator('#composer-attachments .file-chip').getByText('second-note.txt', { exact: true }).waitFor();
+    let firstCommitDraft;
+    await page.route('**/api/rooms/commons/files/*/commit', async route => {
+      firstCommitDraft ??= await page.evaluate(() => Object.values(sessionStorage).map(value => {
+        try { return JSON.parse(value); } catch { return null; }
+      }).find(value => Array.isArray(value?.entries)));
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'storage_unavailable', message: 'Try later' } }) });
+    });
+    await input.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A message with a recovered file').length, 1);
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    const boundFiles = firstCommitDraft.entries.flatMap(([, draft]) => draft.files ?? []);
+    assert.equal(boundFiles.length, 2);
+    assert.ok(boundFiles.every(file => file.commitMessageId), 'every attachment is bound before the first commit request');
+    assert.equal(new Set(boundFiles.map(file => file.commitMessageId)).size, 1);
+    await page.unroute('**/api/rooms/commons/files/*/commit');
+    await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click();
+    await page.getByRole('button', { name: 'Retry second-note.txt', exact: true }).click();
+    await page.locator('#composer-attachments').waitFor({ state: 'hidden' });
+    const recoveredMessage = store.room('commons').state.messages.find(m => m.body === 'A message with a recovered file');
+    assert.equal(store.roomAttachments.list(owner, 'commons').files.filter(f => f.messageId === recoveredMessage.id).length, 2, 'retry commits onto the original message');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === recoveredMessage.body).length, 1);
+
     // An explicit agent request stays discoverable without making ordinary Send a request.
     const recipient = page.locator("#message-to-select"), requestButton = page.locator("#request-reply");
     await recipient.selectOption("nova", { force: true });

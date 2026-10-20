@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Public read-only face for rooms.
 //
 // Rooms are private by default. The room owner may explicitly opt a room
@@ -190,7 +191,8 @@ export class PublicFace {
   faceByCode(code) {
     const row = this._resolveCode(code);
     const state = this._publicState(row);
-    return this.sanitize(state);
+    const messages = messageRepository(this.store, row.room_id, state).recent(MAX_FACE_MESSAGES, m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
+    return this.sanitize({ ...state, messages });
   }
 
   feedByCode(code, { after = null, limit = 50 } = {}) {
@@ -200,20 +202,16 @@ export class PublicFace {
     let n = Number(limit);
     if (!Number.isSafeInteger(n) || n < 1) n = 50;
     n = Math.min(n, MAX_FEED_LIMIT);
-    const messages = (Array.isArray(state?.messages) ? state.messages : [])
-      // v1 channel caveat: the core projection has no channel field, so
-      // every non-DM message is treated as public. Per-channel public
-      // flags are explicitly out of v1 (see DESIGN.md).
-      .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
-    // M-15: an unrecognized cursor fails closed — silently restarting from
-    // the first message would make clients re-read from the top (duplicate
-    // processing, potential infinite re-poll loop).
-    const start = after === null || after === undefined ? 0 : (() => {
-      const at = messages.findIndex(m => m.id === after);
-      if (at < 0) fail(422, "invalid_feed_cursor", "unknown feed cursor — re-fetch from the start");
-      return at + 1;
-    })();
-    const page = messages.slice(Math.max(0, start), Math.max(0, start) + n);
+    const repository = messageRepository(this.store, row.room_id, state);
+    const visible = message => message && message.toMemberId == null && typeof message.body === 'string' && message.body.length > 0;
+    if (after !== null && !visible(repository.get(after))) fail(422, 'invalid_feed_cursor', 'unknown feed cursor — re-fetch from the start');
+    const page = [];
+    let hasMore = false;
+    for (const message of repository.records({afterId:after})) {
+      if (!visible(message)) continue;
+      if (page.length === n) { hasMore = true; break; }
+      page.push(message);
+    }
     return Object.freeze({
       messages: Object.freeze(page.map(m => Object.freeze({
         id: m.id,
@@ -222,7 +220,7 @@ export class PublicFace {
         body: m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body
       }))),
       next: page.length ? page[page.length - 1].id : after,
-      hasMore: start + n < messages.length,
+      hasMore,
       fetchedAt: nowMs()
     });
   }
@@ -238,7 +236,7 @@ export class PublicFace {
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>${esc(face.room.title || "Project Room")}</title>
-<style>:root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+<style>:root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--control-min-target-coarse:2.75rem;--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 [data-theme="light"]{color-scheme:light;--bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%)}
 body{font-family:var(--font-sans);max-width:44rem;margin:2rem auto;padding:0 1rem;background:var(--bg);color:var(--text)}
 a{color:var(--blue)}a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

@@ -10,8 +10,21 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  // These specific browser modules were deliberately retired from v1. A
+  // pre-removal HEAD must not resurrect them in the working-tree fixture.
+  for (const retired of ['account-setup-ui.js', 'gmail-ui.js', 'inbox-client.js', 'inbox-quarantine-ui.js', 'inbox-send-ui.js', 'inbox-ui.js']) {
+    const path = 'src/' + retired;
+    if (!publicAssetPaths.includes(path) && !existsSync(join(repository, path))) paths.delete(path);
+  }
+  paths.add('server/message-entity-projection.mjs');
+  paths.add('server/message-replay-snapshot.mjs');
+  paths.add('server/work-repository.mjs');
+  paths.add('server/message-command-service.mjs');
+  paths.add('src/message-reducers.js');
+  paths.add('src/work-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
   paths.add('client/work-preparation.mjs'); // Restored from #908 revert: MCP work-preparation helper (imported by client/mcp-stdio.mjs)
+  paths.add('client/work-brief.mjs');
   paths.add('client/host-result.mjs'); paths.add('client/host-subprocess.mjs'); paths.add('client/host-verification.mjs');
   paths.add('src/agent-error.mjs');
   paths.add('client/request-notices.mjs');
@@ -28,9 +41,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-draft.mjs');
   paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
-  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add('src/gmail-ui.js'); paths.add('src/account-setup-ui.js');
-  paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
-  paths.add('src/inbox-send-ui.js');
+  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs');
+
   paths.add('src/room-roster.js');
   paths.add('src/account-settings-ui.js');
   paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
@@ -63,7 +75,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)
-  paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
   paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
   paths.add('server/agent-discovery.mjs');
@@ -87,9 +98,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('offline.html'); paths.add('icons/icon-192.png'); paths.add('icons/icon-512.png'); paths.add('icons/maskable-512.png'); paths.add('icons/apple-touch-icon-180.png');
   paths.add('src/pwa-install.js'); paths.add('src/push-ask.js');
   paths.add('src/public-a11y.css');
-  paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
-  paths.add('src/work-recipes.js');
   paths.add('src/board.js');
   paths.add('src/work-templates.js');
   paths.add('src/room-templates.js');
@@ -118,20 +127,20 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+  paths.add('server/legacy-message-shape.mjs'); // projection shape upgrade v1 (imported by server/store.mjs)
   paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
   paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
   paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/squads.mjs'); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
-  paths.add('src/squads-ui.js'); // plan-squads: read-only squad roster panel (lazy-loaded by src/app.js)
   paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
   paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
   paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
   // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
-  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs']) paths.add(path);
+  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs', 'server/operator-archive.mjs']) paths.add(path);
   paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
   paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
   paths.add('src/password-auth.mjs'); // Email+password crypto (imported by server/http.mjs, slice 2)
@@ -176,6 +185,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
+  paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
   paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)

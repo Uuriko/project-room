@@ -4,9 +4,9 @@ import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 38;
+export const STORE_SCHEMA_VERSION = 42;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -31,7 +31,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 export const unfencedAdditiveTables = Object.freeze([
   "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
-  "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
+  "public_work_reviews", "public_work_review_requests", "public_work_review_versions", // Private review projections/journals/version history never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
@@ -370,6 +370,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Durable live work claims: additive, verified on open, included in recovery.
   "work_claims",
   "work_claim_config",
+  // Claim-history spill (W3 data preservation): the append-only store for
+  // history stamps the SEC-2 cap trims out of work_claims rows. Purely
+  // additive and intentionally NOT fenced, same rationale as the claim
+  // rows themselves — the registry verifies its own schema on open.
+  "work_claim_history",
   // human_push_subscriptions (browser push for human members): one row per
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,
@@ -424,6 +429,9 @@ export const unfencedAdditiveTables = Object.freeze([
   // integrity cron writes it; a row names what an operator must repair.
   // Older writers have no path to it. A missing row means not parked.
   "messages_backfill_blocks",
+  // messages_backfill_state: the cursor's replay state when it is too big
+  // for one row, split into parts. Same writer and lifetime as the cursor.
+  "messages_backfill_state",
   // agent_wants_work (BOARD-WAKE-2): an agent's opt-in ready-work filter and
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.
@@ -533,14 +541,17 @@ const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill
 // created lazily on first record/read — a store that never ran the
 // integrity job has no table, so it is allowed by the recovery audit but
 // never required.
-const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
+// projection_shape_upgrades (server/legacy-message-shape.mjs): audit rows of
+// the one-time legacy message shape upgrade, created on its first change. A
+// store that never held a legacy record has none; older writers have no path.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures", "projection_shape_upgrades"]);
 // patrol_* (ClueBot phase 1, server/patrol.mjs): the resident patrol's own
 // per-room cursor, claim/message shadows and findings journal. Purely
 // additive, created lazily by ensurePatrolSchema on the first patrol tick
 // — a store the patrol has never run against has none of them, so they are
 // allowed by the recovery audit but never required. The patrol writes only
 // these tables; older writers have no code path to them.
-const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings"]);
+const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
@@ -551,9 +562,11 @@ export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...AB
 // table or its triggers; verifyWriterFence(36) must not require them.
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
 const v37FencedTables = Object.freeze([...v34FencedTables, "messages"]);
-export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables, "messages"])]);
+const v41FencedTables = Object.freeze([...v37FencedTables, "message_replay_snapshots"]);
+const v42FencedTables = Object.freeze([...v41FencedTables, "work_entities"]);
+export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables, "messages", "message_replay_snapshots", "work_entities"])]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
-  : version === 28 ? deployedV28Tables : version <= 33 ? deployedV28Tables : version <= 36 ? v34FencedTables : v37FencedTables;
+  : version === 28 ? deployedV28Tables : version <= 33 ? deployedV28Tables : version <= 36 ? v34FencedTables : version <= 40 ? v37FencedTables : version === 41 ? v41FencedTables : v42FencedTables;
 export const fenceDefinitions = version => Object.freeze(tablesFor(version).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
@@ -592,7 +605,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
-  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36, 37]) db.function(`project_room_writer_v${version}`, () => version);
+  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

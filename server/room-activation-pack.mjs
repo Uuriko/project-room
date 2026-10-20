@@ -12,7 +12,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
-import { availableClaimsInRoom } from "./available-work.mjs";
+import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -155,9 +155,14 @@ const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
 // It was previously an opaque base64url token that no endpoint parsed back
 // (#3222), so the cursor this pack handed out could not be used anywhere.
 
-export function buildActivationPack(store, roomSlug, viewerId = null) {
+export function buildActivationPack(store, roomSlug, viewerId = null, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
+  // PERF-10X L4: one decoded board per request, shared by the pack's
+  // openClaims and the embedded orient (which shares it onward to its
+  // next-actions / fleet consumers). A caller composing reads in one
+  // request may pass its own memo in as options.boardList.
+  const boardList = options.boardList ?? memoizeBoardList(store);
   if (!state.room) throw new Error("Room projection is missing its room record");
   const now = new Date(store.now()).toISOString();
   const members = Object.values(state.members ?? {})
@@ -180,7 +185,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    openClaims: availableClaimsInRoom(store, roomSlug, { viewerId }),
+    openClaims: availableClaimsInRoom(store, roomSlug, { viewerId, boardList }),
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
     // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
     // messageVisibleToViewer predicate also enforces the history floor, and
@@ -193,7 +198,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
-    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false });
+    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
   }
   return pack;
 }

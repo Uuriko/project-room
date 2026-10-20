@@ -89,6 +89,27 @@ test("deploy lag: past the threshold fails, a fresh merge only warns", async () 
   assert.equal(fresh.report.deploy.status, "pending");
 });
 
+test("deploy lag: a fresh merge of an old branch is pending, not stale (deploy #2648)", async () => {
+  const at = ageHours => ({ committer: { date: new Date(Date.now() - ageHours * HOUR).toISOString() } });
+  const main = [200, "application/json", JSON.stringify({ sha: MAIN })];
+  const comparePath = `/repos/Uuriko/project-room/compare/${LIVE}...${MAIN}`;
+  const compare = commits => [200, "application/json", JSON.stringify({ status: "ahead", ahead_by: commits.length, behind_by: 0, commits })];
+  // Branch commit is 25 h old, but main only took it in via a merge 4 min ago.
+  const freshMerge = await smoke(await stand({ "/repos/Uuriko/project-room/commits/main": main, [comparePath]: compare([
+    { sha: "b1", parents: [{ sha: "b0" }], commit: at(25) },
+    { sha: MAIN, parents: [{ sha: LIVE }, { sha: "b1" }], commit: at(0.07) },
+  ]) }));
+  assert.equal(freshMerge.code, 0);
+  assert.equal(freshMerge.report.deploy.status, "pending");
+  // Work that has sat on main's first-parent line past the threshold still fails.
+  const oldOnMain = await smoke(await stand({ "/repos/Uuriko/project-room/commits/main": main, [comparePath]: compare([
+    { sha: "m1", parents: [{ sha: LIVE }], commit: at(30) },
+    { sha: MAIN, parents: [{ sha: "m1" }], commit: at(1) },
+  ]) }));
+  assert.equal(oldOnMain.code, 1);
+  assert.deepEqual(failures(oldOnMain.report), ["deploy_lag"]);
+});
+
 // A smoke classification regression must not hide CSP breakage on repaired
 // pages behind historical warnings. Transport/browser enforcement lives in
 // the public-page browser journey; this isolates the reporting boundary.
