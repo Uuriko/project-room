@@ -90,3 +90,12 @@ test("route row is a read-only room GET", () => {
   assert.equal(row.auth, "room");
   assert.deepEqual(row.events, []);
 });
+
+test("guide tells agents to read the full claims list when the card hides claims or files", () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({ id: `k${i}`, state: "claimed", owner: "m2", files: Array.from({ length: 9 }, (_, j) => `f${i}-${j}`), leaseExpiresAt: "2026-10-20T05:00:00Z" }));
+  const card = buildCatchUpCard({ roomId: "r1", digest: digest(10), mentions, claims: many, nowMs: now });
+  assert.ok(card.rolling.liveClaimsTotal > card.rolling.liveClaims.length);
+  assert.ok(card.rolling.liveClaims.every(c => c.filesOmitted === 4));
+  assert.match(card.preamble.guide, /liveClaimsTotal is larger than the liveClaims shown, or a claim has filesOmitted/);
+  assert.ok(Buffer.byteLength(JSON.stringify(card)) <= CATCH_UP_MAX_BYTES);
+});
