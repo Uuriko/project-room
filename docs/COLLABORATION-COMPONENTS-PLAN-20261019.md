@@ -125,3 +125,16 @@ The broad Node26 full run reported an OG PNG golden-hash mismatch and a public-r
 The final badge deletion initially removed a still-used import for message rendering. Changed-file lint caught it and the browser boot failed; restored the import while retaining removal of the duplicate work-card badge. Final targeted recheck required before declaring the deletion qualified.
 
 Final badge/import correction: desktop and phone inline-result checks 2/2 pass; changed-file ESLint zero errors, 2 existing browser-fixture warnings. Retain the earlier failed run as superseded only for this explicitly rechecked path. Candidate remains draft pending hosted qualification and broader-suite reconciliation.
+
+
+### Follow-up bug audit (2026-10-19, PR4288)
+
+Hosted Node24 unit, lint, coverage, Cloudflare, eval and invariant checks passed at 9e811941. Contract failed because this document was missing from INDEX. Browser shards 2 and 4 retained the removed standalone external-AI return entry. Repaired both fixtures to enter Use my AI then Paste AI draft; all 23 draft-return/native-draft browser checks pass locally. Docs reachability passes (602 links). Changed-script ESLint has zero errors and one existing prefer-const warning. These are local repairs; no new hosted-head or deployment claim.
+
+New product findings, not fixed in this checkpoint:
+
+1. Result reader copy timeout releases its per-view copy flag after 1500ms, although the OS write is not cancellable. A deterministic real-browser experiment held that write, waited for the failure message and enabled button, issued a newer copy, then completed the old write. The old content overwrote the newer clipboard content. Evidence: /tmp/room-clipboard-audit.mjs and /tmp/room-clipboard-audit.log. This uses a simulated clipboard implementation, not evidence of OS incidence.
+2. Portable prompt and editable-result copy paths instead retain pending-write latches indefinitely. Code inspection and existing held-copy tests show reopening preserves those latches: a never-settling clipboard operation keeps copy/context controls or editable-result input disabled. No bounded recovery is implemented there.
+3. Each surface owns a separate clipboard latch, so those latches do not serialize writes across the result reader, prompt dialog and editable-result dialog. This is a code-level finding; cross-surface overwrite remains to be reproduced independently.
+
+Next build: one shared clipboard-operation owner for these surfaces, with retained in-flight ownership, explicit pending versus failed outcomes, stale-view fencing, and usable selection/download fallbacks. A timer must not pretend to cancel the OS write. Test actual out-of-order settlements and view/session transitions. Avoid adding permanent controls or claiming clipboard writes outside this app can be controlled. Then finish exact-head CI and coordinated landing of PR4288.

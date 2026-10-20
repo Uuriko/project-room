@@ -76,7 +76,9 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   const card = page.locator(`[data-work-record-id="${workId}"]`), input = page.locator("#portable-result"), submit = page.locator("#portable-submit"), dialog = page.locator("#portable-dialog");
   const open = async () => {
     if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
-    await card.getByRole("button", { name: "Paste AI draft", exact: true }).click(); await dialog.waitFor({ state: "visible" });
+    await card.getByRole("button", { name: "Use my AI", exact: true }).click();
+    await dialog.waitFor({ state: "visible" });
+    await page.locator("#portable-add-result").click();
   };
   const answer = (body = "Synthetic agenda: choose priorities and review blockers.") => `ROOM-RETURN ${JSON.stringify({ version: 1, roomId: "commons", workItemId: workId, packetId: "manual-packet", basisRevision: 0 })}\n\n${body}`;
   const unknown = async () => { await page.getByText("Save not confirmed. Retry the same draft.", { exact: true }).waitFor(); assert.equal(await input.getAttribute("readonly"), ""); };
