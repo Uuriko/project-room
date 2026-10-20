@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 
-const LEAN = ["room_needs_me", "room_read_messages", "room_post_message", "room_list_work", "room_acquire_claim", "room_release_claim", "room_search", "room_read_many", "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"];
+const LEAN = ["room_needs_me", "room_read_messages", "room_post_message", "room_reply", "room_list_work", "room_acquire_claim", "room_release_claim", "room_read_work", "room_begin_work", "room_submit_text_result", "room_record_handoff", "room_search", "room_read_many", "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"];
 
-test("lean default lists the 14 room tools first, then the join helpers", () => {
+test("lean default lists the 19 room tools first, then the join helpers", () => {
   const names = listedMcpTools("core").map(tool => tool.name);
-  assert.deepEqual(names.slice(0, 14), LEAN);
+  assert.deepEqual(names.slice(0, 19), LEAN);
 });
 
 test("default list is byte-identical for members, non-members and anonymous callers", () => {
@@ -23,10 +23,10 @@ test("money tools stay out of the default and remain in the full catalog", () =>
   assert.ok(listedMcpTools("full").some(tool => tool.name === "bounty_list"));
 });
 
-test("room_read_many is read-only and the default stays under 14 KB", () => {
+test("room_read_many is read-only and the default stays under 24 KB", () => {
   const core = listedMcpTools("core");
   assert.equal(core.find(tool => tool.name === "room_read_many").annotations.readOnlyHint, true);
-  assert.ok(JSON.stringify(core).length < 14000);
+  assert.ok(JSON.stringify(core).length < 24000);
 });
 
 import { mkdtempSync, rmSync } from "node:fs";
