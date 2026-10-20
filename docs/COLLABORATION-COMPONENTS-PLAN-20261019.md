@@ -452,3 +452,22 @@ subtraction fixture/packaging failures have focused repair evidence; the prior
 Node26 receipt-image golden mismatch remains. This is not frozen-head full-suite
 qualification. Hosted checks, integration and production deployment are still
 separate release steps. No physical mobile, real-human or live-provider claim.
+
+## Connected result surface (2026-10-20)
+
+Implement the real flow using existing ownership boundaries. Keep chat-first assistant requests and pasted/attached material as the entry; do not invent a second task or execution system. Reuse focused work/discussion/context and persisted continuation contracts (qualified by the experiment and transport journey).
+
+1. The result-reader owns a responsive pinned surface: alongside conversation on wide screens; existing contextual reading on narrow screens. Keep exact receipt/version and withdrawal checks unchanged.
+2. Desktop feedback moves to the existing source-thread composer while retaining the result. Feedback remains a reply to the exact evidence message. On narrow screens feedback returns focus and space to the composer.
+3. A new result must not silently replace an open older version. Closing restores an available original control or the composer. Resizing must preserve keyboard focus and unsent feedback.
+4. Preserve the Results-list reader within its modal until the user chooses Reply; do not make an inaccessible background panel behind an open modal.
+5. Extend the existing transport journey and result tests with desktop/phone placement, concurrent update, draft and resize checks. Reuse current assistant-entry and attachment tests; no inference-based authority or configured-assistant claim.
+6. Regenerate source manifest after source edits. Qualify browser, native-shell and affected contracts. Record implementation vs deployment and any remaining release gates separately.
+
+Implemented in the existing reader and shared stylesheet, with no new editor, work model, endpoint or stored state. Wide-screen reading and exact-version feedback now coexist; phone feedback returns to the existing composer. Desktop/phone screenshots were inspected.
+
+Qualification: 59 result/native-text browser cases pass after updating obsolete placement/close assertions; five comparison browser cases passed with unchanged source. Thirteen composer/paste/upload cases and five feedback unit cases pass. Lint has zero errors and existing warnings. Native WKWebView first-use, rendered message, durable draft and window reopen pass; this native smoke does not certify the new docked-result interaction itself. Browser runs used Node 26.8.2, not CI's Node 24.
+
+Evidence: `/Users/johnpotter/Documents/ChatGPT/project room/outputs/connected-result-20261020/`, including the original seven assertion failures and the successful corrected run. Two old narrow-screen assertions expected previously removed explanatory copy; exact result-body and provenance checks remain. Private-draft refusal, exact reply identity, withdrawal, resizing and focus checks remain enforced.
+
+Remaining release gates: `verify:affected --base=HEAD --budget=120` stops at the expected manifest drift for the two changed runtime assets. `scripts/CANDIDATE-MANIFEST.json` is held by Grok's live `grok-starters-c1` claim; coordination request sent on the bus. Do not overwrite that claim or call this a qualified release. Regenerate and inspect the manifest when ownership is available, run affected/full required qualification on CI's runtime, reconcile the PR's existing hosted failures, then integrate and deploy. This checkpoint is local and not deployed. Real-human, physical-device and live-provider qualification remain separate.

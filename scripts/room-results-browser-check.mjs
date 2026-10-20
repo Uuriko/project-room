@@ -151,7 +151,7 @@ for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`
   await f.open(); await f.read(); await f.ready();
   const discuss = p.locator("#result-dialog").getByRole("button", { name: "Reply", exact: true });
   await discuss.focus(); await p.keyboard.press("Enter");
-  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-dialog").isVisible(), !guest, "desktop retains the result; phone returns to the composer");
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await input.evaluate(node => node === document.activeElement), true);
   assert.equal(await input.inputValue(), "");
@@ -363,7 +363,7 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "ordinary task navigation stays focused");
   await card.locator(".work-details > summary").click();
   await card.locator("[data-read-result]").click(); await f.ready();
-  assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await (mobile ? card.locator("#result-dialog") : p.locator("#main > #result-dialog.result-docked")).count(), 1, "reader uses the available screen space");
   assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
@@ -376,7 +376,7 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   await p.locator("#close-result").focus();
   f.reopen("native-result");
   await p.waitForFunction(() => document.querySelector("#result-status").textContent.startsWith("Earlier result"));
-  assert.equal(await card.locator("#result-body").textContent(), f.body, "rerender keeps the inspected version inline");
+  assert.equal(await p.locator("#result-body").textContent(), f.body, "rerender keeps the inspected version");
   assert.equal(await p.locator("#close-result").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(f.state().workItems["native-result"].receipt, receipt);
   await f.capture(mobile ? "inline-result-phone-light" : "inline-result-desktop-dark");
@@ -488,7 +488,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const card = p.locator(`[data-work-record-id="${task.id}"]`);
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
-  assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await p.locator("#main > #result-dialog.result-docked").count(), 1, "desktop result remains beside conversation");
   assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
@@ -621,4 +621,34 @@ test("withdrawal keeps keyboard focus inside the reader", { timeout: 30000 }, as
   const focus = await p.evaluate(() => ({ id: document.activeElement.id, tag: document.activeElement.tagName,
     visible: Boolean(document.activeElement.getClientRects().length), reader: document.querySelector("#result-dialog").contains(document.activeElement) }));
   assert.equal(focus.reader && focus.visible, true, JSON.stringify(focus));
+});
+
+
+for (const mobile of [false, true]) test(`connected result feedback keeps exact context: ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile }), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
+  await p.locator("#message-input").fill("Keep this exact revision and change the introduction.");
+  if (mobile) {
+    assert.equal(await p.locator("#result-dialog").isVisible(), false, "phone returns room to feedback composer");
+  } else {
+    assert.equal(await p.locator("#main > #result-dialog.result-docked").count(), 1);
+    assert.equal(await p.locator("#result-body").textContent(), f.body);
+    f.reopen("native-result");
+    await p.locator("#result-status").filter({ hasText: "Earlier result" }).waitFor();
+    assert.equal(await p.locator("#result-body").textContent(), f.body, "later work state cannot replace pinned text");
+    await p.setViewportSize({ width: 390, height: 844 });
+    await p.waitForFunction(() => !document.querySelector("#result-dialog").classList.contains("result-docked"));
+    assert.equal(await p.locator("#message-input").inputValue(), "Keep this exact revision and change the introduction.");
+    await p.setViewportSize({ width: 1440, height: 1000 });
+    await p.waitForFunction(() => document.querySelector("#result-dialog").classList.contains("result-docked"));
+    await f.capture("connected-feedback-desktop-open");
+    await p.locator("#close-result").click();
+  }
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep this exact revision and change the introduction.");
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(mobile ? "connected-feedback-phone" : "connected-feedback-desktop");
 });

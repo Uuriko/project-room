@@ -13,6 +13,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   const $ = selector => document.querySelector(selector);
   let resultView = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
+  const wide = matchMedia("(min-width: 1100px)");
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function usableText(view) {
     return view && view === resultView && view.loaded && !view.withdrawn && !view.error
@@ -21,10 +22,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   function mountResultReader() {
     if (!resultView) return;
-    const host = resultView.fromResults
+    const docked = wide.matches && !resultView.fromResults;
+    resultReader.classList.toggle("result-docked", docked);
+    const host = docked ? $("#main") : resultView.fromResults
       ? [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === resultView.workItemId) ?? $("#results-panel")
-      : workRecord(resultView.workItemId);
-    if (host && resultReader.parentElement !== host) host.append(resultReader);
+      : workRecord(resultView.workItemId) ?? $(".room-main");
+    if (host && resultReader.parentElement !== host) {
+      const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
+      host.append(resultReader);
+      focused?.focus({ preventScroll: true });
+    }
   }
   function preserveResultFocus(container, render) {
     const focus = resultView && container.contains(resultReader) && resultReader.contains(document.activeElement) ? document.activeElement : null;
@@ -80,7 +87,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   function closeResult(restore = true) {
     const view = resultView;
-    resultView = null; resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+    resultView = null; resultReader.classList.remove("result-docked"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -96,7 +103,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       }
       const card = workRecord(view.workItemId);
       if (view.restoreDetails && card?.querySelector(".work-details")) card.querySelector(".work-details").open = true;
-      focusRecord(card?.querySelector("[data-read-result]") || card);
+      if (card) focusRecord(card.querySelector("[data-read-result]") || card);
+      else $("#message-input").focus();
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
@@ -149,7 +157,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
     resultElement("result-use-status").textContent = "";
     if (onDiscuss(message) === false) return;
-    closeResult(false);
+    if (wide.matches && resultView === view) {
+      view.fromResults = false;
+      resultStatus();
+    } else closeResult(false);
   });
   resultElement("result-original").addEventListener("click", () => {
     const view = resultView;
@@ -223,6 +234,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
 
   new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
     .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
+  wide.addEventListener("change", resultStatus);
   clipboard.subscribe(resultStatus);
   return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult };
 }

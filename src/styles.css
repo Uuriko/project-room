@@ -1792,3 +1792,11 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 .result-row > .inline-result { border: 0; padding: 0; margin: 0; background: transparent; }
 #room-results-list:has(.inline-result:not([hidden])) > .result-row:not(:has(.inline-result:not([hidden]))) { display: none; }
 #room-results-list > .result-row:has(.inline-result:not([hidden])) { border: 0; padding-block: 0; }
+
+/* One pinned result beside the conversation; the mobile reader stays contextual. */
+@media (min-width: 1100px) {
+  .community-shell:has(> .result-docked:not([hidden])) { grid-template-columns: 12rem minmax(0, 1fr) minmax(20rem, .85fr); }
+  #main > .result-docked { grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: var(--space-5); border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--panel); }
+  #main > .result-docked #result-body { max-height: none; border: 0; padding: 0; }
+  #main > .result-docked .portable-actions { position: sticky; bottom: 0; padding-block: var(--space-3); background: var(--panel); }
+}
