@@ -16,7 +16,7 @@
 // 4. No production seam: public backupRoom plus read-only sqlite comparison.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
@@ -90,7 +90,24 @@ test("backup is a faithful full copy: every table's rows match the source", asyn
   assert.deepEqual(afterTables, beforeTables, "backup carries the same tables as the source");
 
   const drifted = beforeTables.filter(name =>
-    before[name].count !== after[name].count || before[name].sha256 !== after[name].sha256);
+    // IR-2: restore_reconcile_state is the one deliberate exception — the
+    // copy carries the boot-lock stamp (asserted exactly below) so a
+    // store booted from this file is restored-unreconciled until the
+    // gate runs. Every other table must match row-for-row.
+    name !== "restore_reconcile_state" &&
+    (before[name].count !== after[name].count || before[name].sha256 !== after[name].sha256));
   assert.deepEqual(drifted, [], `tables with row drift: ${drifted.map(name =>
     `${name} (source ${before[name].count} rows -> backup ${after[name].count} rows)`).join(", ")}`);
+
+  // The IR-2 stamp itself: exactly one row, restored_from at the
+  // backup's watermark, not yet reconciled; the source stays unstamped.
+  const stampDb = openReadOnly(t, result.filename);
+  const stamp = stampDb.prepare("SELECT restored_from AS restoredFrom, reconciled_at AS reconciledAt FROM restore_reconcile_state WHERE singleton=1").get();
+  assert.ok(stamp, "backup copy carries the IR-2 boot-lock stamp");
+  assert.equal(stamp.reconciledAt, null, "the stamped copy boots unreconciled");
+  const watermark = JSON.parse(readFileSync(result.watermark, "utf8"));
+  assert.equal(stamp.restoredFrom, watermark.backedUpAt, "the stamp names the backup watermark");
+  const sourceDb = openReadOnly(t, source);
+  assert.equal(sourceDb.prepare("SELECT count(*) AS n FROM restore_reconcile_state").get().n, 0,
+    "the live source is never stamped");
 });

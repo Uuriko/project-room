@@ -69,6 +69,7 @@ const SOURCE_PINS = {
   "ensureIdentityLinkCodeSchema@1": "2e027731951257ac",
   "ensureAutonomyTiersSchema@1": "10220d71e7134ef8",
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
+  "ensureRestoreReconcileSchema@1": "18394cb242199391",
   "ensureGrantsSchema@1": "fe4b311a64923973",
   "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",

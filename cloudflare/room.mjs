@@ -41,7 +41,7 @@ import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
-import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
+import { operatorRestoreResponse, operatorRestoreFromBackupResponse, operatorRestoreAcknowledgeResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -207,10 +207,16 @@ export class ProjectRoom extends DurableObject {
       return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
-    // Object's storage. Same operator token as the export; fail-closed on a
-    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    // Object's storage, replacing its contents under the IR-2 restore gate.
+    // Same operator token as the export (see server/restore-ndjson.mjs and
+    // docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
       return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+    }
+    // IR-2: the operator acknowledgement that clears a
+    // restored-unreconciled store when no current reference survives.
+    if (url.pathname === '/api/operator/restore-acknowledge') {
+      return respond(await operatorRestoreAcknowledgeResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and

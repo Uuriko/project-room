@@ -37,6 +37,17 @@ function inspect(store) {
       tables.set(table, new Map(store.db.prepare(`SELECT * FROM ${quote(table)}`).all()
         .map(row => [canonical(keys.map(key => row[key])), digest(row)])));
     }
+    // IR-2: the restore-gate stamp is capture metadata, not stored room
+    // data — its timestamps (restored_from, updated_at, the persisted
+    // extract) differ between any two captures of identical data, so the
+    // row is compared by its authority-relevant state only: whether the
+    // capture boots locked. A locked capture and a reconciled one still
+    // differ, as they must.
+    if (tables.has("restore_reconcile_state")) {
+      const rows = store.db.prepare("SELECT reconciled_at AS reconciledAt, restored_from AS restoredFrom FROM restore_reconcile_state").all();
+      tables.set("restore_reconcile_state", new Map(rows.map(row => ["1",
+        digest({ singleton: 1, locked: row.reconciledAt === null || row.reconciledAt < row.restoredFrom ? 1 : 0 })])));
+    }
     for (const row of store.db.prepare('SELECT id,sequence,projection FROM rooms ORDER BY id').all()) {
       const state = JSON.parse(row.projection);
       for (const member of Object.values(state.members)) memberships.set(canonical([row.id, member.id]), digest({

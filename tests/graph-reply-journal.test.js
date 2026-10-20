@@ -14,6 +14,17 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { inboxLimits } from "../server/inbox.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+
+// IR-2: a backup copy carries the restore-gate boot-lock stamp, so its
+// recovery audit differs from the source's exactly in the
+// restore_reconcile_state entry (and the whole-store digest over it).
+// Backup comparisons normalise that one entry; everything else must
+// match exactly.
+const auditSansStamp = store => {
+  const audit = auditRecovery(store);
+  return { ...audit, dataSha256: "ir2-stamp", tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) };
+};
 import { backupRoom } from "../server/backup.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture, v20ReplyJournalBaseline, v21ReplyReviewBaseline } from "../scripts/frozen-runtime-fixture.mjs";
@@ -126,7 +137,7 @@ test("exact provider observations and content review survive reopen, backup and 
   const before = auditRecovery(f.store), attempts = f.attempts(); f.store.close(); f.store = new RoomStore(f.filename);
   assert.deepEqual(auditRecovery(f.store), before); assert.deepEqual(f.attempts(), attempts); assert.equal(f.apply(request).duplicate, true);
   const backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), before); } finally { restored.close(); }
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
   f.save("Newer local intent", 1);
   assert.equal(f.attempts()[0].reviewCurrent, false); assert.equal(f.apply(request).duplicate, true);
   assert.throws(() => f.apply(f.review()), { code: "stale_email_reply_plan" }); auditRecovery(f.store);
@@ -253,7 +264,7 @@ test("dispatch marker survives restart and missing responses; exact receipt retr
   assert.equal(created.receipt.attempt.canSend, false); assert.equal(f.record(f.response(), observation).duplicate, true);
   assert.throws(() => f.record(f.response("different"), observation), { code: "idempotency_conflict" });
   const backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), auditRecovery(f.store)); } finally { restored.close(); }
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
 });
 
 for (const change of ["draft", "source", "connection", "account"]) test(`changed ${change} blocks dispatch but preserves cancellation and original history`, t => {

@@ -6,6 +6,17 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { prepareInboxResult } from "../scripts/inbox-result-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+
+// IR-2: a backup copy carries the restore-gate boot-lock stamp, so its
+// recovery audit differs from the source's exactly in the
+// restore_reconcile_state entry (and the whole-store digest over it).
+// Backup comparisons normalise that one entry; everything else must
+// match exactly.
+const auditSansStamp = store => {
+  const audit = auditRecovery(store);
+  return { ...audit, dataSha256: "ir2-stamp", tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) };
+};
 import { backupRoom } from "../server/backup.mjs";
 
 function setup(t, ready = true) {
@@ -37,7 +48,7 @@ test("exact reviewed result adoption changes only a private draft and retains hi
   assert.equal(auditRecovery(f.store).schemaVersion, 42);
   const backup = await backupRoom(join(f.directory, "room.sqlite"), f.directory);
   const restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), auditRecovery(f.store)); } finally { restored.close(); }
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
   f.store.close(); f.store = new RoomStore(join(f.directory, "room.sqlite"));
   assert.equal(f.apply(request).duplicate, true);
   f.apply({ action: "draft.save", requestId: "clear", sourceId: "note", expectedRevision: 2, sourceRevision: 1, body: "" });

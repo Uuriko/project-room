@@ -9,6 +9,17 @@ import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+
+// IR-2: a backup copy carries the restore-gate boot-lock stamp, so its
+// recovery audit differs from the source's exactly in the
+// restore_reconcile_state entry (and the whole-store digest over it).
+// Backup comparisons normalise that one entry; everything else must
+// match exactly.
+const auditSansStamp = store => {
+  const audit = auditRecovery(store);
+  return { ...audit, dataSha256: "ir2-stamp", tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) };
+};
 import { backupRoom } from "../server/backup.mjs";
 import { emailImportLimits } from "../server/email-import.mjs";
 import { compareRecoveryCaptures } from "../scripts/compare-recovery.mjs";
@@ -64,8 +75,8 @@ test("exact email excerpt shares only selected normalized text and returns a rev
   f.share(result.adoption()); assert.equal(f.read().draft.body, result.body); assert.equal(f.read().draft.origin.unchanged, true);
   assert.equal(f.store.inbox.sends(f.auth.token, request.sourceId, f.auth.sessionBinding).sends.length, 0);
   assert.throws(() => f.store.inbox.sendContext(f.auth.token, request.sourceId, f.auth.sessionBinding), { code: "channel_sending_unavailable" });
-  const before = auditRecovery(f.store), backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), before); } finally { restored.close(); }
+  const backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
   f.store.close(); f.store = new RoomStore(f.filename);
   assert.equal(f.share(request).duplicate, true); assert.equal(f.read().draft.body, result.body);
 });
@@ -295,10 +306,10 @@ test("bounded malformed or out-of-scope observations roll back without consuming
 });
 test("populated backup and replay preserve connection, partial scan, imported content and drafts", async t => {
   const f = fixture(t); f.configure(); f.apply(f.page({ complete: false })); f.draft("Recover this answer");
-  const before = auditRecovery(f.store), state = f.state(), source = f.read(), backup = await backupRoom(f.filename, f.directory);
+  const state = f.state(), source = f.read(), backup = await backupRoom(f.filename, f.directory);
   const copy = new RoomStore(backup.filename, { readOnly: true });
   try {
-    assert.deepEqual(auditRecovery(copy), before);
+    assert.deepEqual(auditSansStamp(copy), auditSansStamp(f.store));
     assert.deepEqual(copy.email.state(f.auth.token, f.raw.connection.id, f.raw.message.parentFolderId, f.auth.sessionBinding), state);
     assert.deepEqual(copy.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding), source);
   } finally { copy.close(); }

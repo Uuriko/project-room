@@ -9,6 +9,17 @@ import { Worker } from "node:worker_threads";
 import { createReplyUpdateFixture } from "../scripts/reply-update-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+
+// IR-2: a backup copy carries the restore-gate boot-lock stamp, so its
+// recovery audit differs from the source's exactly in the
+// restore_reconcile_state entry (and the whole-store digest over it).
+// Backup comparisons normalise that one entry; everything else must
+// match exactly.
+const auditSansStamp = store => {
+  const audit = auditRecovery(store);
+  return { ...audit, dataSha256: "ir2-stamp", tables: audit.tables.map(entry =>
+    entry.table === "restore_reconcile_state" ? { table: entry.table, rows: "ir2-stamp" } : entry) };
+};
 import { backupRoom } from "../server/backup.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { inboxLimits } from "../server/inbox.mjs";
@@ -267,7 +278,7 @@ test("durable child preserves all three versions and exact retry without changin
   assert.throws(() => f.apply(f.reserve()), { code: "reply_update_unresolved" });
   for (const key of ["canExecute", "canRetryUpdate", "canReview", "canSend"]) assert.equal(update[key], false);
   const backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.deepEqual(auditRecovery(restored), audit); } finally { restored.close(); }
+  try { assert.deepEqual(auditSansStamp(restored), auditSansStamp(f.store)); } finally { restored.close(); }
 });
 
 test("no-op proposals never reserve; current local/source/observation versions bind reservation and dispatch", t => {
