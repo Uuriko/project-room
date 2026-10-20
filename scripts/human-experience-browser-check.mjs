@@ -11,6 +11,16 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
+
+async function configureAssistant(page) {
+  await openSettings(page);
+  await page.locator('#assistant-setup').click();
+  await page.locator('#room-assistant-setup select').selectOption('producer');
+  await page.locator('#room-assistant-setup button[type=submit]').click();
+  await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
+  await closeSettings(page);
+}
+
 function deferredResultResponse() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -53,8 +63,10 @@ async function holdResultResponse(page, body, { offline = false, roomId = 'commo
   };
 }
 
-test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 60000 }, async t => {
+test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  const peerMember = f.store.room('commons').state.members.guest;
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.access_changed',data:{memberId:'guest',expectedMemberRevision:peerMember.revision,permissions:[...new Set([...peerMember.permissions,'steer'])],active:true}});
   for (const [type,data] of [
     ['work.proposed',{workItemId:'human-result-task',title:'Write a short result',definitionOfDone:'A readable result is saved',accountableMemberId:'owner',mode:'read',independentVerificationRequired:false,ownerDecisionRequired:false}],
     ['work.accepted',{workItemId:'human-result-task',expectedRevision:0}],
@@ -75,27 +87,31 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
-  await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
-  await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await configureAssistant(owner);
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
-  await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
+  await send(owner,'@Room Compare our launch ideas.');
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   let run=(await api('producer')).runs[0]; assert.equal(run.status,'queued');
   // HS2 3a: the request and its state are on the card face, with Activity still closed.
   for(const page of pages) {
-    await page.locator('#assistant-face .assistant-face-request').getByText('Compare our launch ideas.').waitFor();
+    await page.locator(`[data-message-record-id="${run.sourceMessageId}"] #assistant-face`).waitFor();
+    assert.equal(await page.locator('#assistant-face .assistant-face-request').isVisible(), false, 'the source message supplies the prompt without repetition');
     assert.match(await page.locator('#assistant-face .assistant-face-status').textContent(), /^(Asked|Not picked up yet)/);
     assert.equal(await page.locator('#assistant-activity').evaluate(n=>n.open), false);
   }
-  await peer.locator('#assistant-face').getByRole('button',{name:'Add to this ask',exact:true}).click(); await send(peer,'Keep the design mobile first.');
+  const original = peer.locator(`[data-message-record-id="${run.sourceMessageId}"]`);
+  await original.hover();
+  await original.locator('[data-message-action="reply"]').click();
+  await send(peer,'Keep the design mobile first.');
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('mobile first'));
   run=(await api('producer')).runs[0]; assert.equal(run.inputs.length,2); assert.equal(run.inputs[1].status,'pending');
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
   run=(await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'working',summary:'Comparing mobile readability.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Comparing mobile readability.'));
+  for (const page of pages) await page.locator('#assistant-face .assistant-face-progress').getByText('Comparing mobile readability.', { exact: true }).waitFor();
   const post = await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{Authorization:`Bearer ${f.keys.producer}`,'Content-Type':'application/json'},body:JSON.stringify({id:'public-result-command',type:'message.posted',data:{messageId:'public-result',body:'Recommendation: choose the simpler mobile layout.'}})});assert.ok(post.ok);
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
@@ -173,8 +189,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
       await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click();
-  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-input').fill('@Room Recover this request exactly once.');
   await owner.locator('#message-form button[type=submit]').click();
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   const beforeRetry = (await api('owner')).runs;
@@ -253,7 +268,41 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
   await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
-  mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
+  // A completed answer can be revised through ordinary chat by the other person.
+  const previous = (await api('producer')).runs.find(item => item.id === run.id);
+  await peer.locator('#assistant-activity').evaluate(node => { node.open = true; });
+  await peer.locator('#assistant-runs [data-assistant-reply="public-result"]').click();
+  await peer.locator('#message-input').fill('Make the recommendation one sentence.');
+  await peer.locator('#message-form button[type=submit]').click();
+  await peer.waitForFunction(() => document.querySelector('#message-input').value === '');
+  let followup = (await api('producer')).runs.find(item => ![run.id, recovery.id].includes(item.id));
+  assert.ok(followup, 'replying to a completed result starts a new execution');
+  const followupMessage = f.store.room('commons').state.messages.find(message => message.id === followup.sourceMessageId);
+  assert.equal(followupMessage.replyToId, 'public-result');
+  assert.equal(followupMessage.authorId, 'guest');
+  assert.equal((await api('producer')).runs.find(item => item.id === run.id).revision, previous.revision, 'completed execution is not reopened');
+  followup = (await api('producer', { action:'claim', runId:followup.id, attemptId:'followup-host', expectedRevision:followup.revision })).result;
+  const publication = { action:'publish', requestId:'followup-publication', runId:followup.id, attemptId:'followup-host', expectedRevision:followup.revision,
+    body:'Choose the simpler mobile layout.', summary:'Revised recommendation ready.', appliedInputMessageIds:followup.inputs.map(input => input.sourceMessageId) };
+  const delivered = await api('producer', publication);
+  assert.equal((await api('producer', publication)).result.resultMessageId, delivered.result.resultMessageId);
+  await peer.reload();
+  await peer.locator('#main').waitFor({ state:'visible' });
+  await peer.locator('#assistant-face [data-assistant-reply]').waitFor();
+  await peer.locator('#assistant-face [data-assistant-message]').click();
+  await peer.locator(`[data-message-record-id="${delivered.result.resultMessageId}"]`).waitFor();
+  mkdirSync('test-results/chat-result',{recursive:true});
+  for (const width of [390,1280]) {
+    await peer.setViewportSize({width,height:900});
+    for (const theme of ['dark','light']) {
+      await peer.evaluate(value => document.documentElement.dataset.theme=value, theme);
+      await peer.locator(`[data-message-record-id="${delivered.result.resultMessageId}"]`).scrollIntoViewIfNeeded();
+      const faceBounds = await peer.locator('#assistant-face').boundingBox();
+      assert.ok(faceBounds.width > 200, 'inline progress occupies the message content column, not the avatar column');
+      await peer.screenshot({path:`test-results/chat-result/${width}-${theme}.png`,fullPage:false});
+      assert.equal(await peer.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
+    }
+  }
   assert.deepEqual(errors,[]);
 });
 
@@ -357,7 +406,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
 
 // Owns post-login discovery, preference persistence, draft recovery and first-screen simplicity.
 for (const [width, height] of [[1280, 800], [390, 844]]) {
-  test(`the attention preview shows one line, can be dismissed, and gives the timeline its room back (${width}x${height})`, { timeout: 60000 }, async t => {
+  test(`the conversation has no duplicate attention preview (${width}x${height})`, { timeout: 60000 }, async t => {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
     const post = (key, data) => f.store.command(key, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data });
     const mine = [];
@@ -368,27 +417,14 @@ for (const [width, height] of [[1280, 800], [390, 844]]) {
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
     await page.goto(origin); await signInFixture(page, f.keys.owner);
-    await page.locator('#activity-preview').waitFor({ state: 'visible' });
-    // Three unread replies are counted, but only the newest is listed: a glance, not a reading surface.
-    assert.equal((await page.locator('#activity-preview-count').textContent()).trim(), '3');
-    assert.equal(await page.locator('#activity-preview-list li').count(), 1);
-    // A long nowrap line must ellipsize inside the card, not widen the page (at larger text it did, and a phone's layout viewport grew with it).
+    await page.locator('#main').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#activity-preview').count(), 0);
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'the preview never makes the page wider than the screen');
-    await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
-    const height1 = await page.locator('.timeline').evaluate(n => n.getBoundingClientRect().height);
-    await page.locator('#activity-preview-dismiss').click();
-    assert.equal(await page.locator('#activity-preview').isHidden(), true);
-    const height2 = await page.locator('.timeline').evaluate(n => n.getBoundingClientRect().height);
-    assert.ok(height2 >= height1 + 60, `dismissing returns the space to the timeline (${height1} -> ${height2})`);
-    // Still dismissed after the preview refreshes with the same unread items.
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await page.waitForTimeout(800);
-    assert.equal(await page.locator('#activity-preview').isHidden(), true);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   });
 }
 
-test('human Advanced tools stay out of the door and preserve squad drafts and saved preferences', { timeout: 60000 }, async t => {
+test('human settings preserve saved preferences without a squad surface', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({store:f.store, streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
@@ -426,21 +462,7 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
   assert.equal(await page.getByRole('link',{name:'Demo conversation'}).isVisible(),true);
   await page.locator('#connect-guide-open').click(); await page.locator('#connect-guide-close').click();
   await page.locator('#human-advanced').check(); await page.keyboard.press('Escape');
-  await page.locator('#squads-open').click();
-  await page.locator('#squads-list input[name=name]').fill('team');
-  await page.locator('#squads-list input[name=goal]').fill('Ship together');
-  await page.locator('#squads-list input[name=memberId][value=guest]').check();
-  f.store.command(f.keys.guest,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:crypto.randomUUID(),body:'chat while drafting'}});
-  await page.waitForTimeout(200);
-  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Ship together');
-  await page.locator('#squads-list button[type=submit]').click();
-  await page.locator('#squads-list .squad-card').waitFor();
-  assert.match(f.store.db.prepare("SELECT members_json FROM squads WHERE name='team'").get().members_json,/guest/);
-  await page.locator('#squads-list input[name=name]').fill('team');
-  await page.locator('#squads-list input[name=goal]').fill('Keep this rejected draft');
-  await page.locator('#squads-list button[type=submit]').click();
-  await page.locator('#squads-list [role=alert]').waitFor();
-  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Keep this rejected draft');
+  assert.equal(await page.locator('#squads-open, #squads-dialog').count(), 0);
   assert.deepEqual(errors,[]);
 });
 
@@ -520,7 +542,7 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopping…',{exact:true}).waitFor();
   assert.equal(stopPayload.expectedAttemptId, 'kbd-host');
   assert.equal(stopPayload.expectedRevision, 1, 'the UI sent its observed revision rather than silently refreshing the control');
-  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#room-assistant')) }));
+  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#assistant-face')) }));
   assert.deepEqual(focus,{body:false,inCard:true},'focus stays on the Room card after a keyboard Stop');
   await api('producer',{action:'report',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:3,state:'cancelled',summary:'Stopped.'});
   await status.getByText('Stopped',{exact:true}).waitFor();
@@ -561,9 +583,9 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   await owner.locator('#message-input').fill('Keep my unrelated draft.');
   await control.focus(); await owner.keyboard.press('Enter');
   assert.equal(await owner.locator('#message-input').inputValue(), '');
-  assert.equal(await owner.locator('#ask-room').textContent(), 'Resolve direction');
+  assert.equal(await owner.locator('#assistant-context').textContent(), 'Resolve direction');
   assert.equal((await api('owner')).runs[0].inputs.length, 1, 'opening the composer sends nothing');
-  await owner.locator('#ask-room').click();
+  await owner.locator('#assistant-context').click();
   await owner.locator('#thread-back').click();
   assert.equal(await owner.locator('#message-input').inputValue(), 'Keep my unrelated draft.');
   await control.click();
@@ -590,7 +612,7 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 });
 
-test('@Room in the mention list is an Ask Room, not a plain mention', { timeout: 45000 }, async t => {
+test('@Room stays visible in the draft and routes without a separate composer mode', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await browserType.launch({ headless: true });
@@ -604,14 +626,13 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   const roomOptions = () => page.locator('#mention-list .mention-option').evaluateAll(n => n.map(o => o.textContent.trim()).filter(t => /^Room(?! owner)/.test(t)).length);
   assert.equal(await roomOptions(), 0);
   await input.fill('');
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
-  await input.fill('can you help? @Roo');
+  await configureAssistant(page);
+  await input.fill('@Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('#ask-room').count(), 0);
   await page.locator('#mention-list .mention-option').filter({ hasText: /^\s*Room(?! owner)/ }).first().click();
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'true', 'choosing @Room selects Ask Room');
-  assert.equal(await input.inputValue(), 'can you help?', 'the @ token is removed, not posted as plain text');
+  assert.equal(await input.inputValue(), '@Room ', 'the address remains visible');
+  await input.pressSequentially('can you help?');
   assert.equal(await page.locator('#mention-list').isHidden(), true);
   // Sending now goes out as an invocation: a run exists for the message.
   await page.locator('#message-form button[type=submit]').click();
@@ -631,10 +652,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask c
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
-  await page.locator('#ask-room').click();
-  await page.locator('#message-input').fill('What is the plan?');
+  await configureAssistant(page);
+  await page.locator('#message-input').fill('@Room What is the plan?');
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What is the plan?'));
@@ -654,7 +673,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) test(`ask c
   run = (await api('producer',{action:'publish',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision,summary:'Plan ready.',body:'The plan is to ship the fence first.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   assert.equal(run.status,'done');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('The plan is to ship the fence first.'));
-  assert.equal(await page.locator('#assistant-runs .assistant-run-result').count(),1);
+  assert.equal(await page.locator('#assistant-runs .assistant-run-resultline').count(),1);
   await page.waitForFunction(()=>document.querySelector('.assistant-face-status').dataset.faceStatus === 'done');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors,[]);
@@ -688,7 +707,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     page.setDefaultTimeout(8000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin); await signInFixture(page, f.keys.guest);
-    await page.locator('#assistant-face').waitFor({ state: 'visible' });
+    await page.locator('#assistant-runs [data-assistant-run="shared"]').waitFor({ state: 'attached' });
     await page.locator('#assistant-activity > summary').click();
     await page.locator('#assistant-runs [data-assistant-message="shared-ask"]').click();
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
@@ -702,7 +721,13 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
     await page.locator('#message-input').fill('Keep this unrelated general draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').focus();
+    const historyContribution = async () => {
+      await page.locator('#assistant-activity').evaluate(node => { node.open = true; });
+      await page.locator('[data-assistant-run="shared"]').evaluate(node => { node.open = true; });
+      return page.locator('#assistant-runs [data-contribute-run="shared"]:not([data-conflict])');
+    };
+    assert.equal(await page.locator('#assistant-face').isVisible(), false, 'another channel does not show unrelated progress');
+    await (await historyContribution()).focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('#message-input').evaluate(node => node === document.activeElement), true);
     assert.equal(await page.locator('#message-input').inputValue(), '', 'adding context does not repurpose the destination draft');
@@ -710,7 +735,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-input').fill('Keep the design mobile first.');
     await page.locator('#cancel-reply').click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the existing design thread draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the design mobile first.', 'cancelling the contribution preserves its own draft');
     const response = page.waitForResponse(res => res.url().endsWith('/assistant') && res.request().method() === 'POST');
     await page.locator('#message-form button[type=submit]').click();
@@ -731,17 +756,17 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#channel-list [data-channel="general"]').click();
     await ensureSidebarClosed(page);
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unrelated general draft.');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     await page.locator('#message-input').fill('Unsent additional context.');
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
-    assert.equal(await page.locator('#ask-room').textContent(), 'Ask Room');
+    assert.equal(await page.locator('#assistant-context').isVisible(), false);
     await page.locator('#message-input').fill('Ordinary group banter.');
     const posted = page.waitForResponse(res => res.url().endsWith('/commands') && res.request().postDataJSON()?.data?.body === 'Ordinary group banter.');
     await page.locator('#message-form button[type=submit]').click(); assert.equal((await posted).status(), 201);
     await page.waitForFunction(() => document.querySelector('#message-input').value === '');
     assert.equal((await api('producer')).runs.length, 1, 'leaving context mode does not turn ordinary chat into a new ask');
-    await page.locator('#assistant-face [data-contribute-run="shared"]').click();
+    await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Unsent additional context.');
     assert.deepEqual(errors, []);
   });
@@ -798,13 +823,19 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
-  const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
+  await configureAssistant(page);
+  const send = async body => { await page.locator('#message-input').fill(`@Room ${body}`); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
   await send('Second question for the room?');
   await page.waitForFunction(()=>document.querySelectorAll('#assistant-runs details.assistant-run').length===2);
   await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
+  assert.equal(await page.locator('#settings-dialog').evaluate(n => n.open), false);
+  assert.equal(await page.locator('#assistant-activity > summary').textContent(), 'Work · 2 active');
+  await page.locator('#assistant-activity > summary').focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#assistant-activity').evaluate(n => n.open), false);
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#assistant-activity').evaluate(n => n.open), true);
   // One line per ask: the summary carries the prompt and the status.
   const summaries = await page.locator('#assistant-runs details.assistant-run > summary').allTextContents();
   assert.equal(summaries.length,2);
@@ -826,6 +857,18 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
   await page.evaluate(()=>{ document.querySelector('#assistant-runs details.assistant-run[open] summary [data-cancel]').click(); });
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stopping'));
   assert.equal(await page.locator('#assistant-runs details.assistant-run[open]').count(),1,'summary controls do not toggle the fold');
+  mkdirSync('test-results', { recursive: true });
+  for (const [width, theme] of [[1280, 'dark'], [1280, 'light'], [390, 'dark'], [390, 'light']]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await page.screenshot({ path: `test-results/work-disclosure-${width}-${theme}.png` });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#assistant-activity > summary').click();
+    await page.screenshot({ path: `test-results/work-collapsed-${width}-${theme}.png` });
+    const composer = await page.locator('#message-input').boundingBox();
+    assert.ok(composer && composer.y >= 0 && composer.y + composer.height <= 900);
+    await page.locator('#assistant-activity > summary').click();
+  }
   assert.deepEqual(errors,[]);
 });
 
@@ -842,10 +885,8 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
-  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
-  await page.locator('#ask-room').click();
-  await page.locator('#message-input').fill('What should we prioritize?');
+  await configureAssistant(page);
+  await page.locator('#message-input').fill('@Room What should we prioritize?');
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What should we prioritize?'));
@@ -853,8 +894,8 @@ test('Add to this ask wires the composer into the run and names the ask', { time
   await page.locator('details.assistant-run').evaluate(n=>{n.open=true;});
   // The ask card offers "Add to this ask"; the composer names the ask.
   await page.locator('details.assistant-run').getByRole('button',{name:'Add to this ask',exact:true}).click();
-  assert.equal(await page.locator('#ask-room').textContent(), "Adding to Room owner's ask");
-  assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('#assistant-context').textContent(), "Adding to Room owner's ask");
+  assert.equal(await page.locator('#assistant-context').isVisible(), true);
   // Sending wires the message into the existing run as a contribution.
   await page.locator('#message-input').fill('One more constraint: keep it simple.');
   await page.locator('#message-form button[type=submit]').click();
