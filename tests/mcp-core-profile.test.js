@@ -480,5 +480,16 @@ test("hosted claim PR calls honor target-room tier, write profile and membership
   assert.equal(removed, true);
   assert.equal(denied.value.status, 401);
   assert.equal(denied.value.code, "unauthenticated");
-  assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
+  // BOARD-LIFECYCLE-1: the removal itself now releases the writer's live
+  // claim in the same act (qa-removed-member-leases), so the claim no longer
+  // equals its pre-removal snapshot. What this test pins is that the refused
+  // call mutated nothing: no PR was linked by it, and the only change to the
+  // claim is the removal's own release.
+  const afterRemoval = store.workClaims.get(roomId, claimed.id);
+  assert.equal(afterRemoval.state, "unclaimed");
+  assert.equal(afterRemoval.owner, null);
+  assert.equal(afterRemoval.leaseExpiresAt, null);
+  assert.equal(afterRemoval.history.at(-1).action, "released");
+  assert.equal(afterRemoval.pullRequest, claimed.pullRequest);
+  assert.deepEqual(afterRemoval.pullRequests, claimed.pullRequests);
 });
