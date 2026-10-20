@@ -860,6 +860,14 @@ const signinUI = createAuthSigninUI({
   }
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
+const verificationIntentKey = "project-room:verify-email:v1";
+let verificationIntent = null;
+try {
+  if (initialAuthLink.kind === "notice" && initialAuthLink.notice === "verify") {
+    verificationIntent = { email: initialAuthLink.email, at: Date.now() };
+    sessionStorage.setItem(verificationIntentKey, JSON.stringify(verificationIntent));
+  } else verificationIntent = JSON.parse(sessionStorage.getItem(verificationIntentKey) || "null");
+} catch { /* Same-document intent remains available when storage is disabled. */ }
 const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
@@ -966,7 +974,33 @@ async function openPersonalRoomAfterSignup() {
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
+async function resumeEmailVerification() {
+  if (!verificationIntent) return false;
+  const intent = verificationIntent;
+  const clear = () => {
+    verificationIntent = null;
+    try { sessionStorage.removeItem(verificationIntentKey); } catch { /* Storage unavailable. */ }
+  };
+  if (typeof intent.email !== "string" || !Number.isFinite(intent.at)
+    || Date.now() - intent.at > 30 * 60 * 1000 || intent.at > Date.now()) { clear(); return false; }
+  const owned = await ensureAccountSession();
+  if (!owned?.authenticated) return false;
+  const methods = await accountClient.request("/api/auth/methods", { session: owned });
+  if (accountClient.session !== owned) return false;
+  // A link is navigation intent, never proof or permission to change accounts.
+  if (!methods.methods?.some(method => method.email?.toLowerCase() === intent.email.toLowerCase())
+    || methods.emailVerification?.status !== "unverified") { clear(); return false; }
+  showAccountWorkspace();
+  await openAccountSettings();
+  if (accountClient.session !== owned) return false;
+  const code = $("#account-settings-body").querySelector('[data-form="email-verify"] [name="code"]');
+  if (!code) return false;
+  code.focus();
+  clear();
+  return true;
+}
 async function landAfterSignIn() {
+  if (await resumeEmailVerification()) return;
   if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
@@ -7621,6 +7655,7 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  if (await resumeEmailVerification()) return;
   if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
