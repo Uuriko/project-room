@@ -520,5 +520,10 @@ export default {
   "result.collapse": "Collapse result",
   "activity.recent": "Recent activity",
   "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text.",
-  "clipboard.pending": "Clipboard is still busy. You can keep working."
+  "clipboard.pending": "Clipboard is still busy. You can keep working.",
+  "result.closePreview": "Close preview",
+  "result.backConversation": "Back to conversation",
+  "result.resize": "Resize preview",
+  "result.searchCount": "{count} results",
+  "result.previewActions": "Preview actions"
 };

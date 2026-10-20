@@ -2712,6 +2712,15 @@ let searchCollapsed = false;
 const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
+  const resultsOnly = query.trim().toLowerCase() === "has:result";
+  $("#results-panel").hidden = !resultsOnly;
+  $("#search-list").hidden = resultsOnly;
+  if (resultsOnly) {
+    $("#search-results").hidden = searchCollapsed;
+    $("#clear-search").hidden = false;
+    setText("#search-count", uiText("result.searchCount", { count: completedResults(state).length }));
+    return;
+  }
   const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
@@ -5059,7 +5068,13 @@ let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
-addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
+addEventListener("wheel", event => {
+  noteReaderScroll();
+  // A short conversation cannot emit a scroll event. A downward wheel over
+  // its visible messages still expresses reading through to the end.
+  const list = $("#message-list");
+  if (event.deltaY > 0 && list.contains(event.target) && list.scrollHeight <= list.clientHeight && nearBottomOfList()) scheduleHorizonAdvance();
+}, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
 $("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
@@ -6061,8 +6076,8 @@ $("#room-overview-dialog").addEventListener("click", event => {
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;
-  dialog.classList.toggle("results-only", panelId === "results-panel");
-  $("#settings-title").textContent = panelId === "results-panel" ? "Results" : "Settings";
+  if (panelId === "results-panel") { selectWorkView("results"); return; }
+  $("#settings-title").textContent = "Settings";
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
@@ -6074,10 +6089,6 @@ function openSettings(panelId) {
   }
   renderRecordPanel();
 }
-$("#results-panel > summary").addEventListener("click", event => {
-  event.preventDefault();
-  openSettings("results-panel");
-});
 function openCatchUp() {
   updatesUi?.close();
   const dialog = $("#catchup-dialog");
@@ -6088,7 +6099,14 @@ function openCatchUp() {
   loadReturnBrief();
 }
 function selectWorkView(view) {
-  if (view === "results") openSettings("results-panel");
+  if (view !== "results") return;
+  if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#search-form").hidden = false;
+  $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
+  $("#message-search").value = "has:result";
+  searchCollapsed = false;
+  renderSearch();
+  $("#message-search").focus({ preventScroll: true });
 }
 function resultRow(item) {
   const result = currentResult(item), title = esc(item.title);
@@ -6104,9 +6122,10 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
-  memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
   onDiscuss(message) { return replyToSharedResult(message.id); },
   onOriginal(messageId) {
+    searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }
 });
@@ -7307,7 +7326,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   renderContribution(contributions, owned);
   setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
-  $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
+
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
@@ -7315,7 +7334,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
     preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
-    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#room-results-list").focus({ preventScroll: true });
     resultStatus();
     syncResultComparisons();
     syncActionForm();
@@ -7540,10 +7559,6 @@ $("#advanced-room-tools").addEventListener("toggle", event => {
   if (!event.currentTarget.open) closeSecondaryBoards();
 });
 $("#topbar-settings").addEventListener("click", () => openSettings());
-$("#room-results-open").addEventListener("click", () => {
-  if (!state || !session || busy) return;
-  selectWorkView("results");
-});
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
 $("#settings-close").addEventListener("click", () => { closeSecondaryBoards(); $("#settings-dialog").close(); });
 $("#topbar-search-toggle").addEventListener("click", () => {
