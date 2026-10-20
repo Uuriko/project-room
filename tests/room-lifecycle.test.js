@@ -79,7 +79,9 @@ test("store: archiving closes commands, import and every join path with 409 room
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify(command) });
   const invite = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Late agent" });
   let res = await post(f.keys.guest, { id: randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
-  assert.equal(res.status, 422); assert.equal((await res.json()).error.code, "command_rejected");
+  // ERROR-COPY-1 (UT-ERRORS row 8): a non-owner archive attempt is a
+  // permission refusal — 403 owner_required, not 422 command_rejected.
+  assert.equal(res.status, 403); assert.equal((await res.json()).error.code, "owner_required");
   res = await post(f.keys.owner, { id: randomUUID(), type: T.ROOM_ARCHIVED, data: { note: "x" } });
   assert.equal(res.status, 422); assert.equal((await res.json()).error.code, "invalid_command");
   const before = f.store.room("commons").sequence;
