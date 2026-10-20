@@ -18,6 +18,17 @@
 // both doors (HTTP routes, MCP full profile) accept disputeDeciderId; the
 // human create form offers a decider picker; agentErrorAx maps
 // dispute_unavailable to a followable no-retry answer.
+//
+// Refresh note (REFRESH-CORE merge-up to main 6d84149b, 2026-10-20): the
+// human create form and its decider picker lived in src/bounty-board.js,
+// deleted on main by the owner (PR #4288, panel simplification) together
+// with the panel wiring and the module's own tests. The picker's helper
+// deciderOptionsFor has no surviving live caller (its only runtime caller
+// was the deleted module's view model) — ORPHANED-DEAD under the
+// coordinator's DIFF-SURVIVAL-SWEEP ruling — so the picker section's three
+// create-form tests were dropped with it. The posting-time property itself
+// (escrow designation, both doors, the warning, claim-time refusal) is
+// exercised by the remaining tests in this file, unchanged.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
@@ -25,7 +36,6 @@ import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { handleBountyEscrow } from "../server/bounty-escrow-routes.mjs";
 import { ensureAutonomyTiersSchema } from "../server/autonomy-tiers.mjs";
 import { agentErrorAx, validAgentNext } from "../src/agent-error.mjs";
-import { bountyBoardModel, bountyFormHtml, buildPostPayload, deciderOptionsFor } from "../src/bounty-board.js";
 
 const ROOM = "room-dispute-core";
 const JILL = "id:agent/jill";         // poster lane
@@ -245,38 +255,6 @@ test("agentErrorAx: dispute_unavailable never advises correcting fields and rese
   assert.ok(ax.hint.length < 160, "hint stays short");
   assert.ok(validAgentNext(ax.next), "next[] stays followable");
   assert.match(ax.next[0].command, /Do not retry/);
-});
-
-// --- human create form: the decider picker ----------------------------------
-
-test("decider options exclude the poster and inactive members, prefer display names", () => {
-  const members = {
-    [JILL]: { id: JILL, displayName: "Jill", active: true },
-    [GROK]: { id: GROK, displayName: "Grok Bot", active: true },
-    [INSTINCT]: { id: INSTINCT, active: true },
-    [CODEX]: { id: CODEX, displayName: "Codex", active: false },
-  };
-  const options = deciderOptionsFor(members, JILL);
-  assert.deepEqual(options.map(o => o.id), [GROK, INSTINCT]);
-  assert.equal(options[0].label, "Grok Bot");
-  assert.equal(options[1].label, INSTINCT);
-  const model = bountyBoardModel({ bounties: [], balances: {}, receipts: [], selfId: JILL, members });
-  assert.deepEqual(model.deciderOptions, options);
-});
-
-test("the create form renders the decider picker with the plain consequence as the default", () => {
-  const html = bountyFormHtml(1_786_000_000_000, [{ id: GROK, label: "Grok Bot" }]);
-  assert.match(html, /id="bounty-dispute-decider"/);
-  assert.match(html, /No one — this bounty can never be disputed/);
-  assert.match(html, new RegExp(`<option value="${GROK}">Grok Bot</option>`));
-  assert.match(html, /cannot be added later/);
-});
-
-test("buildPostPayload carries disputeDeciderId only when one is picked", () => {
-  const base = { title: "T", criteria: "C", amount: 5, deadlineLocal: "2999-01-01T00:00" };
-  assert.equal(buildPostPayload({ ...base, disputeDeciderId: GROK }).disputeDeciderId, GROK);
-  assert.equal("disputeDeciderId" in buildPostPayload({ ...base, disputeDeciderId: "" }), false);
-  assert.equal("disputeDeciderId" in buildPostPayload(base), false);
 });
 
 // --- D1 probe (register DATA-STATE-CENSUS): grade, do not fix ---------------
