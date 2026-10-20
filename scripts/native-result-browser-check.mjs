@@ -30,6 +30,10 @@ async function waitForState(page, description, probe, { timeout = 30000, interva
   throw new Error(`Timed out after ${timeout}ms waiting for ${description}. Page state: ${JSON.stringify(state)}`);
 }
 
+// Preview lifecycle checks use a real long artifact; short answers have their
+// conversation-first owner in room-results-browser-check.mjs.
+const previewBody = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n".repeat(35);
+
 async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
@@ -72,7 +76,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
 }
 
 for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "desktop"}: selected old draft becomes exact result`, { timeout: 25000 }, async t => {
-  const f = await setup(t, { mobile }); await f.open(); await f.textReady(); await f.fill();
+  const f = await setup(t, { mobile, body: previewBody }); await f.open(); await f.textReady(); await f.fill();
   assert.equal(await f.page.locator("#action-fields [name=evidenceUrl]").count(), 0);
   assert.equal(await f.page.locator("#action-title").textContent(), "Save as result");
   assert.equal(await f.page.locator("#action-text-body").evaluate(el => getComputedStyle(el).whiteSpace), "pre-wrap");
@@ -83,16 +87,21 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
-  await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  await f.page.locator("#result-options > summary").focus(); await f.page.keyboard.press("Enter");
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-copy-text").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "inline reading does not trap keyboard navigation");
+  assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-body").evaluate(el => el === document.activeElement), true, "scrollable exact text remains keyboard reachable");
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "preview does not trap keyboard navigation");
   await f.page.keyboard.press("Shift+Tab");
-  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
@@ -100,8 +109,9 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
 });
 
 test("exact result copy preserves text, reports failure and ignores a late completion after closing", { timeout: 30000 }, async t => {
-  const f = await setup(t); f.complete();
+  const f = await setup(t, { body: previewBody }); f.complete();
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-options > summary").click();
   await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
   await f.page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
@@ -120,6 +130,7 @@ test("exact result copy preserves text, reports failure and ignores a late compl
   await f.page.evaluate(() => window.finishCopy());
   assert.equal(await f.page.locator("#result-use-status").textContent(), "");
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-options > summary").click();
   await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
   await f.page.evaluate(() => { navigator.clipboard.writeText = async text => { window.copiedResult = text; }; });
   await f.page.locator("#result-copy-text").click();
@@ -156,7 +167,7 @@ test("native review shows exact text and leaves human approval pending", { timeo
 // this task independently. Use the real local result/command routes and the
 // existing fixture; no production seam, model, real device or AT claim.
 for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read, review and return to the same result`, { timeout: 30000 }, async t => {
-  const body = "A quiet room\n\nCheck this exact reference: " + "resultreference".repeat(12) + "\nKeep the next step with the same work.";
+  const body = "A quiet room\n\nCheck this exact reference: " + "resultreference".repeat(95) + "\nKeep the next step with the same work.";
   const f = await setup(t, { review: true, viewport: { width: 320, height: 900 }, body });
   const { page } = f, receipt = structuredClone(f.item().receipt), reads = [], evidence = [];
   const card = page.locator(`[data-work-record-id="${f.workItemId}"]`);
@@ -309,7 +320,7 @@ test("native draft cannot save stale work; explicit refresh keeps the selected t
 });
 
 test("native result large text and keyboard remain usable; revocation clears visible text", { timeout: 25000 }, async t => {
-  const f = await setup(t, { review: true });
+  const f = await setup(t, { review: true, body: previewBody });
   await f.page.evaluate(() => { document.documentElement.style.fontSize = "200%"; }); await f.open(); await f.textReady();
   assert.equal(await f.page.locator("#action-text-body").evaluate(el => getComputedStyle(el).fontSize), "32px");
   assert.equal(await f.page.locator("#action-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
@@ -323,7 +334,7 @@ test("native result large text and keyboard remain usable; revocation clears vis
 });
 
 for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "desktop"}: failed read retries the pinned result in place`, { timeout: 25000 }, async t => {
-  const f = await setup(t, { mobile }); f.complete();
+  const f = await setup(t, { mobile, body: previewBody }); f.complete();
   const attempts = [], retry = f.page.locator("#result-retry"); let release, began;
   const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
   await f.page.route("**/work-result?**", async route => {
@@ -359,7 +370,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "de
 });
 
 for (const boundary of ["close", "revoke"]) test(`native result: held retry cannot restore text after ${boundary}`, { timeout: 25000 }, async t => {
-  const f = await setup(t); f.complete(); let attempts = 0, release, began;
+  const f = await setup(t, { body: previewBody }); f.complete(); let attempts = 0, release, began;
   const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; }); t.after(() => release());
   await f.page.route("**/work-result?**", async route => {
     attempts++;
@@ -450,7 +461,7 @@ test("a room session that ends under a live account says so and points back to t
 });
 
 for (const responseKind of ["wrong-completion", "missing-result"]) test(`native result: ${responseKind} cannot masquerade as the selected result`, { timeout: 25000 }, async t => {
-  const f = await setup(t); f.complete();
+  const f = await setup(t, { body: previewBody }); f.complete();
   await f.page.route("**/work-result?**", async route => {
     const response = await route.fetch(), value = await response.json();
     if (responseKind === "wrong-completion") value.result.receipt.eventId = "another-completion-with-identical-text";
@@ -468,7 +479,7 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
 });
 
 test("result reply refusal keeps the reader and private destination draft intact", { timeout: 30000 }, async t => {
-  const f = await setup(t); f.complete();
+  const f = await setup(t, { body: previewBody }); f.complete();
   await messageAction(f.page, "native-draft", "reply");
   await f.page.locator("#message-input").fill("Private feedback draft");
   await f.page.locator("#message-to-select").evaluate(el => { el.value = "human-checker"; el.dispatchEvent(new Event("change", { bubbles: true })); });
@@ -577,4 +588,24 @@ test("native result 320px: a card re-render rescues a focused View result contro
   }, { timeout: 5000, interval: 300 }).catch(() => {});
   assert.ok(after.top < after.h && after.bottom > 0 && after.unobscured,
     `the settled focused control is on screen after the re-render: ${JSON.stringify({ displaced, after })}`);
+});
+
+for (const mobile of [false, true]) test(`result feedback preserves another reply (${mobile ? "mobile" : "desktop"})`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, body: "A detailed result for review.\n".repeat(60) });
+  f.complete();
+  f.send(T.MESSAGE_POSTED, { messageId: "other-feedback", body: "A separate question", replyToId: "native-draft" });
+  await messageAction(f.page, "native-draft", "reply");
+  await messageAction(f.page, "other-feedback", "reply");
+  await f.page.locator("#message-input").fill("My answer to the separate question");
+  const originalReply = await f.page.locator("#reply-context").textContent();
+  await f.page.locator("#thread-back").click();
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).first().click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), true);
+  await f.capture(`protected-reply-${mobile ? "mobile" : "desktop"}`);
+  await f.page.locator("#close-result").click();
+  await messageAction(f.page, "native-draft", "thread");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "My answer to the separate question");
+  assert.equal(await f.page.locator("#reply-context").textContent(), originalReply);
 });

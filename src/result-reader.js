@@ -16,9 +16,58 @@ export function installResultReader({ client, getState, getSession, sameSession,
   const wide = matchMedia("(min-width: 1100px)");
   const savedKey = "project-room:result-selection:v1";
   const selectionLifetime = 12 * 60 * 60 * 1000;
+  const resize = $("#result-resize"), shell = $("#main");
+  const widthKey = "project-room:preview-width:v1";
+  let previewWidth = 340, dragging = null;
+  try {
+    const stored = Number(storage?.getItem(widthKey));
+    if (Number.isFinite(stored) && stored >= 280 && stored <= 1600) previewWidth = stored;
+  } catch { /* Width is a preference; storage is optional. */ }
+  const widthLimit = () => Math.max(280, shell.clientWidth - 192 - 420);
+  function applyWidth() {
+    const value = Math.round(Math.max(280, Math.min(widthLimit(), previewWidth)));
+    shell.style.setProperty("--result-width", `${value}px`);
+    resize.setAttribute("aria-valuemin", "280");
+    resize.setAttribute("aria-valuemax", String(Math.round(widthLimit())));
+    resize.setAttribute("aria-valuenow", String(value));
+  }
+  function rememberWidth() {
+    try { storage?.setItem(widthKey, String(previewWidth)); } catch { /* Optional preference. */ }
+  }
+  resize.setAttribute("aria-label", uiText("result.resize"));
+  resize.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || !wide.matches || !resultView) return;
+    event.preventDefault();
+    dragging = event.pointerId;
+    resize.setPointerCapture(event.pointerId);
+    shell.classList.add("preview-resizing");
+  });
+  resize.addEventListener("pointermove", event => {
+    if (dragging !== event.pointerId) return;
+    previewWidth = Math.max(280, Math.min(widthLimit(), shell.getBoundingClientRect().right - event.clientX));
+    applyWidth();
+  });
+  const finishResize = () => {
+    if (dragging === null) return;
+    const pointer = dragging; dragging = null;
+    if (resize.hasPointerCapture(pointer)) resize.releasePointerCapture(pointer);
+    shell.classList.remove("preview-resizing");
+    rememberWidth();
+  };
+  resize.addEventListener("pointerup", finishResize);
+  resize.addEventListener("pointercancel", finishResize);
+  resize.addEventListener("lostpointercapture", finishResize);
+  resize.addEventListener("keydown", event => {
+    const step = event.shiftKey ? 80 : 20;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    previewWidth = event.key === "Home" ? 280 : event.key === "End" ? widthLimit()
+      : Math.max(280, Math.min(widthLimit(), Number(resize.getAttribute("aria-valuenow")) + (event.key === "ArrowLeft" ? step : -step)));
+    applyWidth(); rememberWidth();
+  });
+  new ResizeObserver(applyWidth).observe(shell);
   function forgetSelection() { try { storage?.removeItem(savedKey); } catch { /* Reading works without storage. */ } }
   function saveSelection(view) {
-    if (view.fromResults) return;
     try {
       const scope = recoveryScope();
       if (!scope) return;
@@ -26,6 +75,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         workItemId: view.workItemId, receipt: view.receipt }));
     } catch { forgetSelection(); }
   }
+  $("#result-options > summary").setAttribute("aria-label", uiText("result.previewActions"));
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function usableText(view) {
     return view && view === resultView && view.loaded && !view.withdrawn && !view.error
@@ -34,11 +84,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
   }
   function mountResultReader() {
     if (!resultView) return;
-    const docked = wide.matches && !resultView.fromResults;
+    const docked = wide.matches;
     resultReader.classList.toggle("result-docked", docked);
-    const host = docked ? $("#main") : resultView.fromResults
-      ? [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === resultView.workItemId) ?? $("#results-panel")
-      : workRecord(resultView.workItemId) ?? $(".room-main");
+    resultReader.classList.toggle("result-mobile", !docked);
+    resize.hidden = !docked;
+    applyWidth();
+    const host = shell;
     if (host && resultReader.parentElement !== host) {
       const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
       host.append(resultReader);
@@ -66,7 +117,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
-    resultElement("close-result").textContent = uiText(view.fromResults ? "result.back" : "result.collapse");
+    resultElement("close-result").textContent = wide.matches ? "×" : uiText("result.backConversation");
+    resultElement("close-result").setAttribute("aria-label", uiText(wide.matches ? "result.closePreview" : "result.backConversation"));
     if (!clipboard.busy && resultElement("result-use-status").textContent === uiText("clipboard.pending")) resultElement("result-use-status").textContent = "";
     if (clipboard.busy && !view.copying) resultElement("result-use-status").textContent = uiText("clipboard.pending");
     const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
@@ -100,7 +152,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
   function closeResult(restore = true, preserveSaved = false) {
     if (!preserveSaved) forgetSelection();
     const view = resultView;
-    resultView = null; resultReader.classList.remove("result-docked"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+    finishResize();
+    resultView = null; resultReader.classList.remove("result-docked", "result-mobile"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -111,7 +164,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
       if (view.fromResults) {
         const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
-        (row?.querySelector("[data-read-result]") || ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary"))).focus({ preventScroll: true });
+        (row?.querySelector("[data-read-result]") || $("#room-results-list")).focus({ preventScroll: true });
         return;
       }
       const card = workRecord(view.workItemId);
@@ -175,6 +228,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       saveSelection(view);
       resultStatus();
     } else closeResult(false);
+    $("#message-input").focus({ preventScroll: true });
   });
   resultElement("result-original").addEventListener("click", () => {
     const view = resultView;
@@ -202,6 +256,16 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-body").hidden = Boolean(view.withdrawn);
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
+      // Ordinary answers already have an authorized, readable conversation
+      // message. Keep saved historical selections in the exact-version reader.
+      const item = getState().workItems[view.workItemId];
+      const currentFirstResult = !view.previousCompletionEventId && item?.state === S.COMPLETED
+        && !item.supersededBy && matchesReceipt(view.receipt, item.receipt);
+      if (message && currentFirstResult && !view.withdrawn && !view.recovered && value.result.text.body.length <= 1200) {
+        closeResult(false);
+        onOriginal(message.id);
+        return;
+      }
       view.discussionId = message?.id; view.body = value.result.text.body;
       view.textMessageId = value.result.text.messageId;
       const original = getState().messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
@@ -222,6 +286,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   });
   function openResult(view, title, focus = true) {
       resultView = view;
+      resultElement("result-options").open = false;
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
@@ -251,7 +316,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!item) { forgetSelection(); return; }
       openResult({ generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id,
         workItemId: item.id, receipt: { completionEventId: saved.receipt.completionEventId, evidenceVersion: saved.receipt.evidenceVersion },
-        fromResults: false, restoreDetails: false }, item.title, false);
+        fromResults: false, restoreDetails: false, recovered: true }, item.title, false);
     } catch { forgetSelection(); }
   }
   function readResult(e) {

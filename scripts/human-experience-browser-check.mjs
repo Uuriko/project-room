@@ -1021,3 +1021,50 @@ for (const width of [1280, 390]) {
     assert.equal((await read()).status, 'pause_requested');
   });
 }
+
+// These failures leave the server untouched: the browser must retain the exact
+// replacement operation even when an abandoned retry finishes afterwards.
+test('discarded assistant retry cannot erase the replacement pending operation', { timeout: 60000 }, async t => {
+  const { page } = await claimRaceFixture(t, 1280, { run: 'discard-run', ask: 'discard-ask' });
+  const oldCaptured = deferredResultResponse(), replacementCaptured = deferredResultResponse();
+  const releaseOld = deferredResultResponse(), releaseReplacement = deferredResultResponse();
+  t.after(() => { releaseOld.resolve(); releaseReplacement.resolve(); });
+  let calls = 0;
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const call = ++calls;
+    if (call === 2) { oldCaptured.resolve(); await releaseOld.promise; }
+    if (call === 3) { replacementCaptured.resolve(); await releaseReplacement.promise; }
+    await route.fulfill({ status: call === 1 ? 503 : 409, json: { error: {
+      code: call === 1 ? 'service_unavailable' : 'assistant_attempt_changed', message: 'Synthetic interrupted control'
+    } } });
+  });
+  await page.locator('#assistant-face [data-cancel]').click();
+  await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+  await page.locator('#assistant-retry').click(); await oldCaptured.promise;
+  await page.locator('#assistant-discard').click();
+  await page.locator('#assistant-activity').evaluate(node => { node.open = true; });
+  await page.locator('#assistant-runs [data-cancel]').click(); await replacementCaptured.promise;
+  const before = await page.evaluate(() => sessionStorage.getItem('room-assistant-pending:commons:owner'));
+  assert.ok(before, 'the replacement operation is durably pending before the abandoned response');
+  const delivered = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/assistant') && response.status() === 409);
+  releaseOld.resolve(); await (await delivered).finished();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('room-assistant-pending:commons:owner')), before,
+    'a stale rejection must not delete the replacement operation or offer review of the abandoned one');
+  assert.equal(await page.locator('#assistant-review').isVisible(), false);
+});
+
+test('discarding an uncertain assistant control restores the face control accessibility state', { timeout: 60000 }, async t => {
+  const { page } = await claimRaceFixture(t, 1280, { run: 'discard-face-run', ask: 'discard-face-ask' });
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({ status: 503, json: { error: { code: 'service_unavailable', message: 'Synthetic interrupted control' } } });
+  });
+  const stop = page.locator('#assistant-face [data-cancel]');
+  await stop.click(); await page.locator('#assistant-discard').waitFor({ state: 'visible' });
+  await page.locator('#assistant-discard').click();
+  assert.equal(await stop.isEnabled(), true, 'Discard restores the unchanged face control for assistive technology');
+  await stop.click(); await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+});
