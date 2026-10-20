@@ -382,7 +382,9 @@ export class AgentInvites {
       // hidden characters, and skeletons that match someone already here
       // before an identity or membership row is written.
       try {
-        assertAdmissibleMemberName(name, room.state.members); // Q3-D: roster check plus role names
+        // Policy v3: a removed member's name stays reserved in this room;
+        // the redeeming identity's own inactive record never blocks it.
+        assertAdmissibleMemberName(name, room.state.members, { includeInactive: true, excludeId: existingIdentity?.identityId ?? null }); // Q3-D: roster check plus role names
       } catch (error) {
         if (error?.code === "display_name_unavailable") {
           error.detail = {
@@ -495,7 +497,7 @@ export class AgentInvites {
       if (plugin?.roomVerificationPolicy(roomId).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
       if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
-      assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
+      assertAdmissibleMemberName(displayName.trim(), room.state.members, { includeInactive: true, excludeId: identity.identityId }); // Q3-D: roster check plus role names; policy v3 removed-member reservation
       grantCheck();
       const now = this.store.now();
       const incoming = event({ id: eventId, idempotencyKey: eventId, roomId, actorId,

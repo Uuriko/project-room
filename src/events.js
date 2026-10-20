@@ -459,12 +459,20 @@ export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
 // v2 (r50): the G16b first-word collision rule. Events stamped v1 were admitted
 // without it (Oct 5-15 muse-room has two), so replay checks a v1 stamp with
 // the v1 rules; a tightened rule needs a new version, not a rewrite of v1.
-export const DISPLAY_NAME_POLICY_VERSION = 2;
-const DISPLAY_NAME_POLICY_VERSIONS = new Set([1, 2]);
+// v3: a removed member's name stays reserved in the room — live admission
+// also checks inactive member records (the joining member's own record is
+// never in the map at this point, and excludeId keeps that explicit).
+// Events stamped v1/v2 replay without the reservation, as admitted.
+export const DISPLAY_NAME_POLICY_VERSION = 3;
+const DISPLAY_NAME_POLICY_VERSIONS = new Set([1, 2, 3]);
 function assertStampedDisplayName(data, members) {
   const version = data.displayNamePolicyVersion;
   if (!DISPLAY_NAME_POLICY_VERSIONS.has(version)) return;
-  assertMemberDisplayNameAvailable(data.displayName, members, { firstWordRule: version >= 2 });
+  assertMemberDisplayNameAvailable(data.displayName, members, {
+    firstWordRule: version >= 2,
+    includeInactive: version >= 3,
+    excludeId: data.memberId ?? null,
+  });
 }
 // Live message.pinned commands stamp this (store.command injects it at
 // admission). Pin events written before the F-1 DM-party rule omit the field
@@ -1171,6 +1179,21 @@ function changeMemberAccess(state, incoming) {
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
+  // Display-name policy v3: how a membership ended decides whether the
+  // member's name stays reserved in the room. Account deletion ends the
+  // membership AND frees the name (bug-deleted-account-member-stays-active-
+  // 20261010: the next joiner with that name must not 422); the deletion
+  // flow stamps membershipEndReason on its deactivation commands, and the
+  // marker is derived here and mirrored onto the event like delegatedAdmin,
+  // never trusted from a stored record alone. Any other ending (owner
+  // removal, self-leave) keeps the name reserved. Reactivation clears it.
+  if (incoming.data.active === false && incoming.data.membershipEndReason === "account_deleted") {
+    member.membershipEndedBy = "account_deleted";
+    incoming.data.membershipEndedBy = "account_deleted";
+  } else if (incoming.data.active === true) {
+    delete member.membershipEndedBy;
+    delete incoming.data.membershipEndedBy;
+  }
   // #643: the delegation marker follows the bits. An owner grant of admin
   // bits to a non-owner agent sets it (on the projection and the
   // member.access_changed event); any other outcome clears it, so a

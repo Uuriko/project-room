@@ -120,13 +120,27 @@ function normalizedName(value) {
   return value.normalize('NFKC').trim().replace(spaces, ' ').toLowerCase();
 }
 
-function activeNameList(activeNames) {
+function activeNameList(activeNames, { includeInactive = false, excludeId = null } = {}) {
   const records = Array.isArray(activeNames) ? activeNames
     : activeNames && typeof activeNames === 'object' ? Object.values(activeNames)
     : [];
   const names = [];
   for (const record of records) {
-    if (record && typeof record === 'object' && !Array.isArray(record) && record.active === false) continue;
+    if (record && typeof record === 'object' && !Array.isArray(record) && record.active === false) {
+      // Removed members hold no name by default: replay and read paths keep
+      // the semantics the stored history was admitted under. Live admission
+      // opts into includeInactive (display-name policy v3): a removed
+      // member's name stays reserved in the room, so a new identity cannot
+      // take the name the removed member's messages still render under.
+      // excludeId spares the returning identity's OWN inactive record —
+      // re-joining under its own name is not a takeover. A membership that
+      // ended by account deletion does not hold the name either: deletion
+      // frees it for the next joiner (the reducer stamps membershipEndedBy
+      // on the record from the deletion flow's deactivation event).
+      if (!includeInactive) continue;
+      if (record.membershipEndedBy === "account_deleted") continue;
+      if (excludeId !== null && recordName(record).id === excludeId) continue;
+    }
     const { name } = recordName(record);
     if (typeof name === 'string' && name.trim()) names.push(name);
   }
@@ -158,13 +172,13 @@ function isReservedLabel(skeleton) {
   return decorations.some(decoration => reservedLabels.has(decoration));
 }
 
-function classifyMemberDisplayName(name, activeNames, { firstWordRule = true } = {}) {
+function classifyMemberDisplayName(name, activeNames, { firstWordRule = true, ...listOptions } = {}) {
   if (typeof name !== 'string' || !name.trim() || name.length > 80) return { available: false, reason: 'invalid' };
   if (hasBlockedControls(name)) return { available: false, reason: 'control_characters' };
   const skeleton = displayNameSkeleton(name);
   const normalized = normalizedName(name);
   if (!skeleton) return { available: false, reason: 'invalid' };
-  const names = activeNameList(activeNames);
+  const names = activeNameList(activeNames, listOptions);
   if (names.some(other => normalizedName(other) === normalized)) return { available: false, reason: 'duplicate' };
   if (isReservedLabel(skeleton)) return { available: false, reason: 'reserved' };
   if (names.some(other => displayNameSkeleton(other) === skeleton)) return { available: false, reason: 'confusable' };
@@ -227,10 +241,13 @@ function unavailableMessage(reason, suggestion) {
 }
 
 // Admission check for a name about to be stored on a member. `activeNames`
-// is the room's current members (or a list of display names). Inactive
-// members do not block the name. `invalid` means the caller still owns the
-// empty/length error; the four admission reasons throw from
-// assertMemberDisplayNameAvailable.
+// is the room's current members (or a list of display names). By default
+// inactive members do not block the name — that is the replay semantics for
+// stored history. Live admission passes { includeInactive: true } (policy
+// v3): a removed member's name stays reserved in the room, with
+// { excludeId } sparing the returning identity's own inactive record.
+// `invalid` means the caller still owns the empty/length error; the four
+// admission reasons throw from assertMemberDisplayNameAvailable.
 export function assessMemberDisplayName(name, activeNames = [], options = {}) {
   const verdict = classifyMemberDisplayName(name, activeNames, options);
   if (verdict.available || verdict.reason === 'invalid') return { ...verdict, suggestion: null, message: null };

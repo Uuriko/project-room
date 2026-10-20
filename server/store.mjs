@@ -731,7 +731,7 @@ const shapes = {
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy joinedVia",
-  [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
+  [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active membershipEndReason",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
@@ -6100,7 +6100,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // control characters are refused.
       if (command.type === T.MEMBER_ADDED || command.type === T.MEMBER_JOINED_VIA_INVITATION) {
         try {
-          assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members);
+          // Policy v3: mirror the reducer's removed-member reservation so
+          // the refusal surfaces here with its suggestion; the reducer's
+          // stamped check below remains the authority.
+          assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members,
+            { includeInactive: true, excludeId: command.data?.memberId ?? null });
         } catch (error) {
           if (error?.code === "display_name_unavailable" && error.reason !== "duplicate") {
             const refused = new ServiceError(422, "display_name_unavailable", error.message);

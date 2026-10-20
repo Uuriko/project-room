@@ -86,17 +86,17 @@ export function isReservedRoleName(name) {
 }
 
 // A suggestion the admission rules accept: "Member", then "Member 2" and up.
-function admissibleSuggestion(members) {
+function admissibleSuggestion(members, options = {}) {
   for (let n = 1; n <= 50; n += 1) {
     const candidate = n === 1 ? "Member" : `Member ${n}`;
-    if (assessMemberDisplayName(candidate, members ?? []).available) return candidate;
+    if (assessMemberDisplayName(candidate, members ?? [], options).available) return candidate;
   }
   return "Member";
 }
 
-export function assertNotReservedRoleName(name, members = null) {
+export function assertNotReservedRoleName(name, members = null, options = {}) {
   if (!isReservedRoleName(name)) return;
-  const suggestion = admissibleSuggestion(members);
+  const suggestion = admissibleSuggestion(members, options);
   const error = new Error(`That display name is reserved because it reads as a role or as Project Room. Choose a personal name. Suggested name: ${suggestion}.`);
   error.status = 422;
   error.code = "display_name_unavailable";
@@ -108,19 +108,22 @@ export function assertNotReservedRoleName(name, members = null) {
 
 // Member admission: the shared roster check, then the role-name rule. The
 // shared check can suggest a name the role rule refuses ("SYSTEM 2"); that
-// suggestion is swapped for one both rules accept.
-export function assertAdmissibleMemberName(name, members) {
+// suggestion is swapped for one both rules accept. Live admission passes
+// { includeInactive: true, excludeId } (display-name policy v3): a removed
+// member's name stays reserved in the room; the joining identity's own
+// inactive record never blocks the identity itself.
+export function assertAdmissibleMemberName(name, members, options = {}) {
   try {
-    assertMemberDisplayNameAvailable(name, members);
+    assertMemberDisplayNameAvailable(name, members, options);
   } catch (error) {
     if (error?.code === "display_name_unavailable" && isReservedRoleName(error.suggestion)) {
-      const suggestion = admissibleSuggestion(members);
+      const suggestion = admissibleSuggestion(members, options);
       error.message = String(error.message).replace(/Suggested name: .*\.$/u, `Suggested name: ${suggestion}.`);
       error.suggestion = suggestion;
       error.detail = { ...(error.detail ?? {}), suggestion };
     }
     throw error;
   }
-  assertNotReservedRoleName(name, members);
+  assertNotReservedRoleName(name, members, options);
 }
 // --- end Q3-D ---

@@ -472,7 +472,7 @@ export class ShareLinks {
         }
       }
       const room = this.store.room(row.room_id), now = this.store.now();
-      assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
+      assertAdmissibleMemberName(displayName.trim(), room.state.members, { includeInactive: true }); // Q3-D: roster check plus role names; policy v3 removed-member reservation (the joiner always receives a fresh member id here — bound members return or reactivate above)
       if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       const access = this.accessOf(row);
       const role = access === "co_admin" ? "moderator" : access === "member" ? "member" : "guest";

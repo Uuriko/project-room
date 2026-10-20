@@ -563,7 +563,10 @@ function deactivateBoundMembers(store, accountId) {
     store.command(key, roomId, {
       id: `account-delete-leave-${createHash("sha256").update(`${roomId}:${memberId}:${accountId}`).digest("hex").slice(0, 32)}`,
       type: EVENT_TYPES.MEMBER_ACCESS_CHANGED,
-      data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false },
+      // membershipEndReason: deletion ends the membership AND frees the
+      // display name for the next joiner (display-name policy v3 carves
+      // deletion-ended records out of the removed-member reservation).
+      data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false, membershipEndReason: "account_deleted" },
     });
   }
 }

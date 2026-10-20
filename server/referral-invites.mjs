@@ -438,8 +438,9 @@ export class ReferralInvites {
         if (linked) fail(409, "identity_already_linked", "This identity is already linked to this room");
       }
       // Mint copies this string onto the new member. Refuse it before the
-      // identity row exists.
-      assertAdmissibleMemberName(name, room.state.members); // Q3-D: roster check plus role names
+      // identity row exists. Policy v3: a removed member's name stays
+      // reserved; the attached identity's own inactive record never blocks it.
+      assertAdmissibleMemberName(name, room.state.members, { includeInactive: true, excludeId: attached?.identityId ?? null }); // Q3-D: roster check plus role names
       const identity = attached
         ? { identityId: attached.identityId, secret: null }
         : this.store.identities.create(name, {
