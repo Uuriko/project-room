@@ -91,7 +91,12 @@ for (const mobile of [false, true]) {
     // cover viewports where the list has no scrollable overflow.
     const listBox = await page.locator("#message-list").boundingBox();
     await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + Math.min(listBox.height, page.viewportSize().height - listBox.y) / 2);
+    // page.mouse.wheel resolves before the page handles the wheel, so the
+    // synthetic scrolls below could run first and fall outside the reader
+    // window. Wait for the wheel to land before dispatching them.
+    await page.evaluate(() => { window.__wheelSeen = new Promise(resolve => addEventListener("wheel", resolve, { once: true, capture: true, passive: true })); });
     await page.mouse.wheel(0, 100000);
+    await page.evaluate(() => window.__wheelSeen);
     await page.evaluate(() => {
       const list = document.querySelector("#message-list");
       if (list) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event("scroll")); }
