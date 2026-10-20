@@ -363,3 +363,9 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+2026-10-20 WebMCP: `src/webmcp.js` adds a read-only consumer of the existing
+work snapshot for `room_list_work(kind: "work")`. It pages open items and
+reports the claim holder; mutations remain on the Board claim endpoints.
+The source reference census includes this reader; no migration or field
+mapping changes are introduced.

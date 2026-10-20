@@ -110,6 +110,7 @@
   "src/spend-pricing-ui.js",
   "src/strings.js",
   "src/updates-ui.js",
+  "src/webmcp.js",
   "src/work-announcements.js",
   "src/work-help.js",
   "src/work-item-session.js",

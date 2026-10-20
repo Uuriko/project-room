@@ -20,6 +20,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/message-replay-snapshot.mjs');
   paths.add('server/work-repository.mjs');
   paths.add('server/message-command-service.mjs');
+  paths.add('src/webmcp.js');
   paths.add('src/message-reducers.js');
   paths.add('src/work-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
