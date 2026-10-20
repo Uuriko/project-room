@@ -24,6 +24,12 @@
 //                           bare memberId, creating undrainable stock
 //   suppressed_policy       pause / readonly tier / trust / mute / opt-out
 //                           gates refused the wake (by design)
+//   suppressed_no_target    WAKE0-1: the wake-intent rule (§2.1(4)) found
+//                           no delivery target — no enabled agent.wake
+//                           subscription, no wakeUrl and no live push
+//                           subscription on a wakeable host. The design
+//                           never creates an intent it has no way to
+//                           attempt, and the refusal is counted, not lost.
 //   failed                  the emission threw on a path that swallows
 //                           (journaled) — the attempt was owed and lost
 // Delivery is a signal's inclusion in a page/batch served on a door
@@ -34,7 +40,7 @@
 //
 // failureRate = (failed + suppressed_no_identity)
 //             / (emitted + coalesced + failed + suppressed_no_identity)
-// Designed suppressions (no_host, policy) are excluded from both sides:
+// Designed suppressions (no_host, policy, no_target) are excluded from both sides:
 // they are the fabric keeping its documented contract, reported in full
 // in the outcome table so the rate can be re-derived either way.
 //
@@ -47,7 +53,7 @@
 export const WAKE_STORES = Object.freeze(["signals", "work", "queue"]);
 export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
-  "suppressed_policy", "failed", "delivered", "acked", "invalidated",
+  "suppressed_policy", "suppressed_no_target", "failed", "delivered", "acked", "invalidated",
   "doorbell_delivered", "doorbell_failed", "ack_unregistered",
 ]);
 export const WAKE_FAILURE_REASONS = Object.freeze([
@@ -112,7 +118,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
 }
 
 const emptyCounters = () => ({ emitted: 0, coalesced: 0, suppressed_no_host: 0,
-  suppressed_no_identity: 0, suppressed_policy: 0, failed: 0, invalidated: 0,
+  suppressed_no_identity: 0, suppressed_policy: 0, suppressed_no_target: 0, failed: 0, invalidated: 0,
   doorbell_delivered: 0, doorbell_failed: 0, ack_unregistered: 0,
   deliveredByDoor: {}, ackedByDoor: {} });
 
@@ -181,7 +187,8 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
     attempts: Object.freeze({
       emitted: s.emitted + w.emitted, coalesced: s.coalesced,
       suppressedNoHost: s.suppressed_no_host, suppressedNoIdentity: s.suppressed_no_identity + w.suppressed_no_identity,
-      suppressedPolicy: s.suppressed_policy + w.suppressed_policy, failed: s.failed + w.failed,
+      suppressedPolicy: s.suppressed_policy + w.suppressed_policy, suppressedNoTarget: s.suppressed_no_target,
+      failed: s.failed + w.failed,
     }),
     stock: Object.freeze(stock),
     failures: Object.freeze({ ...failures, byReason: Object.freeze(failures.byReason), recent: Object.freeze(failures.recent) }),

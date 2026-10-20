@@ -614,16 +614,21 @@ test("trigger: bond proposal enqueues a durable bond wake that survives a dead p
   await f.store.agentHeartbeats.flushPushes();
   assert.ok(transport.calls.length >= 1, "the doorbell was still attempted");
   const rows = f.store.db.prepare("SELECT * FROM agent_wake_signals WHERE agent_id=?").all(identity.identityId);
-  assert.equal(rows.length, 1, "exactly one durable wake signal for the proposal");
+  // WAKE0-1: the proposal is a wake-causing event — alongside the bond
+  // signal, the offline party (push target registered) also gets a
+  // wake intent pointing at the proposal.
+  assert.equal(rows.length, 2, "the bond signal plus its wake intent");
   assert.equal(rows[0].kind, "bond");
   assert.equal(rows[0].room_id, "commons");
   assert.equal(rows[0].message_id, bondId);
+  assert.equal(rows[1].kind, "wake");
+  assert.equal(rows[1].message_id, `wake:${bondId}`);
   // The durable channel carries it even though the doorbell failed: the
-  // party's next wake poll shows the bond wake, and ack drains it.
+  // party's next wake poll shows both rows, and ack drains them.
   const poll = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
-  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId]]);
-  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [rows[0].signal_id] }, identity.secret)).json();
-  assert.deepEqual(ack.acknowledged, [rows[0].signal_id]);
+  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId], ["wake", `wake:${bondId}`]]);
+  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: rows.map(r => r.signal_id) }, identity.secret)).json();
+  assert.deepEqual(ack.acknowledged, rows.map(r => r.signal_id));
   const quiet = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
   assert.deepEqual(quiet.pendingWakes, []);
   // The proposer is never woken about their own proposal.

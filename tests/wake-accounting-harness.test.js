@@ -144,8 +144,10 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
   f.say("urgent @reviewer");
   await f.store.agentHeartbeats.flushPushes();
   const eBeat = await f.post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, reviewer.secret);
-  assert.equal(eBeat.value.pendingWakes.length, 1, "the durable signal survived the dead doorbell");
-  await f.post("/api/agent-heartbeats/ack", { signalIds: [eBeat.value.pendingWakes[0].signalId] }, reviewer.secret);
+  // WAKE0-1: reviewer is wakeable-with-push and stale, so the mention
+  // also emits a wake intent — the page carries mention + intent (2).
+  assert.equal(eBeat.value.pendingWakes.length, 2, "the durable signal survived the dead doorbell");
+  await f.post("/api/agent-heartbeats/ack", { signalIds: eBeat.value.pendingWakes.map(w => w.signalId) }, reviewer.secret);
 
   // Phase F — truncation parity at 55 pending, then ack-and-repeat drain.
   // (Posts are spread in fake time: the chat flood guard is real and a
@@ -179,15 +181,16 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
     work: { emitted: w.emitted, invalidated: w.invalidated, ackedByDoor: w.ackedByDoor },
     stock: acct.stock, failures: acct.failures.byReason, loss: acct.loss,
   }, null, 1));
-  // Signals tally: A1 + C2 + D1 + E1 + F55 = 60 emitted, all acked.
-  assert.equal(s.emitted, 60);
+  // Signals tally: A1 + C2 + D1 + E2 (mention + its WAKE0-1 wake
+  // intent) + F55 = 61 emitted, all acked.
+  assert.equal(s.emitted, 61);
   assert.equal(s.coalesced, 0);
   assert.equal(s.failed, 0, "fabric loss: no owed attempt errored on a swallowing path");
   assert.equal(s.suppressed_no_identity, 1, "exactly the ghost's claim wake");
-  assert.equal(ackedTotal, 60, "every emitted signal was acked");
+  assert.equal(ackedTotal, 61, "every emitted signal was acked");
   assert.equal(acct.stock.signalsPending, 0);
-  assert.equal(acct.stock.signalsAcked, 60);
-  assert.equal(s.ackedByDoor.rest, 59);
+  assert.equal(acct.stock.signalsAcked, 61);
+  assert.equal(s.ackedByDoor.rest, 60);
   assert.equal(s.ackedByDoor.mcp, 1);
   assert.ok(s.deliveredByDoor.heartbeat >= 51 && s.deliveredByDoor.poll >= 57 && s.deliveredByDoor.mcp >= 51,
     "deliveries counted on every pull door");
@@ -197,11 +200,11 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
   // Work store tally: one emitted work wake, acked once via REST.
   assert.equal(w.emitted, 1);
   assert.equal(w.ackedByDoor.rest, 1);
-  // The council number, decomposed: fabric failure (failed) is 0 of 62
-  // owed attempts (60 signal emissions + 1 work emission + 1 lost
-  // attempt); including the addressability class the rate is 1/62 — and
+  // The council number, decomposed: fabric failure (failed) is 0 of 63
+  // owed attempts (61 signal emissions + 1 work emission + 1 lost
+  // attempt); including the addressability class the rate is 1/63 — and
   // the two classes are never blended in the accounting itself.
   assert.equal(acct.loss.lostAttempts, 1);
-  assert.equal(acct.loss.owedAttempts, 62);
-  assert.ok(Math.abs(acct.loss.failureRate - 1 / 62) < 1e-12);
+  assert.equal(acct.loss.owedAttempts, 63);
+  assert.ok(Math.abs(acct.loss.failureRate - 1 / 63) < 1e-12);
 });
