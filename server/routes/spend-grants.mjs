@@ -127,10 +127,14 @@ export const SPEND_GRANT_ROUTES = Object.freeze([
     schema: { params: roomIdParam, response }, events: [] }),
   // The member spend default (ruling 29b): capability is null like its
   // siblings — the real gate is the owner check inside setSpendDefaultRoute.
+  // Parity is exempt: spend policy is REST-only — no MCP tool reads or sets
+  // any spend-grant surface (the grant rows above predate the note rule).
   Object.freeze({ id: "read-spend-default", method: "GET", path: "/api/rooms/{roomId}/spend-default",
     auth: "room", capability: null, scope: "room", handler: readSpendDefault,
+    parity: "exempt:spend policy is REST-only; no MCP twin for any spend surface",
     schema: { params: roomIdParam, response }, events: [] }),
   Object.freeze({ id: "set-spend-default", method: "POST", path: "/api/rooms/{roomId}/spend-default",
     auth: "room", capability: null, scope: "room", handler: setSpendDefault,
+    parity: "exempt:spend policy is REST-only; no MCP twin for any spend surface",
     schema: { params: roomIdParam, body: spendDefaultBody, response }, events: [] }),
 ]);
