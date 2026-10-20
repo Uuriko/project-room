@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { RoomStore, validateCommand } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   guestInviteContract, guestVoteExcluded, isGuestInviteCode,
@@ -688,16 +688,21 @@ test("guest tier upgrade journals a strictly-valid MEMBER_ACCESS_CHANGED event",
   assert.ok(journaled.length >= 1);
   const ev = journaled.at(-1);
   assert.equal(ev.actorId, ownerId);
-  // Exactly the validator's four fields plus the store-added authority
-  // policy version — no `tier` key anywhere in the event.
-  assert.deepEqual(Object.keys(ev.data).sort(), ["active", "authorityPolicyVersion", "expectedMemberRevision", "memberId", "permissions"].sort());
+  // Exactly the validator's four fields plus the two store-added policy
+  // stamps — no `tier` key anywhere in the event. The display-name stamp
+  // rides member.access_changed since display-name policy v3 (CURE-4348)
+  // so the reducer can gate its reactivation guard on the stamp; like the
+  // authority stamp it is added by the store after validation and refused
+  // in public command data.
+  assert.deepEqual(Object.keys(ev.data).sort(), ["active", "authorityPolicyVersion", "displayNamePolicyVersion", "expectedMemberRevision", "memberId", "permissions"].sort());
   assert.equal(ev.data.active, true);
   assert.ok(!("tier" in ev.data));
   // The command shape behind the journaled event passes strict validation
-  // as-is (the authority policy version is added by the store after
-  // validation, exactly like every other member-authority event).
-  const { authorityPolicyVersion, ...commandData } = ev.data;
+  // as-is (both policy stamps are added by the store after validation,
+  // exactly like every other member-authority event).
+  const { authorityPolicyVersion, displayNamePolicyVersion, ...commandData } = ev.data;
   assert.equal(authorityPolicyVersion, MEMBERSHIP_AUTHORITY_POLICY_VERSION);
+  assert.equal(displayNamePolicyVersion, DISPLAY_NAME_POLICY_VERSION);
   assert.doesNotThrow(() => validateCommand({ id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: commandData }));
 });
 
