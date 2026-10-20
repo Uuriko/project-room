@@ -51,7 +51,10 @@ export function statedArtifactFloors(criterion) {
     if (minimum) floors.push(minimum);
   }
   const citation = CITATION_FORM.exec(criterion);
-  if (citation && PATH_LIKE(citation[1])) floors.push({ kind: 'file_citation', path: citation[1] });
+  // The captured token can carry the criterion's sentence punctuation
+  // ("...cites the file server/bounty-escrow.mjs.") — a file path never
+  // ends in it, so trailing punctuation is the sentence's, not the path's.
+  if (citation && PATH_LIKE(citation[1])) floors.push({ kind: 'file_citation', path: citation[1].replace(/[.,;:]+$/, '') });
   if (TASK_ID_FORM.test(criterion)) floors.push({ kind: 'task_id' });
   return floors;
 }
