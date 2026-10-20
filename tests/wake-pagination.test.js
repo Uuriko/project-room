@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { queueRoomPointer, runCodexQueue } from '../client/codex-queue.mjs';
+import { queueRoomPointer } from '../client/codex-queue.mjs';
 const binding = { origin: 'https://room.example', roomId: 'qa-room', memberId: 'agent-one', threadId: '01a0ee9d-76ed-7e80-acdc-02177dc7ca3c' };
 function fixture(t) {
   const journal = mkdtempSync(join(tmpdir(), 'room-queue-'));
@@ -15,7 +15,6 @@ test('cursor traversal reaches51 without replaying accepted or unknown receipts'
   const { initialRoom } = await import('../server/bootstrap.mjs');
   const { createRoomServer } = await import('../server/http.mjs');
   const { connectRoom } = await import('../client/agent-setup.mjs');
-  const { readAgentConnection } = await import('../client/agent-connection.mjs');
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const { readFileSync } = await import('node:fs');
@@ -28,7 +27,6 @@ test('cursor traversal reaches51 without replaying accepted or unknown receipts'
   const origin = `http://127.0.0.1:${server.address().port}`;
   const invite = store.invites.create(owner, 'commons', { profile: 'chat', displayName: 'Probe' });
   const setup = await connectRoom({ origin, directory: join(journal, 'identity'), name: 'Probe', accept: true, target: invite.code });
-  const connection = readAgentConnection(setup.configDirectory);
   store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'probe-message' });
   for (let i = 0; i < 50; i++) store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'next-' + i });
   const log = join(journal, 'calls');
@@ -36,8 +34,6 @@ test('cursor traversal reaches51 without replaying accepted or unknown receipts'
   const args = ['scripts/codex-queue-pointer.mjs', '--thread', binding.threadId, '--journal', join(journal, 'receipts'), '--host', 'queue-probe'];
   const env = { ...process.env, PATH: journal + ':' + process.env.PATH, ROOM_AGENT_CONFIG: setup.configDirectory, ROOM_TEST_QUEUE_LOG: log };
   for (const key of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete env[key];
-  let polls = 0;
-  server.on('request', req => { if (req.url.startsWith('/api/agent-wakes/poll?')) polls++; });
   const execute = () => promisify(execFile)(process.execPath, args, { env, timeout: 15000 });
   const pending = store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' });
   const { roomEventPointer } = await import('../client/claude-channel.mjs');
