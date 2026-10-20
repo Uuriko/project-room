@@ -234,7 +234,7 @@ export class PublicWorkReviews {
     const row = this.db.prepare('SELECT receipt_json, namespace_key, artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
     if (!row) return;
     const receipt = JSON.parse(row.receipt_json);
-    let claim = null, delivery = null;
+    let claim = null, delivery = null, claimError = null;
     try {
       const item = this.store.workClaims.get(row.namespace_key, receipt.taskId);
       if (item) {
@@ -244,11 +244,18 @@ export class PublicWorkReviews {
         if (item.delivery) delivery = { digest: item.delivery.digest ?? null,
           deliveredBy: item.delivery.deliveredBy ?? null, deliveredAt: item.delivery.deliveredAt ?? null };
       }
-    } catch { claim = null; delivery = null; }
+    } catch (error) {
+      // A failed capture must not bake into the permanent record as a
+      // silent null, indistinguishable from a genuinely absent claim:
+      // record the error's class so a later re-checker can tell absence
+      // from failure. Settlement itself still proceeds (REV-FIXES-1).
+      claim = null; delivery = null;
+      claimError = error && typeof error.name === 'string' && error.name ? error.name : 'Error';
+    }
     receipt.claimSnapshot = { schema: 'public-work-claim-snapshot/1', taskId: receipt.taskId,
       receiptId, generation: receipt.generation, termsVersion: receipt.termsVersion ?? null,
       settledAt: review.decision?.at ?? null, decision: review.decision?.decision ?? null,
-      claim, delivery,
+      claim, delivery, ...(claimError ? { claimError } : {}),
       criteria: Array.isArray(scope.offer.acceptanceCriteria) ? scope.offer.acceptanceCriteria : [],
       verification: { tier: receipt.verification ?? null, state: receipt.state ?? null,
         verdict: review.verification?.verdict ?? null, reviewerKind: review.verification?.reviewerKind ?? null,
