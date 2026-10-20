@@ -15,6 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { buildActivationPack, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { buildOrient } from "../server/orient.mjs";
 
 const ROOM = "activation-demo";
 const FUTURE_LEASE = new Date(Date.now() + 6 * 3600 * 1000).toISOString();
@@ -162,7 +163,8 @@ test("pack surfaces unclaimed board claims as openClaims (#3020)", async t => {
   // The embedded orient agrees: the same claims are the worker's
   // available work, while its own-claims list stays scoped to the viewer
   // (the seeded board claim plus the fixture's pack-work-1 claim).
-  assert.deepEqual(pack.orient.availableClaims, pack.openClaims);
+  assert.equal(pack.orient.availableClaims, undefined);
+  assert.deepEqual(pack.orient.sharedWithPack, { availableClaims: "openClaims", orientation: "orientation" });
   assert.deepEqual(pack.orient.claims.map(claim => claim.id).sort(), ["board-taken-1", "pack-work-1"]);
 });
 
@@ -250,4 +252,21 @@ test("agent client orientation agrees with the browser projection and reads do n
   assert.ok(pack.orientation.activeWork.every(item => item.untrusted === true));
   assert.equal(pack.orientation.purpose, "Current instructions");
   assert.equal(f.store.room(ROOM).sequence, before.sequence);
+});
+
+test("activation pack sends each claim list and the orientation once (qa-pack-duplicate-claims)", t => {
+  const { store } = fixture(t);
+  const pack = buildActivationPack(store, ROOM, "worker");
+  assert.ok(pack.orient, "a member viewer gets the embedded orient");
+  assert.ok(pack.openClaims.length > 0, "fixture has open claims");
+  const whole = JSON.stringify(pack);
+  const count = needle => whole.split(needle).length - 1;
+  for (const claim of pack.openClaims) assert.equal(count(JSON.stringify(claim)), 1, `claim ${claim.id} appears once`);
+  assert.equal(count(JSON.stringify(pack.orientation)), 1, "orientation appears once");
+  // Size budget: the embedded orient adds no more than the standalone orient
+  // minus the two shared fields.
+  const standalone = buildOrient(store, ROOM, "worker", { text: false });
+  const { availableClaims, orientation, ...rest } = standalone;
+  const extra = Buffer.byteLength(JSON.stringify(pack.orient)) - Buffer.byteLength(JSON.stringify(rest));
+  assert.ok(extra < 120, `embedded orient overhead ${extra} bytes`);
 });
