@@ -6366,6 +6366,42 @@
    "census_size": 131241,
    "last_change": "2026-10-18"
   }
+ },
+ {
+  "path": "docs/COLLABORATION-EXPERIMENTS.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-20",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): on main at 6d84149b this doc was reachable from docs/INDEX.md only through the hand-written index's link chain (via docs/COLLABORATION-COMPONENTS-PLAN-20261019.md); the generated index (the design of record) does not reproduce link chains, so it is registered here to be listed. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 12088,
+   "last_change": "2026-10-20"
+  }
  }
  ],
  "families": [

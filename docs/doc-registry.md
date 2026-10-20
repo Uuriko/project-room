@@ -2,7 +2,7 @@
 
 <!-- GENERATED from doc-registry.json by fleet-tools/doc-registry/render-view.mjs — do not edit by hand. The JSON is the registry of record (Docs Programme D-1). -->
 
-Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). Base: 6d84149b558e003fef1d880f7194f75c788dff5e. Rows: 177 (7 family, 0 UNCLASSIFIED, 10 planned, 6 served).
+Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). Base: 6d84149b558e003fef1d880f7194f75c788dff5e. Rows: 178 (7 family, 0 UNCLASSIFIED, 10 planned, 6 served).
 
 ## ARCHIVE (21)
 
@@ -173,7 +173,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | .well-known/agent-card.json | agent-surface | — | — | served | active | served agent card, stamped from its own door's origin (DP-13); the MCP card is served alongside and is registered jointly until AC-4 names its route |
 | /openapi.json | contract | — | — | served | active | served contract artefact; re-sourced from route rows under Option B (AC-2) |
 | **agents-html** — `docs/agents/` (0 members) | agent-surface | — | — | 0 B | active | runtime-package outputs generated from the per-host .md sources at packaging; not tree files (existence=served) |
-| docs/INDEX.md | docs-steward | — | 4.0 KB | 3.3 KB | active | one-screen map, generated from the registry (programme §2.1 #12); over-cap exception retired at the W-D1 landing — the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap. Cap raised 3,072 -> 4,096 at the ruling 31 registry refresh (2026-10-20, REFRESH-DOCS-2): main's front-page headlines joined the map (13 rows + the inbox scope note); the map remains one screen (3,399 B at the refresh). |
+| docs/INDEX.md | docs-steward | — | 4.0 KB | 3.4 KB | active | one-screen map, generated from the registry (programme §2.1 #12); over-cap exception retired at the W-D1 landing — the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap. Cap raised 3,072 -> 4,096 at the ruling 31 registry refresh (2026-10-20, REFRESH-DOCS-2): main's front-page headlines joined the map (13 rows + the inbox scope note); the map remains one screen (3,399 B at the refresh). |
 | **procedures** — `docs/procedures/` (4 members) | operator | — | 25.0 KB | 7.1 KB | active | served wiki sources — product surface (D-12a); the served pages are generated from these sources |
 | kits.txt | agent-surface | — | — | served | active | served; absorbs join/join-team/agents-paste depth |
 | llms-full.txt | agent-surface | — | — | served | active | served; absorbs SWARM/QUICKSTART reference depth |
@@ -195,13 +195,14 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/STAGING.md | operator | 90 | 20.0 KB | 3.4 KB | active | fragments feed OPERATOR-GUIDE (§2.1 #7); standalone survivor as the staging runbook |
 | ops/STATE.md | operator | 90 | 16.0 KB | 4.2 KB | active | DS-4 disposition (2026-10-19, base eabb0011): the operator journal — docs/BACKUPS.md:86 designates this file as the record sink for restore-drill results, and its entries are dated operator prose (2026-10-07 backups + restore drill, 2026-10-10 GitHub polling). That corrects the DS-1 seed premise: the file is operator-written, not machine-written. Exclusion-as-state-artefact was rejected: nothing in code writes or reads it (the STATE.md hits in scripts/room are ROOM-STATE.md, a different file), and a name-based exclusion would be ambiguous against that machine board while hiding a designated record from the registry join. RUNBOOK (90-day clock) with BACKUPS.md as its governing runbook; when the cap approaches, the owner rotates old entries to the archive rather than growing the file. |
 
-## WORKING (11)
+## WORKING (12)
 
 | Path | Owner | TTL | Cap | Size | Status | Note |
 |---|---|---|---|---|---|---|
 | docs/CHAT-RESULT-IMPLEMENTATION-20261019.md | docs-steward | 90 | 40.0 KB | 35.6 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/COLLABORATION-COMPONENTS-PLAN-20261019.md | docs-steward | 90 | 70.0 KB | 66.9 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/COLLABORATION-EXECUTION-20261019.md | docs-steward | 90 | 10.0 KB | 7.4 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
+| docs/COLLABORATION-EXPERIMENTS.md | docs-steward | 90 | 15.0 KB | 11.8 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): on main at 6d84149b this doc was reachable from docs/INDEX.md only through the hand-written index's link chain (via docs/COLLABORATION-COMPONENTS-PLAN-20261019.md); the generated index (the design of record) does not reproduce link chains, so it is registered here to be listed. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md | docs-steward | 90 | 20.0 KB | 17.7 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md | docs-steward | 90 | 10.0 KB | 6.8 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/FOCUSED-COLLABORATION-PLAN-20261019.md | docs-steward | 90 | 15.0 KB | 11.7 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
