@@ -259,6 +259,12 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       }));
       return { value, isError: false };
     }
+    // room_ask_user: default the recipient to the room owner (the person
+    // who runs the room). Asking yourself is refused like any reply request.
+    if (name === "room_ask_user" && rest.toMemberId === undefined) {
+      const ownerId = store.roomAuthority(roomId).ownerId;
+      if (ownerId) rest.toMemberId = ownerId;
+    }
     const command = buildReplyCommand(identity, name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedReplyAction(name, rest, command, receipt));
   }
