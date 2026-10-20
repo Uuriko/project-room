@@ -25,6 +25,8 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
+import { oneLineSetup } from "./routes/connect-skill.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -291,7 +293,7 @@ export class AgentInvites {
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
         VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt, oneLine: oneLineSetup(ROOM_ORIGIN, code), next: createNext(roomId, code) };
     });
   }
 
@@ -632,7 +634,7 @@ const createNext = (roomId, code) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   return Object.freeze([
     Object.freeze({ action: "share-code", description:
-      `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem.` }),
+      `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem. Fastest: give their agent the oneLine field, one sentence that points at the connect skill and carries this code.` }),
     Object.freeze({ action: "preview-invite", method: "POST",
       path: "/api/agent-invites/preview",
       description: `See exactly what the invitee sees before redeeming: the room's consent screen (room name, inviter, permissions). Send { code: "${code}" } in the POST body — never put the code in a URL, where access logs and browser history would keep the live credential. No identity data is revealed.` }),

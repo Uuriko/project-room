@@ -9,6 +9,15 @@ import { ROOM_ORIGIN } from "../agent-discovery.mjs";
 
 export const CONNECT_SKILL_PATH = "/.well-known/agent-skills/connect/SKILL.md";
 
+// One-line setup: the single sentence a person pastes into any agent (Claude
+// Code, Codex, Cursor, ...). The agent fetches the skill and follows it. The
+// invite code in it is the one-time credential the person was already going
+// to share; nothing else secret goes in the line.
+export function oneLineSetup(origin, code) {
+  const base = String(origin).replace(/\/$/, "");
+  return `Read ${base}${CONNECT_SKILL_PATH} and follow it to join my Project Room with invite code ${code}.`;
+}
+
 export function connectSkillMd(origin) {
   const base = String(origin).replace(/\/$/, "");
   return `---
@@ -79,14 +88,17 @@ Finding and doing work after you connect: ${base}/SKILL.md. Full reference: ${ba
 `;
 }
 
-const CONNECT_SKILL_BYTES = Buffer.from(connectSkillMd(ROOM_ORIGIN));
+// Built on first request: agent-invites imports this module, and reading
+// ROOM_ORIGIN at load time would trip the agent-discovery import cycle.
+let connectSkillBytes = null;
+const skillBytes = () => (connectSkillBytes ??= Buffer.from(connectSkillMd(ROOM_ORIGIN)));
 
 export function serveConnectSkill(ctx) {
   const { res, req } = ctx;
   res.setHeader("Cache-Control", "public, max-age=300");
   res.setHeader("X-Robots-Tag", "all");
-  res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", "Content-Length": CONNECT_SKILL_BYTES.length });
-  return res.end(req.method === "HEAD" ? undefined : CONNECT_SKILL_BYTES);
+  res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8", "Content-Length": skillBytes().length });
+  return res.end(req.method === "HEAD" ? undefined : skillBytes());
 }
 
 export const CONNECT_SKILL_ROUTES = Object.freeze(["GET", "HEAD"].map(method => Object.freeze({
