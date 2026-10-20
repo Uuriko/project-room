@@ -362,6 +362,8 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   const card = p.locator('[data-work-record-id="native-result"]');
   await card.locator("[data-read-result]").click(); await f.ready();
   assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   assert.equal(await p.locator("dialog:modal").count(), 0);
   assert.equal(await p.locator("#result-title").evaluate(node => { const box = node.getBoundingClientRect(); return node === document.activeElement && box.top >= 0 && box.bottom <= innerHeight; }), true, "opening starts at the result heading");
   await f.capture(mobile ? "inline-result-initial-phone-light" : "inline-result-initial-desktop-dark");
@@ -377,6 +379,7 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   await f.capture(mobile ? "inline-result-phone-light" : "inline-result-desktop-dark");
   await p.keyboard.press("Escape");
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), true, "closing restores the original details and action");
   assert.equal(await card.locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#message-input").inputValue(), "My next thought while reading");
 });
@@ -483,6 +486,8 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
   assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   await p.locator("#result-discuss").click();
   await p.locator("#message-input").fill("Continue this transport result");
   await p.locator('#message-form button[type="submit"]').click();

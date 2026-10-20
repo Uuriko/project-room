@@ -518,5 +518,6 @@ export default {
   "result.reviewWithdrawn": "This text was withdrawn. Close this review.",
   "result.back": "Back to results",
   "result.collapse": "Collapse result",
-  "activity.recent": "Recent activity"
+  "activity.recent": "Recent activity",
+  "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text."
 };

@@ -1,4 +1,5 @@
-import { canReplyToResult } from "./result-availability.js";
+import { createResultComparison } from "./result-comparison.js";
+import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
 import { createSigninNavigation } from "./signin-navigation.js";
@@ -25,7 +26,7 @@ function clipGraphemes(text, maxUnits) {
   }
   return value.slice(0, taken);
 }
-import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
@@ -3750,7 +3751,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -4060,24 +4061,23 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
-function replyToSharedResult(messageId) {
-  const message = state?.messages.find(entry => entry.id === messageId);
-  if (!canReplyToResult(state, message) || busy || requestReading
-    || pendingMessage || composerFiles.some(file => file.status === "uploading")) return false;
-  const destination = conversation.rootById.get(message.id);
-  if (!destination || !conversation.threads.has(destination)) return false;
-  const draft = destination === composerKey()
-    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value }
-    : drafts.get(destination);
-  if (draft.pending || draft.toMemberId) { notice(uiText("result.replyBlocked")); return false; }
-  setActiveChannel(messageChannelId(message));
-  revealMessage(message.id);
-  switchThread(destination, true);
-  replyToId = message.id;
-  updateReply(); saveComposer(); persistDrafts();
-  $("#message-input").focus();
-  return true;
-}
+const replyToSharedResult = createResultFeedback({
+  getState: () => state, getConversation: () => conversation,
+  isBlocked: () => busy || requestReading || pendingMessage || composerFiles.some(file => file.status === "uploading"),
+  getDraft: destination => destination === composerKey()
+    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value } : drafts.get(destination),
+  onBlocked: () => notice(uiText("result.replyBlocked")),
+  openThread(message, destination) {
+    setActiveChannel(messageChannelId(message));
+    revealMessage(message.id);
+    switchThread(destination, true);
+  },
+  setReply(messageId) {
+    replyToId = messageId;
+    updateReply(); saveComposer(); persistDrafts();
+    $("#message-input").focus();
+  }
+});
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
   getConversation: () => ({ channelId: activeChannelId, threadId: currentThreadId, rootOf: id => conversation?.rootById.get(id) }),
   replyToResult: replyToSharedResult,
@@ -6222,60 +6222,8 @@ function resultRow(item) {
     : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
   return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
 }
-// Both reading and reviewing compare the same pinned completion versions.
-// Each caller owns its dialog/session lifetime; late reads cannot fill a new view.
-const resultComparisons = new Map();
-function clearResultComparison(box) {
-  resultComparisons.delete(box);
-  box.hidden = true; box.replaceChildren();
-}
-function syncResultComparisons() {
-  for (const [box, comparison] of resultComparisons) {
-    if (!comparison.owns()) { clearResultComparison(box); continue; }
-    if ([comparison.currentId, comparison.previousId].some(id => state?.messages.find(message => message.id === id)?.deletedAt)) {
-      clearResultComparison(box);
-      box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
-    }
-  }
-}
-function loadResultComparison(workItemId, previousId, text, box, owns) {
-  clearResultComparison(box);
-  if (!previousId) return;
-  const comparison = { currentId: text.messageId, previousId: null, owns };
-  resultComparisons.set(box, comparison);
-  const current = () => owns() && resultComparisons.get(box) === comparison;
-  client.workResult(workItemId, { completionEventId: previousId }).then(previous => {
-    if (!current() || !previous) return;
-    comparison.previousId = previous.result?.text?.messageId;
-    syncResultComparisons();
-    if (!current()) return;
-    if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
-    const before = previous.result?.text?.body;
-    if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
-      box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
-        previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
-          : "This version's text has been withdrawn, so the two cannot be compared."
-      } Previous approval never carries over.</p>`;
-      box.hidden = false;
-      return;
-    }
-    if (typeof before !== "string") throw new Error("Previous version has no exact text");
-    const rows = diffResultLines(before, text.body);
-    const note = "Previous approval never carries over; review the exact new text.";
-    box.innerHTML = rows === null
-      ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
-      : (() => { const summary = diffResultSummary(rows);
-          const body = rows.length > 200 ? rows.slice(0, 200) : rows;
-          return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
-            (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
-        })();
-    box.hidden = false;
-  }).catch(() => {
-    if (!current()) return;
-    box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
-    box.hidden = false;
-  });
-}
+const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
+  createResultComparison({ client, getState: () => state, esc });
 const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult } = installResultReader({
   client, getState: () => state, getSession: () => session, sameSession,
   isBusy: () => busy,

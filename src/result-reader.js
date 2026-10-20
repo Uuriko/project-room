@@ -91,7 +91,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
         (row?.querySelector("[data-read-result]") || ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary"))).focus({ preventScroll: true });
         return;
       }
-      const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
+      const card = workRecord(view.workItemId);
+      if (view.restoreDetails && card?.querySelector(".work-details")) card.querySelector(".work-details").open = true;
+      focusRecord(card?.querySelector("[data-read-result]") || card);
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
@@ -200,7 +202,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const fromResults = Boolean(read.closest("#room-results-list"));
       if (fromResults && !currentResult(item)) return true;
       const view = { generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id, workItemId: item.id,
-        fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
+        fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
       resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
@@ -209,6 +211,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-use-status").textContent = "";
       const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
+      // Details are the entry path, not a second toolbar above the open result.
+      // Restore them only when closing back to the originating control.
+      if (view.restoreDetails) workRecord(item.id).querySelector(".work-details").open = false;
       mountResultReader(); resultReader.hidden = false;
       resultElement("result-title").focus();
       loadExactResult(view);
