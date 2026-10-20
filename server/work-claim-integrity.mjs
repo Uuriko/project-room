@@ -16,6 +16,7 @@
 import { TEXT_CHARACTER_CLASSES } from "./display-name-guard.mjs";
 import { PILOT_LIMITS } from "./store.mjs";
 import { readCachedDeployStatus, readClaimPullBudget, readRoomDeployStatus } from "./claim-pr-sync.mjs";
+import { CLAIM_ID_RULE, isCreatableClaimId } from "./work-claims.mjs";
 
 const INVISIBLE = new RegExp(TEXT_CHARACTER_CLASSES.invisible.source, "gu");
 const SPACES = new RegExp(TEXT_CHARACTER_CLASSES.spaces.source, "gu");
@@ -72,6 +73,10 @@ export function assertDependsOnKnown(reject, data, { selfId, has }) {
   for (const id of data.dependsOn) {
     if (typeof id !== "string") continue; // the state machine reports the shape
     if (id === selfId) invalid(reject, "dependsOn", "a claim cannot depend on itself");
+    // BOARD-LIFECYCLE-1: a dependency edge to an unreachable id (qa-claim-id-unreachable)
+    // strands the dependent exactly like a closed prerequisite does, so the
+    // creatable-id rule is enforced on entries here too, not only on create.
+    if (!isCreatableClaimId(id)) invalid(reject, "dependsOn", `each dependsOn entry must be ${CLAIM_ID_RULE}`);
     if (!has(id)) invalid(reject, "dependsOn", `no claim "${id.slice(0, 128)}" in this room`);
   }
 }

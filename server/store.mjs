@@ -100,7 +100,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
-import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
+import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, releaseRemovedMemberClaims, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -6222,6 +6222,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
+        // BOARD-LIFECYCLE-1: the member's live board claims release with
+        // the removal (releaseRemovedMemberClaims) — otherwise the board
+        // strands their work behind leases the removed member cannot act
+        // on and peers cannot take.
+        releaseRemovedMemberClaims(this, roomId, command.data.memberId, { actorId: auth.member.id, now: this.now() });
       }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
