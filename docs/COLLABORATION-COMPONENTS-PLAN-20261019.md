@@ -121,3 +121,7 @@ Research does not establish demand or human preference. Synthetic journeys valid
 Final affected run found the newly tracked controller modules missing from the i18n scan inventory. Added only those two paths to i18n-scope.json; no baseline counts changed. Focused E4 rerun and preflight pass. Full ESLint reported zero errors (290 warnings); final changed-file lint and remaining checks are being reconciled.
 
 The broad Node26 full run reported an OG PNG golden-hash mismatch and a public-read latency threshold failure under concurrent load. The same OG test fails in the untouched previous checkout on this runtime. These are retained failures, not waived checks or proof of a production regression. Full run remains incomplete; hosted Node24 qualification is required before landing. Do not call the broad test run exact frozen-head evidence: this turn's user-directed subtraction edits occurred during it.
+
+The final badge deletion initially removed a still-used import for message rendering. Changed-file lint caught it and the browser boot failed; restored the import while retaining removal of the duplicate work-card badge. Final targeted recheck required before declaring the deletion qualified.
+
+Final badge/import correction: desktop and phone inline-result checks 2/2 pass; changed-file ESLint zero errors, 2 existing browser-fixture warnings. Retain the earlier failed run as superseded only for this explicitly rechecked path. Candidate remains draft pending hosted qualification and broader-suite reconciliation.
