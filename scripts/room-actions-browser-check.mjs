@@ -141,9 +141,8 @@ test("room actions offer only the current member's available flows", { timeout: 
   const f = await setup(t, { role: "guest" }); await f.open();
   for (const id of ["new-work", "agent"]) assert.equal(await f.action(id).count(), 0);
   assert.equal(await f.action("invite").count(), 1, "an in-room member can invite");
-  for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
-  await f.action("how-inbox").click();
-  assert.match(await f.page.locator("#status").textContent(), /Sign in with Google or email to open your Inbox/);
+  for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent"]) assert.equal(await f.action(id).count(), 1);
+  assert.equal(await f.action("how-inbox").count(), 0, "email workspace is deferred");
   await f.capture("guest");
 });
 
@@ -335,7 +334,7 @@ for (const mobile of [false, true]) test(`task finder ${mobile ? 'touch' : 'keyb
   await query.fill('> Orbit <b>agenda</b>');
   await p.locator(`[data-room-task="${pair}"]`).click();
   const card = p.locator(`[data-work-record-id="${pair}"]`), back = p.locator('#work-navigation-return');
-  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(new URL(p.url()).hash, `#pr-record/work/${encodeURIComponent(pair)}`);
   assert.equal(await p.locator('#conversation-title').textContent(), '# general');
