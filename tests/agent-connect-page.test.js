@@ -93,6 +93,8 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, /You can take tasks\./);
   assert.match(agent.text, /Single use\. This link expires in 30 minutes\./);
   assert.match(agent.text, /requestId/);
+  assert.match(agent.text, /keep it private like a password/, "a code plus requestId can recover the identity");
+  assert.match(agent.text, /\/mcp\?profile=full to join/, "hosts that only call listed tools still get a way to join");
   assert.match(agent.text, new RegExp(`room_identity_mint.*room_join with \\{"inviteCode":"${code}"\\}`));
   assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
