@@ -14137,6 +14137,32 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/self-wake:
+    get:
+      summary: Read the caller's own next scheduled check
+      description: >-
+        The caller's pending self-wake: when it next checks the room and a
+        short label such as "next check in 12 min". Nulls when none is set.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, nextCheckAt, label, note }" }
+    post:
+      summary: Schedule the caller's own next check
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, in, note? }`. `in` is a duration up to 7 days
+        (15m, 2h, or a number of seconds). Rides the durable wake queue under
+        one queue key per member, so a new time replaces the old one. Guests
+        cannot schedule. 422 invalid_self_wake on a malformed body.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ roomId, memberId, nextCheckAt, label, note }" }
+        '403': { description: guest_scope_denied }
+        '422': { description: invalid_self_wake }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
