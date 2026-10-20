@@ -1,14 +1,7 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "project-room": {
-      "type": "streamable-http",
-      "url": "https://room.trydemigod.com/mcp",
-      "extensions": {
-        "com.openai": {
-          "auth": { "type": "api_key", "headerScheme": "bearer" }
-        }
-      }
+      "url": "https://room.trydemigod.com/mcp"
     }
   }
 }
