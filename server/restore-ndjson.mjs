@@ -172,10 +172,21 @@ function topologicalTableOrder(names, deps) {
 // qualification on the result instead — the semantics of the file replay's
 // report mode (server/room-export.mjs replayNdjson), for backups whose
 // stored projections were written by older code.
-export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
+// Ruling 34 (2026-10-20): a trailer-absent stream is indistinguishable
+// from a tail-torn modern backup, whose non-event row loss restores
+// silently at watermark-only verification (QA case 1c). The library
+// replay keeps its legacy semantics by default (allowTrailerAbsent
+// stays true for direct callers and their tests); the operator restore
+// endpoints pass allowTrailerAbsent: false unless the operator passed
+// the explicit legacy flag, so the production door fails closed.
+export const TRAILER_ABSENT_MESSAGE = "Export has no trailer: refusing a trailer-absent restore at the operator door, because a torn modern backup is indistinguishable from a legacy one and tail loss outside the event log cannot be detected. Pass the explicit legacy flag (?legacy=true, or \"legacy\": true in the restore-from-backup body) to restore a genuine legacy export; it will report contentVerification \"watermark-only\"";
+export function trailerAbsentError() { return new Error(TRAILER_ABSENT_MESSAGE); }
+
+export function replayNdjsonInto(ndjson, store, { audit = "strict", allowTrailerAbsent = true } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
   const { watermark, byTable, trailer, skippedTables, tableDigests } = parseNdjsonExport(ndjson);
+  if (!trailer && !allowTrailerAbsent) throw trailerAbsentError();
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
@@ -281,7 +292,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
 const REPLAY_BATCH_ROWS = 500;
 const REPLAY_BATCH_BYTES = 4 * 1024 * 1024;
 
-export function createBackupReplaySession(store, { audit = "strict" } = {}) {
+export function createBackupReplaySession(store, { audit = "strict", allowTrailerAbsent = true } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
   const db = store.db;
@@ -492,6 +503,10 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       if (carry) { writeLine(carry); carry = ""; }
       if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
         throw new Error("Export is missing its watermark");
+      // Ruling 34: the operator door (allowTrailerAbsent: false) refuses a
+      // trailer-absent backup here; the throw runs finish()'s abort, which
+      // deletes every table the streaming replay already landed.
+      if (!trailer && !allowTrailerAbsent) throw trailerAbsentError();
       // Topological order, not stream-arrival order: late buffers must land
       // dependency-first as well.
       for (const table of topo) if (buffers.get(table)?.length) insertBuffered(table);
@@ -625,6 +640,16 @@ function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 }
 
+// The explicit legacy flag (ruling 34): the operator restore doors refuse
+// trailer-absent exports unless this flag is passed — ?legacy=true on
+// either endpoint, or "legacy": true in the restore-from-backup JSON body.
+// Returns true/false, or null when the supplied value is not a flag value.
+function legacyFlagValue(raw) {
+  if (raw === null || raw === undefined || raw === false || raw === "false") return false;
+  if (raw === true || raw === "true") return true;
+  return null;
+}
+
 // POST /api/operator/restore — replay a whole-store NDJSON export into this
 // Durable Object's storage. Fail-closed: 404 when the operator token is not
 // configured, 401 on a bad token, 405 on non-POST, 409 when the store already
@@ -632,7 +657,8 @@ function jsonResponse(status, body) {
 // ?audit=report query parameter is the operator's explicit opt-in to land a
 // backup whose stored projections have drifted from current-reducer replay:
 // the restore then succeeds with the drift named in the result's audit
-// field instead of refusing (default: strict).
+// field instead of refusing (default: strict). A trailer-absent export is
+// refused (422 restore_verification_failed) unless ?legacy=true is passed.
 export async function operatorRestoreResponse(request, token, store) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/restore") return null;
@@ -646,6 +672,9 @@ export async function operatorRestoreResponse(request, token, store) {
   const auditParam = url.searchParams.get("audit");
   if (auditParam !== null && auditParam !== "strict" && auditParam !== "report")
     return jsonResponse(422, { error: { code: "invalid_restore", message: "audit must be strict or report" } });
+  const legacy = legacyFlagValue(url.searchParams.get("legacy"));
+  if (legacy === null)
+    return jsonResponse(422, { error: { code: "invalid_restore", message: "legacy must be true when passed" } });
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > RESTORE_MAX_BYTES)
     return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
@@ -660,13 +689,13 @@ export async function operatorRestoreResponse(request, token, store) {
   }
   let result;
   try {
-    result = replayNdjsonInto(ndjson, store, { audit: auditParam ?? "strict" });
+    result = replayNdjsonInto(ndjson, store, { audit: auditParam ?? "strict", allowTrailerAbsent: legacy });
   } catch (error) {
     const message = error?.message ?? String(error);
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
+    if (/has no trailer|watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
   }
@@ -674,6 +703,7 @@ export async function operatorRestoreResponse(request, token, store) {
     ok: true,
     verified: result.verified,
     audit: result.audit,
+    trailer: result.trailer,
     contentVerification: result.contentVerification,
     events: result.events,
     tables: result.tables,
@@ -706,7 +736,9 @@ function kvBytes(value) {
 // { "key": "room-backups/2026-10-14.ndjson" } (default: today's key) and
 // may carry the same audit opt-in as the body endpoint:
 // { "audit": "report" } (or ?audit=report) lands a drifted backup with
-// the drift named in the result's audit field.
+// the drift named in the result's audit field. A trailer-absent backup is
+// refused (422 restore_verification_failed, ruling 34) unless the explicit
+// legacy flag is passed: { "legacy": true } (or ?legacy=true).
 export async function operatorRestoreFromBackupResponse(request, token, store, kv) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/restore-from-backup") return null;
@@ -719,18 +751,23 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     return jsonResponse(503, { error: { code: "backup_unavailable", message: "No backup namespace is configured on this deployment" } });
   let key = url.searchParams.get("key");
   let auditMode = url.searchParams.get("audit");
+  let legacyRaw = url.searchParams.get("legacy");
   try {
     const text = await request.text();
     if (text.trim()) {
       const parsed = JSON.parse(text);
       if (parsed && typeof parsed.key === "string") key = parsed.key;
       if (parsed && typeof parsed.audit === "string" && auditMode === null) auditMode = parsed.audit;
+      if (parsed && "legacy" in parsed && legacyRaw === null) legacyRaw = parsed.legacy;
     }
   } catch {
     return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
   }
   if (auditMode !== null && auditMode !== "strict" && auditMode !== "report")
     return jsonResponse(422, { error: { code: "invalid_restore", message: "audit must be strict or report" } });
+  const legacy = legacyFlagValue(legacyRaw);
+  if (legacy === null)
+    return jsonResponse(422, { error: { code: "invalid_restore", message: "legacy must be true when passed" } });
   if (key == null) key = backupObjectKey(new Date());
   if (!BACKUP_KEY_PATTERN.test(key))
     return jsonResponse(422, { error: { code: "invalid_restore", message: "Backup key is not a daily backup key" } });
@@ -752,7 +789,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
 
   let session;
   try {
-    session = createBackupReplaySession(store, { audit: auditMode ?? "strict" });
+    session = createBackupReplaySession(store, { audit: auditMode ?? "strict", allowTrailerAbsent: legacy });
   } catch (error) {
     const message = error?.message ?? String(error);
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
@@ -779,6 +816,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       ok: true,
       verified: result.verified,
       audit: result.audit,
+      trailer: result.trailer,
       contentVerification: result.contentVerification,
       events: result.events,
       tables: result.tables,
@@ -797,7 +835,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     const message = error?.message ?? String(error);
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message))
+    if (/has no trailer|watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }

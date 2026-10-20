@@ -8931,9 +8931,20 @@ paths:
         sha256, and a torn export is refused. The store must hold no rooms:
         a non-empty store is 409 and is never overwritten. Replay runs in one
         transaction, so a failed restore leaves the store empty and retryable.
+        A trailer-absent export is refused (422 restore_verification_failed)
+        unless the explicit legacy flag is passed as ?legacy=true in the
+        query string (a bare-path parameter; its semantics live in this
+        prose): the flag asserts the export is a genuine pre-trailer legacy
+        backup rather than a tail-torn modern one, and the restore then
+        reports trailer absent with contentVerification watermark-only.
         Other methods are 405.
       security:
         - bearerAuth: []
+      parameters:
+        - name: legacy
+          in: query
+          required: false
+          schema: { type: string, enum: ["true"] }
       requestBody:
         required: true
         content:
@@ -8969,9 +8980,21 @@ paths:
         an absent backup is 404. The store must hold no rooms: a non-empty
         store is 409 and is never overwritten. A failed replay deletes
         everything it touched, leaving the store empty and retryable.
-        Other methods are 405.
+        A trailer-absent backup is refused (422
+        restore_verification_failed) unless the explicit legacy flag is
+        passed, as "legacy": true in the JSON body or ?legacy=true in the
+        query string (a bare-path parameter; its semantics live in this
+        prose): the flag asserts the backup is a genuine pre-trailer
+        legacy export rather than a tail-torn modern one, and the restore
+        then reports trailer absent with contentVerification
+        watermark-only. Other methods are 405.
       security:
         - bearerAuth: []
+      parameters:
+        - name: legacy
+          in: query
+          required: false
+          schema: { type: string, enum: ["true"] }
       requestBody:
         required: false
         content:
@@ -8980,6 +9003,7 @@ paths:
               type: object
               properties:
                 key: { type: string }
+                legacy: { type: boolean }
       responses:
         '200': { description: "{ ok, verified, events, ... } restore summary" }
         '400': { description: Body could not be read }

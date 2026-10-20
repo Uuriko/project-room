@@ -27,6 +27,20 @@ honestly cannot survive yet.
     token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
+  - *Trailer rule at the operator door (ruling 34, 2026-10-20):* both
+    operator restore endpoints **refuse a trailer-absent export** with
+    422 `restore_verification_failed`. A missing trailer is
+    indistinguishable from a tail-torn modern backup, whose lost
+    non-event rows (messages, autonomy tiers) restore silently at
+    `contentVerification: "watermark-only"` with the loss unenumerated.
+    A genuine legacy (pre-trailer) export restores only when the
+    operator passes the explicit legacy flag — `?legacy=true` on either
+    endpoint, or `"legacy": true` in the restore-from-backup body — and
+    its result still names the weaker level (`trailer: "absent"`,
+    `contentVerification: "watermark-only"`). Library-level replay
+    (`replayNdjson`, `replayNdjsonInto`, the KV replay session) keeps
+    its legacy semantics unchanged; only the production door fails
+    closed.
   - *KV-native restore (the #3409 fix; deployed to production in revision
     `7ca2e955` on 2026-10-16):*
     `POST /api/operator/restore-from-backup` restores the daily backup
@@ -129,7 +143,13 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
 `Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
-backup, use the KV-native endpoint above with the backup's key instead.)
+backup, use the KV-native endpoint above with the backup's key instead.
+If the export has no trailer, both endpoints refuse it (see the trailer
+rule above): only restore it with the explicit legacy flag
+(`?legacy=true`, or `"legacy": true` in the restore-from-backup body)
+when you have confirmed it is a genuine legacy export rather than a
+torn modern backup, and treat its `watermark-only` verification level
+as the weaker proof it is.)
 
 ## Corrupt-projection maintenance procedure (operator)
 
