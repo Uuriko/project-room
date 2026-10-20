@@ -22,6 +22,59 @@ async function openBoard(page) {
 
 const shots = process.env.ROOM_TEST_SCREENSHOT_DIR || "test-results/board";
 
+test("board starts with work and preserves disclosed drafts across refresh", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40 });
+  let browser;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(origin); await signInFixture(page, fixture.keys.owner);
+  for (let i = 1; i <= 5; i++) await post(page, origin, "/work-claims", { id: `work-${i}`, title: `Plan next release ${i}` }, 201);
+  await page.locator("#tasks-board-open").click();
+  await page.locator('article[data-claim-id="work-5"]').waitFor();
+  mkdirSync(shots, { recursive: true });
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({ path: `${shots}/board-disclosures-${theme}-${width}.png` });
+    }
+  }
+  assert.equal(await page.locator("#board-new-item").isVisible(), false);
+  assert.equal(await page.locator(".live-chip").isVisible(), false);
+  assert.equal(await page.locator("#board-close-stale").isVisible(), false);
+  await page.locator('[data-board-disclosure="create"] > summary').click();
+  await page.locator('#board-new-item [name="title"]').fill("Unfinished draft");
+  await post(page, origin, "/work-claims", { id: "refresh-proof", title: "Fresh work" }, 201);
+  await page.locator('article[data-claim-id="refresh-proof"]').waitFor();
+  assert.equal(await page.locator('#board-new-item [name="title"]').inputValue(), "Unfinished draft");
+  assert.equal(await page.locator("#board-new-item").isVisible(), true);
+  await page.locator('[data-board-disclosure="options"] > summary').click();
+  assert.equal(await page.locator("#board-close-stale").isVisible(), true);
+  assert.equal(await page.locator(".live-chip").isVisible(), true);
+  await page.locator("#board-new-item button[type=submit]").click();
+  await page.locator("article h4", { hasText: "Unfinished draft" }).waitFor();
+  assert.equal(await page.locator('#board-new-item [name="title"]').inputValue(), "");
+  let release, arrived;
+  const held = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { arrived = resolve; });
+  await page.route("**/work-claims", async route => { arrived(); await held; await route.continue(); });
+  await page.locator('#board-new-item [name="title"]').fill("Submitted title");
+  await page.locator("#board-new-item button[type=submit]").click();
+  await started;
+  await page.locator('#board-new-item [name="title"]').fill("Next draft");
+  release();
+  await page.locator("article h4", { hasText: "Submitted title" }).waitFor();
+  assert.equal(await page.locator('#board-new-item [name="title"]').inputValue(), "Next draft");
+});
+
 function github() {
   const body = JSON.stringify({ sha: "c".repeat(40) });
   return async () => ({
@@ -173,7 +226,9 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.locator(".board-empty").waitFor();
   assert.equal(await page.locator(".board-empty").innerText(), "Claim work here so people and agents don't collide.");
   assert.equal(await page.locator("#board-new-item").count(), 1);
+  await page.locator('[data-board-disclosure="options"] > summary').click();
   assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live differs from main|Live is behind main/);
+  await page.locator('[data-board-disclosure="create"] > summary').click();
   await page.locator("#board-new-item [name=title]").fill("Fix login copy");
   await page.locator("#board-new-item [name=files]").fill("src/board-ui.js");
   await page.locator("#board-new-item button[type=submit]").click();
@@ -1162,7 +1217,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   await page.locator("#main").waitFor({ state: "visible" });
   await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
-  await page.locator(".live-chip").waitFor();
+  await page.locator(".live-chip").waitFor({ state: "attached" });
   assert.equal(await page.locator("#board-new-item").count(), 0);
   assert.equal(await page.locator("article[data-claim-id='reader-held']").count(), 1);
   assert.equal(await page.locator("[data-claim-link-pr]").count(), 0, "a held claim does not restore revoked Board-write authority");
@@ -1217,6 +1272,7 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
     await openBoard(page);
     await first.arrived.promise;
     assert.equal(await page.locator("article[data-claim-id='held-done']").count(), 0, "the first list read is still held");
+    await page.locator('[data-board-disclosure="options"] > summary').click();
     for (let step = 0; step < 25; step += 1) {
       if (await page.evaluate(() => document.activeElement?.matches("form[data-claim-cap] button[type='submit']"))) break;
       await page.keyboard.press("Shift+Tab");

@@ -79,6 +79,7 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   await signInFixture(page, fixture.keys.owner);
   await openBoard(page);
   const noteInput = page.locator('#board-new-item input[name="note"]');
+  await page.locator('[data-board-disclosure="create"] > summary').click();
   assert.equal(await noteInput.count(), 1, "note input exists");
   const label = await page.locator('#board-new-item label:has(input[name="note"])').textContent();
   assert.match(label, /Note/, "note input is label-associated");
@@ -142,6 +143,7 @@ test("coarse pointer keeps 44px touch targets on board controls", { timeout: 900
   await openBoard(page);
   const openBox = await page.locator("#tasks-board-open").boundingBox();
   assert.ok(openBox.height >= 44, `board open button is ${openBox.height}px tall on coarse pointer`);
+  await page.locator('[data-board-disclosure="create"] > summary').click();
   const submitBox = await page.locator('#board-new-item button[type="submit"]').boundingBox();
   assert.ok(submitBox.height >= 44, `new-item submit is ${submitBox.height}px tall on coarse pointer`);
   const noteBox = await page.locator('#board-new-item input[name="note"]').boundingBox();

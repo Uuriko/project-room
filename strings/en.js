@@ -128,6 +128,8 @@ export default {
   "board.loading.002": "Refreshing the board…",
   "board.loading.error": "<p class=\"board-error\" role=\"alert\">Could not load the board. <button type=\"button\" class=\"button secondary\" data-board-retry>Try again</button></p>",
   "board.loading.005": "Saving…",
+  "board.disclosure.create": "New item",
+  "board.disclosure.options": "Board options",
   "board.action.pending.claim": "Claiming '{title}'…",
   "board.action.pending.renew": "Renewing '{title}'…",
   "board.action.pending.progress": "Marking '{title}' in progress…",
