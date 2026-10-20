@@ -80,12 +80,16 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   const args = ['scripts/codex-queue-pointer.mjs', '--thread', binding.threadId, '--journal', join(journal, 'receipts'), '--host', 'queue-probe'];
   const env = { ...process.env, PATH: journal + ':' + process.env.PATH, ROOM_AGENT_CONFIG: setup.configDirectory, ROOM_TEST_QUEUE_LOG: log };
   for (const key of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete env[key];
+  let polls = 0;
+  server.on('request', req => { if (req.url.startsWith('/api/agent-wakes/poll?')) polls++; });
   const execute = () => promisify(execFile)(process.execPath, args, { env, timeout: 15000 });
   const output = (await execute()).stdout;
   const first = JSON.parse(output.trim());
+  assert.equal(polls, 2, 'initial read and one pre-dispatch fenced read');
   assert.equal(first.status, 'accepted'); assert.equal(first.signalId, signal.signalId);
   assert.equal(store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' }).length, 2, 'transport success never handles Room wakes');
   const second = (await execute()).stdout.trim().split('\n').map(JSON.parse);
+  assert.equal(polls, 4, 'accepted duplicates do not spend extra poll requests');
   assert.equal(second[0].duplicate, true);
   assert.equal(second.length, 2, 'accepted first signal must not starve the next');
   assert.equal(second[1].duplicate, false);
@@ -94,6 +98,7 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   assert.equal(readFileSync(log, 'utf8'), 'xx', 'restart only delivers the next signal');
   assert.ok((await execute()).stdout.trim().split('\n').map(JSON.parse).every(row => row.duplicate));
   assert.equal(readFileSync(log, 'utf8'), 'xx', 'neither signal is redelivered');
+  assert.equal(polls, 5, 'duplicate-only pass needs one read, no dispatch polls');
   assert.equal(store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' }).length, 2);
   assert.ok(!output.includes(connection.token));
   store.identities.unlink(owner, 'commons', setup.identityId);
