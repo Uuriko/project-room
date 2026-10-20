@@ -2467,8 +2467,24 @@ function renderMessages() {
   // visible row steady after both message and new-message controls change.
   if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
     window.scrollBy({ top: anchor.getBoundingClientRect().top - anchorOffset, behavior: "instant" });
-  // Anchor correction can undo focus scrolling. Rescue a restored replacement
-  // even if its old node started offscreen; leave manually scrolled focus alone.
+  // A re-render that trims or reflows the timeline can move the node the member
+  // was working on out of view (the page scroll is clamped or the card moves),
+  // and restoring focus above uses preventScroll. If it was on screen before and
+  // the focused control is not now, bring it back the least amount.
+  // The gate is judged from the settled element, not only the start snapshot:
+  // a render that begins with focus in transit, or with the focused control
+  // already off screen, restores focus above (or inside a re-rendered card)
+  // onto a replacement the start snapshot never saw on screen, and the
+  // snapshot-only gate left that replacement stranded off screen. So the
+  // rescue also arms when this render itself restored focus — the settled
+  // element is a different node than the one the snapshot captured. A control
+  // that stayed focused throughout and was merely scrolled away from does
+  // not arm it: no restore happened and the snapshot saw it off screen.
+  // The rescue runs after the scroll compensation above on purpose: the
+  // compensation restores the anchor row's position, and any scroll the
+  // rescue makes is inside the delta it measures, so a rescue that ran
+  // first was arithmetically undone whenever the anchor survived the
+  // render. Judged last, on the final settled position, it sticks.
   const settledFocus = list.contains(document.activeElement) && document.activeElement !== document.body ? document.activeElement : null;
   if (settledFocus && (focusedOnScreen || settledFocus !== focused)) {
     const now = settledFocus.getBoundingClientRect();
