@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryFor, visible, validBasis } from "../src/updates-ui.js";
+import { queryFor, validBasis } from "../src/updates-ui.js";
 
 test("queryFor: each filter issues its documented updates query", () => {
   assert.equal(queryFor("needs"), "state=actionable");
@@ -8,16 +8,6 @@ test("queryFor: each filter issues its documented updates query", () => {
   assert.equal(queryFor("all"), "state=all");
   assert.equal(queryFor("saved"), "state=actionable");
   assert.equal(queryFor("bogus"), "state=actionable");
-});
-
-test("visible: other filters pass every item through", () => {
-  const items = [
-    { id: "a", state: "read" },
-    { id: "b", state: "unread" },
-  ];
-  assert.deepEqual(visible(items, "needs").map(item => item.id), ["a", "b"]);
-  assert.deepEqual(visible(items, "mentions").map(item => item.id), ["a", "b"]);
-  assert.deepEqual(visible(items, "all").map(item => item.id), ["a", "b"]);
 });
 
 test("validBasis: accepts ub1_ plus 64 lowercase hex chars, nothing else", () => {

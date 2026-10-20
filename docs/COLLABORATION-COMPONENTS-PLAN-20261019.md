@@ -394,3 +394,61 @@ and `mobile-room.png` in the same directory. These show native WKWebView and a
 390px browser fixture, respectively; they are not physical-device or human-study
 qualification. Refresh recovery, stored records and agent APIs were deliberately
 retained. No merge, deployment, signing or notarization is claimed here.
+
+## Attention accuracy and deletion pass
+
+1. Feed and badge must observe room changes without requiring Close/reopen.
+   Coalesce changes, fence reads to the current session, retain the reader's
+   page budget and preserve focus/scroll; never replay an uncertain action.
+2. Include pending permission upgrades, with accurate wording, for authorized
+   membership administrators. Do not expose owner-only invitation data to admins.
+3. Apply Mentions filtering to the whole destination. Reuse existing approval,
+   partial-grant and stale-response controls rather than invent a new mutation path.
+4. Delete repeated row kind/state text and the redundant catch-up count. Keep
+   pagination announcements accessible and recovery controls where needed.
+5. Rehearse mentions arriving live, membership review, modal return, drafts and
+   narrow layouts. Preserve previous result/agent status semantics and reuse
+   unchanged-source evidence rather than rerun unrelated studies.
+6. Further deletion decisions: retain saved messages, real permission decisions,
+   exact-result provenance and recovery; do not cut controls merely because the
+   current view is quiet. Stylesheet changes are excluded while another agent
+   holds that file. No new dashboard, workflow engine or onboarding wizard.
+
+### Implemented refinement and verification
+
+Live changes now coalesce into attention reads. Pending user actions cancel
+queued refreshes, and unchanged rows retain their DOM nodes. Refresh preserves
+focus and scroll and cannot replay an uncertain action. Pending permission
+upgrades now enter the feed for membership administrators with correct wording;
+owner-only invitations remain owner-only. Existing decisions remain the only
+approval path. Requests are not duplicated as generic rows, Mentions hides the
+decision section, and decisions precede informational updates on narrow screens.
+
+Deleted: duplicate request cards, visible routine kind/state metadata, redundant
+catch-up/decision counts, the outer nested attention frame, the no-op visible()
+filter adapter, obsolete integration comments, and Approve partial when only one
+permission is requested. Keep multi-permission partial review, exact-operation
+retry, separate private handled/dismissed semantics, bookmarks and recovery.
+Those still have meaningful behavior; hiding them would not remove their domain
+semantics. Server/API records remain intact.
+
+Found and fixed during verification: removing unsupported Open buttons had also
+removed a neutral retry for an uncertain Open whose source disappeared. Exact
+retry remains available; unsupported new actions do not return. Unchanged live
+refreshes previously replaced focused rows; repaint suppression and cancellation
+now prevent that interruption.
+
+Evidence: 1,919 affected checks passed (one skip), 12 Updates browser cases passed,
+16 access/permission cases passed, 19 projection/client unit checks passed before
+removal of the no-op adapter test, and the final focused single/multiple-permission
+checks cover removal of the meaningless subset action. Native WKWebView first-use,
+message confirmation, durable draft and window reopen passed. Lint has zero errors
+and existing warnings. Subsequent presentation-only adjustments were checked in
+their affected browser journeys. Screenshots are in
+`/Users/johnpotter/Documents/ChatGPT/project room/outputs/attention-refinement-20261019/`.
+
+The earlier broad run finished with 11,336 pass, 31 skip, five failures: four
+subtraction fixture/packaging failures have focused repair evidence; the prior
+Node26 receipt-image golden mismatch remains. This is not frozen-head full-suite
+qualification. Hosted checks, integration and production deployment are still
+separate release steps. No physical mobile, real-human or live-provider claim.

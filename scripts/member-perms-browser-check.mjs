@@ -133,8 +133,8 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   const owner = await f.login("owner"), row = attentionRow(owner);
   await row.waitFor();
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
-  assert.match(await row.locator(".attention-detail").textContent(), /accept_work/);
-  assert.match(await row.locator(".attention-detail").textContent(), /complete_work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Accept work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
   assert.equal(await attentionRow(owner, "Ordinary Joiner").locator(".attention-kind").textContent(), "Join request");
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "review controls fit the viewport");
   await decide(owner, "Approve");
@@ -161,7 +161,7 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
   assert.equal(await row.getByRole("button", { name: "Approve", exact: true }).isDisabled(), true,
     "an admin is not offered a grant it does not hold");
-  assert.match(await row.textContent(), /You cannot grant: complete_work/);
+  assert.match(await row.textContent(), /You cannot grant: Complete work/);
   assert.deepEqual(f.permissions("requester"), []);
   let writes = 0;
   admin.on("request", request => { if (request.method() === "POST" && /\/decide$/.test(new URL(request.url()).pathname)) writes++; });
@@ -170,9 +170,9 @@ test("an admin can cancel partial review, approve only selected permissions, and
   const selection = row.locator("fieldset");
   await selection.waitFor();
   assert.equal(await selection.getByRole("checkbox").count(), 2);
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isDisabled(), true);
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isChecked(), false);
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).uncheck();
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isDisabled(), true);
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).uncheck();
   assert.equal(await row.getByRole("button", { name: "Approve selected", exact: true }).isDisabled(), true);
   await row.getByRole("button", { name: "Cancel", exact: true }).click();
   await selection.waitFor({ state: "detached" });
@@ -183,7 +183,7 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Cancel returns focus to partial review");
 
   await partialButton.click();
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).focus();
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).focus();
   await admin.keyboard.press("Escape");
   await selection.waitFor({ state: "detached" });
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Escape returns focus to partial review");
@@ -191,8 +191,8 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(f.store.room("commons").sequence, sequence, "Escape appends no room event");
 
   await partialButton.click();
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).check();
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isChecked(), false);
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).check();
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
   const approved = await decide(admin, "Approve selected");
   await row.waitFor({ state: "detached" });
   assert.deepEqual(approved.grantedPermissions, ["accept_work"]);
@@ -204,8 +204,8 @@ test("an admin can cancel partial review, approve only selected permissions, and
   const remainder = await ask(member);
   assert.deepEqual(remainder.requestedPermissions, ["complete_work"], "the next request asks only for missing permissions");
   await row.waitFor();
-  assert.match(await row.locator(".attention-detail").textContent(), /complete_work/);
-  assert.doesNotMatch(await row.locator(".attention-detail").textContent(), /accept_work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
+  assert.doesNotMatch(await row.locator(".attention-detail").textContent(), /Accept work/);
   await decide(admin, "Decline");
   await row.waitFor({ state: "detached" });
   await member.locator("#message-list").getByText(new RegExp(`Declined permission request ${remainder.requestId}`)).waitFor();

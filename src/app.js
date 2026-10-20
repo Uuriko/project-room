@@ -447,6 +447,7 @@ const client = new RoomClient({
     remindersUI?.sync();
     syncNotifications();
     syncAttention();
+    updatesUi?.sync();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     if (presenceBoundary) startPresencePoll();
@@ -708,9 +709,7 @@ const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cock
 } });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
-// UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
-// later open this destination with the matching filter. Room UI v2 removes
-// the old entries later. The badge counts actionable updates only.
+// One attention destination; historical palette names resolve here.
 // JDOT-COH-NAV begin
 updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin }),
@@ -2056,6 +2055,7 @@ function render() {
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
+  updatesUi?.sync();
   // JDOT-MEMBER-PERMS-UI end
   const proposing = can("steer") && !isRoomArchived(state); // Issue #6 A2: no new work in an archived room.
   for (const id of ["new-work-button"]) {

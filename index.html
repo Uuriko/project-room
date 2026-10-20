@@ -202,7 +202,7 @@
             <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="sr-only"></span></button>
               <details id="room-more" class="room-more"><summary class="topbar-button">More</summary>
                 <div class="room-more-actions">
               <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Saved for later <span id="later-count" class="count-chip" hidden></span></button>
@@ -212,9 +212,9 @@
               </details>
             </div>
           </header>
-          <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
+          <section id="needs-attention" aria-label="Needs your attention" hidden>
             <header class="attention-header">
-              <h3><span class="attention-icon" aria-hidden="true">!</span> Needs your attention <span id="attention-count" class="count-chip"></span></h3>
+              <h3>Decisions <span id="attention-count" class="sr-only"></span></h3>
               <button id="attention-refresh" class="button ghost" type="button">Refresh</button>
             </header>
             <ol id="attention-list" class="attention-list"></ol>

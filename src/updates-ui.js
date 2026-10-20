@@ -18,10 +18,6 @@ export function queryFor(filter) {
   return "state=actionable";
 }
 
-export function visible(items, filter) {
-  return items;
-}
-
 export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage }) {
   const topbar = host?.querySelector(".topbar-actions") ?? document.querySelector(".topbar-actions");
   const entry = document.createElement("button");
@@ -44,11 +40,14 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const history = document.querySelector("#topbar-catchup");
   const attention = document.querySelector("#needs-attention");
   if (history) dialog.append(history);
-  if (attention) dialog.append(attention);
+  const decisions = document.createElement("div");
+  decisions.id = "updates-decisions";
+  if (attention) { decisions.append(attention); dialog.insertBefore(decisions, dialog.querySelector(".updates-list")); }
   const tabs = dialog.querySelector(".updates-filters");
   const list = dialog.querySelector(".updates-list");
   const status = dialog.querySelector("#updates-status");
   const summary = dialog.querySelector("#updates-summary");
+  summary.classList.add("sr-only");
   const partial = dialog.querySelector("#updates-partial");
   const pageAnnouncement = dialog.querySelector("#updates-page-announcement");
   const loadMore = dialog.querySelector("#updates-load-more");
@@ -68,6 +67,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   let cursor = null, hasMore = false, loadedPages = 0, incomplete = false;
   let visitedCursors = new Set();
   let badgeMore = false, badgeIncomplete = false, loading = false;
+  let refreshTimer = null, observed = null, painted = null;
   let ticket = 0;
   let interaction = 0;
   let owner = null;
@@ -77,6 +77,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const context = () => getContext ? getContext() : client.session ? `${client.generation}|${client.session.roomId}|${client.session.member?.id}` : null;
   const owns = value => value !== null && value === context();
   function reset() {
+    clearTimeout(refreshTimer); refreshTimer = null; observed = null; painted = null;
     ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs"; operations.clear();
     cursor = null; hasMore = false; loadedPages = 0; incomplete = false; visitedCursors = new Set();
     badgeMore = false; badgeIncomplete = false; loading = false;
@@ -89,7 +90,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (owner !== value) { reset(); owner = value; }
     return value;
   }
-  function cancelPending() { interaction++; ticket++; loading = false; paintOperations(); paintPaging(); }
+  function cancelPending() { clearTimeout(refreshTimer); refreshTimer = null; interaction++; ticket++; loading = false; paintOperations(); paintPaging(); }
   function capture(itemId, action = "open") {
     return { filter, itemId, action, pageBudget: Math.max(1, loadedPages), scrollTop: dialog.scrollTop, listScrollTop: list.scrollTop };
   }
@@ -123,7 +124,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function paintPaging() {
     const pageCopy = loadedPages ? `Page ${loadedPages} loaded. ` : "";
     if (pageAnnouncement.textContent !== pageCopy) pageAnnouncement.textContent = pageCopy;
-    const summaryCopy = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}`;
+    const summaryCopy = `${items.length} loaded${hasMore ? " · More available" : ""}`;
     const partialCopy = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
     if (summary.textContent !== summaryCopy) summary.textContent = summaryCopy;
     if (partial.textContent !== partialCopy) partial.textContent = partialCopy;
@@ -145,19 +146,23 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
   }
   function paint() {
+    decisions.hidden = filter === "mentions";
     for (const button of tabs.querySelectorAll("[role=tab]")) {
       const on = button.dataset.updateFilter === filter;
       button.setAttribute("aria-selected", on ? "true" : "false");
       button.tabIndex = on ? 0 : -1;
     }
+    const signature = JSON.stringify([filter, items, [...operations.keys()]]);
+    if (signature === painted) { paintOperations(); paintPaging(); return; }
+    painted = signature;
     list.replaceChildren();
-    const rows = [...visible(items, filter)];
+    const rows = items.filter(item => !attention || item.kind !== "access_request");
     // A committed-but-lost Done may have left this filter. Keep only a neutral
     // recovery control, not cached source text that a fresh read no longer lists.
     for (const [id] of operations) {
       if (!rows.some(item => item.id === id)) rows.push({ id, title: "Earlier update action", kind: "pending_action", state: "unconfirmed" });
     }
-    if (!rows.length) {
+    if (!rows.length && !items.some(item => attention && item.kind === "access_request")) {
       const empty = document.createElement("li");
       empty.className = "empty-note";
       empty.textContent = incomplete ? "No matching updates are loaded yet. Some sources are unavailable."
@@ -170,19 +175,18 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const row = document.createElement("li");
       row.className = "updates-row";
       row.dataset.updateId = item.id;
+      row.dataset.updateState = item.state;
       const copy = document.createElement("div");
       copy.className = "updates-copy";
       const title = document.createElement("strong");
       title.textContent = item.title || item.kind;
-      const meta = document.createElement("p");
-      meta.textContent = `${item.kind.replaceAll("_", " ")} · ${item.state}`;
-      copy.append(title, meta);
+      copy.append(title);
       const actions = document.createElement("div");
       actions.className = "updates-actions";
       for (const [name, label] of Object.entries(ACTION_LABELS)) {
         // Owner decisions are below this list; do not offer an Open action
         // unless this row has a supported work or conversation destination.
-        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId) continue;
+        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId && operations.get(item.id)?.action !== "open") continue;
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";
@@ -277,6 +281,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         item: { ...item, sourceRef: { ...item.sourceRef } }, busy: false, flight: 0 };
       operations.set(item.id, operation);
     }
+    cancelPending();
     const mine = ++interaction, flight = ++operation.flight;
     const origin = capture(item.id, action);
     const path = action === "open" ? "read" : action;
@@ -350,7 +355,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     if (loading) return;
     cancelPending();
     const owned = owner, mine = interaction;
-    const previous = new Set(visible(items, filter).map(item => item.id));
+    const previous = new Set(items.map(item => item.id));
     let retainFocus = event.detail === 0 && document.activeElement === loadMore;
     const movedFocus = event => { if (event.target !== loadMore) retainFocus = false; };
     const movedPointer = () => { retainFocus = false; };
@@ -361,7 +366,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       if (!retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
       // Disabling the pending control can drop keyboard focus. On failure,
       // return to the same enabled retry control without moving into old rows.
-      const added = new Set(loaded ? visible(items, filter).filter(item => !previous.has(item.id)).map(item => item.id) : []);
+      const added = new Set(loaded ? items.filter(item => !previous.has(item.id)).map(item => item.id) : []);
       const firstNewAction = [...list.children].filter(row => added.has(row.dataset.updateId))
         .map(row => row.querySelector("[data-update-action]:enabled")).find(Boolean);
       const continuation = !loadMore.hidden && !loadMore.disabled ? loadMore : null;
@@ -400,11 +405,43 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       if (owns(owned) && dialog.open) status.textContent = error?.message || "Could not confirm that action. Retry it to check the same update.";
     });
   });
+  // Coalesce room events without replacing a pending action or stealing focus.
+  function sync(force = false) {
+    const value = context();
+    if (!value) { reset(); return; }
+    const signature = `${value}:${client.sequence}`;
+    if (!force && signature === observed) return;
+    observed = signature;
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(async () => {
+      refreshTimer = null;
+      if (document.hidden || !owns(value) || operations.size) { observed = null; return; }
+      if (loading) { sync(true); return; }
+      const before = document.activeElement;
+      const row = before?.closest?.("[data-update-id]");
+      const saved = row ? capture(row.dataset.updateId, before.dataset.updateAction) : null;
+      const scroll = dialog.scrollTop, mine = interaction;
+      let moved = false;
+      const moving = event => { if (event.target !== before && event.target !== document.body) moved = true; };
+      document.addEventListener("focusin", moving);
+      try {
+        await load(filter);
+        if (!owns(value) || mine !== interaction || !dialog.open || moved) return;
+        dialog.scrollTop = scroll;
+        if (saved) {
+          const replacement = [...list.children].find(node => node.dataset.updateId === saved.itemId);
+          (replacement?.querySelector(`[data-update-action="${saved.action}"]`) ?? tabs.querySelector('[aria-selected="true"]'))?.focus({ preventScroll: true });
+        }
+      } finally { document.removeEventListener("focusin", moving); }
+    }, 200);
+  }
+  document.addEventListener("attention-changed", () => sync(true));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(true); });
   const main = document.querySelector("#main");
   if (main) {
     new MutationObserver(() => { if (main.hidden) reset(); else void load(filter); })
       .observe(main, { attributes: true, attributeFilter: ["hidden"] });
   }
   paintBadge();
-  return { open, restore, reset, cancelPending, close() { cancelPending(); if (dialog.open) dialog.close(); }, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
+  return { open, restore, reset, sync, cancelPending, close() { cancelPending(); if (dialog.open) dialog.close(); }, openAction(id) { const next = PALETTE[id]; if (!next) return false; open(next); return true; } };
 }
