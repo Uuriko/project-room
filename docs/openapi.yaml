@@ -3388,6 +3388,7 @@ paths:
                         remainingCents: { type: string }
     post:
       summary: Set the room's member spend default
+      x-room-permission: owner
       description: >-
         Member spend default. Owner only; every other member receives 403
         owner_required before the request shape is parsed. Records
