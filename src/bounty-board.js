@@ -46,6 +46,20 @@ export function formatBountyWhen(iso) {
   return Number.isNaN(date.getTime()) ? "" : `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`;
 }
 
+// Compact duration for the card's timing lines ("2d 4h", "5h 12m", "12m"):
+// the challenge countdown and the stale-lot time-in-state share it.
+export function formatBountyDuration(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${mins}m`;
+}
+
 const STATE_LABELS = {
   proposed: "Proposed", funded: "Open", claimed: "Claimed", submitted: "Submitted",
   accepted: "Accepted", approved: "Approved", disputed: "Disputed", paid: "Settled",
@@ -63,11 +77,31 @@ export function safeEvidenceUrl(value) {
   return /^https?:\/\//i.test(value.trim()) ? value.trim() : "";
 }
 
-function normalizeBounty(row, self) {
+function normalizeBounty(row, self, nowMs = Date.now()) {
   const poster = typeof row?.poster === "string" ? row.poster : "";
   const claimant = typeof row?.claimant === "string" ? row.claimant : "";
   const verifier = typeof row?.verifier === "string" ? row.verifier : "";
   const state = typeof row?.state === "string" ? row.state : "";
+  const terminal = TERMINAL_STATES.has(state);
+  // Money-legibility (MONEY-LEGIBILITY step 1): the escrow view already emits
+  // the timing fields below; the card used to drop every one of them, so the
+  // challenge deadline that auto-approves an accepted bounty, a snoozed lot's
+  // wake date, a stale lot's time-in-state, and a duplicate's original were
+  // invisible on every door. Display only — no semantics change.
+  const challengeEndsMs = typeof row?.challengeEndsMs === "number" && Number.isFinite(row.challengeEndsMs)
+    ? row.challengeEndsMs : null;
+  const challenge = state === "accepted" && challengeEndsMs !== null && challengeEndsMs > nowMs
+    ? { endsWhen: formatBountyWhen(row?.challengeEnds), countdown: formatBountyDuration(challengeEndsMs - nowMs) }
+    : null;
+  const snoozedUntilMs = typeof row?.snoozedUntilMs === "number" && Number.isFinite(row.snoozedUntilMs)
+    ? row.snoozedUntilMs : null;
+  const snoozedWhen = snoozedUntilMs !== null && snoozedUntilMs > nowMs
+    ? formatBountyWhen(row?.snoozedUntil) : "";
+  const timeInStateMs = typeof row?.timeInStateMs === "number" && Number.isFinite(row.timeInStateMs)
+    ? row.timeInStateMs : null;
+  const staleFor = !terminal && timeInStateMs !== null && timeInStateMs > 24 * 3600 * 1000
+    ? formatBountyDuration(timeInStateMs) : "";
+  const duplicateOf = typeof row?.duplicateOf === "string" && row.duplicateOf ? row.duplicateOf : "";
   const evidence = row?.evidence && typeof row.evidence === "object" ? row.evidence : null;
   const criteria = Array.isArray(row?.rubric?.criteria)
     ? row.rubric.criteria.filter(c => c && typeof c.criterionId === "string")
@@ -90,6 +124,10 @@ function normalizeBounty(row, self) {
       summary: typeof evidence.summary === "string" ? evidence.summary : "",
       evidenceUrl: safeEvidenceUrl(evidence.evidenceUrl),
     } : null,
+    challenge,
+    snoozedWhen,
+    staleFor,
+    duplicateOf,
     rubricCriteria: criteria,
     mine,
     canFund: state === "proposed" && mine,
@@ -116,10 +154,10 @@ function normalizeReceipt(row) {
 }
 
 // Pure view model over the three endpoint payloads. Tested without DOM.
-export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) {
+export function bountyBoardModel({ bounties, balances, receipts, selfId, nowMs = Date.now() } = {}) {
   const self = canonicalLaneId(selfId);
   const rows = Array.isArray(bounties) ? bounties : [];
-  const items = rows.map(row => normalizeBounty(row, self));
+  const items = rows.map(row => normalizeBounty(row, self, nowMs));
   const balance = balances && typeof balances === "object" ? balances : {};
   const history = (Array.isArray(receipts) ? receipts : []).map(normalizeReceipt);
   return {
@@ -215,14 +253,23 @@ export function bountyListHtml(model) {
   if (items.length === 0) {
     return `<div class="bounty-list"><p class="form-hint">No bounties in this room yet. Post the first one above.</p></div>`;
   }
+  const listedIds = new Set(items.map(item => item.bountyId).filter(Boolean));
   const rows = items.map(item => {
     const meta = [`Posted by ${escapeHtml(item.poster || "unknown")}`];
     if (item.claimant) meta.push(`claimed by ${escapeHtml(item.claimant)}`);
     if (item.dueWhen) meta.push(`due ${escapeHtml(item.dueWhen)}`);
+    if (item.challenge) meta.push(`challenge window ends ${escapeHtml(item.challenge.endsWhen)} (in ${escapeHtml(item.challenge.countdown)})`);
+    if (item.snoozedWhen) meta.push(`snoozed until ${escapeHtml(item.snoozedWhen)}`);
+    if (item.staleFor) meta.push(`${escapeHtml(item.stateLabel)} for ${escapeHtml(item.staleFor)}`);
+    if (item.duplicateOf) {
+      meta.push(listedIds.has(item.duplicateOf)
+        ? `<a href="#bounty-row-${escapeHtml(item.duplicateOf)}">duplicate of ${escapeHtml(item.duplicateOf)}</a>`
+        : `duplicate of ${escapeHtml(item.duplicateOf)}`);
+    }
     const fund = item.canFund
       ? `<div class="bounty-actions"><button class="button secondary" type="button" data-bounty-action="fund" data-bounty-id="${escapeHtml(item.bountyId)}">Fund escrow</button></div>`
       : "";
-    return `<article class="bounty-row" data-bounty-row="${escapeHtml(item.bountyId)}">` +
+    return `<article class="bounty-row" id="bounty-row-${escapeHtml(item.bountyId)}" data-bounty-row="${escapeHtml(item.bountyId)}">` +
       `<div class="bounty-row-head"><span class="bounty-title">${escapeHtml(item.title)}</span>` +
       `<span class="land-badge">${escapeHtml(item.stateLabel)}</span>` +
       `<span class="bounty-amount">${escapeHtml(formatCredits(item.amount))} credits</span></div>` +

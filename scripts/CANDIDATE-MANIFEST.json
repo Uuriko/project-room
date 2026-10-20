@@ -72,7 +72,7 @@
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
     "src/board-ui.js": "sha256:66f670acf90a942c542fcd0ccc8f329a6f865352131796b8423230e77708146f",
     "src/board.css": "sha256:97883f6b1ab6817bde7b020f1fe1ac463eb0cc002e19cda8b76895474b2c0a47",
-    "src/bounty-board.js": "sha256:3c65ff411c06bcbaed3825f2b9145233af79a5439f31de36ecb152e0e1a2be14",
+    "src/bounty-board.js": "sha256:fa3716fdb6d00b983c157411979e9d5e69116b8aa0ccb52c06300dfc671a516b",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",

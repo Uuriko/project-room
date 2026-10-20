@@ -9,6 +9,7 @@ import {
   escapeHtml,
   canonicalLaneId,
   formatCredits,
+  formatBountyDuration,
   bountyStateLabel,
   safeEvidenceUrl,
   bountyBoardModel,
@@ -269,4 +270,74 @@ test("restoreBountyFocus focuses the equivalent control and reports misses (A11Y
   const emptyRoot = { querySelector: () => null };
   assert.equal(restoreBountyFocus(emptyRoot, "id:bounty-title"), false,
     "a control that legitimately vanished restores nothing");
+});
+
+// --- MONEY-LEGIBILITY step 1: the card renders the timing fields the escrow
+// view already emits (challengeEnds, snoozedUntil, timeInState, duplicateOf).
+const ML_NOW = Date.parse("2026-10-19T12:00:00.000Z");
+const ML_HOUR = 3600 * 1000;
+const ACCEPTED = {
+  ...SUBMITTED, bountyId: "ROOMX-9", state: "accepted", group: "in-review",
+  challengeEnds: "2026-10-22T12:00:00.000Z", challengeEndsMs: ML_NOW + 72 * ML_HOUR,
+};
+
+test("formatBountyDuration renders compact day/hour/minute spans", () => {
+  assert.equal(formatBountyDuration(3 * 24 * ML_HOUR + 5 * ML_HOUR), "3d 5h");
+  assert.equal(formatBountyDuration(2 * 24 * ML_HOUR), "2d");
+  assert.equal(formatBountyDuration(5 * ML_HOUR + 12 * 60000), "5h 12m");
+  assert.equal(formatBountyDuration(12 * 60000), "12m");
+  assert.equal(formatBountyDuration(30000), "under a minute");
+  assert.equal(formatBountyDuration(-1), "");
+  assert.equal(formatBountyDuration("3d"), "");
+  assert.equal(formatBountyDuration(undefined), "");
+});
+
+test("an accepted bounty shows its challenge deadline and countdown (P1)", () => {
+  const model = bountyBoardModel({ bounties: [ACCEPTED], balances: BALANCES, selfId: "m9", nowMs: ML_NOW });
+  const item = model.items[0];
+  assert.equal(item.challenge.endsWhen, "Oct 22");
+  assert.equal(item.challenge.countdown, "3d");
+  const html = bountyListHtml(model);
+  assert.ok(html.includes("challenge window ends Oct 22 (in 3d)"), html);
+});
+
+test("no challenge line before acceptance or after the window closes (P1)", () => {
+  const submitted = bountyBoardModel({ bounties: [{ ...ACCEPTED, state: "submitted" }], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(submitted.items[0].challenge, null);
+  const closed = bountyBoardModel({ bounties: [{ ...ACCEPTED, challengeEndsMs: ML_NOW - ML_HOUR }], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(closed.items[0].challenge, null);
+  assert.ok(!bountyListHtml(closed).includes("challenge window ends"));
+});
+
+test("a snoozed bounty shows its wake date, a lapsed snooze shows nothing (P7)", () => {
+  const snoozed = { ...PROPOSED, snoozedUntil: "2026-10-21T12:00:00.000Z", snoozedUntilMs: ML_NOW + 48 * ML_HOUR };
+  const model = bountyBoardModel({ bounties: [snoozed], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(model.items[0].snoozedWhen, "Oct 21");
+  assert.ok(bountyListHtml(model).includes("snoozed until Oct 21"));
+  const lapsed = bountyBoardModel({ bounties: [{ ...snoozed, snoozedUntilMs: ML_NOW - ML_HOUR }], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(lapsed.items[0].snoozedWhen, "");
+});
+
+test("a stale lot shows time-in-state; fresh and terminal lots do not (P9)", () => {
+  const stale = { ...SUBMITTED, timeInStateMs: 3 * 24 * ML_HOUR + 5 * ML_HOUR };
+  const model = bountyBoardModel({ bounties: [stale], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(model.items[0].staleFor, "3d 5h");
+  assert.ok(bountyListHtml(model).includes("Submitted for 3d 5h"));
+  const fresh = bountyBoardModel({ bounties: [{ ...SUBMITTED, timeInStateMs: 2 * ML_HOUR }], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(fresh.items[0].staleFor, "");
+  const terminal = bountyBoardModel({ bounties: [{ ...SUBMITTED, state: "paid", timeInStateMs: 9 * 24 * ML_HOUR }], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(terminal.items[0].staleFor, "");
+});
+
+test("a duplicate names its original, linking when the original is listed (P10)", () => {
+  const dup = { ...PROPOSED, bountyId: "ROOMX-10", duplicateOf: "ROOMX-2" };
+  const model = bountyBoardModel({ bounties: [PROPOSED, dup], selfId: "m9", nowMs: ML_NOW });
+  assert.equal(model.items[1].duplicateOf, "ROOMX-2");
+  const html = bountyListHtml(model);
+  assert.ok(html.includes('<a href="#bounty-row-ROOMX-2">duplicate of ROOMX-2</a>'), html);
+  assert.ok(html.includes('id="bounty-row-ROOMX-2"'), "rows carry anchor ids");
+  const solo = bountyBoardModel({ bounties: [dup], selfId: "m9", nowMs: ML_NOW });
+  const soloHtml = bountyListHtml(solo);
+  assert.ok(soloHtml.includes("duplicate of ROOMX-2"));
+  assert.ok(!soloHtml.includes('href="#bounty-row-ROOMX-2"'), "no dangling anchor when the original is not listed");
 });
