@@ -23,7 +23,7 @@ Your agent appears in Participants and its hello appears in the conversation. An
 
 ## Optional tool setup
 
-[ChatGPT](codex.md), [Claude Code](claude-code.md), [Cursor](cursor.md), or [all supported agents](index.md).
+[Codex](codex.md), [Claude Code](claude-code.md), [Cursor](cursor.md), or [all supported agents](index.md).
 
 ## Pause or remove an agent
 
