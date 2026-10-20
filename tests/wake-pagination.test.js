@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { queueRoomPointer, runCodexQueue } from '../client/codex-queue.mjs';
+const binding = { origin: 'https://room.example', roomId: 'qa-room', memberId: 'agent-one', threadId: '01a0ee9d-76ed-7e80-acdc-02177dc7ca3c' };
+function fixture(t) {
+  const journal = mkdtempSync(join(tmpdir(), 'room-queue-'));
+  t.after(() => rmSync(journal, { recursive: true, force: true }));
+  return { binding, journal, pointer: { roomId: 'qa-room', signalId: 'signal-1', messageId: 'message-1' }, authorize: async () => true };
+}
+test('cursor traversal reaches51 without replaying accepted or unknown receipts', { timeout: 30000 }, async t => {
+  const { RoomStore } = await import('../server/store.mjs');
+  const { initialRoom } = await import('../server/bootstrap.mjs');
+  const { createRoomServer } = await import('../server/http.mjs');
+  const { connectRoom } = await import('../client/agent-setup.mjs');
+  const { readAgentConnection } = await import('../client/agent-connection.mjs');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { readFileSync } = await import('node:fs');
+  const { journal } = fixture(t), store = new RoomStore(':memory:');
+  store.initialize(initialRoom('commons'));
+  const owner = store.issueAccessKey('commons', 'owner');
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const invite = store.invites.create(owner, 'commons', { profile: 'chat', displayName: 'Probe' });
+  const setup = await connectRoom({ origin, directory: join(journal, 'identity'), name: 'Probe', accept: true, target: invite.code });
+  const connection = readAgentConnection(setup.configDirectory);
+  store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'probe-message' });
+  for (let i = 0; i < 50; i++) store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'next-' + i });
+  const log = join(journal, 'calls');
+  writeFileSync(join(journal, 'codex'), '#!/bin/sh\nprintf x >> "$ROOM_TEST_QUEUE_LOG"\n', { mode: 0o700 });
+  const args = ['scripts/codex-queue-pointer.mjs', '--thread', binding.threadId, '--journal', join(journal, 'receipts'), '--host', 'queue-probe'];
+  const env = { ...process.env, PATH: journal + ':' + process.env.PATH, ROOM_AGENT_CONFIG: setup.configDirectory, ROOM_TEST_QUEUE_LOG: log };
+  for (const key of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete env[key];
+  let polls = 0;
+  server.on('request', req => { if (req.url.startsWith('/api/agent-wakes/poll?')) polls++; });
+  const execute = () => promisify(execFile)(process.execPath, args, { env, timeout: 15000 });
+  const pending = store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' });
+  const { roomEventPointer } = await import('../client/claude-channel.mjs');
+  for (const row of pending) await queueRoomPointer({ binding: { ...binding, origin, roomId: 'commons', memberId: setup.identityId }, pointer: roomEventPointer(row, 'commons'), journal: join(journal, 'receipts'), authorize: async () => true, run: async () => row === pending[0] ? 'unknown' : 'accepted' });
+  const output = (await execute()).stdout.trim().split('\n').map(JSON.parse);
+  assert.equal(output.filter(row => !row.duplicate).length, 1, '51st wake must be reached without ACKing first50');
+  assert.equal(readFileSync(log, 'utf8'), 'x');
+  assert.equal(store.agentHeartbeats.pendingWakePage(setup.identityId, { roomId: 'commons' }).more, true);
+});
+
+test('stable cursor covers101 tied signals across ACK changes and rejects scope reuse', async t => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { AgentHeartbeats, agentHeartbeatSchema } = await import('../server/agent-heartbeats.mjs');
+  const db = new DatabaseSync(':memory:'); db.exec(agentHeartbeatSchema); t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => 1000, transaction: fn => fn() });
+  for (let i = 0; i < 101; i++) hb.enqueueWake({ agentId: 'ai_test', roomId: 'room', kind: 'mention', messageId: 'm' + i });
+  const scope = { roomId: 'room', hostId: 'host' };
+  const first = hb.pendingWakePage('ai_test', scope);
+  assert.equal(first.signals.length, 50); assert.equal(first.more, true);
+  for (const patch of [{ roomId: 'other' }, { hostId: 'other' }])
+    assert.throws(() => hb.pendingWakePage('ai_test', { ...scope, ...patch, cursor: first.nextCursor }), /cursor/);
+  assert.throws(() => hb.pendingWakePage('ai_other', { ...scope, cursor: first.nextCursor }), /cursor/);
+  assert.throws(() => hb.pendingWakePage('ai_test', { ...scope, cursor: 'broken' }), /cursor/);
+  db.prepare('UPDATE agent_wake_signals SET delivered_at=1001 WHERE signal_id=?').run(first.signals[0].signalId);
+  const second = hb.pendingWakePage('ai_test', { ...scope, cursor: first.nextCursor });
+  const third = hb.pendingWakePage('ai_test', { ...scope, cursor: second.nextCursor });
+  assert.equal(second.signals.length, 50); assert.equal(third.signals.length, 1);
+  assert.equal(third.more, false); assert.equal(third.nextCursor, null);
+  assert.equal(new Set([...first.signals, ...second.signals, ...third.signals].map(row => row.signalId)).size, 101);
+});
