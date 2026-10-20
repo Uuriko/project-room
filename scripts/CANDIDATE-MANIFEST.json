@@ -89,7 +89,7 @@
     "src/front-door.js": "sha256:f0c3bb0288e0131bb3d9e987fda9e13438ee4750fcb81f71a4861c49a9a3a8c3",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
-    "src/human-experience.css": "sha256:5ac0bf7eca0f7345b63dbe9ada55812c74022cba2950be75e3ef9e2bc148a3b7",
+    "src/human-experience.css": "sha256:91fdd7a55bb75d93100c8dafcc6a9bcebea8a27f4655318181533a038d42ad94",
     "src/human-experience.js": "sha256:d985fc460b4911fae174a1032efb342dfbcb704e9f68fcdc3a957a75de7de4b6",
     "src/human-push-display.js": "sha256:e5ae3ec560fe7334442557e286e5d297f8b579a215f41c2702890ba49d8050f6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
