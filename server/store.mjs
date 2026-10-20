@@ -719,6 +719,7 @@ const shapes = {
   [T.ROOM_SPEND_PRICING_SET]: "enabled",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
+  [T.ROOM_INTERNAL_SET]: "enabled",
   // --- PRIV-2: owner-only history setting and the export audit record. ---
   [T.ROOM_HISTORY_VISIBILITY_SET]: "historyVisibility",
   [T.ROOM_EXPORTED]: "format",

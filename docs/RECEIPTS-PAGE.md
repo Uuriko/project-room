@@ -39,9 +39,9 @@ the badge in the receipt link with the verdict line as its alt text.
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
 `project-room-public-room-proof/1`). It exists only when the room is
 publicly listed and its owner has public receipts on. It lists the room's
-own public receipts — the same records as above, through the same toggle
-and unpublish filters — and labels each with the level of proof its record
-carries:
+own public receipts — the same records as above, through the same toggle,
+unpublish, internal-room, and verification-fact filters — and labels each
+with the level of proof its record carries:
 
 - **Server-verified merge** — a work claim this server recorded as merged
   (`pr_merged` with `syncedAt`) before publishing. The strongest claim here.
@@ -66,6 +66,33 @@ exception as the receipt card.
 
 ## What is public
 
+- **Internal rooms never exhibit.** A room whose owner has recorded it
+  internal (`room.internal_set` — the platform team's own rooms: drills,
+  QA, fleet coordination) keeps its receipts in-room. Its work-claim,
+  work-item, public-work, and lot receipts appear on no public surface:
+  not the wall, not the detail page, not the sitemap, not a proof page,
+  not the directory counts, and never as the featured exemplar. Only a
+  recorded marking hides a room — no room is treated as internal by
+  inference from its name, members, or traffic.
+- **No verification fact, no public receipt.** A record with no
+  verification fact recorded anywhere does not project onto public
+  proof surfaces at all (#3636 Option 1, enforced at the projection and
+  the read). Per shape, the fact is: a work claim's server-settled
+  merge, or its recorded verification tier (a verification object in a
+  completed state, or the attesting member the done transition stored
+  in `reviewedBy`) — labelled at its true tier, verified or
+  self-attested; a work item's recorded reporter (the accountable
+  member its completion named); a public-work receipt's own records —
+  a verified stamp, a `system_checked` tier, or a review record
+  carrying a decision or a PASS/FAIL verdict (a merely submitted,
+  hash-only, unreviewed public-work receipt stays in-room until a fact
+  is recorded, then appears); a lot's recorded settlement verdict.
+- **The featured exemplar is verified or absent.** The front door's
+  featured receipt is never a self-attested or hash-only record: only
+  a server-verified merge, a member-verified completion, or a
+  public-work receipt stamped verified / `system_checked` / carrying
+  a reviewer's PASS can be featured. When nothing qualifies, the card
+  shows no receipt rather than an unverified one.
 - Public-work receipts are already public. They stay on this page.
 - A work claim appears only when it is done, this server recorded the merge
   (`pr_merged` on the claim history, with `syncedAt`), and the room owner

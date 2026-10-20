@@ -166,8 +166,13 @@ function servePublicWork(t) {
   const artifactText = "the delivered teardown";
   const sha = createHash("sha256").update(artifactText, "utf8").digest("hex");
   const receiptId = `pwr_${"aa".repeat(32)}`;
+  // The record carries a verification fact (a platform-executed check
+  // passed at finish: system_checked) — since PROOF-WALL-FLIP a
+  // public-work receipt with no recorded fact does not resolve publicly
+  // at all, so there would be nothing here to verify.
   const body = { schema: "public-work-receipt/1", receiptId, namespaceId: `public_${"bb".repeat(16)}`,
     identityId: "ai_public", title: "Public task alpha", createdAt: "2026-10-01T00:00:00.000Z",
+    state: "submitted", verification: "system_checked",
     artifact: { sha256: sha } };
   store.db.prepare(`INSERT INTO public_work_tasks
       (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
@@ -193,10 +198,12 @@ test("public work: record + artifact re-validate; a forged artifact contradicts"
   assert.equal(forged.verdict, "contradicted");
 });
 
-test("public work: a pruned delivery record is no longer verifiable", async t => {
+test("public work: a pruned delivery record removes the receipt from public view", async t => {
   const { store, receiptId } = servePublicWork(t);
   store.db.prepare("DELETE FROM public_work_receipts WHERE receipt_id=?").run(receiptId);
-  const verification = await verify(store, receiptId);
-  assert.equal(check(verification, "source-record").status, "missing");
-  assert.equal(verification.verdict, "no-longer-verifiable");
+  // PROOF-WALL-FLIP: with its source record gone, the receipt carries
+  // no verification fact, so it no longer resolves publicly at all —
+  // verify-at-read-time exists only while a receipt is public, and
+  // there is nothing left for it to verify.
+  assert.equal(publicReceiptById(store, receiptId), null);
 });

@@ -58,6 +58,21 @@ async function serve(t, { receiptsEnabled = 1 } = {}) {
     id: PWR, title: "Public audit delivered", source: "public-work",
     hashes: [`sha256:${"b".repeat(64)}`], at: "2026-10-12T00:00:00.000Z",
   });
+  // The public-work projection is backed by its source records, as every
+  // real delivery is: the receipt record carries the system_checked tier —
+  // the verification fact PROOF-WALL-FLIP requires before a public-work
+  // projection serves. (A projection whose source record is pruned no
+  // longer serves; this fixture models the live shape, not the pruned one.)
+  store.db.prepare(`INSERT INTO public_work_tasks
+      (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run("offer-proof", "commons", "commons", 1, "https://github.com/Uuriko/project-room", "main", JSON.stringify(["README.md"]), 1, Date.now());
+  store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    PWR, "offer-proof", "commons", 1, "ai_public", "note", "b".repeat(64), 4,
+    JSON.stringify({ schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public",
+      title: "Public audit delivered", createdAt: "2026-10-12T00:00:00.000Z", artifact: { sha256: "b".repeat(64) },
+      state: "submitted", verification: "system_checked",
+      executedChecks: [{ name: "criteria_coverage", result: "pass" }] }), Date.now());
   insertReceipt(store, {
     id: OTHER, title: "Another room's secret win", source: "work-claim", origin: "other-room", room: "other-room",
     pullRequest: "https://github.com/Uuriko/project-room/pull/9", mergedAt: "2026-10-12T00:00:00.000Z",

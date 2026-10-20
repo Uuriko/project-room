@@ -59,7 +59,7 @@
     set("fd-proves", receipt.mergedAt && receipt.pullRequest
       ? "The server verified the merge against the linked pull request. Open the receipt for the checks, the evidence, and the full record."
       : "The room recorded this work and made it public. Open the receipt for the checks, the evidence, and the full record.");
-    set("fd-card-note", "This card shows the newest published receipt, counted live.");
+    set("fd-card-note", "This card shows the newest verified published receipt, counted live.");
   } catch {
     // Static card stays — it is labelled a sample, so it stays honest.
   }

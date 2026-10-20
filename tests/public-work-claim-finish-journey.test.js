@@ -82,10 +82,17 @@ test('seeded journey: fresh identity claims, works, finishes, receipt goes publi
   assert.equal(midClaim.body.claim.state, 'claimed');
   assert.ok(midClaim.body.claim.leaseExpiresAt, 'claim carries a lease expiry');
 
-  // 4. The agent does the work and finishes: artifact bytes + reported checks.
+  // 4. The agent does the work and finishes: artifact bytes + reported
+  // checks + the per-criterion attestation. The attestation is what lets
+  // the platform execute its coverage check at finish: the passed check
+  // earns the receipt its system_checked tier — the verification fact
+  // PROOF-WALL-FLIP requires before a public-work receipt serves. An
+  // unattested finish stays hash-only and in-room until a review records
+  // a fact; that is the flip's rule, not a gap in this journey.
   const artifactText = 'The repository began as a sketch on a whiteboard.\n';
   const finish = await f.call('POST', taskPath + '/finish', { secret,
-    body: { requestId: 'pwj-finish', expectedTermsVersion: termsVersion, generation, artifactText, checksReported: ['proofread the paragraph'] } });
+    body: { requestId: 'pwj-finish', expectedTermsVersion: termsVersion, generation, artifactText, checksReported: ['proofread the paragraph'],
+      criteriaAttestation: [{ criterion: 'One truthful paragraph about the repository', status: 'met' }] } });
   assert.equal(finish.status, 200, JSON.stringify(finish.body).slice(0, 200));
   assert.equal(finish.body.action, 'submitted');
   const receipt = finish.body.receipt;

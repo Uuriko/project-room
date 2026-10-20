@@ -223,17 +223,21 @@ test("unpublish removes a room and a receipt from public reads and the sitemap",
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
     blobs: [HASH], updatedAt: "2026-10-01T12:00:00.000Z",
   });
+  // The receipt record carries the shape the real finish writes — the
+  // system_checked tier is the verification fact PROOF-WALL-FLIP requires
+  // before a public-work record serves; this suite's subject is unpublish.
+  const pwrBody = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public",
+    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) },
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }] };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     PWR, "offer-1", "commons", 1, "ai_public", "note", "cd".repeat(32), 4,
-    JSON.stringify({ schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public", title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) } }),
+    JSON.stringify(pwrBody),
     Date.now());
   store.command(ownerKey, "commons", { id: "page-on", type: "room.public_page_set", data: { enabled: true } });
   store.command(ownerKey, "commons", { id: "receipts-on", type: "room.public_receipts_set", data: { enabled: true } });
   store.roomDirectory.set("commons", "owner", true);
-  projectPublicWorkReceipt(store, {
-    schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public",
-    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) },
-  }, "cd".repeat(32));
+  projectPublicWorkReceipt(store, pwrBody, "cd".repeat(32));
   const claimId = collectPublicReceipts(store).find(item => item.title === "Ship the door").id;
   assert.equal((await raw(origin, "/r/commons")).status, 200);
   assert.match((await raw(origin, "/r/commons")).text, /Report/);

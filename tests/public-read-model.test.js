@@ -204,8 +204,18 @@ test("receipt and agent listings are one page at a time", async t => {
   const insertReceipt = store.db.prepare(`INSERT INTO public_receipts
     (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
     VALUES (?, ?, 'public-work', NULL, NULL, NULL, '[]', '[]', NULL, NULL, '[]', ?, ?)`);
+  // Each public-work row carries its source record with a verification
+  // fact (system_checked at finish): since PROOF-WALL-FLIP a public-work
+  // row with no fact on its records does not serve at all, so a fixture
+  // that seeds the projection without its source record would page an
+  // empty wall for the wrong reason.
+  const insertSource = store.db.prepare(`INSERT INTO public_work_receipts
+    (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+    VALUES (?, ?, 'ns', 1, 'ai_paged', 'note', ?, 4, ?, 0)`);
   for (let i = 0; i < 21; i += 1) {
-    insertReceipt.run(`pwr_${String(i).padStart(32, "0")}`, `Paged receipt ${i}`, new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(), PUBLIC_START_URL);
+    const id = `pwr_${String(i).padStart(32, "0")}`;
+    insertReceipt.run(id, `Paged receipt ${i}`, new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(), PUBLIC_START_URL);
+    insertSource.run(id, `paged-offer-${i}`, "0".repeat(64), JSON.stringify({ state: "submitted", verification: "system_checked" }));
   }
   const insertAgent = store.db.prepare(`INSERT INTO public_directory_entries
     (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)

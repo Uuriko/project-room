@@ -8,11 +8,7 @@ import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 import {
-  OPERATOR_HIDDEN_RECEIPT_SQL,
-  ownerHiddenReceiptSql,
   receiptVisibilitySqlFor,
-  ownerToggleReadable,
-  publicWorkTablesReadable,
   lotReceiptVisible,
 } from "./public-visibility.mjs"; // the one visibility definition every public read applies
 
@@ -33,6 +29,10 @@ export const PUBLIC_BACKFILL_BATCH = 20;
 
 export const PUBLIC_READ_MODEL_SCHEMA = `
   CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS internal_rooms (
     room_id TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL
   );
@@ -178,12 +178,20 @@ function serverVerifiedMerge(item) {
 // an attested distinct member under the reviewed policies. A reviewer
 // distinct from the worker is a verified completion; anything else is
 // the worker's own attestation, disclosed as such, never upgraded.
+// With NEITHER shape recorded there is no verification fact at all, and
+// the tier is null (PROOF-WALL-FLIP, enforcing #3636 Option 1 at the
+// projection): a bare done claim — a direct store write, a fixture, a
+// legacy row — does not project onto public proof surfaces. A pending
+// verification object is not a completed fact either; the claim
+// re-projects when its verification completes and is recorded.
 export function workClaimVerificationTier(item) {
   const recorded = item?.verification;
   if (recorded && typeof recorded === "object"
     && (recorded.state === "verified" || recorded.state === "self_attested")) return recorded.state;
-  if (typeof item?.reviewedBy === "string" && item.reviewedBy && item.reviewedBy !== item.owner) return "verified";
-  return "self_attested";
+  if (typeof item?.reviewedBy === "string" && item.reviewedBy) {
+    return item.reviewedBy !== item.owner ? "verified" : "self_attested";
+  }
+  return null;
 }
 
 // A done claim with no pull request on it finished by result, not by
@@ -352,6 +360,13 @@ function optedInRows(store, state) {
   const items = state.workItems && typeof state.workItems === "object" ? Object.values(state.workItems) : [];
   for (const item of items) {
     if (!item || item.state !== "completed" || !item.receipt || typeof item.receipt !== "object") continue;
+    // The completion receipt's recorded fact is its reporter: the
+    // accountable member the completion event named (completeWork).
+    // A receipt with no recorded reporter — the provenance-repair path
+    // stamps reportedById null when the completion event is unknown —
+    // carries no verification fact and does not project
+    // (PROOF-WALL-FLIP, #3636 Option 1).
+    if (typeof item.receipt.reportedById !== "string" || !item.receipt.reportedById) continue;
     const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
     const { agents, humans, agentIds } = creditsFrom(people);
     const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
@@ -544,7 +559,19 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const mirrorSetting = previous === null
     || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
       || recordedWas.revision !== recorded.revision));
-  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
+  // The internal-room marking mirrors the same way into internal_rooms
+  // for the visibility definition (PROOF-WALL-FLIP): the record lives
+  // in the room's own log (room.internal_set, owner-only); the mirror
+  // carries the exact recorded value so the public read can require a
+  // recorded marking. Same revision watch, same authoritative
+  // re-mirror on a null previous.
+  const internalRecorded = state.room.internal;
+  const hasInternal = !!internalRecorded && typeof internalRecorded.enabled === "boolean";
+  const internalWas = previous?.room?.internal ?? null;
+  const mirrorInternal = previous === null
+    || (hasInternal && (!internalWas || typeof internalWas.enabled !== "boolean"
+      || internalWas.revision !== internalRecorded.revision));
+  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting && !mirrorInternal) return;
   const write = () => {
     if (mirrorSetting) {
       if (hasRecorded) {
@@ -552,6 +579,14 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
           ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
       } else {
         store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+      }
+    }
+    if (mirrorInternal) {
+      if (hasInternal) {
+        store.db.prepare(`INSERT INTO internal_rooms (room_id, enabled) VALUES (?,?)
+          ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, internalRecorded.enabled ? 1 : 0);
+      } else {
+        store.db.prepare("DELETE FROM internal_rooms WHERE room_id=?").run(roomId);
       }
     }
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
@@ -592,7 +627,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   // A public-work receipt body names its claim NAMESPACE, not its room —
   // but this read model speaks in room ids: the public record exposes
   // room_id as the receipt's room, and the operator unpublish predicate
-  // (HIDDEN_RECEIPT) matches room takedowns against it. Resolve the task's
+  // (the operator-unpublish leg) matches room takedowns against it. Resolve the task's
   // room so the receipt carries its true room; with the namespace left in
   // place, a room takedown never hides these receipts and the public
   // record presents an internal namespace key as if it were a room id.
@@ -785,14 +820,14 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
 }
 
 // An unpublished room or receipt stays out of listings, detail reads,
-// and the sitemap. The visibility rule — this operator-unpublish leg,
+// and the sitemap. The visibility rule — the operator-unpublish leg,
 // the owner-toggle leg (#3595: the origin room, plus the owning room of
 // a public-work receipt through its task record, since a pwr_ row's
-// origin can be a namespace rather than a room id), and their
-// composition — is defined once in server/public-visibility.mjs. The
-// directory receipt count applies the same predicate (PR 2 of the
-// visibility package); the claim that it did was false before it.
-const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
+// origin can be a namespace rather than a room id), the internal-room
+// leg, the public-work verification-fact leg, and their composition —
+// is defined once in server/public-visibility.mjs. The directory
+// receipt count applies the same predicate (PR 2 of the visibility
+// package); the claim that it did was false before it.
 
 const receiptFilter = (room, needle) => {
   const clauses = [];
@@ -814,13 +849,12 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
-  // The rows this list could serve: filter matches, minus both kinds of
-  // hidden (operator-unpublished, owner-toggled-off). The page query and
-  // the cursor lookup apply the same set, so a served nextCursor always
+  // The rows this list could serve: filter matches, minus every kind of
+  // hidden (operator-unpublished, owner-toggled-off, internal-room,
+  // public-work without a verification fact). The page query and the
+  // cursor lookup apply the same set, so a served nextCursor always
   // names a receipt a follow-up request may anchor on.
-  const visibility = ownerToggleReadable(store.db)
-    ? [HIDDEN_RECEIPT, ownerHiddenReceiptSql({ taskRoomLeg: publicWorkTablesReadable(store.db) })]
-    : [HIDDEN_RECEIPT];
+  const visibility = [receiptVisibilitySqlFor(store.db)];
   let after = "";
   const afterParams = [];
   if (cursor != null) {
@@ -829,9 +863,8 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     }
     // The cursor must name a receipt this list could serve: a hidden row
     // is not a valid pagination position — accepting it would confirm the
-    // hidden receipt exists and where it sits in the order (#3595). Both
-    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
-    // owner public-receipts toggle (the owner leg). Same 422 as a
+    // hidden receipt exists and where it sits in the order (#3595). Every
+    // hiding mechanism in the visibility predicate counts. Same 422 as a
     // never-existent id.
     const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);

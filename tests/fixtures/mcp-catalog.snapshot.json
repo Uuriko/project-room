@@ -1301,7 +1301,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "b5c80c2eebfd171a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2281,7 +2281,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "b5c80c2eebfd171a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

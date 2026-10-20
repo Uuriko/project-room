@@ -43,13 +43,26 @@ async function serve(t) {
     history: [{ action: "state:done", agentId: "ada", at: "2026-10-02T10:00:00.000Z", note: "Delivered the field guide" }],
     pullRequest: null, blobs: [HASH], updatedAt: "2026-10-02T10:00:00.000Z",
   });
-  // A result-mode finish only the worker attests.
+  // A result-mode finish only the worker attests. The done transition
+  // recorded the attestation as a verification object — that recorded
+  // object is the fact this receipt projects on.
   store.workClaims.set("commons", {
     id: "self-result", title: "Self attested work", state: "done", owner: "ada",
     deliveryMode: "result", reviewPolicy: "self_attested",
+    verification: { state: "self_attested", by: "ada", at: "2026-10-02T11:00:00.000Z" },
     tags: ["result"],
     history: [{ action: "state:done", agentId: "ada", at: "2026-10-02T11:00:00.000Z", note: "Finished the survey" }],
     pullRequest: null, blobs: [], updatedAt: "2026-10-02T11:00:00.000Z",
+  });
+  // A done claim with NO verification fact recorded anywhere — no
+  // verification object, no reviewedBy. It does not project
+  // (PROOF-WALL-FLIP: #3636 Option 1 requires a recorded fact).
+  store.workClaims.set("commons", {
+    id: "bare-result", title: "Unrecorded finish work", state: "done", owner: "ada",
+    deliveryMode: "result", reviewPolicy: "self_attested",
+    tags: ["result"],
+    history: [{ action: "state:done", agentId: "ada", at: "2026-10-02T11:30:00.000Z", note: "Finished, nothing recorded" }],
+    pullRequest: null, blobs: [], updatedAt: "2026-10-02T11:30:00.000Z",
   });
   // The merge path, unchanged: the server settled this merge.
   store.workClaims.set("commons", {
@@ -113,10 +126,12 @@ test("the tier derivation reads the recorded fact at its true strength", () => {
   // On main the fact is reviewedBy, route-enforced at the done transition.
   assert.equal(workClaimVerificationTier({ reviewedBy: "owner", owner: "ada" }), "verified");
   assert.equal(workClaimVerificationTier({ reviewedBy: "ada", owner: "ada" }), "self_attested");
-  assert.equal(workClaimVerificationTier({ owner: "ada" }), "self_attested");
+  // No recorded fact at all — no verification object in a completed
+  // state, no reviewedBy — is no tier: the claim does not project.
+  assert.equal(workClaimVerificationTier({ owner: "ada" }), null);
   // An unrecognized recorded state never upgrades: the main shape decides.
   assert.equal(workClaimVerificationTier({ verification: { state: "pending" }, reviewedBy: "owner", owner: "ada" }), "verified");
-  assert.equal(workClaimVerificationTier({ verification: { state: "pending" }, owner: "ada" }), "self_attested");
+  assert.equal(workClaimVerificationTier({ verification: { state: "pending" }, owner: "ada" }), null);
 });
 
 test("a legacy public_receipts table gains the verification column additively", async t => {
@@ -165,11 +180,16 @@ test("result-mode finishes project at their true tier and resolve anonymously", 
   assert.equal(merged.pullRequest, "https://github.com/Uuriko/project-room/pull/21");
   assert.equal(merged.mergedAt, "2026-10-02T08:05:00.000Z");
 
-  // Nothing else projects: not the unsettled PR claim, not unfinished or
+  // Nothing else projects: not the unsettled PR claim, not the done
+  // claim with no verification fact recorded, not unfinished or
   // retired work, and nothing from the room that never opted in.
-  for (const title of ["Unsettled merge claim", "Unfinished work", "Retired work", "Quiet verified work"]) {
+  for (const title of ["Unsettled merge claim", "Unrecorded finish work", "Unfinished work", "Retired work", "Quiet verified work"]) {
     assert.equal(byTitle.has(title), false, title);
   }
+  // The no-fact claim's twin id 404s, like any non-projected receipt.
+  const bareTwin = publicWorkClaimReceiptId("commons", "bare-result");
+  assert.equal((await raw(origin, `/receipts/${bareTwin}`)).status, 404);
+  assert.equal((await raw(origin, `/receipts/${bareTwin}.json`)).status, 404);
 
   // The feed page labels each result-mode tier in plain words.
   const feedHtml = await raw(origin, "/receipts");
@@ -234,6 +254,11 @@ test("member receipts name the public twin when one resolves, null when none doe
   const unsettled = byId.get("pr-unsettled");
   assert.equal(unsettled.publicId, null);
   assert.equal(unsettled.publicUrl, null);
+
+  // Same for the done claim with no verification fact recorded.
+  const bare = byId.get("bare-result");
+  assert.equal(bare.publicId, null);
+  assert.equal(bare.publicUrl, null);
 
   // And in the room that never opted in, the same finish has no twin.
   const quiet = await raw(origin, "/api/rooms/quiet-room/receipts", { headers: { authorization: `Bearer ${quietAdaKey}` } });

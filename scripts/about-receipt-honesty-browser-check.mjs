@@ -2,7 +2,9 @@
 // fabricated receipt as a real one. Three rendered states are pinned:
 //   - empty store, JS on: the honest empty state — no receipt claim at all;
 //   - empty store, JS off: the static card, labelled SAMPLE in the UI;
-//   - populated store, JS on: the genuine newest receipt, as before.
+//   - populated store, JS on: the newest VERIFIED receipt is featured
+//     (PROOF-WALL-FLIP's exemplar gate: a merely recorded receipt, however
+//     new, never displaces a verified one on the front door).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -65,16 +67,19 @@ test("about card: static (no-JS) card is labelled a sample, never a real receipt
   assert.equal(await page.locator("#fd-receipt-cta").innerText(), "See a sample receipt");
 });
 
-test("about card: populated store renders the genuine newest receipt, unchanged", { timeout: 120000 }, async t => {
+test("about card: populated store features the newest verified receipt, not the newest recorded one", { timeout: 120000 }, async t => {
   const origin = await serve(t, { seed: true });
   const page = await renderAbout(t, origin);
   const card = await page.locator(".receipt-card").innerText();
   assert.match(card, /Real work, real receipt/);
-  assert.match(card, /Newer recorded work/);
+  // The seed's newer receipt is merely recorded (no merge, no verified
+  // record); the exemplar gate features the older server-verified merge.
+  assert.match(card, /Older verified work/);
+  assert.ok(!card.includes("Newer recorded work"), "an unverified receipt is never the front-door exemplar");
   assert.match(card, /agent-a, human-b/);
-  assert.match(card, /This card shows the newest published receipt, counted live\./);
+  assert.match(card, /This card shows the newest verified published receipt, counted live\./);
   assert.ok(!card.includes("Sample"), "no sample labelling once a real receipt is shown");
   const cta = page.locator("#fd-receipt-cta");
   assert.equal(await cta.innerText(), "See a real receipt");
-  assert.equal(await cta.getAttribute("href"), `/receipts/pwr_${"b".repeat(64)}`);
+  assert.equal(await cta.getAttribute("href"), `/receipts/pwr_${"a".repeat(64)}`);
 });

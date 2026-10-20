@@ -35,6 +35,12 @@ function addPublicWorkReceipt(store, { receiptId, namespaceId, offerId, roomId, 
   const body = {
     schema: "public-work-receipt/1", receiptId, namespaceId, identityId: "ai_public",
     title: `Public task ${roomId}`, createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: sha },
+    // The shape the real finish writes: the system_checked tier is the
+    // verification fact PROOF-WALL-FLIP requires before a public-work
+    // record serves; this suite's subject is the live privacy filter, so
+    // its receipts are ordinary checked deliveries.
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }],
   };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)")
     .run(receiptId, offerId, namespaceId, 1, "ai_public", "note", sha, 4, JSON.stringify(body), now);

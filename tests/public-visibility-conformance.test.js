@@ -18,6 +18,7 @@ import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 import { publicUnpublishSchema } from "../server/legal-store.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { publicWorkClaimsSchema } from "../server/public-work-claims.mjs";
+import { publicWorkReviewsSchema } from "../server/public-work-reviews.mjs";
 import {
   receiptVisibilitySql,
   receiptVisibilitySqlFor,
@@ -27,6 +28,7 @@ import {
   receiptVisible,
   lotReceiptVisible,
   lotVisibleFromFacts,
+  receiptVisibleFromFacts,
 } from "../server/public-visibility.mjs";
 
 function makeDb() {
@@ -35,6 +37,7 @@ function makeDb() {
   db.exec(publicUnpublishSchema);
   db.exec(roomDirectorySchema);
   db.exec(publicWorkClaimsSchema);
+  db.exec(publicWorkReviewsSchema);
   return db;
 }
 
@@ -57,10 +60,15 @@ function seedReceipt(db, { id, roomId, origin, source }) {
 }
 
 function seedWorkRows(db, { receiptId, offerId, taskRoom }) {
+  // The cross-product cells isolate the SWITCH legs, so the seeded
+  // public-work record carries a verification fact (the verified stamp)
+  // — a factless public-work record is hidden by the fact leg whatever
+  // the switches say; that leg has its own corpus block below.
   db.prepare(`INSERT INTO public_work_receipts
     (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(receiptId, offerId, "ns", 1, "ai_corpus", "note", hex(64, "0"), 4, "{}", 0);
+    .run(receiptId, offerId, "ns", 1, "ai_corpus", "note", hex(64, "0"), 4,
+      JSON.stringify({ state: "verified", verification: "system_checked" }), 0);
   if (taskRoom) {
     db.prepare(`INSERT INTO public_work_tasks
       (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
@@ -137,7 +145,7 @@ test("SQL and JS twins agree with the definition across the receipt switch space
     }
   }
 
-  const sql = receiptVisibilitySql({ ownerToggle: ownerToggleReadable(db) });
+  const sql = receiptVisibilitySqlFor(db);
   const hidden = hiddenReceiptIds(db, cells.map(cell => cell.id));
   for (const cell of cells) {
     const label = `${cell.shape} / unpublish=${cell.unpublish} / toggle=${cell.toggle}`;
@@ -165,7 +173,7 @@ test("edge cells the cross product does not generate", () => {
   seedReceipt(db, { id: nsKeyed, roomId: "keyed-ns", origin: "keyed-ns", source: "public-work" });
   seedWorkRows(db, { receiptId: nsKeyed, offerId: "offer-keyed", taskRoom: "keyed-room" });
   setToggle(db, "keyed-ns", "off");
-  const sql = receiptVisibilitySql({ ownerToggle: true });
+  const sql = receiptVisibilitySqlFor(db);
   assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(nsKeyed), false, "SQL: origin-keyed toggle hides");
   assert.equal(receiptVisible(db, nsKeyed), false, "JS: origin-keyed toggle hides");
 
@@ -225,29 +233,35 @@ test("a store predating the public-work tables degrades the task leg in both twi
   }
 });
 
-test("the lot rule across unpublish × recorded setting × toggle", () => {
+test("the lot rule across unpublish × recorded setting × toggle × internal", () => {
   const db = makeDb();
   let n = 0;
   for (const unpublish of ["none", "receipt", "room"]) {
     for (const setting of ["absent", "off", "on"]) {
       for (const toggle of ["absent", "on", "off"]) {
-        n += 1;
-        const roomId = `lot-room-${n}`;
-        const id = nextId("lot", String(n % 10));
-        if (unpublish === "receipt") {
-          db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 0, 'op')").run(id);
+        for (const internal of ["absent", "off", "on"]) {
+          n += 1;
+          const roomId = `lot-room-${n}`;
+          const id = nextId("lot", String(n % 10));
+          if (unpublish === "receipt") {
+            db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 0, 'op')").run(id);
+          }
+          if (unpublish === "room") {
+            db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', ?, 0, 'op')").run(roomId);
+          }
+          if (setting !== "absent") {
+            db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, ?)")
+              .run(roomId, setting === "on" ? 1 : 0);
+          }
+          if (internal !== "absent") {
+            db.prepare("INSERT INTO internal_rooms (room_id, enabled) VALUES (?, ?)")
+              .run(roomId, internal === "on" ? 1 : 0);
+          }
+          setToggle(db, roomId, toggle);
+          const expected = unpublish === "none" && setting === "on" && toggle !== "off" && internal !== "on";
+          assert.equal(lotReceiptVisible(db, { id, roomId }), expected,
+            `lot / unpublish=${unpublish} / setting=${setting} / toggle=${toggle} / internal=${internal}`);
         }
-        if (unpublish === "room") {
-          db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', ?, 0, 'op')").run(roomId);
-        }
-        if (setting !== "absent") {
-          db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, ?)")
-            .run(roomId, setting === "on" ? 1 : 0);
-        }
-        setToggle(db, roomId, toggle);
-        const expected = unpublish === "none" && setting === "on" && toggle !== "off";
-        assert.equal(lotReceiptVisible(db, { id, roomId }), expected,
-          `lot / unpublish=${unpublish} / setting=${setting} / toggle=${toggle}`);
       }
     }
   }
@@ -264,8 +278,141 @@ test("the pure-data lot rule the packager's U5 filter must mirror", () => {
     [{ unpublished: false, settingEnabled: 0, receiptsPrivate: false }, false],
     [{ unpublished: false, settingEnabled: null, receiptsPrivate: false }, false],
     [{ unpublished: true, settingEnabled: null, receiptsPrivate: true }, false],
+    [{ unpublished: false, settingEnabled: 1, receiptsPrivate: false, internalRoom: true }, false],
+    [{ unpublished: false, settingEnabled: 1, receiptsPrivate: false, internalRoom: false }, true],
   ];
   for (const [facts, expected] of table) {
     assert.equal(lotVisibleFromFacts(facts), expected, JSON.stringify(facts));
   }
+});
+
+test("the pure-data receipt rule the packager's U5 filter must mirror", () => {
+  const table = [
+    [{}, true],
+    [{ unpublished: true }, false],
+    [{ receiptsPrivate: true }, false],
+    [{ internalRoom: true }, false],
+    [{ missingVerificationFact: true }, false],
+    [{ internalRoom: false, missingVerificationFact: false }, true],
+  ];
+  for (const [facts, expected] of table) {
+    assert.equal(receiptVisibleFromFacts(facts), expected, JSON.stringify(facts));
+  }
+});
+
+// PROOF-WALL-FLIP legs: the internal-room marking and the public-work
+// verification fact, pinned in both twins against expectations written
+// from the definition.
+test("the internal-room leg hides every receipt shape of a marked room, and only a marked room", () => {
+  const db = makeDb();
+  const sql = receiptVisibilitySqlFor(db);
+  const cases = [];
+  let n = 0;
+  for (const [shape, build] of Object.entries(SHAPES)) {
+    for (const internal of ["absent", "off", "on"]) {
+      n += 1;
+      const room = `flip-room-${n}`;
+      const cell = { room, ns: `flip-ns-${n}`, shape, internal };
+      const id = nextId(shape.startsWith("pwr") ? "pwr" : "wcr", String(n % 10));
+      const fields = build(cell);
+      seedReceipt(db, { id, ...fields });
+      if (fields.work) seedWorkRows(db, { receiptId: id, offerId: `flip-offer-${n}`, taskRoom: room });
+      if (internal !== "absent") {
+        db.prepare("INSERT INTO internal_rooms (room_id, enabled) VALUES (?, ?)")
+          .run(room, internal === "on" ? 1 : 0);
+      }
+      cases.push({ id, expectedVisible: internal !== "on", label: `${shape} / internal=${internal}` });
+    }
+  }
+  const hidden = hiddenReceiptIds(db, cases.map(cell => cell.id));
+  for (const cell of cases) {
+    assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(cell.id),
+      cell.expectedVisible, `SQL verdict — ${cell.label}`);
+    assert.equal(!hidden.has(cell.id), cell.expectedVisible, `JS batch verdict — ${cell.label}`);
+    assert.equal(receiptVisible(db, cell.id), cell.expectedVisible, `JS single verdict — ${cell.label}`);
+  }
+  // A marking recorded against an unrelated room hides nothing here:
+  // only a recorded marking on one of the receipt's OWN rooms counts,
+  // so no stranger's receipt can be hidden by another room's marking.
+  const stranger = nextId("wcr", "9");
+  seedReceipt(db, { id: stranger, roomId: "stranger-room", origin: "stranger-room", source: "work-claim" });
+  db.prepare("INSERT INTO internal_rooms (room_id, enabled) VALUES ('someone-elses-room', 1)").run();
+  assert.equal(receiptVisible(db, stranger), true, "an unrelated room's marking never hides a stranger's receipt");
+});
+
+test("the public-work fact leg: only a recorded fact serves, in both twins", () => {
+  const db = makeDb();
+  const sql = receiptVisibilitySqlFor(db);
+  // [label, receipt record, review record (state_json) or null, expected]
+  const shapes = [
+    ["submitted, hash only, no review", { state: "submitted", verification: "hash_only" }, null, false],
+    ["submitted, hash only, review still pending", { state: "submitted", verification: "hash_only" }, { state: "pending", verification: null, decision: null }, false],
+    ["stamped verified on acceptance", { state: "verified", verification: "hash_only" }, null, true],
+    ["system_checked at finish, unreviewed", { state: "submitted", verification: "system_checked" }, null, true],
+    ["review PASS verdict recorded", { state: "submitted", verification: "hash_only" }, { state: "pending", verification: { verdict: "PASS" }, decision: null }, true],
+    ["review FAIL verdict recorded", { state: "submitted", verification: "hash_only" }, { state: "pending", verification: { verdict: "FAIL" }, decision: null }, true],
+    ["rejected decision recorded", { state: "submitted", verification: "hash_only" }, { state: "rejected", verification: null, decision: { decision: "rejected" } }, true],
+    ["revision requested", { state: "submitted", verification: "hash_only" }, { state: "revision_requested", verification: null, decision: { decision: "revision_requested" } }, true],
+    ["no receipt record at all", null, null, false],
+  ];
+  const ids = [];
+  let n = 0;
+  for (const [label, record, review, expected] of shapes) {
+    n += 1;
+    const id = nextId("pwr", String(n % 10));
+    const room = `fact-room-${n}`;
+    seedReceipt(db, { id, roomId: room, origin: room, source: "public-work" });
+    if (record) {
+      db.prepare(`INSERT INTO public_work_receipts
+        (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, `fact-offer-${n}`, "ns", 1, "ai_corpus", "note", hex(64, "0"), 4, JSON.stringify(record), 0);
+    }
+    if (review) {
+      db.prepare("INSERT INTO public_work_reviews (receipt_id, room_id, revision, state_json) VALUES (?,?,?,?)")
+        .run(id, room, 1, JSON.stringify(review));
+    }
+    ids.push(id);
+    assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(id), expected, `SQL verdict — ${label}`);
+    assert.equal(receiptVisible(db, id), expected, `JS single verdict — ${label}`);
+  }
+  const hidden = hiddenReceiptIds(db, ids);
+  for (const [index, [, , , expected]] of shapes.entries()) {
+    assert.equal(!hidden.has(ids[index]), expected, `JS batch verdict — ${shapes[index][0]}`);
+  }
+  // The fact leg never reaches other sources: a work-claim row with no
+  // records behind it is judged by the projector's tier rule, not here.
+  const claim = nextId("wcr", "7");
+  seedReceipt(db, { id: claim, roomId: "fact-claim-room", origin: "fact-claim-room", source: "work-claim" });
+  assert.equal(receiptVisible(db, claim), true, "the fact leg applies to public-work rows only");
+});
+
+test("a store predating the reviews table judges public-work facts from the receipt record alone", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
+  db.exec(roomDirectorySchema);
+  db.exec(publicWorkClaimsSchema);
+  // No publicWorkReviewsSchema: the composed form must degrade to the
+  // records-only leg, never reference the absent table.
+  const sql = receiptVisibilitySqlFor(db);
+  assert.equal(sql.includes("public_work_reviews"), false, "the records-only fragment never references the reviews table");
+  const checked = nextId("pwr", "a");
+  seedReceipt(db, { id: checked, roomId: "old-room", origin: "old-room", source: "public-work" });
+  db.prepare(`INSERT INTO public_work_receipts
+    (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(checked, "old-offer-1", "ns", 1, "ai_corpus", "note", hex(64, "0"), 4,
+      JSON.stringify({ state: "submitted", verification: "system_checked" }), 0);
+  const bare = nextId("pwr", "b");
+  seedReceipt(db, { id: bare, roomId: "old-room", origin: "old-room", source: "public-work" });
+  db.prepare(`INSERT INTO public_work_receipts
+    (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(bare, "old-offer-2", "ns", 1, "ai_corpus", "note", hex(64, "0"), 4,
+      JSON.stringify({ state: "submitted", verification: "hash_only" }), 0);
+  assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(checked), true, "SQL: record fact serves");
+  assert.equal(receiptVisible(db, checked), true, "JS: record fact serves");
+  assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(bare), false, "SQL: no fact hides");
+  assert.equal(receiptVisible(db, bare), false, "JS: no fact hides");
 });

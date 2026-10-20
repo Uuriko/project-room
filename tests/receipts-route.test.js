@@ -27,7 +27,13 @@ async function serve(t) {
     pullRequest: { url: "https://github.com/Uuriko/project-room/pull/9", outcome: "merged", syncedAt: "2026-10-01T12:00:00.000Z" },
     blobs: [HASH], updatedAt: "2026-10-01T12:00:00.000Z",
   });
-  const publicWork = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public", title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) } };
+  // The record carries the shape the real finish writes — the
+  // system_checked tier is the verification fact PROOF-WALL-FLIP requires
+  // before a public-work record serves; this suite's subject is the
+  // owner publication toggle, so its receipt is a checked delivery.
+  const publicWork = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons", identityId: "ai_public", title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) },
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }] };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     PWR, "offer-1", "commons", 1, "ai_public", "note", "cd".repeat(32), 4, JSON.stringify(publicWork), Date.now());
   projectPublicWorkReceipt(store, publicWork, "cd".repeat(32));

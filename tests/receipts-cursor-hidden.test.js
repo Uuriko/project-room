@@ -153,7 +153,12 @@ test("a public-work receipt is refused as a cursor while its task room's toggle 
       VALUES (?,?,?,?,?,?,?,?,?)`)
     .run("offer-1", NAMESPACE, "task-room", 1, "https://github.com/Uuriko/project-room", "main", "[]", 1, now);
   const body = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: NAMESPACE, identityId: "ai_public",
-    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "ab".repeat(32) } };
+    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "ab".repeat(32) },
+    // The shape the real finish writes, system_checked tier included: the
+    // verification fact PROOF-WALL-FLIP requires before a public-work
+    // record serves (and so before it can anchor a page as control here).
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }] };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     PWR, "offer-1", NAMESPACE, 1, "ai_public", "note", "ab".repeat(32), 4, JSON.stringify(body), now);
   projectPublicWorkReceipt(store, body, "ab".repeat(32));

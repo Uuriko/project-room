@@ -32,8 +32,15 @@ async function serve(t) {
       (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
       VALUES (?,?,?,?,?,?,?,?,?)`)
     .run("offer-1", NAMESPACE, "commons", 1, "https://github.com/Uuriko/project-room", "main", JSON.stringify(["README.md"]), 1, now);
+  // The body carries the shape the real finish writes (public-work-claims):
+  // state "submitted" and the system_checked tier its passed coverage check
+  // earned — the verification fact PROOF-WALL-FLIP requires a public-work
+  // record to carry before it serves. This suite's subject is the owner
+  // toggle, so its receipt is an ordinary checked delivery.
   const body = { schema: "public-work-receipt/1", receiptId: PWR, namespaceId: NAMESPACE, identityId: "ai_public",
-    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) } };
+    title: "Public task", createdAt: "2026-10-01T00:00:00.000Z", artifact: { sha256: "cd".repeat(32) },
+    state: "submitted", verification: "system_checked",
+    executedChecks: [{ name: "criteria_coverage", result: "pass" }] };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     PWR, "offer-1", NAMESPACE, 1, "ai_public", "note", "cd".repeat(32), 4, JSON.stringify(body), now);
   projectPublicWorkReceipt(store, body, "cd".repeat(32));
