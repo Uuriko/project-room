@@ -1188,7 +1188,12 @@ function changeMemberAccess(state, incoming) {
   // active member now holds would put two active members under one name.
   // Exact-name (skeleton) collisions only: the returning member's own
   // inactive record never blocks, and inactive records never block.
-  if (incoming.data.active === true && member.active === false) {
+  // The guard is gated on the event's policy stamp (v>=3, the same
+  // threshold assertStampedDisplayName uses for the reservation): the
+  // store stamps live member.access_changed admissions, while stored
+  // pre-v3 access_changed events carry no stamp and replay under the
+  // rules of their era — history is not re-judged (CURE-4348).
+  if (incoming.data.displayNamePolicyVersion >= 3 && incoming.data.active === true && member.active === false) {
     const skeleton = displayNameSkeleton(member.displayName);
     const holder = Object.values(state.members).find(other =>
       other.id !== member.id && other.active !== false && displayNameSkeleton(other.displayName) === skeleton);

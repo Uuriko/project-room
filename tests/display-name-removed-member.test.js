@@ -185,9 +185,12 @@ test("reactivation is refused while a distinct active member holds the name; all
     at: new Date(Date.UTC(2026, 9, 5) + (tick++) * 1000).toISOString(), data,
   });
   const add = (memberId, version) => ev(T.MEMBER_ADDED, { memberId, displayName: "Shared Name", kind: "human", permissions: ["steer"], displayNamePolicyVersion: version });
-  const setActive = (state, memberId, active) => {
+  const setActive = (state, memberId, active, version) => {
     const m = state.members[memberId];
-    return ev(T.MEMBER_ACCESS_CHANGED, { memberId, expectedMemberRevision: m.revision, permissions: [...m.permissions], active });
+    return ev(T.MEMBER_ACCESS_CHANGED, {
+      memberId, expectedMemberRevision: m.revision, permissions: [...m.permissions], active,
+      ...(version != null ? { displayNamePolicyVersion: version } : {}),
+    });
   };
   let state = replay([...initialRoom("commons")]);
   state = applyEvent(state, add("first-holder", DISPLAY_NAME_POLICY_VERSION));
@@ -198,8 +201,12 @@ test("reactivation is refused while a distinct active member holds the name; all
   state = applyEvent(state, add("second-holder", 2));
   assert.equal(state.members["second-holder"].active, true);
   // Reactivating the first holder would put two active members under one
-  // name; the reducer refuses it.
-  assert.throws(() => applyEvent(state, setActive(state, "first-holder", true)), /already used/);
+  // name; the reducer refuses it. The reactivation event carries the v3
+  // policy stamp a live admission writes (the store stamps
+  // member.access_changed at admission): the guard gates on that stamp, so
+  // an UNSTAMPED stored reactivation is legacy history and replays clean —
+  // that leg is pinned in tests/display-name-composed-seams.test.js.
+  assert.throws(() => applyEvent(state, setActive(state, "first-holder", true, DISPLAY_NAME_POLICY_VERSION)), /already used/);
   // Positive control: with no distinct active holder, reactivation applies
   // and the member keeps its name.
   let solo = replay([...initialRoom("commons")]);

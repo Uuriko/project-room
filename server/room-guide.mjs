@@ -34,8 +34,14 @@ export function installGuideCommandHook(store) {
   const proto = store && Object.getPrototypeOf(store);
   if (!proto || typeof proto.command !== "function" || proto.__roomGuideHook) return;
   const original = proto.command;
-  proto.command = function(token, roomId, command, binding) {
-    const result = original.call(this, token, roomId, command, binding);
+  // Forward the FULL argument list: store.command's fifth argument is an
+  // internal-options object (the account-deletion flow passes
+  // membershipEndReason through it). A fixed-arity wrapper silently dropped
+  // it, so the deletion stamp never landed wherever this hook is installed
+  // (the Durable Object, first seed) — CURE-4348.
+  proto.command = function(...args) {
+    const result = original.apply(this, args);
+    const roomId = args[1];
     if (typeof roomId === "string") {
       noteGuideRoom(this, roomId);
       try {

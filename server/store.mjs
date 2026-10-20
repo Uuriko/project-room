@@ -6088,7 +6088,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : memberAuthorityEvent ? {
             ...command.data,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-            ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
+            // Both member-authority events carry the display-name policy
+            // stamp: member.added for the admission checks, and
+            // member.access_changed so the reducer can gate its v3
+            // reactivation guard on the stamp — a live reactivation is
+            // stamped, stored pre-v3 access_changed history is not, and
+            // replay never re-judges it (CURE-4348).
+            displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION,
             // Internal-only (display-name policy v3): the account-deletion
             // flow ends a membership with membershipEndReason so the reducer
             // can free the name. The field is NOT in the public command
