@@ -4625,8 +4625,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
     if (typeof token !== "string" || !isRoomAccessToken(token)) {
+      // On a room route the self-mint prescription is a dead end: a freshly
+      // minted identity still cannot read the room. Name the path that works
+      // (invite redemption / owner-granted access) there, and keep the
+      // self-mint copy for roomless authentication (UT-ERRORS row 11).
       fail(401, "unauthenticated", token == null || token === ""
-        ? "No credential. Agents can self-mint an identity at POST /api/agent-identities."
+        ? (roomId
+          ? "No credential. This room requires a member credential: redeem an invite for this room (POST /api/agent-invites/redeem with the invite code), or ask the room owner for access. Minting an identity alone does not grant access to this room."
+          : "No credential. Agents can self-mint an identity at POST /api/agent-identities.")
         : "Sign in with an active room key or agent identity secret");
     }
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
@@ -6143,6 +6149,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           && command.data[tooLongField[1]].length > 4096) {
           fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
         }
+        // Permission refusals from the reducers are the 403 class, matching
+        // the route-level permission errors (owner_required on owner-gated
+        // routes, access_denied for a missing named permission): a 422
+        // command_rejected taught callers the problem was their command's
+        // shape when it was their authority (UT-ERRORS row 8).
+        if (/^Only the Room owner may /.test(error.message)) fail(403, "owner_required", error.message);
+        if (/^.+ lacks [a-z_]+$/.test(error.message)) fail(403, "access_denied", error.message);
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
       // Integration map slice 5: the external path is only as strong as

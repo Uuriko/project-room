@@ -102,6 +102,15 @@ export const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
+// The required dispute bond in millis: exactly 25% of the bounty, rounded
+// UP to the nearest milli (the smallest representable unit — amounts carry
+// at most 3 decimals). The rounding is part of the stated rule: for a 0.01
+// bounty the bond is 0.003, not the unrepresentable 0.0025 a naive 25%
+// computation produces (UT-ERRORS row 9 note 2). Exported so the
+// prescription surfaces and tests compute it the same way enforcement does.
+export function requiredDisputeBondMillis(amountMillis) {
+  return Math.ceil(amountMillis * DISPUTE_BOND_RATIO);
+}
 export const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
@@ -2381,15 +2390,19 @@ export class BountyEscrow {
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
-      // The dispute bond is exactly 25% of the bounty (#3307). That is
-      // this production rule, not a machine minimum: the dispute machine's
-      // own floor is 5% (MIN_BOND_RATIO in server/bounty-disputes.mjs),
-      // which 25% satisfies, and the machine's 25% is its cap on total
-      // recorded dispute cost — so the bond equals the maximum total
-      // dispute cost the machine will record (v2 economics).
-      const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
+      // The dispute bond is exactly 25% of the bounty (#3307), rounded up
+      // to the nearest milli (requiredDisputeBondMillis) — the rounding is
+      // part of the stated rule, since amounts carry at most 3 decimals
+      // and a naive 25% of a small bounty (0.0025 of 0.01) is
+      // unrepresentable. That is this production rule, not a machine
+      // minimum: the dispute machine's own floor is 5% (MIN_BOND_RATIO in
+      // server/bounty-disputes.mjs), which 25% satisfies, and the machine's
+      // 25% is its cap on total recorded dispute cost — so the bond equals
+      // the maximum total dispute cost the machine will record (v2
+      // economics).
+      const required = requiredDisputeBondMillis(bounty.amountMillis);
       check(bondMillis === required, "invalid_bond",
-        `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);
+        `dispute bond must be exactly 25% of the bounty, rounded up to the nearest 0.001 credits (${toCredits(required)} credits)`);
       // Seat-or-refuse (#3727): a dispute must never open into an empty
       // decider seat. The designated tier-1 decider is the only
       // authorized decider in slice 1 — panel-majority voting arrives

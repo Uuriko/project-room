@@ -162,7 +162,12 @@ export function createMessageReducers({ requireMember, knownMember, requireField
     if (evidenceFor) throw new Error(`This message is the recorded result of ${evidenceFor.id} and cannot be changed`);
     const actor = requireMember(state, incoming.actorId);
     if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
-    if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
+    // A missing token is not a change: the old single message asserted
+    // "Message changed" when nothing had changed and the caller had simply
+    // omitted the field — and neither variant named the field to supply
+    // (UT-ERRORS row 5 / QA card 7a).
+    if (incoming.data.expectedMessageRevision == null) throw new Error("expectedMessageRevision is required: resend with expectedMessageRevision set to the message's current revision (0 if it was never edited), which the conversation read shows");
+    if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error(`Message changed; refresh before editing and resend with expectedMessageRevision set to the current revision (current revision is ${message.revision ?? 0})`);
     return { message, actor };
   }
 

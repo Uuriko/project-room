@@ -259,8 +259,12 @@ export class PublicWorkClaims {
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
   list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
-    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
-    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    // Name the offending parameter: "Invalid page" for limit=-1, limit=abc
+    // and after=%ZZ alike taught the caller nothing about which field to
+    // fix (QA card 7e).
+    check(Number.isInteger(limit) && limit > 0 && limit <= 100, 'limit must be an integer from 1 to 100');
+    check(after === '' || identifier(after), 'after must be a task id (the nextCursor of a previous page)');
+    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'claimable and claimableFirst must be booleans');
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id

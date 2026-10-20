@@ -352,3 +352,11 @@ test('match makes no board-wide no_claimable_tasks verdict from a partial scan (
   assert.equal(empty.reasonCode, 'no_claimable_tasks');
   assert.equal(empty.inspected, 3);
 });
+
+test('card 7 (e): list() paging refusals name the offending parameter', t => {
+  const f = fixture(t);
+  assert.throws(() => f.service().list({ limit: -1 }), /limit must be an integer from 1 to 100/);
+  assert.throws(() => f.service().list({ limit: 'abc' }), /limit must be an integer from 1 to 100/);
+  assert.throws(() => f.service().list({ limit: 101 }), /limit must be an integer from 1 to 100/);
+  assert.throws(() => f.service().list({ after: '%ZZ' }), /after must be a task id/);
+});

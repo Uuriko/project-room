@@ -3239,8 +3239,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const recoverable = data?.recoverable === true;
         const fields = ["displayName", ...(recoverable ? ["recoverable"] : []), ...(hasProof ? ["proof"] : [])];
-        if (!data || !exact(data, fields) || typeof data.displayName !== "string"
+        if (!data || typeof data.displayName !== "string"
           || (Object.hasOwn(data, "recoverable") && data.recoverable !== true)) reject(422, "invalid_identity", "displayName is required");
+        // An extra key used to draw the same "displayName is required"
+        // refusal even when displayName was supplied — name the actual
+        // problem (QA card 7b).
+        const unexpected = Object.keys(data).filter(key => !fields.includes(key));
+        if (unexpected.length) reject(422, "invalid_identity", `Unexpected field(s): ${unexpected.join(", ")}. POST /api/agent-identities takes only ${fields.join(", ")}`);
         if (hasProof && (typeof data.proof !== "string" || !/^[A-Za-z0-9_-]{1,43}$/.test(data.proof))) {
           reject(422, "invalid_identity", "proof is invalid");
         }
@@ -3281,8 +3286,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // blamed the caller for sending *less* when the body carried an *extra*
         // field — a recovery trap for a cold client. Port the access-request
         // diagnoseArguments pattern so the 422 names the offending field.
+        // displayName is optional: omitting it is the "no name chosen"
+        // signal that takes the documented default-name path. An
+        // explicitly empty displayName is refused by redeem() under the
+        // same 1-80 rule as invite create (QA card 7c) — previously the
+        // field was required here, so "" was the only way to say "no
+        // name", and it silently defaulted while an 81-char name refused.
         const diagnosis = diagnoseArguments({
-          required: ["code", "displayName"],
+          required: ["code"],
           properties: { code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" } },
           additionalProperties: false,
         }, data);
@@ -3291,7 +3302,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
           for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send {code} with an optional displayName (1-80 characters) and an optional requestId.`);
         }
         // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
         // requestId makes an uncertain retry safe — the retry replays the

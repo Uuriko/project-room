@@ -688,9 +688,11 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
 test("redeem with the default displayName guides a rename through a fresh redeem (RC-2026-09-18-026)", async t => {
   const { origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
-  // The HTTP contract requires displayName as a string; an empty one falls
-  // back to the default "Invited agent" name at redeem().
-  const res = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "" });
+  // ERROR-COPY-1 (QA card 7c): omitting displayName is the "no name chosen"
+  // signal and falls back to the default "Invited agent" name at redeem();
+  // an explicitly empty displayName is now refused under the same 1-80 rule
+  // as invite create, instead of silently defaulting.
+  const res = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code });
   assert.equal(res.status, 201, JSON.stringify(res.json));
   assert.equal(res.json.displayName, "Invited agent");
   const rename = res.json.next.find(step => step.action === "choose-display-name");
@@ -834,4 +836,24 @@ test("redeem: a member re-joining under its own name gets identity_already_linke
   const collide = await post(origin, "/api/agent-invites/redeem", { code: code3.json.code, displayName: "Returning Agent" });
   assert.equal(collide.status, 422, JSON.stringify(collide.json));
   assert.equal(collide.json.error.code, "display_name_unavailable");
+});
+
+test("card 7 (c): redeem refuses an explicitly empty displayName; an absent one keeps the documented fallback", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  // An explicitly supplied empty (or whitespace-only) name is a supplied
+  // name that fails the same 1-80 rule the >80 case and invite create use —
+  // it must not silently become "Invited agent".
+  for (const badName of ["", "   "]) {
+    const refused = await redeem(origin, minted.json.code, badName);
+    assert.equal(refused.status, 422, JSON.stringify(refused.json));
+    assert.equal(refused.json.error.code, "invalid_invite_name");
+    assert.match(refused.json.error.message, /1-80 characters/);
+  }
+  // No name at all: the documented fallback still applies (and the refusal
+  // above did not burn the code).
+  const fallback = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code });
+  assert.equal(fallback.status, 201, JSON.stringify(fallback.json));
+  assert.equal(fallback.json.displayName, "Invited agent");
 });

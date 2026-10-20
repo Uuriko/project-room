@@ -164,7 +164,12 @@ test("a missing poll vote active is invalid_arguments and a no-bearer 401 preser
   });
   assert.throws(() => store.authenticate(null, "commons"), error => {
     assert.equal(error.status, 401);
-    assert.match(error.message, /self-mint an identity/);
+    // ERROR-COPY-1 (UT-ERRORS row 11): on a room route the no-credential
+    // message prescribes the invite path that actually grants access; the
+    // self-mint prescription survives only for roomless authentication,
+    // since a minted identity alone cannot read a room.
+    assert.match(error.message, /redeem an invite for this room/);
+    assert.doesNotMatch(error.message, /self-mint an identity/);
     return true;
   });
   const unauth = agentErrorAx({ httpStatus: 401, code: "unauthenticated", message: "No credential" });

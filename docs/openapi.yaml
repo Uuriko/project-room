@@ -7906,9 +7906,11 @@ paths:
     post:
       summary: Dispute an accepted bounty
       description: |
-        Challenger stakes a bond of exactly 25% of the bounty (the
+        Challenger stakes a bond of exactly 25% of the bounty, rounded up
+        to the nearest 0.001 credits (the smallest representable amount —
+        for a 0.01 bounty the bond is 0.003, not 0.0025). That is the
         production rule in disputeBounty; the dispute machine's internal
-        floor is 5%, and its 25% figure is the total-dispute-cost cap). The designated decider — the dispute decider named
+        floor is 5%, and its 25% figure is the total-dispute-cost cap. The designated decider — the dispute decider named
         at posting, else the designated verifier — seats as the decider;
         if no decider can be seated the
         dispute is honestly unavailable and the request is refused
@@ -7930,7 +7932,7 @@ paths:
               type: object
               required: [bond, grounds]
               properties:
-                bond: { type: number, description: Must be exactly 25% of the bounty amount }
+                bond: { type: number, description: Must be exactly 25% of the bounty amount, rounded up to the nearest 0.001 (e.g. 0.003 for a 0.01 bounty) }
                 grounds: { type: string, minLength: 1 }
                 idempotencyKey: { type: string }
       responses:
