@@ -48,6 +48,7 @@ import {
   readSpendGrantRoute,
   issueSpendGrantRoute,
   revokeSpendGrantRoute,
+  setSpendDefaultRoute,
 } from "../server/spend-grants.mjs";
 
 function setup(t) {
@@ -617,6 +618,9 @@ test("settle enforces the reserve lease itself, with or without an intervening r
 
 test("refusal names the tool and price in text and structured detail", async t => {
   const f = roomWithPeer(t);
+  // Ruling 29b: a grantless member now authorizes against the room's member
+  // spend default; zeroing the default restores the refusal pinned here.
+  setSpendDefaultRoute(f.store, f.owner.secret, f.roomId, { cents: 0 });
   const error = spendError(
     () => chargeSpendBeforeCall(f.store, f.peer.secret, "room_put_file", { roomId: f.roomId }),
     { status: 402, code: "payment_required" });
@@ -648,6 +652,9 @@ test("chargeSpendBeforeCall routes the check+reserve through store.transaction (
   // the only portable boundary; this test fails on the pre-fix code
   // because the platform transaction is never entered.
   const f = roomWithPeer(t);
+  // Ruling 29b: the refusal path is exercised with the member spend
+  // default zeroed, so the grant-less call is refused as before it existed.
+  setSpendDefaultRoute(f.store, f.owner.secret, f.roomId, { cents: 0 });
   let platformTxCalls = 0;
   const origTransaction = f.store.transaction.bind(f.store);
   f.store.transaction = fn => { platformTxCalls++; return origTransaction(fn); };
@@ -670,6 +677,9 @@ const fileArgs = roomId => ({
 
 test("tools/call: priced tool without a grant is refused and never runs", async t => {
   const f = roomWithPeer(t);
+  // Ruling 29b: with the member spend default zeroed by the owner, a
+  // grantless member is refused exactly as before the default existed.
+  setSpendDefaultRoute(f.store, f.owner.secret, f.roomId, { cents: 0 });
   const response = await callTool(f.call, f.peer.secret, "room_put_file", fileArgs(f.roomId));
   const value = errorOf(response);
   assert.equal(value.status, 402);
@@ -756,7 +766,7 @@ test("tools/call: priced tool that fails after charging is voided, not settled",
 
 // --- Visibility: withhold, never refuse ---
 
-test("readSpendGrantRoute: agents see their grant; guests and grant-less members see null", async t => {
+test("readSpendGrantRoute: agents see their grant; grant-less agent members see the default purse", async t => {
   const f = roomWithPeer(t);
   issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
     grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
@@ -771,7 +781,11 @@ test("readSpendGrantRoute: agents see their grant; guests and grant-less members
   const plainMember = joined.memberId ?? joined.member?.id;
   setTier(f.store.db, f.roomId, plainMember, "t2_standard", { updatedBy: f.ownerMemberId, nowMs: Date.now() });
   const none = readSpendGrantRoute(f.store, plain.secret, f.roomId);
-  assert.equal(none.spend, null, "grant-less member sees null, not a refusal");
+  // Ruling 29b: a grant-less agent member sees the room's default purse
+  // summary (withhold, never refuse — the shape changed, not the rule).
+  assert.equal(none.spend.source, "room_default");
+  assert.equal(none.spend.capCents, "25");
+  assert.equal(none.spend.remainingCents, "25");
 });
 
 // --- Price-in-description contract ---
@@ -789,16 +803,18 @@ test("every priced tool advertises its price in its description", async t => {
   assert.equal(priceForTool("no_such_tool"), null);
 });
 
-test("route table: the three spend-grant routes are registered with room auth", () => {
+test("route table: the five spend-grant routes are registered with room auth", () => {
   // Regression: the RT allowlist gate rejects new legacy-chain routes, so
   // these must live in server/routes/table.mjs via SPEND_GRANT_ROUTES.
   const byId = Object.fromEntries(SPEND_GRANT_ROUTES.map(r => [r.id, r]));
-  assert.equal(SPEND_GRANT_ROUTES.length, 3);
+  assert.equal(SPEND_GRANT_ROUTES.length, 5);
   assert.deepEqual(
     SPEND_GRANT_ROUTES.map(r => `${r.method} ${r.path}`),
     ["POST /api/rooms/{roomId}/spend-grants",
      "DELETE /api/rooms/{roomId}/spend-grants/{agentId}",
-     "GET /api/rooms/{roomId}/spend-grant"]);
+     "GET /api/rooms/{roomId}/spend-grant",
+     "GET /api/rooms/{roomId}/spend-default",
+     "POST /api/rooms/{roomId}/spend-default"]);
   for (const route of SPEND_GRANT_ROUTES) {
     assert.equal(route.auth, "room");
     assert.equal(route.scope, "room");

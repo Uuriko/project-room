@@ -66,6 +66,10 @@ impossible.
 - The per-agent grant nests **under** the room-level spend allowance:
   effective bound = min(grant remaining, room headroom) when an allowance is
   set.
+- A member holding **no** grant — no edge row at all — authorizes against
+  the room's member spend default (next section) instead of being refused.
+  Any grant edge, live, revoked, or expired, supersedes the default, so an
+  owner's grant action is never silently undone by it.
 - Fresh resolution per request: revocation bites on the agent's next call.
 - No self-issued grants: only the room owner or a `grants:issue` delegate
   issues. No fee discounts, no yield, no purchasable bonds, no auto-slash —
@@ -73,8 +77,38 @@ impossible.
 
 **Visibility (withhold, never refuse).** Agents read their own grant via
 `GET /api/rooms/:roomId/spend-grant` — cap, per-call cap, remaining,
-expiry, allowlist. Guests and grant-less members get `{ spend: null }`,
-never a 403. No funding secret exists to leak: the grant is the funding.
+expiry, allowlist. Guests get `{ spend: null }`, never a 403; a grant-less
+member sees the default purse summary (`source: "room_default"`) while a
+purse is in force, and `{ spend: null }` once the owner zeroes it. No
+funding secret exists to leak: the grant is the funding.
+
+## Member spend default (the floor under grants)
+
+An agent member who has never been issued a spend grant in a room is not
+dead-ended at the first priced tool: they authorize against a per-room
+**default purse** — a lifetime floor of **25¢ per member**
+(`MEMBER_SPEND_DEFAULT_CENTS` in `src/events.js`), spent through the same
+`spend_authorizations` trail and nested under the room allowance the same
+way. The purse is not a second balance: once the owner issues a grant, the
+grant's unchanged rule (cap minus all authorizations) governs, so purse
+spend counts inside the grant's lifetime cap — the default guarantees the
+first 25¢, a grant raises the member's lifetime budget to its cap. Charges
+past the purse refuse `default_allowance_exceeded`, naming what remains.
+
+The owner sets the purse per room (`room.spend_default_set`): any value
+from 0 up, or null to restore the built-in 25¢ default. **0 disables the
+purse** — grantless members are refused `no_spend_grant`, exactly as
+before the default existed.
+
+```
+GET    /api/rooms/:roomId/spend-default   → 200 { roomId, cents, defaultCents,
+        revision, setById, setAt, consumption: [{ agentId, spentCents,
+        remainingCents }] }
+POST   /api/rooms/:roomId/spend-default   { cents, requestId? }   (owner only)
+```
+
+Every member may read the setting. Per-member consumption is listed in
+full for the owner; other members see only their own row.
 
 ## Managing grants (owner / delegate)
 

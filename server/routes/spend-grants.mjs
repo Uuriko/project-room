@@ -7,7 +7,7 @@
 // get { spend: null }. Delegates request spend for other agents, never for
 // themselves; the owner keeps full authority.
 
-import { issueSpendGrantRoute, revokeSpendGrantRoute, readSpendGrantRoute } from "../spend-grants.mjs";
+import { issueSpendGrantRoute, revokeSpendGrantRoute, readSpendGrantRoute, readSpendDefaultRoute, setSpendDefaultRoute } from "../spend-grants.mjs";
 
 // Auth mirrors every sibling room route (#2955): room credential, fence,
 // roomAuth, no Bearer account sessions, no non-session credentials carried
@@ -56,6 +56,19 @@ export function readOwnSpendGrant(ctx) {
   return ctx.json(ctx.res, 200, result);
 }
 
+export function readSpendDefault(ctx) {
+  const { roomId, selected, fence } = access(ctx, { writing: false });
+  const result = readSpendDefaultRoute(ctx.store, selected.token, roomId, fence);
+  return ctx.json(ctx.res, 200, result);
+}
+
+export async function setSpendDefault(ctx) {
+  const { roomId, selected, fence } = access(ctx, { writing: true });
+  const request = await ctx.body(ctx.req);
+  const result = setSpendDefaultRoute(ctx.store, selected.token, roomId, request, fence);
+  return ctx.json(ctx.res, result.duplicate ? 200 : 201, result);
+}
+
 const roomIdParam = Object.freeze({
   type: "object",
   required: ["roomId"],
@@ -85,6 +98,18 @@ const grantBody = Object.freeze({
   },
 });
 
+const spendDefaultBody = Object.freeze({
+  type: "object",
+  required: ["cents"],
+  additionalProperties: false,
+  properties: {
+    // integer cents, or null to restore the built-in default; the runtime
+    // gate (setSpendDefaultRoute) enforces the range.
+    cents: { type: ["integer", "null"] },
+    requestId: { type: "string" },
+  },
+});
+
 const response = Object.freeze({ type: "object" });
 
 export const SPEND_GRANT_ROUTES = Object.freeze([
@@ -100,4 +125,12 @@ export const SPEND_GRANT_ROUTES = Object.freeze([
   Object.freeze({ id: "read-own-spend-grant", method: "GET", path: "/api/rooms/{roomId}/spend-grant",
     auth: "room", capability: null, scope: "room", handler: readOwnSpendGrant,
     schema: { params: roomIdParam, response }, events: [] }),
+  // The member spend default (ruling 29b): capability is null like its
+  // siblings — the real gate is the owner check inside setSpendDefaultRoute.
+  Object.freeze({ id: "read-spend-default", method: "GET", path: "/api/rooms/{roomId}/spend-default",
+    auth: "room", capability: null, scope: "room", handler: readSpendDefault,
+    schema: { params: roomIdParam, response }, events: [] }),
+  Object.freeze({ id: "set-spend-default", method: "POST", path: "/api/rooms/{roomId}/spend-default",
+    auth: "room", capability: null, scope: "room", handler: setSpendDefault,
+    schema: { params: roomIdParam, body: spendDefaultBody, response }, events: [] }),
 ]);

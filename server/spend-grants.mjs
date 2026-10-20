@@ -26,6 +26,15 @@
 //   - per-agent grant nests UNDER the room-level spend allowance
 //     (server/spend-allowance.mjs): effective bound = min(grant remaining,
 //     room headroom) when an allowance is set
+//   - a member holding no spend grant at all (no edge row — never issued)
+//     authorizes against the room's member spend default (ruling 29b): a
+//     lifetime floor per member, owner-set per room via
+//     room.spend_default_set (src/events.js memberSpendDefaultCents), 25c
+//     when unset, 0 restores the zero-grant refusal exactly. ANY edge —
+//     live, revoked, or expired — supersedes the purse, so an owner's
+//     grant action on a member is never silently undone by the default;
+//     purse charges write the same spend_authorizations rows and nest
+//     under the room allowance the same way
 //   - fresh resolution per request: no cached caps; revocation bites on the
 //     agent's next call
 //   - SQLite-transaction serialization of check+reserve: cap races fail
@@ -69,7 +78,9 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
-import { ownMember, spendPricingEnabled } from "../src/events.js";
+import { ownMember, spendPricingEnabled, memberSpendDefaultCents, MEMBER_SPEND_DEFAULT_CENTS, SPEND_ALLOWANCE_LIMITS, validId, EVENT_TYPES as T } from "../src/events.js";
+
+export { MEMBER_SPEND_DEFAULT_CENTS };
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "cents";
@@ -292,6 +303,15 @@ export function resolveSpendGrant(db, roomId, agentId, { nowMs = Date.now(), inc
   return Object.freeze({ edge, terms, live });
 }
 
+// Any spend edge row at all for the member — live, revoked, expired, or an
+// edge whose terms row is missing. The member spend default applies only
+// when NO edge exists (the member was never issued a grant in this room);
+// every edge state keeps the grant path's own behaviour and refusals.
+function spendEdgeExists(db, roomId, agentId) {
+  return !!db.prepare(`SELECT 1 FROM agent_capability_grants WHERE room_id = ? AND agent_id = ? AND capability = ?`)
+    .get(roomId, agentId, SPEND_CAPABILITY);
+}
+
 function authorizationsTotal(db, roomId, agentId) {
   const row = db.prepare(
     `SELECT COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS total
@@ -327,10 +347,12 @@ export function remainingSpendCents(db, roomId, agentId) {
 // Agent-visible summary: cap, per-tx cap, remaining, expiry, allowlist.
 // Withhold, never refuse: guests and grant-less agents get { spend: null }
 // from the route, never a 403. No funding secret is ever exposed — there is
-// none; the grant IS the funding.
-export function spendGrantSummary(db, roomId, agentId, { nowMs = Date.now() } = {}) {
+// none; the grant IS the funding. A member holding no grant falls back to
+// the member spend default summary (source: "room_default") when the caller
+// supplies the room's default cents — see readSpendGrantRoute.
+export function spendGrantSummary(db, roomId, agentId, { nowMs = Date.now(), defaultCents = null } = {}) {
   const grant = resolveSpendGrant(db, roomId, agentId, { nowMs });
-  if (!grant) return null;
+  if (!grant) return memberSpendDefaultSummary(db, roomId, agentId, { defaultCents });
   return Object.freeze({
     denomination: grant.terms.denomination,
     capCents: grant.terms.capCents,
@@ -339,6 +361,31 @@ export function spendGrantSummary(db, roomId, agentId, { nowMs = Date.now() } = 
     expiresAt: grant.edge.expiresAt,
     allowlist: grant.terms.allowlist,
     singleUse: grant.terms.singleUse,
+  });
+}
+
+// The member spend default as a summary, in the grant summary's shape plus
+// source: "room_default". The purse has no expiry, allowlist, or single-use;
+// its per-call bound is the purse itself (a charge can never exceed the
+// remaining purse, checked at authorize time). Returns null whenever no
+// purse applies: no default in force, any spend edge exists (every grant
+// state supersedes the purse), or the member is a guest / t1_readonly —
+// authorizeSpend refuses both outright, so showing them a purse would lie.
+export function memberSpendDefaultSummary(db, roomId, agentId, { defaultCents = null } = {}) {
+  if (!db || typeof roomId !== "string" || !validMemberId(agentId)) return null;
+  if (!Number.isSafeInteger(defaultCents) || defaultCents <= 0) return null;
+  if (isGuestAgentMemberId(agentId)) return null;
+  if (tierOf(db, roomId, agentId) === "t1_readonly") return null;
+  if (spendEdgeExists(db, roomId, agentId)) return null;
+  return Object.freeze({
+    denomination: SPEND_DENOMINATION,
+    capCents: intToCents(defaultCents),
+    perTxCapCents: intToCents(defaultCents),
+    remainingCents: intToCents(Math.max(0, defaultCents - authorizationsTotal(db, roomId, agentId))),
+    expiresAt: null,
+    allowlist: null,
+    singleUse: false,
+    source: "room_default",
   });
 }
 
@@ -399,6 +446,7 @@ function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra =
     grant_expired: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant has expired. ${obtain} No call was made and nothing was charged.`,
     grant_revoked: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant was revoked. ${obtain} No call was made and nothing was charged.`,
     cap_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId}'s spend grant has ${extra.remainingCents} cents remaining. Ask the room owner to raise the cap. No call was made and nothing was charged.`,
+    default_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId} holds no spend grant and the room's member spend default has ${extra.remainingCents} cents remaining for them. Ask the room owner for a spend grant (POST /api/rooms/${roomId}/spend-grants) or to raise the default (POST /api/rooms/${roomId}/spend-default). No call was made and nothing was charged.`,
     per_tx_cap_exceeded: `Payment required: ${toolName} costs ${price} per call, above ${agentId}'s per-call cap of ${extra.perTxCapCents} cents. Ask the room owner to raise the per-call cap. No call was made and nothing was charged.`,
     room_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but the room's spend allowance has ${extra.roomHeadroomCents} cents of headroom left. Ask the room owner to raise the allowance. No call was made and nothing was charged.`,
   };
@@ -427,7 +475,8 @@ function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra =
 //   authorization (crash recovery: the caller may still settle or void
 //   it); only 'voided' stays consumed (409).
 export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonce,
-  roomHeadroomCents = null, roomAllowanceCents = null, roomCommittedCents = null, nowMs = Date.now() } = {}) {
+  roomHeadroomCents = null, roomAllowanceCents = null, roomCommittedCents = null,
+  roomDefaultCents = null, nowMs = Date.now() } = {}) {
   if (!db || typeof roomId !== "string") refuse(422, "invalid_spend_grant", "roomId must be a string");
   if (!validMemberId(agentId)) refuse(422, "invalid_spend_grant", "agentId must be a room member id");
   if (priceForTool(toolName) === null) refuse(422, "invalid_spend_grant", `${toolName} is not a priced tool`);
@@ -474,35 +523,49 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       return { replay: "voided" };
     }
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs, includeInactive: true });
-    if (!grant) paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
-    if (grant.edge.revokedAt !== null)
-      paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "grant_revoked" });
-    if (grant.edge.expiresAt !== null && grant.edge.expiresAt <= nowMs)
-      paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "grant_expired" });
-    const terms = grant.terms;
-    if (terms.allowlist !== null && !terms.allowlist.includes(toolName))
-      refuse(403, "spend_tool_not_allowlisted", `${toolName} is not in ${agentId}'s spend grant allowlist; no call was made and nothing was charged`, {
-        tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId,
-      });
-    const perTx = centsToInt(terms.perTxCapCents);
-    if (priceCents > perTx)
-      paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "per_tx_cap_exceeded", extra: { perTxCapCents: terms.perTxCapCents } });
-    // Single-use admission: at most one in-flight authorization per grant,
-    // decided atomically here. Revoking in settle() is too late — two
-    // overlapping calls with different nonces would both authorize.
-    // A voided attempt frees the slot; the call never happened.
-    if (terms.singleUse) {
-      const inFlight = db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations
-        WHERE room_id = ? AND agent_id = ? AND status = 'reserved'`).get(roomId, agentId).n;
-      if (Number(inFlight) > 0)
-        refuse(409, "single_use_in_flight",
-          "This single-use spend grant already has an in-flight authorization; overlapping calls are refused, no call was made and nothing was charged", {
-            tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId,
-          });
+    let remaining;
+    if (grant) {
+      if (grant.edge.revokedAt !== null)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "grant_revoked" });
+      if (grant.edge.expiresAt !== null && grant.edge.expiresAt <= nowMs)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "grant_expired" });
+      const terms = grant.terms;
+      if (terms.allowlist !== null && !terms.allowlist.includes(toolName))
+        refuse(403, "spend_tool_not_allowlisted", `${toolName} is not in ${agentId}'s spend grant allowlist; no call was made and nothing was charged`, {
+          tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId,
+        });
+      const perTx = centsToInt(terms.perTxCapCents);
+      if (priceCents > perTx)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "per_tx_cap_exceeded", extra: { perTxCapCents: terms.perTxCapCents } });
+      // Single-use admission: at most one in-flight authorization per grant,
+      // decided atomically here. Revoking in settle() is too late — two
+      // overlapping calls with different nonces would both authorize.
+      // A voided attempt frees the slot; the call never happened.
+      if (terms.singleUse) {
+        const inFlight = db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations
+          WHERE room_id = ? AND agent_id = ? AND status = 'reserved'`).get(roomId, agentId).n;
+        if (Number(inFlight) > 0)
+          refuse(409, "single_use_in_flight",
+            "This single-use spend grant already has an in-flight authorization; overlapping calls are refused, no call was made and nothing was charged", {
+              tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId,
+            });
+      }
+      remaining = Math.max(0, centsToInt(terms.capCents) - authorizationsTotal(db, roomId, agentId));
+      if (priceCents > remaining)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "cap_exceeded", extra: { remainingCents: intToCents(remaining) } });
+    } else if (Number.isSafeInteger(roomDefaultCents) && roomDefaultCents > 0 && !spendEdgeExists(db, roomId, agentId)) {
+      // Member spend default (ruling 29b): the member has never held a spend
+      // grant in this room, so they authorize against the room's default
+      // purse — a lifetime floor on the same authorization trail. No terms
+      // row exists, so the grant-only concepts (allowlist, per-tx cap,
+      // single-use) do not apply; the remaining check subsumes a per-tx
+      // bound because remaining never exceeds the purse.
+      remaining = Math.max(0, roomDefaultCents - authorizationsTotal(db, roomId, agentId));
+      if (priceCents > remaining)
+        paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "default_allowance_exceeded", extra: { remainingCents: intToCents(remaining) } });
+    } else {
+      paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
     }
-    const remaining = Math.max(0, centsToInt(terms.capCents) - authorizationsTotal(db, roomId, agentId));
-    if (priceCents > remaining)
-      paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "cap_exceeded", extra: { remainingCents: intToCents(remaining) } });
     // Room allowance, enforced cumulatively inside this transaction: the
     // projection snapshot (allowance minus committed) is the base, and
     // every in-flight room reservation narrows it, so two concurrent
@@ -568,8 +631,10 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, agentId, nonce);
   const remainingNowCents = () => {
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs: Date.now() });
-    if (!grant) return "0";
-    return intToCents(Math.max(0, centsToInt(grant.terms.capCents) - authorizationsTotal(db, roomId, agentId)));
+    if (grant) return intToCents(Math.max(0, centsToInt(grant.terms.capCents) - authorizationsTotal(db, roomId, agentId)));
+    if (Number.isSafeInteger(roomDefaultCents) && roomDefaultCents > 0 && !spendEdgeExists(db, roomId, agentId))
+      return intToCents(Math.max(0, roomDefaultCents - authorizationsTotal(db, roomId, agentId)));
+    return "0";
   };
   if (outcome.replay === "settled") {
     // Exactly-once: the receipt already exists. Return it without charging
@@ -747,6 +812,10 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
     roomCommittedCents: report.allowance
       ? report.committedCents + settledToolChargesCents(store.db, roomId, Date.parse(report.period.since))
       : report.committedCents,
+    // The member spend default (ruling 29b): read fresh from the projection
+    // per call, like the allowance above — an owner change bites on the
+    // member's next call.
+    roomDefaultCents: memberSpendDefaultCents(room.state),
     nowMs,
   }));
 }
@@ -833,7 +902,9 @@ export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSes
 }
 
 // GET /api/rooms/:roomId/spend-grant — the caller's own spend summary.
-// Withhold, never refuse: guests and grant-less members get { spend: null }.
+// Withhold, never refuse: guests and grant-less members with no default
+// purse get { spend: null }; a grant-less member with a purse in force gets
+// the purse summary (source: "room_default").
 export function readSpendGrantRoute(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
@@ -844,8 +915,96 @@ export function readSpendGrantRoute(store, token, roomId, expectedSessionBinding
     return {
       roomId,
       memberId,
-      spend: guest ? null : spendGrantSummary(store.db, roomId, memberId, { nowMs }),
+      // The purse is an agent-member floor: humans and the owner are never
+      // charged, so their summary stays grant-or-null.
+      spend: guest ? null : spendGrantSummary(store.db, roomId, memberId, {
+        nowMs,
+        defaultCents: auth.member.kind === "agent" ? memberSpendDefaultCents(room.state) : null,
+      }),
       evaluatedThrough: room.sequence,
     };
   });
+}
+
+// GET /api/rooms/:roomId/spend-default — every member may read it: the
+// effective purse is room policy members already feel at the charge gate.
+// The response carries the stored setting plus per-member consumption of
+// the purse (spend_authorizations rows by members holding no spend edge):
+// the owner sees every purse consumer; anyone else sees at most their own
+// row — other members' spend stays theirs.
+export function readSpendDefaultRoute(store, token, roomId, expectedSessionBinding = null) {
+  return store.readTransaction(() => {
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    const room = store.room(roomId);
+    const stored = room.state.room.spendDefault ?? null;
+    const cents = memberSpendDefaultCents(room.state);
+    const isOwner = auth.member.id === room.state.room.ownerId;
+    const consumption = [];
+    if (cents > 0) {
+      const rows = store.db.prepare(
+        `SELECT agent_id, COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS spent
+         FROM spend_authorizations
+         WHERE room_id = ? AND status IN ('reserved', 'settled')
+         GROUP BY agent_id`).all(roomId);
+      for (const row of rows) {
+        if (spendEdgeExists(store.db, roomId, row.agent_id)) continue;
+        if (!isOwner && row.agent_id !== auth.member.id) continue;
+        const spent = Number(row.spent ?? 0);
+        consumption.push(Object.freeze({
+          agentId: row.agent_id,
+          spentCents: intToCents(spent),
+          remainingCents: intToCents(Math.max(0, cents - spent)),
+        }));
+      }
+      // A purse holder with no charges yet still sees their own fresh purse.
+      const own = auth.member.kind === "agent"
+        ? memberSpendDefaultSummary(store.db, roomId, auth.member.id, { defaultCents: cents })
+        : null;
+      if (own && !consumption.some(entry => entry.agentId === auth.member.id))
+        consumption.push(Object.freeze({
+          agentId: auth.member.id,
+          spentCents: intToCents(Number(own.capCents) - Number(own.remainingCents)),
+          remainingCents: own.remainingCents,
+        }));
+    }
+    return {
+      roomId,
+      cents,
+      defaultCents: MEMBER_SPEND_DEFAULT_CENTS,
+      revision: stored?.revision ?? 0,
+      setById: stored?.setById ?? null,
+      setAt: stored?.setAt ?? null,
+      consumption,
+      evaluatedThrough: room.sequence,
+    };
+  });
+}
+
+// POST /api/rooms/:roomId/spend-default — owner only (403 for everyone else,
+// checked here before the request shape is parsed so a non-owner learns
+// nothing about accepted fields from a malformed write). Body:
+// { cents, requestId? }; cents null restores the built-in default, 0
+// disables the purse (grantless members are refused exactly as before it
+// existed).
+export function setSpendDefaultRoute(store, token, roomId, request, expectedSessionBinding = null) {
+  store.readTransaction(() => {
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    const room = store.room(roomId);
+    if (auth.member.id !== room.state.room.ownerId) refuse(403, "owner_required", "Only the room owner can set the member spend default");
+  });
+  if (!request || Array.isArray(request) || typeof request !== "object")
+    refuse(422, "invalid_spend_default", "Supply { cents } and an optional requestId");
+  const keys = Object.keys(request);
+  if (!keys.includes("cents") || keys.some(key => !["cents", "requestId"].includes(key)))
+    refuse(422, "invalid_spend_default", "Supply cents (integer cents, or null to restore the built-in default) and an optional requestId");
+  const { cents } = request;
+  if (cents !== null && (!Number.isSafeInteger(cents) || cents < 0 || cents > SPEND_ALLOWANCE_LIMITS.allowanceCents))
+    refuse(422, "invalid_spend_default", `cents must be an integer of cents from 0 to ${SPEND_ALLOWANCE_LIMITS.allowanceCents}, or null to restore the built-in default`);
+  if (request.requestId !== undefined && !validId(request.requestId))
+    refuse(422, "invalid_spend_default", "requestId must be a valid identifier");
+  return store.command(token, roomId, {
+    id: request.requestId ?? randomUUID(),
+    type: T.ROOM_SPEND_DEFAULT_SET,
+    data: { cents },
+  }, expectedSessionBinding);
 }

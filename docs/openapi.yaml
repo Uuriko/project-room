@@ -3350,6 +3350,87 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422': { description: invalid_spend_pricing }
+  /api/rooms/{roomId}/spend-default:
+    get:
+      summary: Read the room's member spend default
+      description: >-
+        Member spend default (ruling 29b): the per-room purse agent members
+        holding no spend grant authorize priced tools against. Every member
+        can read it: the effective purse is room policy members already feel
+        at the charge gate. cents is the effective value (the built-in
+        default 25 while unset); consumption lists per-member purse spend
+        for the owner and only the caller's own row for anyone else. Takes
+        no query parameters.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Member spend default state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  cents: { type: integer }
+                  defaultCents: { type: integer }
+                  revision: { type: integer }
+                  setById: { type: ['string', 'null'] }
+                  setAt: { type: ['string', 'null'] }
+                  consumption:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agentId: { type: string }
+                        spentCents: { type: string }
+                        remainingCents: { type: string }
+    post:
+      summary: Set the room's member spend default
+      description: >-
+        Member spend default. Owner only; every other member receives 403
+        owner_required before the request shape is parsed. Records
+        room.spend_default_set with cents (integer cents): agent members
+        holding no spend grant authorize against this lifetime purse per
+        member, through the same spend_authorizations trail as grants.
+        cents 0 disables the purse (grantless members are refused
+        no_spend_grant, exactly as before the default existed); cents null
+        restores the built-in default. Any spend grant edge supersedes the
+        purse. requestId is an optional idempotency key: the same id with
+        the same input returns the original receipt (200), with different
+        input 409 idempotency_conflict.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cents]
+              additionalProperties: false
+              properties:
+                cents: { type: ['integer', 'null'] }
+                requestId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '403': { description: owner_required }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: invalid_spend_default }
   /api/rooms/{roomId}/spend-grants:
     post:
       summary: Issue a per-agent spend grant
