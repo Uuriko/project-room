@@ -186,6 +186,12 @@ export const SAFE_ENTROPY_TOKENS = [
   // entropy threshold.
   "docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md", // scripts/docs-link-check.mjs bridge exception key
   "docs/EXECUTION-PORTABILITY-PLAN-20261018.md", // scripts/docs-link-check.mjs bridge exception key
+  // Fleet-workspace paths cited in the vendored doc-freshness
+  // lint's header comments (scripts/doc-freshness/doc-freshness.mjs,
+  // PR #4239). File paths, not credentials; the dated directory
+  // pushes the joined path token over the entropy threshold.
+  "~/workspace/fixplan-2026-10-19/truth-layer.md", // doc-freshness.mjs spec citation
+  "~/workspace/fixplan-2026-10-19/JILL-RATIFICATION-V2.md", // doc-freshness.mjs ratification citation
 ];
 
 // Directories scanned: source code where a real secret could hide.
