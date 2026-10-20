@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { isHumanAside } from "../src/aside.js";
 import { sessionWatermark } from "./read-cursor.mjs";
 // Cross-room "what needs me" for one identity.
 //
@@ -237,6 +238,7 @@ function roomDmsOf(store, roomId, memberId, after, state) {
       const messageId = event.data?.messageId ?? event.id;
       const current = currentById.get(messageId);
       if (current?.deletedAt) continue;
+      if (isHumanAside(state?.members, event.actorId, current ? current.body : event.data?.body)) continue;
       items.push({
         kind: "dm",
         roomId,

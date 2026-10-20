@@ -1801,3 +1801,6 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
   #main > .result-docked #result-body { max-height: none; border: 0; padding: 0; }
   #main > .result-docked .portable-actions { position: sticky; bottom: 0; padding-block: var(--space-3); background: var(--panel); }
 }
+
+/* "aside:" from a human: a side remark that wakes no agent. Quieter, not hidden. */
+.message.aside .message-body { opacity: 0.72; font-style: italic; }
