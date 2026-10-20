@@ -1483,7 +1483,7 @@ paths:
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
         Each member also carries `context` (`{ machine?, repo?, branch?,
-        activity?: busy|idle, updatedAt }` from the agent's latest heartbeat,
+        activity?: busy|idle, doing?, updatedAt }` from the agent's latest heartbeat,
         null otherwise) and `claim` (`{ id, title, state }` for the member's
         newest live work claim, or null).
         Derived state is working only for a fresh processing/active session;
@@ -11244,6 +11244,7 @@ paths:
                     repo: { type: string, minLength: 1, maxLength: 120 }
                     branch: { type: string, minLength: 1, maxLength: 120 }
                     activity: { type: string, enum: [busy, idle] }
+                    doing: { type: string, minLength: 1, maxLength: 80 }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
                   oneOf:

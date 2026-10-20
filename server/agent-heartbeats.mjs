@@ -299,7 +299,7 @@ export function convergeWakeSignalRoomScope(db) {
 // unchanged. Every field is optional, short, and shown to room members, so
 // it must never carry a secret: plain names only.
 export const HOST_CONTEXT_ACTIVITIES = Object.freeze(["busy", "idle"]);
-const CONTEXT_FIELDS = Object.freeze(["machine", "repo", "branch", "activity"]);
+const CONTEXT_FIELDS = Object.freeze(["machine", "repo", "branch", "activity", "doing"]);
 const hostContextSchema = `CREATE TABLE IF NOT EXISTS agent_host_context (
   agent_id TEXT NOT NULL, host_id TEXT NOT NULL, context_json TEXT NOT NULL, updated_at INTEGER NOT NULL,
   PRIMARY KEY(agent_id, host_id))`;
@@ -314,6 +314,13 @@ export function checkHostContext(value) {
     check(typeof value[key] === "string" && value[key].trim().length > 0 && value[key].length <= 120
       && !/[\u0000-\u001f]/.test(value[key]), 422, "invalid_heartbeat", `context.${key} must be 1 to 120 printable characters`);
     out[key] = value[key].trim();
+  }
+  // doing: a short live status line from the agent's last tool action,
+  // like "Edit math.js". Plain words only, never command arguments.
+  if (value.doing !== undefined && value.doing !== null) {
+    check(typeof value.doing === "string" && value.doing.trim().length > 0 && value.doing.length <= 80
+      && !/[\u0000-\u001f]/.test(value.doing), 422, "invalid_heartbeat", "context.doing must be 1 to 80 printable characters");
+    out.doing = value.doing.trim();
   }
   if (value.activity !== undefined && value.activity !== null) {
     check(HOST_CONTEXT_ACTIVITIES.includes(value.activity), 422, "invalid_heartbeat", "context.activity must be busy or idle");
