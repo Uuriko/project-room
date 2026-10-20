@@ -41,12 +41,16 @@ export function statedArtifactFloors(criterion) {
   if (/\bartifact\b/i.test(criterion)) {
     let minimum = null;
     for (const form of MINIMUM_FORMS) {
-      const match = form.exec(criterion);
-      if (!match) continue;
-      const value = Number(match[1].replace(/,/g, ''));
-      if (!Number.isSafeInteger(value) || value <= 0) continue;
-      const floor = { kind: 'minimum_length', value, unit: /^b/i.test(match[2]) ? 'bytes' : 'characters' };
-      if (!minimum || floor.value > minimum.value) minimum = floor;
+      // Every match of the form counts, not just the first: a criterion
+      // may state a minimum more than once ("at least 200 characters
+      // ... at least 400 characters"), and the floor is the STRONGEST
+      // minimum stated, wherever in the criterion it appears.
+      for (const match of criterion.matchAll(new RegExp(form.source, `${form.flags}g`))) {
+        const value = Number(match[1].replace(/,/g, ''));
+        if (!Number.isSafeInteger(value) || value <= 0) continue;
+        const floor = { kind: 'minimum_length', value, unit: /^b/i.test(match[2]) ? 'bytes' : 'characters' };
+        if (!minimum || floor.value > minimum.value) minimum = floor;
+      }
     }
     if (minimum) floors.push(minimum);
   }
