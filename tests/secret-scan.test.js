@@ -137,6 +137,19 @@ test("H-19: an allowlist match that overlaps the finding still suppresses it", (
   assert.deepEqual(findings, [], "the allowlist still works when it covers the finding itself");
 });
 
+test("generated OG assets and the base64 alphabet scan clean without weakening entropy detection", async () => {
+  const { ALLOWLIST, SAFE_ENTROPY_TOKENS } = await import("../scripts/secret-scan-check.mjs");
+  const options = { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS };
+  const ogAssets = readFileSync(new URL("../server/og-assets-embedded.mjs", import.meta.url), "utf8");
+  const ogRender = readFileSync(new URL("../server/og-render.mjs", import.meta.url), "utf8");
+  assert.deepEqual(scanText(ogAssets, options), []);
+  assert.deepEqual(scanText(ogRender, options), []);
+
+  const planted = highEntropySecret();
+  const findings = scanText(`const planted = "${planted}";`, options);
+  assert.deepEqual(findings.map(finding => finding.rule), ["high-entropy"]);
+});
+
 test("a later secret of the same rule is not hidden by an earlier allowlisted match", async () => {
   const { ALLOWLIST } = await import("../scripts/secret-scan-check.mjs");
   const live = "sk_live_" + randomBytes(16).toString("hex");
