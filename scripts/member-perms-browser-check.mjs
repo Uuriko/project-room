@@ -388,6 +388,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
   await row.getByRole("button", { name: "Approve", exact: true }).focus();
   unrelatedMessage("The reader moves away during a pending refresh");
   await captured.promise;
+  await page.locator("#updates-close").click();
   const composer = page.locator("#message-input");
   await composer.focus();
   const delivered = page.waitForResponse(isQueue);
