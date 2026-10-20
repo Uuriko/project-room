@@ -79,9 +79,17 @@ test('scoped HTTP identity acknowledges its persisted reply and safely reruns', 
   const signal = store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId }).signal;
   const reply = await agent.say('A persisted answer', { replyToId: messageId });
   const options = { connection, hostId: 'completion-probe', signalId: signal.signalId, replyMessageId: reply.event.data.messageId };
-  assert.equal((await completeReplyWake(options)).status, 'reply_observed_and_acknowledged');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const env = { ...process.env, ROOM_AGENT_CONFIG: setup.configDirectory };
+  for (const key of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete env[key];
+  const execute = () => promisify(execFile)(process.execPath, ['scripts/room-complete-wake.mjs',
+    '--host', options.hostId, '--signal', options.signalId, '--reply', options.replyMessageId], { env, timeout: 15000 });
+  const output = (await execute()).stdout;
+  assert.equal(JSON.parse(output).status, 'reply_observed_and_acknowledged');
+  assert.ok(!output.includes(connection.token));
   assert.equal(store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' }).length, 0);
-  assert.equal((await completeReplyWake(options)).status, 'not_observed_pending');
+  assert.equal(JSON.parse((await execute()).stdout).status, 'not_observed_pending');
   store.identities.unlink(owner, 'commons', setup.identityId);
-  await assert.rejects(completeReplyWake(options));
+  await assert.rejects(execute());
 });
