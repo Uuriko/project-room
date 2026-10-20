@@ -99,10 +99,12 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.equal(enrolled.status, 200);
   const bearerTools = (await enrolled.json()).result.tools;
   // The minted identity holds no room membership, so the door serves it the
-  // non-member (public-work) catalog. That is a different subject from the
-  // card's enrolled tier, which advertises the member catalog: the default
-  // core list a member bearer gets, derived from the serving registry (#3769).
-  assert.deepEqual(bearerTools, listedMcpTools("core", false, null, "public_work"));
+  // roomless default catalog: the join readers, room_join and room_create,
+  // and the public-work tools (qa-mcp-roomless-join). That is a different
+  // subject from the card's enrolled tier, which advertises the member
+  // catalog: the default core list a member bearer gets, derived from the
+  // serving registry (#3769).
+  assert.deepEqual(bearerTools, listedMcpTools("core", false, { memberships: [] }));
   assert.deepEqual(card.tools.enrolled, listedMcpTools("core", false, null));
   assert.equal(card.tools.enrolled.length, CORE_MCP_TOOLS.length + MCP_JOIN_TOOLS.length,
     "enrolled count derives from the registry: core profile plus the join tools");
