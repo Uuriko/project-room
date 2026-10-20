@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { readAgentConnection, ConnectionError } from "../client/agent-connection.mjs";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
-  pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
+  pendingWakeToItem, attentionKey, selectUnhandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
 import { leaseHoursFromUntil, parseRoomText } from "../client/text-plug.mjs";
@@ -176,13 +176,6 @@ async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env }
   };
 }
 
-async function ackWakes(connection, signalIds, { fetchImpl = fetch } = {}) {
-  if (!signalIds.length) return { acknowledged: [] };
-  return await jsonRequest(connection, "/api/agent-heartbeats/ack", {
-    fetchImpl, method: "POST", body: { signalIds }
-  });
-}
-
 export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
   try {
     const connection = connectionFromEnv(env);
@@ -247,30 +240,55 @@ function nextFor(code) {
   return "See archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
 }
 
+// A dispatch receipt is not completion evidence. Never remove an uncertain
+// reservation automatically: the child may have acted before it failed.
+function dispatchPath(filename, connection, key) {
+  const scope = JSON.stringify([connection.origin, connection.memberId, key]);
+  return join(`${filename}.dispatches`, createHash("sha256").update(scope).digest("hex") + ".json");
+}
+
 async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {
   const filename = journalPathFor(env);
   let journal = readJournalFile(filename);
   const distinct = [...new Map(items.map(item => [attentionKey(item), item])).values()];
-  const fresh = selectUnhandled(distinct, journal);
-  const secrets = [connection.token];
-  const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), secrets));
+  const fresh = selectUnhandled(distinct, journal).filter(item =>
+    !existsSync(dispatchPath(filename, connection, attentionKey(item))));
+  const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), [connection.token]));
   const executed = [];
   for (const plan of plans) {
     if (!execute) continue;
+    const receipt = dispatchPath(filename, connection, plan.key);
+    mkdirSync(dirname(receipt), { recursive: true, mode: 0o700 });
+    let fd;
+    try { fd = openSync(receipt, "wx", 0o600); }
+    catch (error) { if (error.code === "EEXIST") continue; throw error; }
+    try {
+      writeFileSync(fd, JSON.stringify({ key: plan.key, at: now(), status: "unknown" }) + "\n");
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    // Persist the directory entry before any external side effects begin.
+    const dir = openSync(dirname(receipt), "r");
+    try { fsyncSync(dir); } finally { closeSync(dir); }
     const raw = await (runner ?? defaultRunner)(plan, env, connection);
-    // A child has the bearer in its environment; its output is not trusted.
     const redact = (value, limit) => typeof value === "string"
       ? value.replaceAll(connection.token, "[REDACTED]").slice(0, limit) : "";
     const result = { code: raw?.code, stdout: redact(raw?.stdout, 8000), stderr: redact(raw?.stderr, 2000) };
-    executed.push({ key: plan.key, result });
-    if (result.code === 0) {
-      journal = markHandled(journal, plan.item, now());
-      writeJournalFile(filename, journal);
-    }
+    const saved = openSync(receipt, "w", 0o600);
+    try {
+      writeFileSync(saved, JSON.stringify({ key: plan.key, at: now(), status: "process_exited", code: result.code }) + "\n");
+      fsyncSync(saved);
+    } finally { closeSync(saved); }
+    executed.push({ key: plan.key, result, completion: "not_confirmed" });
   }
-  // Preview and unsuccessful execution must not advance past pending work.
-  if (execute && executed.every(entry => entry.result.code === 0) && extra.cursor !== undefined) {
-    journal = setCursor(journal, extra.cursor);
+  // This cursor tracks observed dispatch, never handled work. Uncertain
+  // receipts block advancement; successful processes still leave wakes pending.
+  const dispatched = distinct.every(item => {
+    if (Object.hasOwn(journal.handled, attentionKey(item))) return true;
+    try { return JSON.parse(readFileSync(dispatchPath(filename, connection, attentionKey(item)), "utf8")).code === 0; }
+    catch { return false; }
+  });
+  if (execute && dispatched && extra.cursor !== undefined) {
+    journal = setCursor(readJournalFile(filename), extra.cursor);
     writeJournalFile(filename, journal);
   }
   return { journal, plans, executed, filename };
@@ -297,12 +315,6 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   const result = await planAndJournal({
     connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
-  if (execute) {
-    const completedSignals = beat.pendingWakes.filter(wake =>
-      Object.hasOwn(result.journal.handled, attentionKey(pendingWakeToItem(wake))))
-      .map(wake => wake.signalId).filter(id => typeof id === "string" && id.length > 0);
-    await ackWakes(connection, completedSignals, { fetchImpl });
-  }
   const silent = result.plans.length === 0;
   const rooms = [...new Set([
     connection.roomId,
