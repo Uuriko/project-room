@@ -47,10 +47,14 @@ test("a non-owner member is refused by each owner-only store gate", t => {
   refuses(() => f.store.guestInvites.list(f.plainKey, "commons", null), 403, "owner_required");
   refuses(() => f.store.shareLinks.create(f.plainKey, "commons", { requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"),
     expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 }, null), 403, "access_denied");
+  // ERROR-COPY-1 row 8: a "lacks <permission>" command refusal is a permission
+  // refusal, so the store catch maps it to the 403 class (was 422
+  // command_rejected). The gate itself is unchanged: plain still cannot add or
+  // re-permission members.
   refuses(() => f.store.command(f.plainKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
-    data: { memberId: "evil", displayName: "E", kind: "human", permissions: ["manage_members"] } }), 422, "command_rejected");
+    data: { memberId: "evil", displayName: "E", kind: "human", permissions: ["manage_members"] } }), 403, "access_denied");
   refuses(() => f.store.command(f.plainKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
-    data: { memberId: "victim", expectedMemberRevision: 0, permissions: ["steer"], active: false } }), 422, "command_rejected");
+    data: { memberId: "victim", expectedMemberRevision: 0, permissions: ["steer"], active: false } }), 403, "access_denied");
 });
 
 test("the owner passes the same gates (control)", t => {
