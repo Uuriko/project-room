@@ -508,9 +508,30 @@ function holdDue(store, roomId, items, until, nowMs) {
   }
 }
 
+// The namespace skip must hold BEFORE the candidate LIMIT, not only in
+// the JS pass below: when 32 or more earlier-due namespace rows are
+// queued, the LIMIT fills entirely with rows the JS pass then discards,
+// and due private claims starve tick after tick (admission defect —
+// Codex review, muse-room 15734; the same defect was found on #4246's
+// original head and fixed there first). Exclude namespace rows in SQL
+// when public_work_tasks exists; a registry without the table keeps the
+// legacy no-exclusion shape (the loaders' catch already tolerates the
+// missing table). The per-row isPublicClaimNamespace check in each
+// loader stays as the mid-run backstop.
+function publicNamespaceSqlExclusion(store) {
+  try {
+    store.db.prepare("SELECT 1 FROM public_work_tasks LIMIT 1").get();
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return "";
+    throw error;
+  }
+  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)";
+}
+
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -523,7 +544,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
         AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
@@ -531,7 +552,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -562,6 +583,7 @@ function loadDueClaims(store, nowMs) {
 // pullVerificationDue both require an unstamped outcome).
 function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -575,7 +597,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') = 'done'
         AND json_extract(item_json, '$.deliveryMode') = 'merged'
@@ -584,7 +606,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),

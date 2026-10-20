@@ -27,6 +27,7 @@ import { createWork, claimWork, appendWorkPullRequest, claimHistoryLength } from
 import { syncClaimPullRequests, sweepStaleUnclaimedClaims, applyPullRequestWebhook } from "../server/claim-pr-sync.mjs";
 import { autoLinkPullRequest, linkDeployToSettledClaims } from "../server/claim-autolink.mjs";
 import { withPublicWorkClaimWriter, verifyPublicWorkClaimFence } from "../server/public-work-claim-fence.mjs";
+import { createDurableWorkClaimRegistry } from "../server/work-claim-sqlite.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
 
 const HOUR = 3600_000;
@@ -221,6 +222,68 @@ test("G2: the stale-unclaimed sweep retires a private room's dormant claim and n
   assert.equal(store.workClaims.get("commons", "sync-stale-private").state, "closed");
   assert.equal(store.workClaims.get(namespace, "sync-stale-public").state, "unclaimed",
     "namespace rows belong to the public-work module's lifecycle, not the board stale sweep");
+});
+
+// ADMISSION (Codex review, muse-room 15734; the same defect DELTA
+// QA-4246-ADMISSION-1019 found on #4246's original head): the two poll
+// loaders skipped namespace rows only AFTER the SQL LIMIT. Seed the
+// registry so all 32 candidate slots (PULL_CANDIDATE_CAP) are earlier-due
+// public rows and the private claim, though due, is cut by LIMIT before
+// the JS backstop ever sees it: private reconciliation starves silently,
+// tick after tick. Both loader shapes must exclude public namespaces in
+// SQL, before ORDER BY/LIMIT, keeping the JS filter as the mid-run
+// backstop. Ported from #4246's corrected regression cases.
+const STARVE_NOW = Date.UTC(2026, 9, 19, 10, 43, 0);
+const STARVE_PR = "https://github.com/Uuriko/project-room/pull/4999";
+const STARVE_REV = "86fc24a18a8c2e207a2a2b1de37eb31213f67215";
+
+function starvationFixture(t, shape) {
+  const store = new RoomStore("unused-injected-database.sqlite", { database: new DatabaseSync(":memory:") });
+  store.initialize(initialRoom());
+  t.after(() => store.close());
+  const offerId = "sync-starve-task";
+  store.projectOffers.create("commons", "owner", { requestId: "create", offerId, reviewerMemberIds: ["owner"],
+    terms: { repositoryUrl: "https://github.com/Uuriko/project-room", kind: "project", title: "Sync starve task",
+      summary: "Disposable starvation task", acceptanceCriteria: ["Return an artifact"], reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" } } });
+  store.projectOffers.transition("commons", "owner", offerId, "publish", { requestId: "publish", expectedRevision: 1 });
+  const task = store.publicWorkClaims.enable("commons", "owner", offerId, {
+    requestId: "enable", expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: "main", files: ["src/sync-proof.js"] });
+  const ns = task.namespaceId;
+  const registry = createDurableWorkClaimRegistry(store.db);
+  const makeClaim = (id, at) => {
+    const base = claimWork(createWork({ id, title: `Claim ${id}` }, { now: STARVE_NOW - 4 * HOUR, agentId: "alice" }),
+      "alice", { now: STARVE_NOW - 4 * HOUR, leaseHours: 6 });
+    const item = shape === "live" ? base : { ...base, state: "done", deliveryMode: "merged", revision: STARVE_REV };
+    // The loaders' SQL reads the singular $.data.pullRequest envelope;
+    // pullRequestDue/pullVerificationDue read the singular JS field. Set both.
+    return { ...item, pullRequest: { url: STARVE_PR, repo: "Uuriko/project-room", number: 4999, nextPollAt: at }, pullRequests: [{ url: STARVE_PR, nextPollAt: at }] };
+  };
+  withPublicWorkClaimWriter(store, () => {
+    for (let i = 0; i < 32; i++) registry.set(ns, makeClaim(`pub-${String(i).padStart(2, "0")}`, STARVE_NOW - 10 * HOUR));
+  });
+  store.workClaims.set("commons", makeClaim("priv-starved", STARVE_NOW - HOUR));
+  return { store, ns };
+}
+
+function countingFetch() {
+  const calls = [];
+  const impl = async () => { calls.push(Date.now()); return { ok: false, status: 404, headers: { get: () => null } }; };
+  impl.calls = calls;
+  return impl;
+}
+
+test("admission: 32 earlier-due public claims do not starve a due private claim from live settlement", async t => {
+  const { store } = starvationFixture(t, "live");
+  const fetchImpl = countingFetch();
+  await syncClaimPullRequests(store, { env: {}, token: null, fetchImpl, nowMs: STARVE_NOW });
+  assert.ok(fetchImpl.calls.length > 0, `the private claim is polled (fetches: ${fetchImpl.calls.length})`);
+});
+
+test("admission: 32 earlier-due public claims do not starve a private done/merged verification", async t => {
+  const { store } = starvationFixture(t, "done");
+  const fetchImpl = countingFetch();
+  await syncClaimPullRequests(store, { env: {}, token: null, fetchImpl, nowMs: STARVE_NOW });
+  assert.ok(fetchImpl.calls.length > 0, `the private verification candidate is polled (fetches: ${fetchImpl.calls.length})`);
 });
 
 test("the fence still bites: a bare registry write to a namespace aborts, and exclusion changed no writer's admission", async t => {
