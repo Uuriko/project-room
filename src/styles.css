@@ -1828,3 +1828,5 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 .result-row:has(> .inline-result:not([hidden])) > p,
 .result-row:has(> .inline-result:not([hidden])) > .result-meta { display: none; }
 .result-row > .inline-result { border: 0; padding: 0; margin: 0; background: transparent; }
+#room-results-list:has(.inline-result:not([hidden])) > .result-row:not(:has(.inline-result:not([hidden]))) { display: none; }
+#room-results-list > .result-row:has(.inline-result:not([hidden])) { border: 0; padding-block: 0; }

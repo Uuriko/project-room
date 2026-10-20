@@ -46,6 +46,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    resultElement("close-result").textContent = uiText(view.fromResults ? "result.back" : "result.collapse");
     const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
     const textMessage = getState().messages.find(message => message.id === view.textMessageId);
     if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };

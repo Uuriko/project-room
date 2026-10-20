@@ -85,8 +85,12 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#result-dialog").getAttribute("role"), "region");
   assert.equal(await p.locator("dialog:modal").count(), 1, "reading adds no second modal over Results");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
+  assert.equal(await p.locator("#close-result").textContent(), "Back to results");
+  assert.equal(await p.locator("#result-discuss").textContent(), "Reply");
+  assert.equal(await f.row("approved-result").isVisible(), false, "reading focuses on the selected result");
   await f.capture(mobile ? "touch-reader" : "desktop-reader");
   await p.keyboard.press("Escape");
+  assert.equal(await f.row("approved-result").isVisible(), true, "Back restores the result list");
   assert.equal(await f.row("native-result").locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#message-input").inputValue(), "Keep my next thought.");
   assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
@@ -145,7 +149,7 @@ for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`
   const input = p.locator("#message-input");
   await input.fill("Keep my channel draft");
   await f.open(); await f.read(); await f.ready();
-  const discuss = p.getByRole("button", { name: "Discuss result", exact: true });
+  const discuss = p.locator("#result-dialog").getByRole("button", { name: "Reply", exact: true });
   await discuss.focus(); await p.keyboard.press("Enter");
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);

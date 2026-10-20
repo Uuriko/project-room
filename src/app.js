@@ -2568,11 +2568,12 @@ function renderMessages() {
   // visible row steady after both message and new-message controls change.
   if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
     window.scrollBy({ top: anchor.getBoundingClientRect().top - anchorOffset, behavior: "instant" });
-  // Anchor correction can undo focus scrolling; keep the active control visible
-  // only after every layout and scroll adjustment has finished.
-  if (focusedOnScreen && list.contains(document.activeElement) && document.activeElement !== document.body) {
-    const now = document.activeElement.getBoundingClientRect();
-    if (now.top < 0 || now.bottom > innerHeight) document.activeElement.scrollIntoView({ block: "nearest", behavior: "instant" });
+  // Anchor correction can undo focus scrolling. Rescue a restored replacement
+  // even if its old node started offscreen; leave manually scrolled focus alone.
+  const settledFocus = list.contains(document.activeElement) && document.activeElement !== document.body ? document.activeElement : null;
+  if (settledFocus && (focusedOnScreen || settledFocus !== focused)) {
+    const now = settledFocus.getBoundingClientRect();
+    if (now.top < 0 || now.bottom > innerHeight) settledFocus.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
@@ -6962,6 +6963,7 @@ async function refreshActivityPreview() {
   } catch { /* the preview is best-effort; the dialog reports loudly */ }
   finally { previewBusy = false; }
 }
+$("#activity-preview-heading").textContent = uiText("activity.recent");
 $("#activity-preview-open").addEventListener("click", openActivity);
 $("#activity-preview-dismiss").addEventListener("click", () => {
   for (const item of previewItems) previewDismissed.add(item.id);

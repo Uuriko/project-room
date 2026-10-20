@@ -454,11 +454,11 @@ export default {
   "entry.signedOut": "Not signed in",
   "entry.connection": "Not connected · sign in required",
   "entry.refresh": "Refresh connection",
-  "result.copyText": "Copy text",
-  "result.download": "Download text",
+  "result.copyText": "Copy",
+  "result.download": "Download",
   "result.copied": "Copied",
   "result.copyFailed": "Could not copy. Retry or download the text.",
-  "result.discuss": "Discuss result",
+  "result.discuss": "Reply",
   "result.replyBlocked": "This conversation has a private draft or an unresolved send. Open the conversation to finish it before replying.",
   "record.invalidView": "Choose a supported record view.",
   "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
@@ -515,5 +515,8 @@ export default {
   "result.loadingConversation": "Loading conversation…",
   "result.conversationUnavailable": "Conversation unavailable. Reopen the result to try again.",
   "result.comparisonWithdrawn": "A version was withdrawn. Its text is no longer shown in this comparison.",
-  "result.reviewWithdrawn": "This text was withdrawn. Close this review."
+  "result.reviewWithdrawn": "This text was withdrawn. Close this review.",
+  "result.back": "Back to results",
+  "result.collapse": "Collapse result",
+  "activity.recent": "Recent activity"
 };
