@@ -256,6 +256,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   const onClick = async event => {
     if (busy) return;
+    const emailLink = event.target?.closest?.('[name="method"][value="email"]');
+    if (emailLink) {
+      const form = emailLink.closest('[data-signin-form]');
+      if (form?.reportValidity()) await onSubmit({ target: form, submitter: emailLink, preventDefault() {} });
+      return;
+    }
     if (event.target?.closest?.("[data-passkey-signin]")) {
       const provider = credentials ?? globalThis.navigator?.credentials;
       if (!provider?.get || await beforeSignIn?.() === false) return;
@@ -398,7 +404,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       // magic-request submit it does not consult beforeSignIn (asking
       // for a link signs nothing in and clears nothing; the host's gate
       // applies when a password is presented or a code/link redeemed).
-      const linkRequest = passwordMode !== "signup" && !fields.password && mailConfigured;
+      const linkRequest = passwordMode !== "signup" && mailConfigured && (event.submitter?.value === "email" || !fields.password);
       if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();

@@ -129,7 +129,7 @@ test("reader uses current disconnected connection state, not the source's histor
 });
 test("HTTP email view is explicit, private, no-store and refuses unknown negotiations", async t => {
   const f = fixture(t); f.configure(); f.apply(f.page());
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;

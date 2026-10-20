@@ -283,7 +283,8 @@ test("current active admin renders the queue when the owner-only reader returns 
   assert.equal(section._elements["#attention-range"].textContent, "Showing 1–1 of 1");
   const markup = section._elements["#attention-list"].innerHTML;
   assert.match(markup, /Pending member wants more permissions/);
-  assert.match(markup, /You cannot grant: complete_work/, "admin grant controls use current permissions");
+  assert.match(markup, /You cannot grant: Complete work/, "admin grant controls use current permissions with a readable permission name");
+  assert.match(markup, /<button[^>]*data-action-index="0"[^>]*disabled>Approve<\/button>/, "the unavailable full grant stays disabled");
   assert.equal(section._elements["#attention-status"].textContent, "");
   assert.equal(timers.size, 0);
 });
