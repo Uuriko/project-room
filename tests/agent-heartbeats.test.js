@@ -85,7 +85,7 @@ test("heartbeat upserts hosts and derives online/offline/unregistered status", t
 });
 
 test("wake signals coalesce per message and deliver through pending/ack", t => {
-  const { hb } = unit(t);
+  const { hb, advance } = unit(t);
   hb.heartbeat(wakeable());
   const first = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(first.enqueued, true);
@@ -93,6 +93,7 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   const dup = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(dup.enqueued, false, "same message wakes once");
   assert.equal(dup.signal.signalId, first.signal.signalId);
+  advance(1); // Distinct times exercise oldest-first; tied cursor order has its own test.
   hb.enqueueWake({ agentId: "ai_testagent", kind: "dm", roomId: "room-1", messageId: "msg-2" });
   const pending = hb.pendingWakes("ai_testagent");
   assert.equal(pending.length, 2);
