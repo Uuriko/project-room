@@ -69,8 +69,8 @@ $('#answer').addEventListener('submit', async e => {
     const result = await response.json();
     own.attempts.push({ answer, elapsedMs, result });
     if (trial !== own) return;
-    $('#status').textContent = result.passed ? 'Recorded: fixture requirements met.' : 'Recorded: one or more fixture requirements were not met.';
-    log('submit', { passed: result.passed });
+    $('#status').textContent = result.outcome === 'passed' ? 'Recorded: resumption facts match.' : result.outcome === 'requires_content_review' ? 'Recorded: mechanical checks passed; content review is still required.' : 'Recorded: one or more mechanical checks failed.';
+    log('submit', { outcome: result.outcome });
   } catch (error) { if (trial === own) $('#status').textContent = error.message; }
   finally { button.disabled = false; }
 });

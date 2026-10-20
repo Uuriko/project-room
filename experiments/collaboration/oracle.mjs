@@ -12,7 +12,8 @@ export function score(id, task, answer) {
     ? { currentVersion: a.current === t.current, acceptedVersion: a.accepted === t.accepted,
       owner: a.owner?.trim() === t.owner, blocker: a.blocker?.trim().toLowerCase() === t.blocker.toLowerCase() }
     : { exactVersion: a.basedOn === t.current,
-      correctContent: typeof a.body === 'string' && t.required.every(pattern => pattern.test(a.body)) && !t.forbidden.some(pattern => pattern.test(a.body)) };
-  return { passed: Object.values(checks).every(Boolean), checks,
-    limitation: 'Fixture rubric checks exact facts and required phrases; it is not a general semantic quality judge.' };
+      requiredPhrases: typeof a.body === 'string' && t.required.every(pattern => pattern.test(a.body)) && !t.forbidden.some(pattern => pattern.test(a.body)) };
+  const checksPassed = Object.values(checks).every(Boolean);
+  return { checksPassed, outcome: !checksPassed ? "rejected" : task === "resume" ? "passed" : "requires_content_review", checks,
+    limitation: 'Review/handoff outputs are never semantically approved by this phrase checker. Exact facts and required phrases are mechanical screening only.' };
 }

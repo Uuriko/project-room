@@ -63,3 +63,25 @@ The new harness verifies that wrong answers are rejected, all concept variants c
 Do not implement a production layout based on the scripted results. Run a formative human pilot with rotated layouts and domain tasks, and live-model handoffs using these API inputs under fixed budgets. Keep a separate held-out set before quantitative claims. The production baseline checks establish functionality, not an apples-to-apples timed layout baseline. The current short fixtures test comprehension mechanics; longer histories, external imports, simultaneous contributions and real delayed return require a later experiment round.
 
 For external agent evaluation, GET `/api/scenario/<id>/context?mode=full|compact|retrievable` on the loopback origin. In retrieval mode the packet provides a relative discussion URL. An evaluator, not the participant, POSTs `{scenario, task:"handoff", answer:{basedOn,body}}` to `/api/score`. Do not give agents unrestricted access to evaluator files or the score endpoint during a measured attempt. This prototype is not an isolation boundary: actual trials must enforce that separation in their runner.
+
+## Round 2: evaluator adversaries and existing architecture (2026-10-20)
+
+The initial phrase scorer could falsely label a contradictory answer as passing: “Do not launch November 21. Mina is not the contact.” The scoring contract now separates `checksPassed` from `outcome`. Resume facts can pass; review and handoff text that clears mechanical screening receives `requires_content_review`, never semantic approval. Wrong versions or missing required phrases are rejected. Three adversarial controls explicitly verify that keyword matches cannot confer approval. Earlier round-1 “passed” review results must be interpreted as mechanical screening only, not evidence of content quality.
+
+Validation: 36 browser trials, 9 wrong-answer controls, 3 adversarial controls and 9 context conditions completed without harness failures. A separate 12-case recovery run (three layouts × two widths × two failures) preserves correction drafts after scoring transport failure and prevents a delayed score from contaminating a newly selected scenario. These are research-interface checks; they do not add production behavior.
+
+Run recovery with `node experiments/collaboration/recovery.mjs /absolute/output/directory`.
+
+Run the real API baseline with `node experiments/collaboration/production-context.mjs /absolute/output/directory`. It uses the existing disposable acceptance fixture, production HTTP server and validated RoomAgentClient. It grows unrelated history while retrieving one work item and its linked discussion, then creates a new SDK client and resumes a server-issued discussion checkpoint. No model is called.
+
+Observed serialized JSON bytes (not compression, token counts or a timing benchmark):
+
+| Unrelated messages | Room snapshot | Selected work | Linked discussion | Selected + discussion |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 10,133 | 5,807 | 3,101 | 8,908 |
+| 100 | 207,115 | 5,808 | 3,411 | 9,219 |
+| 500 | 588,753 | 5,808 | 3,720 | 9,528 |
+
+Discussion grew slightly because the experiment adds one relevant follow-up between sizes. The correction remained available in linked discussion at every size; selected work intentionally omitted it. Each resumed checkpoint returned exactly the newly added reply. These findings support reusing existing bounded context and retrieval APIs, not asserting that the underlying server query cost is bounded or that a whole-system rewrite is unnecessary. There is no statistically established latency win and no comparison of live-model task quality.
+
+Round-2 artifacts are in the chat workspace's `outputs/collaboration-round2`: `report.json`, `recovery.json`, `production-context.json`, screenshots, per-trial exports and traces. The local experiment server must be restarted after scorer edits because server modules are cached; refresh the browser afterward.

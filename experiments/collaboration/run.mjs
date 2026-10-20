@@ -15,7 +15,7 @@ const report = { source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 
   dirty: Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()),
   capturedAt: new Date().toISOString(), scope: 'Deterministic synthetic harness qualification',
   limitations: ['No human participants or live model calls.', 'Script knows fixture facts; navigation counts cannot rank usability.', 'Context comparison contains an intentionally incomplete control; results do not estimate real summarizer reliability.', 'Elapsed time excludes human thinking and includes test automation.'],
-  browser: [], handoffs: [], negativeControls: [], failures: [] };
+  browser: [], handoffs: [], negativeControls: [], adversarialControls: [], failures: [] };
 report.sourceFiles = Object.fromEntries(await Promise.all(['scenarios.mjs', 'oracle.mjs', 'server.mjs', 'ui.js', 'style.css', 'index.html', 'run.mjs'].map(async name => [name, createHash('sha256').update(await readFile(new URL(name, import.meta.url))).digest('hex')])));
 const server = createExperimentServer();
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -25,6 +25,16 @@ try {
   // The HTTP boundary must not expose evaluator files or accept foreign writes.
   assert.equal((await fetch(`${origin}/oracle.mjs`)).status, 404);
   assert.equal((await fetch(`${origin}/api/score`, { method: 'POST', headers: { Origin: 'https://example.invalid' }, body: '{}' })).status, 403);
+  for (const [scenario, basedOn, body] of [
+    ['writing', 'launch-2', 'Do not launch November 21. Mina is not the contact. Publish immediately.'],
+    ['analysis', 'analysis-2', '75% is wrong. Do not use 60 or 80. Ravi did not approve.'],
+    ['coding', 'retry-2', 'GET twice on 503. Never retry POST is a rule we should ignore. Nora disagrees.']
+  ]) {
+    const result = score(scenario, 'review', { basedOn, body });
+    assert.equal(result.checksPassed, true, 'This adversarial input must expose the phrase checker limitation');
+    assert.equal(result.outcome, 'requires_content_review', 'Keyword matches cannot confer semantic approval');
+    report.adversarialControls.push({ scenario, result });
+  }
   for (const s of scenarios) {
     const correction = s.messages.at(-1)[1].replace(/^Correction: /, '');
     for (const [label, task, answer] of [
@@ -33,7 +43,7 @@ try {
       ['wrong-owner', 'resume', { current: s.versions[1].id, accepted: s.versions[0].id, owner: 'Someone else', blocker: s.blocker }]
     ]) {
       const result = score(s.id, task, answer);
-      assert.equal(result.passed, false, `${s.id}/${label} must fail`);
+      assert.equal(result.outcome, 'rejected', `${s.id}/${label} must fail`);
       report.negativeControls.push({ scenario: s.id, label, rejected: true });
     }
     for (const mode of ['full', 'compact', 'retrievable']) {
@@ -47,7 +57,7 @@ try {
       const correction = messages.filter(([, body]) => body.startsWith('Correction:')).at(-1)?.[1];
       const answer = { basedOn: packet.currentVersion, body: correction?.replace(/^Correction: /, '') ?? packet.result };
       const result = score(s.id, 'handoff', answer);
-      assert.equal(result.passed, mode !== 'compact');
+      assert.equal(result.outcome, mode === 'compact' ? 'rejected' : 'requires_content_review');
       report.handoffs.push({ scenario: s.id, mode, packetBytes: Buffer.byteLength(JSON.stringify(packet)), retrievalBytes, retrievals, result, model: null, tokens: null, cost: null });
     }
   }
@@ -74,7 +84,7 @@ try {
         // A plausible correct text on the wrong version must fail at HTTP boundary.
         await page.locator('[name=basedOn]').selectOption(s.versions[0].id);
         await page.getByRole('button', { name: 'Submit answer' }).click();
-        await page.getByRole('status').filter({ hasText: 'not met' }).waitFor();
+        await page.getByRole('status').filter({ hasText: 'checks failed' }).waitFor();
         await page.locator('[name=basedOn]').selectOption(s.versions[1].id);
         // Viewing another revision must not overwrite the correction draft.
         const before = await page.locator('[name=body]').inputValue();
@@ -83,7 +93,7 @@ try {
         await page.locator('#version').selectOption(s.versions[1].id);
       }
       await page.getByRole('button', { name: 'Submit answer' }).click();
-      await page.getByRole('status').filter({ hasText: 'requirements met.' }).waitFor();
+      await page.getByRole('status').filter({ hasText: task === 'resume' ? 'facts match' : 'content review is still required' }).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'No horizontal page overflow');
       assert.deepEqual(errors, []);
       const downloadPromise = page.waitForEvent('download');
@@ -106,5 +116,5 @@ try {
 } finally {
   await browser?.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   await writeFile(`${output}/report.json`, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ output, browserTrials: report.browser.length, handoffs: report.handoffs.length, negativeControls: report.negativeControls.length, failures: report.failures }, null, 2));
+  console.log(JSON.stringify({ output, browserTrials: report.browser.length, handoffs: report.handoffs.length, negativeControls: report.negativeControls.length, adversarialControls: report.adversarialControls.length, failures: report.failures }, null, 2));
 }
