@@ -1,3 +1,4 @@
+import { isHumanAside } from "../src/aside.js";
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
@@ -6489,6 +6490,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
+    if (isHumanAside(state?.members, senderMemberId, data?.body)) return;
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
     // Decision #25: trial seats receive mention wakes in their room. Guest
@@ -6561,7 +6563,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // against a direct @mention of the same author in the reply body;
       // humans keep their existing attention paths.
       const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
-      if (!replyDmTarget) {
+      if (!replyDmTarget && !isHumanAside(state?.members, senderMemberId, data.body)) {
         const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
         const authorId = repliedTo?.authorId ?? "";
         const author = authorId ? (state?.members ?? {})[authorId] : null;
@@ -6577,6 +6579,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];
+    // "aside:" from a human: no mention rows, so no agent inbox entry.
+    if (isHumanAside(state?.members, senderMemberId, body)) return [];
     const members = state?.members ?? {};
     const identityNames = identityNamesForRoom(this.db, roomId);
     const timeoutMs = this.mentionTimeoutMsFor(roomId);
