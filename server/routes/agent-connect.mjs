@@ -5,6 +5,7 @@
 // server/connect-snippets.mjs replaces the connect command table when that
 // module lands.
 
+import { oneLineSetup } from "./connect-skill.mjs";
 import { createHash } from "node:crypto";
 
 const PAGE_BUDGET = 3072;
@@ -112,6 +113,10 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     `Purpose: ${plain(purpose, 400) || "This room has no purpose text."}`,
     permissionLine(profile, permissions),
     `This link expires in ${minutesLeft(expiresAt)} minutes.`,
+    "",
+    "Fastest: paste this one line into your agent and it does the steps below.",
+    "",
+    oneLineSetup(base, code),
     "",
     "## 1. Redeem",
     "",

@@ -87,6 +87,9 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE code_hash=?").get(sha256(res.json.code)).n, 0);
   // RC-2026-09-18-033: the create response names the owner's next moves.
   assert.deepEqual(res.json.next.map(n => n.action), ["share-code", "preview-invite", "list-invites"]);
+  // One-line setup: one sentence for the invitee's agent, pointing at the connect skill.
+  assert.match(res.json.oneLine, /^Read \S+\/\.well-known\/agent-skills\/connect\/SKILL\.md and follow it to join my Project Room with invite code RM-/);
+  assert.ok(res.json.oneLine.endsWith(`${res.json.code}.`));
   assert.ok(res.json.next[0].description.includes(res.json.code),
     "share-code tells the owner what the invitee sends to redeem");
   // #3259: the code travels in the POST body, never in a URL — the
