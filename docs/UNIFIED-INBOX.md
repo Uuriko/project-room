@@ -518,7 +518,7 @@ once that file is next edited).
 
 ### Connection cards and the list
 
-`src/inbox-ui.js` renders one card per connection under the message list:
+`archive/deferred-email/src/inbox-ui.js` renders one card per connection under the message list:
 channel and bot or mailbox name, connection state, and for Telegram the live
 lines (`Live: not configured · set …` / `Live: configured`, `Webhook: …`,
 `Last update received`, `Last send`) plus **Reconnect**; email cards read
@@ -575,7 +575,7 @@ mailbox), `email_connection_limit` (20 per account), `email_connection_changed`
    registry throws at load time if a provider has no adapter).
 3. Accept the new `adapter` value where the Inbox projects sources
    (`summary`, `channelView` in `server/inbox.mjs`) and in the browser
-   validators (`src/inbox-client.js`).
+   validators (`archive/deferred-email/src/inbox-client.js`).
 4. Add the new server files to `scripts/runtime-package.mjs` and
    `scripts/candidate-runtime-fixture.mjs`; add tests and coverage-map claims.
 5. Keep the fixture-first stance: no tokens in code, fetch only through an
