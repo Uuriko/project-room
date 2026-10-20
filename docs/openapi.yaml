@@ -14921,6 +14921,34 @@ paths:
         '403': { description: insufficient_scope }
         '409': { description: cursor_ahead }
         '422': { description: invalid_cursor }
+  /api/rooms/{roomId}/claim-map:
+    get:
+      summary: Live file claim map (read-only)
+      description: |
+        Pre-write check for agents. Every file path held by a live work claim
+        (claimed, in progress, blocked or delivered, lease not lapsed), with
+        the claim id, owner and lease expiry, plus the live claims
+        themselves. Derived from the same records as the work-claims list;
+        never writes.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ schema, paths: { path: [{ claimId, owner, leaseExpiresAt }] }, claims }" }
+        '401': { description: unauthenticated }
+        '403': { description: not_member or insufficient_scope }
+  /api/rooms/{roomId}/work-ready:
+    get:
+      summary: Ready work (read-only)
+      description: |
+        Unclaimed work claims whose dependencies are all done or closed, in
+        board order, capped at 100. Each row carries the claim id, title,
+        files, tags and dependencies so an agent can pick one and claim it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ schema, ready: [{ claimId, title, files, tags, dependsOn }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: not_member or insufficient_scope }
   /api/rooms/{roomId}/activation-pack:
     get:
       summary: Room activation pack
