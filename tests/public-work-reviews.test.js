@@ -75,6 +75,12 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
     verifiedAt: null, decidedAt: accepted.review.decision.at });
   const receiptRest = { ...stamped };
   delete receiptRest.verified; delete receiptRest.review;
+  // FIX-SETTLE-SNAPSHOT: the decision also freezes the claim record
+  // onto the record as claimSnapshot — the one other post-issuance
+  // addition; everything else is exactly as submitted.
+  assert.equal(receiptRest.claimSnapshot.decision, 'accepted');
+  assert.equal(typeof receiptRest.claimSnapshot.claim.leaseExpiresAt, 'string');
+  delete receiptRest.claimSnapshot;
   assert.deepEqual({ ...receiptRest, state: 'submitted' }, f.receipt);
   assert.deepEqual(f.store.publicWorkClaims.artifact(id), artifact);
   assert.equal(f.store.workClaims.get(kernel.namespaceId, kernel.taskId).state, 'done');

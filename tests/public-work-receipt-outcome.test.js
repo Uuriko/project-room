@@ -148,8 +148,12 @@ test('rejected public-work receipt reads as rejected everywhere; undecided claim
   const rejected = f.finish('rejected-task');
   const pending = f.finish('pending-task');
   f.reviews.decide('commons', 'owner', rejected.receiptId, f.input(rejected, 'reject', 0, { decision: 'rejected' }));
-  // A rejection never stamps: the stored record is the minted record, byte for byte.
-  assert.deepEqual(f.stored(rejected.receiptId), rejected);
+  // A rejection never stamps the submission's own fields: the stored
+  // record is the minted record plus exactly the settlement's
+  // claimSnapshot evidence block (FIX-SETTLE-SNAPSHOT) — nothing else.
+  const { claimSnapshot: rejectedSnapshot, ...mintedRest } = f.stored(rejected.receiptId);
+  assert.deepEqual(mintedRest, rejected);
+  assert.equal(rejectedSnapshot.decision, 'rejected');
   const pubRejected = publicReceiptById(f.store, rejected.receiptId);
   const pubPending = publicReceiptById(f.store, pending.receiptId);
   assert.equal(pubRejected.state, 'rejected');
@@ -255,8 +259,13 @@ test('paid rejection: full feeless refund exactly as the train pins it, faces re
   assert.equal(pub.state, 'rejected');
   assert.equal(pub.review.state, 'rejected');
   assert.equal(store.publicWorkClaims.receipt(id).state, 'rejected');
-  // The stored record was never stamped or rewritten by the verdict.
-  assert.deepEqual(JSON.parse(store.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(id).receipt_json), receipt);
+  // The stored record was never stamped by the verdict: its own fields
+  // are the minted record exactly; the only addition is the
+  // settlement's claimSnapshot evidence block (FIX-SETTLE-SNAPSHOT).
+  const { claimSnapshot: paidSnapshot, ...paidRest } = JSON.parse(store.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(id).receipt_json);
+  assert.deepEqual(paidRest, receipt);
+  assert.equal(paidSnapshot.decision, 'rejected');
+  assert.equal(paidSnapshot.settlement.phase, 'refunded');
   const journalAfter = f.journalCount();
   publicReceiptById(store, id); store.publicWorkClaims.receipt(id);
   assert.equal(f.journalCount(), journalAfter);
