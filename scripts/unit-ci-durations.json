@@ -670,6 +670,7 @@
   "tests/member-deactivate.test.js": 28745,
   "tests/member-display-names.test.js": 5173,
   "tests/member-permission-requests.test.js": 32107,
+  "tests/member-reactivate-rebound.test.js": 2740,
   "tests/member-status.test.js": 33483,
   "tests/members-directory.test.js": 43987,
   "tests/membership-delegation.test.js": 112389,

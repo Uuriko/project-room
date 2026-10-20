@@ -4214,6 +4214,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
     return bound && this.memberSelfLeft(roomId, bound.member_id, state) ? bound.member_id : null;
   }
+  // The rebound shape (r126): this member was the accepted target of a
+  // targeted invitation, holds no account binding of its own any more, and
+  // the invited account is now bound to a DIFFERENT member of this room —
+  // the person came back through a newer invitation as a newer member (the
+  // invitation audit's "rebound invitee"). The old member record is retired
+  // history; the newer membership is the person's live one.
+  memberRebound(roomId, memberId) {
+    if (this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, memberId)) return false;
+    const accepted = this.db.prepare("SELECT intended_account_id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'").get(roomId, memberId);
+    if (!accepted) return false;
+    return Boolean(this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=? AND member_id<>?").get(roomId, accepted.intended_account_id, memberId));
+  }
   // Inactive, and the last deactivation was the member's own act.
   memberSelfLeft(roomId, memberId, state) {
     if (state.members[memberId]?.active !== false) return false;
@@ -5944,6 +5956,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           .filter(id => firstBlockedWakeTarget(room.state, auth.member.id, [id]))
         : [];
       const target = room.state.members[command.data.memberId];
+      // r126 rebound guard: reactivating the OLD member of a person who
+      // self-left and rejoined through a newer invitation would leave an
+      // active human with no account binding, and every later invitation
+      // audit (cold start, backup, export, the integrity job) would fail on
+      // the record. Refuse here, before the event is built; the person's
+      // newer membership is the one to change instead.
+      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === true && target?.kind === "human" && target.active === false
+        && this.memberRebound(roomId, target.id)) {
+        fail(409, "membership_rebound", "This person rejoined as a newer member. Change that membership instead.");
+      }
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
