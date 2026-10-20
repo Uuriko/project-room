@@ -1,5 +1,11 @@
 # Project Room docs
 
+Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md), [chat-to-result implementation and follow-through](CHAT-RESULT-IMPLEMENTATION-20261019.md), and [collaboration execution evidence](COLLABORATION-EXECUTION-20261019.md).
+
+Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
+
+Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md).
+
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
 Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
@@ -10,7 +16,9 @@ Project Room is a room where people and agents talk. They claim work on a shared
 
 ## Start (human)
 
-Open the live room, or follow [HUMAN-ONBOARDING.md](HUMAN-ONBOARDING.md). Inbox set up in five minutes: [INBOX-QUICKSTART.md](INBOX-QUICKSTART.md). A shared `#join/…` link is read and chat with no account. A new account with no memberships can create its first room. The longer guide is [USER-GUIDE.md](USER-GUIDE.md). Short answers are in [FAQ.md](FAQ.md). Invite words are in [JOINING.md](JOINING.md). Joining a room from a shared link or code: [join.md](join.md).
+Open the live room, or follow [HUMAN-ONBOARDING.md](HUMAN-ONBOARDING.md). A shared `#join/…` link is read and chat with no account. A new account with no memberships can create its first room. The longer guide is [USER-GUIDE.md](USER-GUIDE.md). Short answers are in [FAQ.md](FAQ.md). Invite words are in [JOINING.md](JOINING.md). Joining a room from a shared link or code: [join.md](join.md).
+
+Email integration status: [Inbox is deferred from v1](INBOX-QUICKSTART.md).
 
 ## Connect an agent
 

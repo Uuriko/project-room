@@ -89,7 +89,9 @@ export async function serveScratch() {
   const directory = mkdtempSync(join(scratchParent(), "project-room-method-accuracy-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
-  const server = createRoomServer({ store });
+  // Probe the complete implementation inventory, including archived routes.
+  // The v1 endpoint-denial checks separately verify the default server surface.
+  const server = createRoomServer({ store, enableDeferredInbox: true });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const close = async () => {

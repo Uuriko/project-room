@@ -11,8 +11,16 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false } = {}) {
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false } = {}) {
   const f = createResultsFixture();
+  if (olderResult) {
+    const now = f.store.now; let offset = 0;
+    f.store.now = () => now() + offset;
+    for (let i = 0; i < 130; i++) {
+      offset += 2500;
+      f.send("owner", T.MESSAGE_POSTED, { messageId: `later-${i}`, body: `Later conversation ${i}` });
+    }
+  }
   if (privateResult) {
     f.send("owner", T.WORK_PROPOSED, { workItemId: "private-result", title: "Private notes", definitionOfDone: "Private result",
       accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
@@ -77,8 +85,12 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#result-dialog").getAttribute("role"), "region");
   assert.equal(await p.locator("dialog:modal").count(), 1, "reading adds no second modal over Results");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
+  assert.equal(await p.locator("#close-result").textContent(), "Back to results");
+  assert.equal(await p.locator("#result-discuss").textContent(), "Reply");
+  assert.equal(await f.row("approved-result").isVisible(), false, "reading focuses on the selected result");
   await f.capture(mobile ? "touch-reader" : "desktop-reader");
   await p.keyboard.press("Escape");
+  assert.equal(await f.row("approved-result").isVisible(), true, "Back restores the result list");
   assert.equal(await f.row("native-result").locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#message-input").inputValue(), "Keep my next thought.");
   assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
@@ -98,7 +110,7 @@ test("results update after review and reopening; a pinned open reader becomes ea
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   assert.equal(await f.row("native-result").count(), 0);
   await p.locator("#close-result").click();
-  assert.equal(await p.locator("#results-panel > summary").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#room-results-list").evaluate(node => node === document.activeElement), true);
   f.reopen("pending-result"); f.reopen("approved-result");
   await p.locator("#room-results-list .empty-note").waitFor();
   assert.match(await p.locator("#room-results-list").textContent(), /No completed results yet/);
@@ -137,7 +149,7 @@ for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`
   const input = p.locator("#message-input");
   await input.fill("Keep my channel draft");
   await f.open(); await f.read(); await f.ready();
-  const discuss = p.getByRole("button", { name: "Discuss result", exact: true });
+  const discuss = p.locator("#result-dialog").getByRole("button", { name: "Reply", exact: true });
   await discuss.focus(); await p.keyboard.press("Enter");
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
@@ -175,16 +187,42 @@ test("guest Results remain useful with large text and no creation controls", { t
   await f.capture("large-text");
 });
 
-test("a withdrawn result loses its discussion action without disturbing a draft", { timeout: 30000 }, async t => {
-  const f = await setup(t), p = f.p;
+for (const theme of ["dark", "light"]) for (const mobile of [false, true]) test(`a withdrawn result clears its reader: ${theme} ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { theme, mobile }), p = f.p;
   await p.locator("#message-input").fill("Keep this thought");
   await f.open(); await f.read(); await f.ready();
   await p.locator("#result-discuss").waitFor({ state: "visible" });
   const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
   f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
   await p.locator("#result-discuss").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#result-body").textContent(), "", "withdrawal clears already loaded text");
+  assert.equal(await p.locator("#result-body").isHidden(), true);
+  assert.match(await p.locator("#result-status").textContent(), /Text withdrawn/);
+  assert.equal(await p.locator("#result-copy-text").isHidden(), true);
+  assert.equal(await p.locator("#result-download").isHidden(), true);
+  await f.capture(`withdrawn-${theme}-${mobile ? "phone" : "desktop"}`);
   await p.locator("#close-result").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Keep this thought");
+});
+
+test("a delayed result response cannot restore withdrawn text", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open();
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; }), began = new Promise(resolve => { started = resolve; });
+  t.after(() => release());
+  await p.route("**/work-result?**", async route => {
+    const response = await route.fetch(); started(); await gate; await route.fulfill({ response });
+  });
+  await f.read(); await began;
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  // Wait for the live deletion before releasing the older exact-text response.
+  await p.waitForFunction(id => document.querySelector(`[data-message-record-id="${id}"]`)?.textContent.includes("deleted"), messageId);
+  release();
+  await p.locator("#result-status").filter({ hasText: "Text withdrawn" }).waitFor();
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.equal(await p.locator("#result-copy-text").isHidden(), true);
+  assert.equal(await p.locator("#result-discuss").isHidden(), true);
 });
 
 test("returning from a result preserves an uncertain send's exact target and retry", { timeout: 30000 }, async t => {
@@ -204,7 +242,9 @@ test("returning from a result preserves an uncertain send's exact target and ret
   await send.click();
   await p.locator("#composer-status").filter({ hasText: "Draft kept" }).waitFor();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
-  await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await f.read(); await f.ready();
+  assert.equal(await p.locator("#result-discuss").isDisabled(), true, "an uncertain send owns the existing reply target");
+  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
   await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
   assert.equal(attempts.length, 2);
@@ -301,12 +341,17 @@ for (const guest of [false, true]) test(`private result continuation keeps its a
 
 for (const mobile of [false, true]) test(`public result preserves an authored private draft: ${mobile ? "phone light" : "desktop dark"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
+  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "private-draft-thread", body: "Discuss the result here", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
   await p.locator("#message-input").fill("Private follow-up for the guest");
   await p.locator("#thread-back").click();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  assert.equal(await p.locator("#result-dialog").isVisible(), true, "protected destination draft refuses the handoff");
+  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
+  await p.locator(`[data-message-record-id="${resultId}"] [data-message-action="thread"]`).click();
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
 });
@@ -474,4 +519,62 @@ test("saved scoped channel: human assignment to inline result, continuation and 
     requests: traffic.length, finishedRequests: traffic.filter(row => row.status).length,
     requestsByMethod: Object.fromEntries([...new Set(traffic.map(row => row.method))].map(method => [method, traffic.filter(row => row.method === method).length])),
     scope: "local sign-in through saved scoped channel, deterministic MCP result, restart, continuation reply/ack; no external model or human think time" }));
+});
+
+for (const mobile of [false, true]) test(`older result resolves its reply conversation: ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { olderResult: true, mobile }), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
+});
+
+test("stalled clipboard recovers without losing the result or download", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
+  await p.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => new Promise(() => {}) } }));
+  await p.locator("#result-copy-text").click();
+  await p.locator("#result-use-status").filter({ hasText: "Could not copy" }).waitFor();
+  assert.equal(await p.locator("#result-copy-text").isDisabled(), false);
+  assert.equal(await p.locator("#result-download").isVisible(), true);
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
+});
+
+for (const delayed of [false, true]) test(`withdrawing prior version clears comparison: ${delayed ? "delayed response" : "already rendered"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  const previous = structuredClone(f.state().workItems["native-result"].receipt);
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_STARTED, { resolvedBlocker: "Ready to revise" });
+  const body = "Replacement result without the old note.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "replacement-audit", workItemId: "native-result", body });
+  f.change("native-result", T.WORK_COMPLETED, { summary: "Replacement", nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: previous.eventId, evidenceMessageId: "replacement-audit", evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
+  let release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
+  t.after(() => release());
+  if (delayed) await p.route("**/work-result?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("completionEventId") !== previous.eventId) return route.continue();
+    const response = await route.fetch(); began(); await gate; await route.fulfill({ response });
+  });
+  await f.open(); await f.read();
+  if (delayed) await started;
+  else await p.locator("#result-diff").filter({ hasText: "One useful result" }).waitFor();
+  const messageId = previous.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  await p.waitForFunction(id => document.querySelector(`[data-message-record-id="${id}"]`)?.textContent.includes("deleted"), messageId);
+  release();
+  await p.locator("#result-diff").filter({ hasText: "A version was withdrawn" }).waitFor();
+  await f.capture(delayed ? "withdrawn-comparison-delayed" : "withdrawn-comparison");
+  assert.equal((await p.locator("#result-diff").textContent()).includes("One useful result"), false, "withdrawn previous text must leave comparison too");
+});
+
+test("withdrawal keeps keyboard focus inside the reader", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-copy-text").focus();
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  await p.locator("#result-copy-text").waitFor({ state: "hidden" });
+  const focus = await p.evaluate(() => ({ id: document.activeElement.id, tag: document.activeElement.tagName,
+    visible: Boolean(document.activeElement.getClientRects().length), reader: document.querySelector("#result-dialog").contains(document.activeElement) }));
+  assert.equal(focus.reader && focus.visible, true, JSON.stringify(focus));
 });

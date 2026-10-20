@@ -1,5 +1,6 @@
+import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
-import { WORK_STATES as S, isRoomArchived, messageChannelId } from "./events.js";
+import { WORK_STATES as S, isRoomArchived } from "./events.js";
 import { matchesReceipt } from "./workflow.js";
 import { currentResult } from "./work-selectors.js";
 
@@ -12,6 +13,11 @@ export function installResultReader({ client, getState, getSession, sameSession,
   let resultView = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
+  function usableText(view) {
+    return view && view === resultView && view.loaded && !view.withdrawn && !view.error
+      && sameSession(view.generation, view.roomId, view.memberId)
+      && !getState().messages.find(message => message.id === view.textMessageId)?.deletedAt;
+  }
   function mountResultReader() {
     if (!resultView) return;
     const host = resultView.fromResults
@@ -29,23 +35,44 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
       || isRoomArchived(getState())) return null;
     // The ordinary thread composer does not inherit a DM audience.
-    return getState().messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
-      && !message.deletedAt && message.body === view.body && !getState().channels?.[messageChannelId(message)]?.archivedAt);
+    return getState().messages.find(message => canReplyToResult(getState(), message) && message.id === view.textMessageId && message.workItemId === view.workItemId
+      && message.body === view.body);
+  }
+  function needsConversation(view) {
+    return Boolean(usableText(view) && !isRoomArchived(getState()) && client.owesHistory
+      && !getState().messages.some(message => message.id === view.textMessageId));
   }
   function resultStatus() {
     mountResultReader();
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+    resultElement("close-result").textContent = uiText(view.fromResults ? "result.back" : "result.collapse");
+    const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
+    const textMessage = getState().messages.find(message => message.id === view.textMessageId);
+    if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };
+    if (view.withdrawn) {
+      view.body = "";
+      resultElement("result-body").textContent = "";
+      resultElement("result-body").hidden = true;
+      resultElement("result-original").hidden = true;
+      resultElement("result-use-status").textContent = "";
+      clearResultComparison(resultElement("result-diff"));
+    }
     const item = getState().workItems[view.workItemId];
     const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
       : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
     const retry = resultElement("result-retry");
-    resultElement("result-discuss").hidden = !resultDiscussionMessage(view);
-    resultElement("result-discuss").disabled = !canDiscuss();
+    resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
+    resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
     retry.hidden = !view.error && !view.retrying;
     retry.disabled = !view.error;
+    for (const action of ["result-copy-text", "result-download"]) {
+      resultElement(action).hidden = !usableText(view);
+      resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying);
+    }
+    if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement("close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
   function closeResult(restore = true) {
@@ -54,6 +81,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
+    resultElement("result-use-status").textContent = "";
+    resultElement("result-copy-text").hidden = true;
+    resultElement("result-download").hidden = true;
     clearResultComparison(resultElement("result-diff"));
     if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
       if (view.fromResults) {
@@ -65,12 +95,60 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
+  resultElement("result-copy-text").textContent = uiText("result.copyText");
+  resultElement("result-download").textContent = uiText("result.download");
+  resultElement("result-copy-text").addEventListener("click", async () => {
+    const view = resultView;
+    if (!usableText(view) || view.copying) return;
+    view.copying = true; resultStatus();
+    resultElement("result-use-status").textContent = "";
+    try {
+      let timer;
+      try {
+        await Promise.race([navigator.clipboard.writeText(view.body), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error()), 1500);
+        })]);
+      } finally { clearTimeout(timer); }
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copied");
+    } catch {
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copyFailed");
+    } finally {
+      view.copying = false;
+      if (resultView === view) resultStatus();
+    }
+  });
+  resultElement("result-download").addEventListener("click", () => {
+    const view = resultView;
+    if (!usableText(view)) return;
+    const url = URL.createObjectURL(new Blob([view.body], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = "result.txt";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
   resultElement("result-discuss").textContent = uiText("result.discuss");
-  resultElement("result-discuss").addEventListener("click", () => {
-    const message = resultDiscussionMessage(resultView);
-    if (!message || !canDiscuss()) return;
+  resultElement("result-discuss").addEventListener("click", async () => {
+    const view = resultView;
+    if (!view || view.resolving || !canDiscuss()) return;
+    if (needsConversation(view)) {
+      view.resolving = true; resultStatus();
+      resultElement("result-use-status").textContent = uiText("result.loadingConversation");
+      try {
+        await client.refresh(null, { fill: true });
+      } catch {
+        if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
+        return;
+      } finally {
+        view.resolving = false;
+        if (resultView === view) resultStatus();
+      }
+    }
+    if (resultView !== view || !usableText(view) || !canDiscuss()) return;
+    const message = resultDiscussionMessage(view);
+    if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
+    resultElement("result-use-status").textContent = "";
+    if (onDiscuss(message) === false) return;
     closeResult(false);
-    onDiscuss(message);
   });
   resultElement("result-original").addEventListener("click", () => {
     const view = resultView;
@@ -97,12 +175,14 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const message = getState().messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
         && message.body === value.result.text.body);
       view.discussionId = message?.id; view.body = value.result.text.body;
+      view.textMessageId = value.result.text.messageId;
       const original = getState().messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
       view.originalId = original?.id; resultElement("result-original").hidden = !original;
       view.loaded = true; view.retrying = false;
       if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
       resultStatus();
-      loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, resultElement("result-diff"), owns);
+      if (!view.withdrawn) loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text,
+        resultElement("result-diff"), () => owns() && !view.withdrawn);
     }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
   }
   resultElement("result-retry").addEventListener("click", () => {
@@ -124,6 +204,9 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;
       resultElement("result-discuss").hidden = true;
+      resultElement("result-copy-text").hidden = true;
+      resultElement("result-download").hidden = true;
+      resultElement("result-use-status").textContent = "";
       const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
       mountResultReader(); resultReader.hidden = false;

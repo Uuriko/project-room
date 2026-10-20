@@ -10,6 +10,12 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  // These specific browser modules were deliberately retired from v1. A
+  // pre-removal HEAD must not resurrect them in the working-tree fixture.
+  for (const retired of ['account-setup-ui.js', 'gmail-ui.js', 'inbox-client.js', 'inbox-quarantine-ui.js', 'inbox-send-ui.js', 'inbox-ui.js']) {
+    const path = 'src/' + retired;
+    if (!publicAssetPaths.includes(path) && !existsSync(join(repository, path))) paths.delete(path);
+  }
   paths.add('server/message-entity-projection.mjs');
   paths.add('server/message-replay-snapshot.mjs');
   paths.add('server/work-repository.mjs');
@@ -35,9 +41,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-draft.mjs');
   paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
-  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add('src/gmail-ui.js'); paths.add('src/account-setup-ui.js');
-  paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
-  paths.add('src/inbox-send-ui.js');
+  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs');
+
   paths.add('src/room-roster.js');
   paths.add('src/account-settings-ui.js');
   paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)

@@ -86,13 +86,51 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-copy-text").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "inline reading does not trap keyboard navigation");
   await f.page.keyboard.press("Shift+Tab");
-  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  assert.equal(await f.page.locator("#result-download").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
   assert.equal(await f.page.locator(`[data-read-result='${f.workItemId}']`).evaluate(el => el === document.activeElement), true);
+});
+
+test("exact result copy preserves text, reports failure and ignores a late completion after closing", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete();
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
+  await f.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async text => { window.copiedResult = text; throw new Error("Permission denied"); }
+    } });
+  });
+  await f.page.locator("#result-copy-text").click();
+  await f.page.getByText("Could not copy. Retry or download the text.", { exact: true }).waitFor();
+  assert.equal(await f.page.evaluate(() => window.copiedResult), f.body);
+  await f.page.evaluate(() => { navigator.clipboard.writeText = text => {
+    window.copiedResult = text; return new Promise(resolve => { window.finishCopy = resolve; });
+  }; });
+  await f.page.locator("#result-copy-text").click();
+  assert.equal(await f.page.locator("#result-copy-text").isDisabled(), true);
+  await f.page.locator("#close-result").click();
+  await f.page.evaluate(() => window.finishCopy());
+  assert.equal(await f.page.locator("#result-use-status").textContent(), "");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
+  await f.page.evaluate(() => { navigator.clipboard.writeText = async text => { window.copiedResult = text; }; });
+  await f.page.locator("#result-copy-text").click();
+  await f.page.getByText("Copied", { exact: true }).waitFor();
+  assert.equal(await f.page.evaluate(() => window.copiedResult), f.body);
+  const downloaded = f.page.waitForEvent("download");
+  await f.page.locator("#result-download").click();
+  const download = await downloaded;
+  assert.equal(download.suggestedFilename(), "result.txt");
+  const chunks = []; for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+  assert.equal(Buffer.concat(chunks).toString("utf8"), f.body);
 });
 
 test("native result uncertain save resumes exact text and command", { timeout: 25000 }, async t => {
@@ -382,7 +420,7 @@ test("a room session that ends under a live account says so and points back to t
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${origin}/?account=1`);
   await signInFixture(page, f.store.issueAccountAccessKey("admin-account"), { returnTo: `${origin}/?account=1` });
-  await page.locator("#inbox-panel").waitFor();
+  await page.locator("#account-rooms-panel").waitFor();
   await clickChrome(page, "#nav-rooms");
   await page.locator('[data-account-room="commons"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
@@ -427,4 +465,116 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
   await f.page.locator("#result-retry").click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
+});
+
+test("result reply refusal keeps the reader and private destination draft intact", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete();
+  await messageAction(f.page, "native-draft", "reply");
+  await f.page.locator("#message-input").fill("Private feedback draft");
+  await f.page.locator("#message-to-select").evaluate(el => { el.value = "human-checker"; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  await f.page.locator("#thread-back").click();
+  await f.page.locator("#message-input").fill("Room draft");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), true, "refused handoff leaves exact result visible");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Room draft", "refusal must not navigate or replace the current draft");
+  await f.page.locator("#close-result").click();
+  await messageAction(f.page, "native-draft", "reply");
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
+  assert.equal(await f.page.locator("#message-to-select").inputValue(), "human-checker");
+  await f.page.locator("#message-to-select").evaluate(el => { el.value = ""; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  await f.page.locator("#thread-back").click();
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#result-dialog").isVisible(), false);
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
+  assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
+});
+
+test("withdrawal clears an open review and prevents approval of missing text", { timeout: 25000 }, async t => {
+  const f = await setup(t, { review: true }); await f.open(); await f.textReady();
+  await f.save.focus();
+  f.send(T.MESSAGE_DELETED, { messageId: "native-draft", expectedMessageRevision: 0 });
+  await f.page.waitForFunction(() => document.querySelector('[data-message-record-id="native-draft"]')?.textContent.includes("deleted"));
+  assert.equal(await f.page.locator("#action-text-body").textContent(), "", "withdrawal clears the review copy too");
+  assert.equal(await f.save.isDisabled(), true, "withdrawn text cannot be approved from an open form");
+  assert.equal(await f.page.locator("#cancel-action").evaluate(node => node === document.activeElement), true);
+});
+
+test("late review text cannot restore a withdrawn result", { timeout: 25000 }, async t => {
+  const f = await setup(t, { review: true });
+  let release, began;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { began = resolve; });
+  t.after(() => release());
+  await f.page.route("**/work-result?**", async route => {
+    const response = await route.fetch(); began(); await gate; await route.fulfill({ response });
+  });
+  await f.open(); await started;
+  f.send(T.MESSAGE_DELETED, { messageId: "native-draft", expectedMessageRevision: 0 });
+  await f.page.waitForFunction(() => document.querySelector('[data-message-record-id="native-draft"]')?.textContent.includes("deleted"));
+  release();
+  await f.page.locator("#action-text-origin").filter({ hasText: "This text was withdrawn" }).waitFor();
+  assert.equal(await f.page.locator("#action-text-body").textContent(), "");
+  assert.equal(await f.save.isDisabled(), true);
+});
+
+// Composed from PR #4285: force offscreen focus before a node replacement.
+test("native result 320px: a card re-render rescues a focused View result control that starts off screen", { timeout: 30000 }, async t => {
+  const f = await setup(t, { review: true, viewport: { width: 320, height: 900 } });
+  const { page } = f;
+  const card = page.locator(`[data-work-record-id="${f.workItemId}"]`);
+  const read = card.locator("[data-read-result]");
+  await read.waitFor();
+  // Quiesce first: the app's initial snapshot renders can land after the
+  // first focus() and drop it, and a scroll forced mid-settle is clamped by
+  // the still-shifting layout. Poll until this control holds focus and its
+  // geometry is unchanged across two reads before forcing the start state.
+  let last = null, stable = 0;
+  await waitForState(page, "the View result control to hold focus in a settled layout", async () => {
+    await read.focus().catch(() => {});
+    const s = await page.evaluate(() => { const a = document.activeElement, b = a?.getBoundingClientRect?.();
+      return a?.dataset?.focusKey ? { y: Math.round(scrollY), top: Math.round(b.top), key: a.dataset.focusKey } : null; }).catch(() => null);
+    stable = s && s.key === `work-native-result:${f.workItemId}` && last && s.y === last.y && s.top === last.top ? stable + 1 : 0;
+    last = s;
+    return stable >= 1;
+  });
+  const displaced = await page.evaluate(() => {
+    const el = document.activeElement, r = el.getBoundingClientRect();
+    window.scrollTo({ top: Math.max(0, scrollY + r.top - (innerHeight + 60)), behavior: "instant" });
+    const now = el.getBoundingClientRect();
+    return { top: Math.round(now.top), h: innerHeight, scrollY: Math.round(scrollY), focused: document.activeElement === el };
+  });
+  assert.ok(displaced.focused && displaced.top >= displaced.h,
+    `precondition: the focused control starts off screen: ${JSON.stringify(displaced)}`);
+  const before = await read.elementHandle();
+  f.mutate(T.WORK_BLOCKED, { reason: "Synthetic pin update", nextAction: "Revisit later" });
+  // Settle means the swap actually landed: the pre-mutation node is
+  // disconnected and focus rests on a different, connected control with this
+  // work's focus key. (Checking the key alone would pass on the old node
+  // before the stream even delivers the mutation.)
+  const settled = await page.waitForFunction(({ old, id, key }) => new Promise(resolve => {
+    const ok = () => { const a = document.activeElement; return a && a !== old && !old.isConnected && a.dataset.focusKey === key
+      && a.closest("[data-work-record-id]")?.dataset.workRecordId === id && a.isConnected; };
+    if (!ok()) return resolve(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(ok())));
+  }), { old: before, id: f.workItemId, key: `work-native-result:${f.workItemId}` }, { timeout: 8000 }).then(() => true, () => false);
+  assert.ok(settled, "the re-render replaces the focused node and focus settles on the replacement control");
+  // Assert the final resting position, not a mid-burst sample: poll until
+  // the settled control is on screen and stays there across two reads.
+  const measure = () => page.evaluate(() => {
+    const el = document.activeElement, b = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(Math.max(0, Math.min(innerWidth - 1, b.left + b.width / 2)), Math.max(0, Math.min(innerHeight - 1, b.top + b.height / 2)));
+    return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: innerHeight, scrollY: Math.round(scrollY),
+      unobscured: hit === el || el.contains(hit) };
+  });
+  let after = await measure(), resting = 0;
+  await waitForState(page, "the settled focused control to rest on screen", async () => {
+    after = await measure();
+    resting = after.top < after.h && after.bottom > 0 && after.unobscured ? resting + 1 : 0;
+    return resting >= 2;
+  }, { timeout: 5000, interval: 300 }).catch(() => {});
+  assert.ok(after.top < after.h && after.bottom > 0 && after.unobscured,
+    `the settled focused control is on screen after the re-render: ${JSON.stringify({ displaced, after })}`);
 });

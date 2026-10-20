@@ -110,6 +110,7 @@ export async function openMemberProfile(page, memberId) {
 
 // Secondary controls moved into their existing account/room contexts.
 export async function clickChrome(page, selector) {
+  if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
@@ -131,6 +132,12 @@ export async function clickChrome(page, selector) {
     else await ensureSidebarClosed(page);
   }
   await control.click();
+}
+
+export async function returnToRoom(page, roomId = "commons") {
+  await clickChrome(page, "#nav-rooms");
+  await page.locator(`[data-account-room="${roomId}"]`).click();
+  await page.locator("#main").waitFor({ state: "visible" });
 }
 
 // Work cards expose one primary action; secondary actions use the native More
