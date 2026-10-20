@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { assistantDraftSink, runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
+import { assistantDraftSink, runCodexSharedAssistant, sharedReplyContext } from "../client/codex-shared-assistant.mjs";
 import { createSharedAssistantEnvelope } from "../client/codex-runtime.mjs";
 
 test("participant context cannot replace shared interaction guidance or its trust label", () => {
@@ -21,7 +21,7 @@ test("participant context cannot replace shared interaction guidance or its trus
   assert.ok(createSharedAssistantEnvelope({}).interaction.instructions.length > 0);
 });
 
-async function setup(t, during) {
+async function setup(t, during, { replyToResult = false } = {}) {
   const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const db = new DatabaseSync(":memory:");
@@ -35,7 +35,8 @@ async function setup(t, during) {
   };
   const message = (actor, id, body, references = {}) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type: "message.posted", data: { messageId: id, body, ...references } });
   await api("owner", { action: "configure", expectedRevision: 0, name: "Room", coordinatorMemberId: "producer" });
-  message("owner", "shared-question", "Improve the login flow"); message("guest", "shared-friend", "Keep the page simple", { replyToId: "shared-question" });
+  if (replyToResult) message("producer", "prior-result", "Original result to revise");
+  message("owner", "shared-question", "Improve the login flow", replyToResult ? { replyToId: "prior-result" } : {}); message("guest", "shared-friend", "Keep the page simple", { replyToId: "shared-question" });
   await api("owner", { action: "invoke", runId: "shared", sourceMessageId: "shared-question" });
   await api("guest", { action: "contribute", runId: "shared", sourceMessageId: "shared-friend", expectedRevision: 0 });
   const calls = [], listeners = new Set(); let state = "inProgress", turnNumber = 0; const pastTurns = [];
@@ -70,6 +71,10 @@ test("two humans' public ask runs through Codex and atomic publication without p
   assert.deepEqual(envelope.context.inputs.map(x => x.memberId), ["owner", "guest"]);
   assert.equal(envelope.context.inputs[1].replyToId, "shared-question", "the agent receives the same reply target the human selected");
   assert.equal(envelope.context.inputs[0].replyToId, undefined);
+  assert.deepEqual(envelope.context.inputs[1].replyContext, {
+    messageId: "shared-question", memberId: "owner", revision: 0, channelId: "general",
+    contentStatus: "quoted", body: "Improve the login flow", truncated: false
+  });
   assert.equal(envelope.context.inputs.length, 2, "references do not pull unrelated history into the request");
   assert.equal(Object.keys(f.f.store.room("commons").state.replyRequests ?? {}).length, 0);
   const retry = await f.run(); assert.equal(retry.result.resultMessageId, result.result.resultMessageId);
@@ -459,4 +464,53 @@ test("observed failed turn remains failed if the transport disconnects immediate
   };
   assert.equal((await f.run()).result.status, "failed");
   assert.equal(f.calls.filter(x => x.method === "turn/start").length, 1);
+});
+
+
+test("direct reply context is bounded, attributed and never expands private or unrelated messages", async () => {
+  const source = { id: "followup", replyToId: "result", channelId: "general" };
+  const result = { id: "result", authorId: "producer", revision: 3, body: "😀".repeat(8001) };
+  const quoted = await sharedReplyContext(source, async () => result);
+  assert.equal(Array.from(quoted.body).length, 8000);
+  assert.equal(quoted.truncated, true);
+  assert.equal(quoted.memberId, "producer");
+  assert.equal(quoted.revision, 3);
+  for (const inaccessible of [null, { ...result, toMemberId: "owner" }, { ...result, deletedAt: "now" },
+    { ...result, channelId: "private" }, { ...result, id: "other" }]) {
+    assert.deepEqual(await sharedReplyContext(source, async () => inaccessible), { messageId: "result", contentStatus: "unavailable" });
+  }
+  for (const status of [403, 404]) assert.equal((await sharedReplyContext(source, async () => { throw { status }; })).contentStatus, "unavailable");
+  await assert.rejects(sharedReplyContext(source, async () => { throw new Error("Network unavailable"); }), /Network unavailable/);
+  assert.equal(await sharedReplyContext({}, async () => { throw new Error("Must not read ambient history"); }), undefined);
+});
+
+
+test("editing a quoted result during execution reconciles the new reference before publication", async t => {
+  let fixture;
+  const f = await setup(t, async ({ turnNumber, finish }) => {
+    if (turnNumber === 1) fixture.store.command(fixture.keys.producer, "commons", {
+      id: randomUUID(), type: "message.edited", data: { messageId: "prior-result", expectedMessageRevision: 0, body: "Corrected result to revise" }
+    });
+    finish("completed");
+  }, { replyToResult: true });
+  fixture = f.f;
+  assert.equal((await f.run()).result.status, "done");
+  const turns = f.calls.filter(call => call.method === "turn/start");
+  assert.equal(turns.length, 2);
+  const first = JSON.parse(turns[0].params.input[0].text).context.inputs[0];
+  const changed = JSON.parse(turns[1].params.input[0].text).context.inputs[0];
+  assert.equal(first.replyContext.body, "Original result to revise");
+  assert.equal(changed.replyContext.body, "Corrected result to revise");
+  assert.equal(changed.replyContext.revision, 1);
+  await f.run();
+  assert.equal(f.calls.filter(call => call.method === "turn/start").length, 2, "retries do not execute the follow-up twice");
+});
+
+test("previews revalidate changed context even when run revision is unchanged", async t => {
+  const clock = draftClock(t), sent = []; let current = true, checks = 0;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async value => sent.push(value.body),
+    attemptId: "a", requestKey: "k", inputIds: ["m"], isCurrent: async () => { checks++; return current; } });
+  sink.emit(publicDelta("Old context")); await clock.settle();
+  current = false; sink.emit(publicDelta(" continued after withdrawal")); await clock.tick(500); await sink.close();
+  assert.deepEqual(sent, ["Old context"], `context checked ${checks} times`);
 });

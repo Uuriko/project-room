@@ -1,4 +1,4 @@
-<!-- generated-by: gen-doc-index@1 · source: 2feda87c770902f07a2828b139cd3df4d3d49815 · inputs: docs/doc-registry.json@82138f16 -->
+<!-- generated-by: gen-doc-index@1 · source: 6d84149b558e003fef1d880f7194f75c788dff5e · inputs: docs/doc-registry.json@b26fe8b4 -->
 # Documentation index
 
 One-screen map of the documentation set, generated from the doc

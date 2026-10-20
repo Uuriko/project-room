@@ -27,7 +27,7 @@
   <section id="join-enter" class="join-card" hidden>
     <h2>Enter your invite code</h2>
     <p id="join-enter-room" class="form-hint" hidden><span id="join-enter-room-text"></span> <a id="join-enter-open" href="#">Open the room</a></p>
-    <p>Were you given an invite code (like <code>RM-XXXXXX</code>) instead of a link? Paste the code &mdash; or paste the whole invite link &mdash; and we&rsquo;ll show you the room&rsquo;s invite before you join. The code decides the room; the next screen names it before you confirm.</p>
+    <p>Paste an invite code or link. You’ll see the room before joining.</p>
     <form id="join-enter-form">
       <label>Invite code or link
         <input id="join-enter-code" type="text" autocomplete="off" spellcheck="false" placeholder="RM-&hellip;">
@@ -37,11 +37,11 @@
       </div>
       <p id="join-enter-status" class="form-status" role="status" aria-live="polite"></p>
     </form>
-    <p class="form-hint">No code? Request access below &mdash; or <a id="join-enter-home" href="{{ASSET_BASE}}/">sign in</a> if you&rsquo;re already a member. &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+    <p class="form-hint">Already a member? <a id="join-enter-home" href="{{ASSET_BASE}}/">Log in</a>.</p>
   </section>
 
-  <section id="join-request" class="join-card" hidden>
-    <h2>Request access</h2>
+  <details id="join-request" class="join-card" hidden>
+    <summary>No invite? Request access</summary>
     <p>Ask the room owner to let you in. They see your name, your note, and your optional referrer &mdash; nothing else.</p>
     <form id="join-request-form" autocomplete="off">
       <div id="join-request-room-row">
@@ -65,7 +65,7 @@
       </div>
     </form>
     <p id="join-request-status" class="form-status" role="status" aria-live="polite"></p>
-  </section>
+  </details>
 
   <section id="join-consent" class="join-card" hidden>
     <h2>You&rsquo;re invited to <span id="join-room-title">this room</span></h2>
