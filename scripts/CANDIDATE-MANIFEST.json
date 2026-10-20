@@ -138,7 +138,7 @@
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
     "src/work-item-session.js": "sha256:ceb06395aa89c1edf06b5cd4fe863a2de1438aad73fe3abe33009bf357920864",
     "src/work-loops.js": "sha256:93c681edd6cdd34702088505d4f0fdebab289fefa937cfc972b0a546fe0d92eb",
-    "src/work-packet.js": "sha256:f9a95e18f257f42a7a954b333badb175370fd8ed5c5791849324d4a4e696b32a",
+    "src/work-packet.js": "sha256:b2741eedd7007f3d77af5e1ae0ba9b8bda4a59c3ccd6be313c7d3d7f9e86e903",
     "src/work-reducers.js": "sha256:ac83c996954fdf0b301d6bb27776f929b5bf33bd92f6f4b1b493cba7c3abff63",
     "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
