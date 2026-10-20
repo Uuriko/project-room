@@ -74,6 +74,15 @@
         "openWorldHint": false
       }
     },
+    "room_begin_work": {
+      "inputSchema": "dfbf4a6b79964c4e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -191,8 +200,35 @@
         "openWorldHint": true
       }
     },
+    "room_read_work": {
+      "inputSchema": "ad0ec36250888c94",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_record_handoff": {
+      "inputSchema": "2f690e02f2c13878",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_release_claim": {
       "inputSchema": "997d52d3df093d0c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_reply": {
+      "inputSchema": "7da2ddf2ad93430b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -216,6 +252,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_submit_text_result": {
+      "inputSchema": "15543437625fbdc2",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_who": {
@@ -2509,6 +2554,15 @@
         "openWorldHint": false
       }
     },
+    "room_begin_work": {
+      "inputSchema": "dfbf4a6b79964c4e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -2626,8 +2680,35 @@
         "openWorldHint": true
       }
     },
+    "room_read_work": {
+      "inputSchema": "ad0ec36250888c94",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_record_handoff": {
+      "inputSchema": "2f690e02f2c13878",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_release_claim": {
       "inputSchema": "997d52d3df093d0c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_reply": {
+      "inputSchema": "7da2ddf2ad93430b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2651,6 +2732,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_submit_text_result": {
+      "inputSchema": "15543437625fbdc2",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_who": {
