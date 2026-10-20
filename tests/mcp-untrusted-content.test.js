@@ -170,7 +170,15 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
     assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
   }
-  const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
+  // Same explicit accounting for the MCP bounty parity verbs
+  // (bounty_decline / bounty_reject): advertised once on full, never core,
+  // and excluded from the existing-catalog budget rather than consuming it.
+  const parityTools = new Set(["bounty_decline", "bounty_reject"]);
+  for (const name of parityTools) {
+    assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
+    assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
+  }
+  const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name) && !parityTools.has(tool.name));
   assert.ok(existingTools.length <= 115,
     `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget remains 115 tools`);
   for (const name of ["room_read_messages", "room_read_request", "room_needs_me"]) {
