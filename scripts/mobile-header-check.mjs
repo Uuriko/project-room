@@ -49,7 +49,7 @@ async function assertMoreLabel(page) {
   assert.equal(new Set(lines).size, 1, `More must remain one readable line, not stacked characters (line tops: ${lines})`);
 }
 
-const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#room-more > summary", "#session-menu-button"];
+const headerControls = ["#sidebar-toggle", "#topbar-updates", "#tasks-board-open", "#topbar-search-toggle", "#room-more > summary", "#session-menu-button"];
 const longRoomName = "Project Room — A deliberately long research and delivery room name";
 
 async function assertReadableWords(page, selectors) {
