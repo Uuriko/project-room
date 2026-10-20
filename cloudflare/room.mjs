@@ -1,6 +1,7 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
+import { unsubscribeSecretFromEnv } from "../server/email-unsubscribe.mjs";
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { DurableObject } from 'cloudflare:workers';
@@ -142,6 +143,7 @@ export class ProjectRoom extends DurableObject {
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      unsubscribeSecret: unsubscribeSecretFromEnv(env),
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
