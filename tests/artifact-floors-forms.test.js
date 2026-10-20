@@ -47,6 +47,29 @@ test('through evaluation: word floors count whitespace-separated tokens', () => 
   assert.equal(evaluateArtifactFloors(['The artifact is a glossary of 300–600 words.'], words300, {}).failures.length, 0);
 });
 
+test('verbatim founding criterion: a bare length statement floors (REV-FIXES-1-AMEND)', () => {
+  // The EXP-13R founding criterion's verbatim text (receipt
+  // pwr_7580d250f35a, pw-garden-glossary-20261005-r2, criterion 2) names
+  // no subject noun at all — the length IS the subject — so the subject
+  // gate never opened for it even after the REV-FIXES-1 widening.
+  assert.deepEqual(minimumOf('Total length 300-600 words'), { kind: 'minimum_length', value: 300, unit: 'words' });
+  assert.deepEqual(minimumOf('Total length 300–600 words.'), { kind: 'minimum_length', value: 300, unit: 'words' });
+  // A length statement about something else is still not bare: other
+  // words remain once the cue, numbers, and unit are stripped.
+  assert.equal(minimumOf("The summary's length is 200–400 characters."), undefined);
+});
+
+test('through evaluation under the verbatim phrasing', () => {
+  const criterion = 'Total length 300-600 words';
+  const words289 = Array.from({ length: 289 }, (_, i) => `term${i}`).join(' ');
+  const result = evaluateArtifactFloors([criterion], words289, {});
+  assert.equal(result.checked, 1);
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures[0].detail, /at least 300 words; the artifact has 289/);
+  const words300 = Array.from({ length: 300 }, (_, i) => `term${i}`).join(' ');
+  assert.equal(evaluateArtifactFloors([criterion], words300, {}).failures.length, 0);
+});
+
 test('negative corpus: criteria stating no artifact length minimum invent no floor', () => {
   // A minimum stated about something else is still not an artifact floor.
   assert.equal(minimumOf('The summary is at least 200 characters.'), undefined);

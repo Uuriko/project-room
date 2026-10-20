@@ -28,6 +28,10 @@
 //     characters" — the floor is the smallest whole unit meeting it)
 //     floor the same way (REV-FIXES-1, from REV-PRS-1 F-4296-1: the
 //     EXP-13R glossary criterion is a word range and escaped entirely).
+//     The founding criterion's verbatim text ("Total length 300-600
+//     words", receipt pwr_7580d250f35a) names no subject at all — the
+//     length is the subject — so a criterion that is nothing but a
+//     length statement floors too (REV-FIXES-1-AMEND).
 //     A negated minimum ("need not be at least 200 characters") still
 //     floors: the parser stays literal in the safe direction — it can
 //     only block a PASS, never admit one (REV-PRS-1 F-4296-4, accepted
@@ -52,6 +56,24 @@ const RANGE_FORMS = [
 // the submitted artifact: its own names in task criteria. A minimum
 // stated about anything else (a summary, a cover note) is not a floor.
 const SUBJECT_FORM = /\b(?:artifact|submission|response|deliverable)\b/i;
+// A criterion that is nothing but a length statement ("Total length
+// 300-600 words") names no subject noun because the length IS the
+// subject — there is nothing else in the criterion the minimum could
+// be about — so it qualifies when stripping the length cue, the
+// numbers, the unit, and the connectives leaves nothing behind. A
+// length statement about something else keeps other words under the
+// same stripping ("The summary is 200–400 characters", "The summary's
+// length is 200–400 characters") and still floors nothing
+// (REV-FIXES-1-AMEND: the EXP-13R founding criterion is verbatim the
+// bare shape and escaped the subject gate entirely).
+const LENGTH_CUE = /\b(?:total\s+)?(?:length|word[\s-]?count|character[\s-]?count)\b/gi;
+const isBareLengthStatement = criterion => criterion
+  .replace(LENGTH_CUE, ' ')
+  .replace(/\d[\d,]*(?:\.\d+)?/g, ' ')
+  .replace(/\b(?:characters?|chars?|bytes?|words?)\b/gi, ' ')
+  .replace(/\b(?:at\s+least|no\s+fewer\s+than|not\s+less\s+than|minimum|between|and|or\s+more|of|is)\b/gi, ' ')
+  .replace(/[+–—\-:.,;]/g, ' ')
+  .trim() === '';
 const CITATION_FORM = /cit(?:e|es|ed|ing)\s+(?:the\s+)?file\s+`?([A-Za-z0-9_.\-/]+)`?/i;
 const TASK_ID_FORM = /(?:states?|names?|includes?|gives?|reports?)\s+(?:the\s+)?task[\s-]?id\b/i;
 const PATH_LIKE = token => token.includes('/') || /\.[A-Za-z0-9]{1,10}$/.test(token);
@@ -72,7 +94,7 @@ const unitOf = raw => /^b/i.test(raw) ? 'bytes' : /^w/i.test(raw) ? 'words' : 'c
 export function statedArtifactFloors(criterion) {
   if (typeof criterion !== 'string') return [];
   const floors = [];
-  if (SUBJECT_FORM.test(criterion)) {
+  if (SUBJECT_FORM.test(criterion) || isBareLengthStatement(criterion)) {
     let minimum = null;
     const consider = (value, unit) => {
       if (value === null) return;
