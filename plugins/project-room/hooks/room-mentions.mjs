@@ -7,6 +7,10 @@
 // The connection comes from ROOM_AGENT_CONFIG/connection.json ({origin,
 // roomId, token}). The token is sent only as a bearer header and is never
 // printed. Every failure fails open: the session starts and stops normally.
+// Claude Code and Codex both substitute ${CLAUDE_PLUGIN_ROOT} in hook commands
+// (Codex also offers PLUGIN_ROOT). The seen-mention state goes to the plugin
+// data directory when the host provides one (PLUGIN_DATA / CLAUDE_PLUGIN_DATA),
+// otherwise next to the private connection.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -84,6 +88,13 @@ async function readStdin() {
   try { return text.trim() ? JSON.parse(text) : {}; } catch { return {}; }
 }
 
+export function stateDir(env, conn) {
+  for (const key of ["PLUGIN_DATA", "CLAUDE_PLUGIN_DATA"]) {
+    if (typeof env[key] === "string" && env[key].trim()) return env[key].trim();
+  }
+  return conn.dir;
+}
+
 export async function main(mode, { env = process.env, fetchImpl = fetch, input = {}, out = s => process.stdout.write(s) } = {}) {
   let conn;
   try { conn = readConnection(env); } catch { conn = null; }
@@ -93,15 +104,16 @@ export async function main(mode, { env = process.env, fetchImpl = fetch, input =
   }
   try {
     const rows = await unreadMentions(conn, fetchImpl);
-    const seen = loadSeen(conn.dir);
+    const dir = stateDir(env, conn);
+    const seen = loadSeen(dir);
     if (mode === "session-start") {
       for (const row of rows) seen.ids.add(row.messageEventId);
       seen.blocks = 0;
-      saveSeen(conn.dir, seen);
+      saveSeen(dir, seen);
       out(`${sessionStartText(conn, rows)}\n`);
     } else if (mode === "stop") {
       const decision = stopDecision(conn, rows, seen, input);
-      saveSeen(conn.dir, seen);
+      saveSeen(dir, seen);
       if (decision) out(`${JSON.stringify(decision)}\n`);
     }
   } catch {

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { main } from "../plugins/project-room/hooks/room-mentions.mjs";
+import { main, stateDir } from "../plugins/project-room/hooks/room-mentions.mjs";
 
 const TOKEN = "secret-token-value";
 const setup = () => {
@@ -66,5 +66,25 @@ test("hooks.json wires both events to the script in the plugin root", () => {
   for (const [event, mode] of [["SessionStart", "session-start"], ["Stop", "stop"]]) {
     const command = hooks[event][0].hooks[0].command;
     assert.equal(command, `node "\${CLAUDE_PLUGIN_ROOT}/hooks/room-mentions.mjs" ${mode}`);
+  }
+});
+
+test("seen state uses the host plugin data dir when present (Codex PLUGIN_DATA, Claude CLAUDE_PLUGIN_DATA)", async () => {
+  const env = setup();
+  const data = mkdtempSync(join(tmpdir(), "room-hooks-data-"));
+  assert.equal(stateDir({ ...env, PLUGIN_DATA: data }, { dir: env.ROOM_AGENT_CONFIG }), data);
+  assert.equal(stateDir({ ...env, CLAUDE_PLUGIN_DATA: data }, { dir: env.ROOM_AGENT_CONFIG }), data);
+  assert.equal(stateDir(env, { dir: env.ROOM_AGENT_CONFIG }), env.ROOM_AGENT_CONFIG);
+  await run("session-start", { ...env, PLUGIN_DATA: data }, fetchWith([row("m9")]));
+  assert.deepEqual(JSON.parse(readFileSync(join(data, "hook-mentions-seen.json"), "utf8")).ids, ["m9"]);
+});
+
+test("hook commands only use a plugin-root variable both hosts substitute", () => {
+  const hooks = JSON.parse(readFileSync(new URL("../plugins/project-room/hooks/hooks.json", import.meta.url), "utf8")).hooks;
+  for (const entries of Object.values(hooks)) {
+    for (const { command } of entries[0].hooks) {
+      const vars = [...command.matchAll(/\$\{(\w+)\}/g)].map(m => m[1]);
+      assert.ok(vars.length > 0 && vars.every(v => v === "CLAUDE_PLUGIN_ROOT" || v === "PLUGIN_ROOT"), command);
+    }
   }
 });
