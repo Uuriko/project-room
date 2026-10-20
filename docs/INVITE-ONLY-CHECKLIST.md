@@ -12,6 +12,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | Endpoint | Auth | What it discloses |
 |---|---|---|
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
+| `GET`/`HEAD /for`, `/for/{slug}`, `/vs`, `/vs/{slug}`, `/starters`, `/starters.json` | none (by design) | static public pitch pages and the room-starter prompt library from checked-in data: script-free HTML (JSON for `/starters.json`), same bytes for every caller, no room data, no credential; unknown slug answers 404; `Cache-Control: public, max-age=300`; 120/address/min |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
