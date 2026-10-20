@@ -33,24 +33,19 @@ check(new URL(location.href).searchParams.get('room')?.startsWith('personal-'), 
 fill('#message-input', 'A real message from the native WebKit acceptance journey.');
 document.querySelector('#message-form').requestSubmit();
 await wait(() => [...document.querySelectorAll('[data-message-record-id]')].some(node => node.textContent.includes('A real message from the native WebKit acceptance journey.')), 'message receipt');
-// Name editing stays available later through real private-account controls.
-if (!document.querySelector('#account-settings-button').getClientRects().length) document.querySelector('#session-menu-button').click();
-check(document.querySelector('#account-settings-button').getClientRects().length, 'visible Account settings');
-document.querySelector('#account-settings-button').click();
-await wait(() => document.querySelector('#nav-inbox')?.getClientRects().length, 'visible Inbox navigation after account settings');
-check(document.querySelector('#nav-inbox').getClientRects().length, 'visible Inbox navigation'); document.querySelector('#nav-inbox').click();
-await wait(() => document.querySelector('#inbox-panel')?.hidden === false && document.querySelector('.inbox-gmail details > summary'), 'private inbox');
-document.querySelector('.inbox-gmail details > summary').click();
-await wait(() => document.querySelector('#inbox-setup')?.getClientRects().length, 'optional Personalize setup'); document.querySelector('#inbox-setup').click();
-await wait(() => document.querySelector('#setup-name')?.getClientRects().length, 'later name editing'); fill('#setup-name', 'Mac acceptance');
-[...document.querySelectorAll('#account-setup-dialog button')].find(button => button.textContent === 'Done').click();
-await wait(() => !document.querySelector('#account-setup-dialog')?.open, 'later name saved');
+// Profile editing stays available without leaving the conversation.
+if (!document.querySelector('#account-profile-button').getClientRects().length) document.querySelector('#session-menu-button').click();
+check(document.querySelector('#account-profile-button').getClientRects().length, 'visible Profile control');
+document.querySelector('#account-profile-button').click();
+await wait(() => document.querySelector('#account-profile-dialog')?.open && document.querySelector('#account-profile-body [name="displayName"]')?.getClientRects().length, 'profile form');
+fill('#account-profile-body [name="displayName"]', 'Mac acceptance');
+document.querySelector('#account-profile-body form[data-form="account-profile"]').requestSubmit();
+await wait(() => !document.querySelector('#account-profile-dialog')?.open, 'profile saved');
 const profile = await (await fetch('/api/account/profile', { headers: accountHeaders })).json();
 check(profile.displayName === 'Mac acceptance', 'optional account name persisted');
-check((await rooms()).length === 1, 'later name editing cannot duplicate the room');
-document.querySelector('#nav-rooms').click();
-await wait(() => document.querySelector('#main')?.hidden === false && document.querySelector('#message-input'), 'return to conversation');
-check(new URL(location.href).searchParams.get('room') === firstRoom, 'later personalization keeps original personal room');
+check((await rooms()).length === 1, 'profile editing cannot duplicate the room');
+check(document.querySelector('#main')?.hidden === false && !document.querySelector('#message-input').disabled, 'conversation remains usable');
+check(new URL(location.href).searchParams.get('room') === firstRoom, 'profile editing keeps original personal room');
 // Existing room membership names are independent from the account profile.
 check(document.querySelector('#identity-label').textContent === 'Owner', 'profile editing preserves existing room membership identity');
 fill('#message-input', 'Keep this native draft when I close the window.');
