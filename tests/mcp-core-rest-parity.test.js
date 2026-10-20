@@ -41,7 +41,8 @@ export const CORE_REST_TWINS = Object.freeze({
   room_read_work: ["GET /api/rooms/{roomId}/work-context"],
   room_begin_work: [commands, { event: "work.started" }],
   room_submit_text_result: [commands, { event: "work.completed" }],
-  room_record_handoff: [commands, { event: "work.handoff_recorded" }]
+  room_record_handoff: [commands, { event: "work.handoff_recorded" }],
+  room_propose_work: [commands, { event: "work.proposed" }]
 });
 
 // Static join documents, served as plain files rather than API routes.

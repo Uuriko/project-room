@@ -173,6 +173,15 @@
         "openWorldHint": false
       }
     },
+    "room_propose_work": {
+      "inputSchema": "a2f024c70bf9a3e9",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_read_many": {
       "inputSchema": "1963190aa102bef7",
       "annotations": {
@@ -2649,6 +2658,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_propose_work": {
+      "inputSchema": "a2f024c70bf9a3e9",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
       }
