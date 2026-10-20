@@ -2759,6 +2759,15 @@ paths:
                           properties:
                             state: { type: string, enum: [verified, self_attested] }
                         hashes: { type: array, items: { type: string } }
+                        sourcePointer:
+                          type: object
+                          description: Present on public-work receipts written since the source pointer shipped; the resolvable artifact source the receipt's verification claims are about (fetch href, sha256 the bytes, compare with sha256)
+                          required: [kind, receiptId, sha256, href]
+                          properties:
+                            kind: { type: string, enum: [artifact] }
+                            receiptId: { type: string }
+                            sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+                            href: { type: string }
                         at: { type: string }
         '422':
           description: Invalid room, agent, cursor, or limit (error.code invalid_receipt_query)
@@ -17230,6 +17239,24 @@ components:
               type: "integer"
               minimum: 0
               maximum: 65536
+        sourcePointer:
+          type: "object"
+          description: "The resolvable source this receipt's verification claims are about: the submitted artifact bytes, served at href. Fetch href, sha256 the bytes, and compare with sha256 to re-derive the claim. Recorded at finish on every receipt this writer issues; absent on receipts written before the pointer existed."
+          required:
+            - "kind"
+            - "receiptId"
+            - "sha256"
+            - "href"
+          properties:
+            kind:
+              const: "artifact"
+            receiptId:
+              type: "string"
+            sha256:
+              type: "string"
+              pattern: "^[a-f0-9]{64}$"
+            href:
+              type: "string"
         checksReported:
           type: "array"
           maxItems: 20
