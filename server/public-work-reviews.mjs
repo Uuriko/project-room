@@ -216,6 +216,51 @@ export class PublicWorkReviews {
     this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
     projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
   }
+  // FIX-SETTLE-SNAPSHOT: a decision is the settlement, and settlement is
+  // the last moment the full claim record is reachable from the receipt.
+  // After it, the task packet deliberately nulls leaseExpiresAt for any
+  // receipted task (public-work-claims.mjs packet()) and the receipt
+  // itself never carried claim fields, so a later re-checker has no
+  // ground truth to re-derive against — EXP-13R's escrow verdicts
+  // rested on internal consistency alone for exactly this reason. In
+  // the same transaction as the verdict, freeze the claim record as it
+  // stood — lease fields, the criteria set, and the verification facts
+  // this decision completes — onto the receipt's own record, where the
+  // canonical receipt read already serves the rest of the receipt's
+  // evidence. Written once: a decision is final (review_final above)
+  // and journal replays return before this point. The reviewer reason
+  // stays member-side, as on every other receipt face.
+  stampClaimSnapshot(receiptId, scope, review, settlement) {
+    const row = this.db.prepare('SELECT receipt_json, namespace_key, artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+    if (!row) return;
+    const receipt = JSON.parse(row.receipt_json);
+    let claim = null, delivery = null;
+    try {
+      const item = this.store.workClaims.get(row.namespace_key, receipt.taskId);
+      if (item) {
+        claim = { owner: item.owner ?? null, state: item.state ?? null,
+          claimedAt: item.claimedAt ?? null, leaseStartAt: item.leaseStartAt ?? null,
+          leaseExpiresAt: item.leaseExpiresAt ?? null };
+        if (item.delivery) delivery = { digest: item.delivery.digest ?? null,
+          deliveredBy: item.delivery.deliveredBy ?? null, deliveredAt: item.delivery.deliveredAt ?? null };
+      }
+    } catch { claim = null; delivery = null; }
+    receipt.claimSnapshot = { schema: 'public-work-claim-snapshot/1', taskId: receipt.taskId,
+      receiptId, generation: receipt.generation, termsVersion: receipt.termsVersion ?? null,
+      settledAt: review.decision?.at ?? null, decision: review.decision?.decision ?? null,
+      claim, delivery,
+      criteria: Array.isArray(scope.offer.acceptanceCriteria) ? scope.offer.acceptanceCriteria : [],
+      verification: { tier: receipt.verification ?? null, state: receipt.state ?? null,
+        verdict: review.verification?.verdict ?? null, reviewerKind: review.verification?.reviewerKind ?? null,
+        verifiedAt: receipt.verified?.at ?? null,
+        executedChecks: Array.isArray(receipt.executedChecks) ? receipt.executedChecks : [],
+        checksReported: Array.isArray(receipt.checksReported) ? receipt.checksReported : [],
+        criteriaAttestation: receipt.criteriaAttestation ?? null, deliveryDigest: receipt.deliveryDigest ?? null },
+      settlement: settlement ? { phase: settlement.phase ?? null, challengeEndsAt: settlement.challengeEndsAt ?? null,
+        escrowReceipt: settlement.escrowReceipt ? { kind: settlement.escrowReceipt.kind ?? null, lotId: settlement.escrowReceipt.lotId ?? null } : null } : null };
+    this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
+    projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
+  }
   decide(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'decide', input); }
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
@@ -288,6 +333,10 @@ export class PublicWorkReviews {
       const settlement = action === 'decide' && ['accepted', 'rejected'].includes(input.decision)
         ? this.settlementService().settleOnVerdict(roomId, scope.receipt.taskId, { decision: input.decision, reason: input.reason }) : null;
       if (action === 'decide' && input.decision === 'accepted') this.stampPublicReceiptVerified(receiptId, current);
+      // The claim snapshot freezes after settlement and the verified
+      // stamp, still inside this transaction, so it records the final
+      // state and tier the decision produced (see stampClaimSnapshot).
+      if (action === 'decide' && ['accepted', 'rejected'].includes(input.decision)) this.stampClaimSnapshot(receiptId, scope, current, settlement);
       // W3: the public_work_reviews row is the current-verdict pointer;
       // this append-only row is the history it used to destroy. Written
       // after settlement and the verified stamp, inside the same
