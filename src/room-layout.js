@@ -82,13 +82,3 @@ export function sidebarSectionsInUse(state) {
     referrals: humans.length > 1 || members.some(m => m.referredBy)
   };
 }
-
-// An open panel stays, so a live render never pulls a section out from under
-// someone reading it.
-export function syncSidebarSections(state) {
-  const inUse = sidebarSectionsInUse(state);
-  for (const [id, show] of [['#land-queue-panel', inUse.landing], ['#referral-panel', inUse.referrals]]) {
-    const panel = document.querySelector(id);
-    if (panel) panel.hidden = Boolean(panel.closest("#room-sidebar")) && !show && !panel.open;
-  }
-}

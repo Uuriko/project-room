@@ -5,7 +5,7 @@ import { uiText } from "./strings.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
-import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
+import { installRoomLayout } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
@@ -1923,7 +1923,6 @@ function render() {
   syncWorkForm();
   syncActionForm();
   syncChatSuggestions();
-  syncSidebarSections(state);
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
@@ -4845,7 +4844,7 @@ function roomActionEntries() {
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", always: true },
-    { id: "landing", label: "Landing queue", words: "land merge pull request review queue", always: true },
+    { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true },
     { id: "permissions", label: "Room permissions", words: "trust cross owner collaboration wake", always: true },
     { id: "settings", label: "Settings", words: "advanced configuration", always: true },
     { id: "usage", label: "Usage", words: "spend seats sessions caps limits budget headroom", always: true }
@@ -5006,7 +5005,6 @@ function chooseRoomAction(id) {
   if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
   if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
-  if (id === "landing") { openSettings("land-queue-panel"); return; }
   if (id === "permissions") { openSettings("room-permissions"); return; }
   if (id === "settings") { openSettings(); return; }
   if (id === "usage") { openSettings("usage-panel"); return; }
@@ -7811,9 +7809,6 @@ const ready = (async () => {
   $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
-  const priorEntries = roomActionEntries;
-  roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
-    ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
