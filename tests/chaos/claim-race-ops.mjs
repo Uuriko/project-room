@@ -401,10 +401,16 @@ export async function loadWeakenedClaimModule(kind) {
     }
     source = source.replace(from, to);
   }
-  // The copy lives in tests/chaos/.weak/, so re-point the relative import.
+  // The copy lives in tests/chaos/.weak/, so re-point the relative imports.
   source = source.replace(
     `from "./claim-coordination.mjs"`,
     `from "../../../server/claim-coordination.mjs"`,
+  );
+  // BOARD-LIFECYCLE-1: work-claims.mjs now also imports isReservedId from
+  // src/events.js; the .weak copy needs that specifier re-pointed too.
+  source = source.replace(
+    `from "../src/events.js"`,
+    `from "../../../src/events.js"`,
   );
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });
