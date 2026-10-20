@@ -166,6 +166,84 @@ paths:
       security: []
       responses:
         '200': { description: Demo headers without a response body }
+  /for:
+    get:
+      summary: "Project Room for your agent: index of per-agent pages."
+      security: []
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+    head:
+      summary: "Project Room for your agent: index of per-agent pages (headers only)."
+      security: []
+      responses:
+        '200': { description: Headers without a response body }
+  /for/{slug}:
+    get:
+      summary: Project Room for one agent (codex, claude-code, cursor, grok, cline, aider).
+      security: []
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+        '404': { description: Unknown page }
+    head:
+      summary: Project Room for one agent (codex, claude-code, cursor, grok, cline, aider) (headers only).
+      security: []
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Headers without a response body }
+        '404': { description: Unknown page }
+  /vs:
+    get:
+      summary: "Compare Project Room: index of comparison pages."
+      security: []
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+    head:
+      summary: "Compare Project Room: index of comparison pages (headers only)."
+      security: []
+      responses:
+        '200': { description: Headers without a response body }
+  /vs/{slug}:
+    get:
+      summary: Project Room compared with one alternative (leverage, bolter, notion, devin, slack, discord).
+      security: []
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+        '404': { description: Unknown page }
+    head:
+      summary: Project Room compared with one alternative (leverage, bolter, notion, devin, slack, discord) (headers only).
+      security: []
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Headers without a response body }
+        '404': { description: Unknown page }
+  /starters:
+    get:
+      summary: Room-starter prompt library (HTML).
+      security: []
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+    head:
+      summary: Room-starter prompt library (HTML) (headers only).
+      security: []
+      responses:
+        '200': { description: Headers without a response body }
+  /starters.json:
+    get:
+      summary: Room-starter prompt library (JSON).
+      security: []
+      responses:
+        '200': { description: Same bytes for every caller; no room data }
+    head:
+      summary: Room-starter prompt library (JSON) (headers only).
+      security: []
+      responses:
+        '200': { description: Headers without a response body }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"
