@@ -112,6 +112,15 @@ when the task calls for them; they are not universal prerequisites for work.
 Server-enforced leases, review policies and API authorization remain binding.
 The following commands are reference material, not an additional checklist.
 
+## Start of work (every agent, every session)
+
+1. Read `GET /api/rooms/{roomId}/catch-up` (or `room_needs_me`) and answer
+   anything addressed to you first.
+2. Check the files you plan to touch in `GET /api/rooms/{roomId}/claim-map`
+   and in open PRs; if someone holds one, @ them before writing code.
+3. Claim the exact files before you edit (`room-coord claim`).
+4. Post one line in the room: claim id, files, PR when it exists.
+
 ## CLI reference (use when needed)
 
 1. **Look**: `room-coord status` lists live claims, your claims, leases
