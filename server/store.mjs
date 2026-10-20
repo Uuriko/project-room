@@ -1,3 +1,4 @@
+import { HeldMessages, holdsFor } from "./held-messages.mjs"; // Opt-in held messages.
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
@@ -6503,28 +6504,53 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
-      // #3345: a mention target with no identity link on either table can
-      // never be woken — that used to be a silent `continue`; it is now a
-      // counted, journaled loss (the member exists; the fabric cannot
-      // address them).
-      if (!identityId) {
-        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
-          event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+      // Opt-in held messages: the recipient's person asked to approve wakes
+      // from other people's agents first. Off unless that person turned it on.
+      const holder = holdsFor(this.db, roomId, state.members, senderMemberId, memberId);
+      if (holder) {
+        (this.heldMessages ??= new HeldMessages(this)).hold({ roomId, messageId: data.messageId ?? eventId, eventId,
+          recipientMemberId: memberId, senderMemberId, kind, person: holder });
         continue;
       }
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
-      if (woken && signal) {
-        this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
-        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
-        // offline agent's push subscription; the inbox pull carries the body.
-        // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: identityId,
-          eventType: kind === "dm" ? "dm.posted" : "message.posted",
-          roomId, id: data.messageId ?? eventId, ts: this.now() });
-      }
+      this.deliverMentionWake(roomId, memberId, kind, data.messageId ?? eventId);
     }
+  }
+
+  // One mention wake to one agent member: identity lookup, wake if offline,
+  // ping and push. Shared by live posts and approved held messages.
+  deliverMentionWake(roomId, memberId, kind, messageId) {
+    const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+    // #3345: a mention target with no identity link on either table can
+    // never be woken — that used to be a silent `continue`; it is now a
+    // counted, journaled loss (the member exists; the fabric cannot
+    // address them).
+    if (!identityId) {
+      recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+      return;
+    }
+    const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+      agentId: identityId, kind, roomId, messageId });
+    if (woken && signal) {
+      this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
+      // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
+      // offline agent's push subscription; the inbox pull carries the body.
+      // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
+      this.agentHeartbeats.pushNotify({ identityId: identityId,
+        eventType: kind === "dm" ? "dm.posted" : "message.posted",
+        roomId, id: messageId, ts: this.now() });
+    }
+  }
+
+  // An approved held message: the mention inbox row it skipped, then the wake.
+  deliverHeldWake(roomId, { eventId, messageId, memberId, kind }) {
+    const nowMs = this.now();
+    if (kind === "mention") {
+      this.db.prepare(`INSERT OR IGNORE INTO mention_states
+        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at) VALUES(?,?,?,?,?,?,NULL)`)
+        .run(roomId, eventId, memberId, "delivered", nowMs, nowMs + this.mentionTimeoutMsFor(roomId));
+    }
+    this.deliverMentionWake(roomId, memberId, kind, messageId);
   }
 
   // #658: mention lifecycle tracking. Called inside command()'s transaction
@@ -6587,6 +6613,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       if (toMemberId && toMemberId !== memberId) continue;
+      if (holdsFor(this.db, roomId, members, senderMemberId, memberId)) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
     // plan-squads: @squad/<name> fans out to one mention row per active
