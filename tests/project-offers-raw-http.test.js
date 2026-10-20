@@ -17,7 +17,7 @@ import { createRoomServer } from '../server/http.mjs';
 
 const offerInput = (offerId = 'raw-http-offer') => ({ requestId: `create-${offerId}`, offerId,
   reviewerMemberIds: ['owner'], terms: { repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'task', title: 'Review a small patch', summary: 'Fix one reproducible bug.',
-    acceptanceCriteria: ['Include a regression test'], reward: { kind: 'cash', unit: 'USD', amountMinor: '10000', terms: 'Subject to separately agreed payment setup.' }, approvalPolicy: { mode: 'human' } } });
+    acceptanceCriteria: ['Include a regression test'], reward: { kind: 'work_trade', unit: 'credit', amountMinor: '1000' }, approvalPolicy: { mode: 'human' } } });
 
 async function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'project-offer-raw-'));
