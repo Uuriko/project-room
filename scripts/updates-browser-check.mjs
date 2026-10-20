@@ -114,7 +114,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#room-actions-query").fill("Catch up");
   await page.locator("[data-room-action=catch-up]").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await selectUpdatesFilter("Saved", "saved");
+  await selectUpdatesFilter("Needs me", "needs");
   await page.locator(".updates-row").waitFor();
   assert.match(await page.locator(".updates-row").innerText(), /read/);
   await page.locator('.updates-row [data-update-action="done"]').click();
@@ -287,8 +287,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
 
   // Another real client handles the item while its task is open. Returning to
-  // Saved keeps the filter and uses its tab when the original row disappeared.
-  await selectUpdatesFilter("Saved", "saved");
+  // Needs me keeps the filter and uses its tab when the original row disappeared.
+  await selectUpdatesFilter("Needs me", "needs");
   await openReview(review.id).press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   const sessionResponse = await page.request.get(`${origin}/api/session`);
@@ -300,9 +300,9 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(handled.status(), 200, await handled.text());
   await page.locator("#work-navigation-return").press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "needs");
   assert.equal(await row(review.id).count(), 0);
-  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.getByRole("tab", { name: "Needs me" }).getAttribute("aria-selected"), "true");
   assert.equal(await page.locator("#message-input").inputValue(), draft);
   await selectUpdatesFilter("All activity", "all");
   await openReview(review.id).waitFor();
@@ -998,10 +998,8 @@ async function holdUpdatesPage(page, state = "all") {
 
 test("Updates page older authorized work, keep honest counts and restore the captured page budget at 1280px and 390px", { timeout: 120000 }, async t => {
   const f = await pagingJourney(t);
-  const { page, store, review, pages, requests } = f;
+  const { page, review, pages, requests } = f;
   await f.markOutside(review, "read");
-  const sharedBefore = JSON.stringify(store.room("commons"));
-  const commandsBefore = f.countCommands();
   await f.openUpdates("needs");
   await f.waitRows(pages[0].items);
   assert.equal(await page.locator("#updates-count").textContent(), "50+");
@@ -1012,22 +1010,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   await f.waitRows(pages[0].items);
   assert.equal(await page.locator("#updates-count").textContent(), "100+", "the separate bounded badge fetch is also visibly truncated");
   assert.doesNotMatch(await page.locator("#topbar-updates").getAttribute("aria-label"), /100 need you$/);
-  await f.selectUpdatesFilter("Saved", "saved");
-  await f.waitRows([]);
-  assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/,
-    "zero read rows in the first prefix says nothing about later pages");
-  assert.match(await page.locator("#updates-summary").textContent(), /\b0 loaded\b.*\b50 checked\b/);
-  await f.loadMore([review], { keyboard: true });
-  assert.match(await f.row(review.id).innerText(), / · read/);
-  assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b100 checked\b/);
-  await f.loadMore([review], { keyboard: true });
-  assert.equal(await page.evaluate(() => document.activeElement?.dataset.updateFilter), "saved",
-    "an exhausted Saved page with no new matching row returns keyboard focus to its selected tab");
-  assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b126 checked\b/);
-  assert.equal(f.countCommands(), commandsBefore, "Saved remains the read-state alias and creates no save operation");
-  assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
   await page.locator("#updates-close").click();
-
   for (const [index, width] of [1280, 390].entries()) {
     await page.setViewportSize({ width, height: 844 });
     await f.openUpdates();
@@ -1097,19 +1080,19 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false, "hasMore=false exposes no enabled continuation");
   assert.equal(await page.locator("#updates-count").textContent(), "100+", "the last activity page is never mistaken for the actionable total");
 
-  // An older Saved target can disappear while away, without replacing Saved
+  // An older actionable target can disappear while away, without replacing Needs me
   // with another filter or treating the first two pages as the whole list.
-  await f.selectUpdatesFilter("Saved", "saved");
-  await f.loadMore([review]);
+  await f.selectUpdatesFilter("Needs me", "needs");
+  await f.loadMore((await f.readPages("actionable")).slice(0, 2).flatMap(value => value.items));
   await f.action(review.id, "open").click();
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await f.markOutside(review, "done");
   const beforeMissingReturn = requests.length;
   await page.locator("#work-navigation-return").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
+  await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "needs");
   assert.equal(await f.row(review.id).count(), 0);
-  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.getByRole("tab", { name: "Needs me" }).getAttribute("aria-selected"), "true");
   assert.equal(requests.length - beforeMissingReturn, 2);
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/);
 
@@ -1358,7 +1341,7 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
     assert.equal(await f.action(pages[0].items[0].id, "open").isDisabled(), true,
       "a page transition cannot launch a row action from its older list");
     if (transition === "filter") {
-      await f.selectUpdatesFilter("Saved", "saved");
+      await f.selectUpdatesFilter("Mentions", "mentions");
       await f.waitRows([]);
     } else {
       if (transition === "Escape") await page.keyboard.press("Escape");
@@ -1387,8 +1370,8 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
       assert.equal(await page.evaluate(() => document.activeElement?.dataset.workRecordId), review.sourceRef.workItemId);
     } else {
       await f.waitRows(transition === "filter" ? [] : pages[0].items);
-      assert.equal(await page.getByRole("tab", { name: transition === "filter" ? "Saved" : "All activity" }).getAttribute("aria-selected"), "true");
-      assert.match(await page.locator("#updates-summary").textContent(), transition === "filter" ? /\b0 loaded\b.*\b50 checked\b/ : /\b50 loaded\b/);
+      assert.equal(await page.getByRole("tab", { name: transition === "filter" ? "Mentions" : "All activity" }).getAttribute("aria-selected"), "true");
+      assert.match(await page.locator("#updates-summary").textContent(), transition === "filter" ? /\b0 loaded\b/ : /\b50 loaded\b/);
       await page.locator("#updates-close").click();
     }
   }

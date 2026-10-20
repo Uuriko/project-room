@@ -1,4 +1,4 @@
-// Updates destination. Needs me, Mentions, All activity, and Saved.
+// Updates destination. Needs me, Mentions, and All activity.
 // The badge counts actionable items only. Opening a row marks it read.
 // Done and Clear are the handled and dismissed marks. Keyboard reachable,
 // and the rows stay usable at 390px.
@@ -6,8 +6,7 @@
 const FILTERS = [
   { id: "needs", label: "Needs me" },
   { id: "mentions", label: "Mentions" },
-  { id: "all", label: "All activity" },
-  { id: "saved", label: "Saved" }
+  { id: "all", label: "All activity" }
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
@@ -15,12 +14,11 @@ const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
 export function queryFor(filter) {
   if (filter === "mentions") return "state=actionable&kinds=mention";
-  if (filter === "all" || filter === "saved") return "state=all";
+  if (filter === "all") return "state=all";
   return "state=actionable";
 }
 
 export function visible(items, filter) {
-  if (filter === "saved") return items.filter(item => item.state === "read");
   return items;
 }
 
@@ -43,6 +41,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   dialog.setAttribute("aria-labelledby", "updates-title");
   dialog.innerHTML = `<div class="dialog-head"><h2 id="updates-title">Updates</h2><button id="updates-close" class="button ghost" type="button">Close</button></div><div class="updates-filters" role="tablist" aria-label="Update filters"></div><ol class="updates-list"></ol><div id="updates-summary-status" role="status" aria-live="polite" aria-atomic="true"><span id="updates-page-announcement" class="sr-only"></span><p id="updates-summary" class="form-hint"></p><p id="updates-partial" class="form-hint"></p></div><button id="updates-load-more" class="button secondary" type="button" hidden>Load more</button><p id="updates-status" class="form-hint" role="status"></p>`;
   (host ?? document.body).append(dialog);
+  const history = document.querySelector("#topbar-catchup");
+  const attention = document.querySelector("#needs-attention");
+  if (history) dialog.append(history);
+  if (attention) dialog.append(attention);
   const tabs = dialog.querySelector(".updates-filters");
   const list = dialog.querySelector(".updates-list");
   const status = dialog.querySelector("#updates-status");
@@ -121,7 +123,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function paintPaging() {
     const pageCopy = loadedPages ? `Page ${loadedPages} loaded. ` : "";
     if (pageAnnouncement.textContent !== pageCopy) pageAnnouncement.textContent = pageCopy;
-    const summaryCopy = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}${filter === "saved" ? ` · ${items.length} checked` : ""}`;
+    const summaryCopy = `${visible(items, filter).length} loaded${hasMore ? " · More available" : ""}`;
     const partialCopy = incomplete ? "Some update sources are unavailable. This list may be incomplete." : "";
     if (summary.textContent !== summaryCopy) summary.textContent = summaryCopy;
     if (partial.textContent !== partialCopy) partial.textContent = partialCopy;

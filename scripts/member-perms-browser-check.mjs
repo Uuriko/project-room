@@ -67,6 +67,7 @@ async function setup(t, { width = 1440 } = {}) {
     await page.goto(origin);
     await signInFixture(page, keys[memberId]);
     await page.locator("#main").waitFor({ state: "visible" });
+    if (["owner", "admin"].includes(memberId)) await page.locator("#topbar-updates").click();
     return page;
   };
   const api = async (path, memberId = "owner", data) => {

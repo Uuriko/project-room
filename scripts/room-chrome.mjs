@@ -39,6 +39,7 @@ export async function ensurePeopleOpen(page) {
 export async function openCatchUp(page) {
   const dialog = page.locator("#catchup-dialog");
   if (!(await dialog.evaluate(node => node.open))) {
+    if (!(await page.locator("#updates-dialog").isVisible())) await page.locator("#topbar-updates").click();
     await page.locator("#topbar-catchup").click();
   }
   await dialog.waitFor({ state: "visible" });

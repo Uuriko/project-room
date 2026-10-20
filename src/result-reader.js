@@ -65,7 +65,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
     resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
       : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
-      : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
+      : view.loaded ? `Submitted by ${memberLabel(view.reportedById)}` : "Loading exact text…");
     const retry = resultElement("result-retry");
     resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);

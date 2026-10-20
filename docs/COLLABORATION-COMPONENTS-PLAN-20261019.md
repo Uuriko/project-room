@@ -326,3 +326,44 @@ Interactive local browser inspection covered login, invite entry, invalid-invite
 Do not interpret passing functional checks as design approval. No new feature or source patch was made during this audit; the identified repairs require the narrow design above and regression evidence. The previous broad suite's PNG golden mismatch and exact-head hosted qualification remain recorded rather than silently discarded.
 
 Second batch `/tmp/room-current-qa-core.log`: 61/61 passed, covering agent sign-in, accountless join restoration, auth return, design cohesion, portable work including lost-response retries, result copying, room-only navigation, result privacy/withdrawal, delayed comparisons and focus recovery. Combined audit: 77 passes, zero failures, zero skips. All tests ran against unchanged runtime source `6b7fe857`. Audit conclusion: exercised core workflows pass; five specific functional/design findings remain open.
+
+## Product subtraction implementation — 2026-10-19
+
+John approved removing unnecessary interface and code before further expansion.
+The implementation keeps conversation as home and reduces competing destinations:
+
+- Updates is the single top-level attention entry. Catch-up and owner decisions
+  move inside it; the separate Activity dialog and conversation preview are deleted.
+  The misleading Saved update filter is removed. Explicit message bookmarks and
+  per-reader read boundaries remain intact.
+- Delete the human Squads, referrals, bounties, retention, open-questions, landing
+  queue and recipe-catalog modules, their exclusive tests/styles and all static
+  packaging references. Keep persisted records, server APIs and agent capabilities.
+  This is a human product-surface cut, not data destruction or an API migration.
+- Remove public-work and receipts links from login. Invite entry leads with the
+  invite field; request access remains available through a deliberate disclosure.
+- Replace six agent-specific paste blocks with one deployment-aware onboarding
+  block. Preserve invitation fragments, advertised proof difficulty, identity
+  reuse, credential isolation and truthful connection limits.
+- Remove revision/hash boilerplate from the ordinary action heading while
+  retaining exact-result identity and provenance in the underlying reader.
+
+Implementation order: remove entry points and callers, delete dedicated modules,
+repair asset manifests, adapt browser journeys to the remaining routes, then
+verify the same draft, permission, pagination and stale-response guarantees.
+Do not weaken those guarantees to accommodate a smaller interface.
+
+Retained deliberately: attention Refresh is still a recovery control for failed
+or externally changing queues; notification settings, connection controls,
+permission decisions, stored obligations, and diagnostic access remain available.
+No backend economic feature or persistent schema is removed in this pass.
+
+Local evidence so far: lint passes with zero errors (289 existing warnings),
+43 client/Updates/roster unit tests pass, seven access/owner paging/race journeys
+pass at desktop and phone widths, and the native WKWebView first-use journey
+passes account creation, room entry, confirmed message, durable draft and close/
+reopen. The native screenshot is `/tmp/room-subtraction-native.png`. Separate
+entry/collaboration/reconnect checks passed 10 cases; onboarding HTTP tests pass
+2 cases. Remaining navigation/permissions and broader affected qualification are
+recorded at the next checkpoint. These are simulated participant journeys, not
+real-human research. No production deployment or notarized distribution claimed.
