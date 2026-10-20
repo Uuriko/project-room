@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { completeReplyWake } from '../client/wake-completion.mjs';
 
 function fixture() {
-  const signal = { signalId: 'signal', kind: 'mention', roomId: 'room', messageId: 'original' };
+  const signal = { signalId: 'signal', kind: 'mention', roomId: 'room', messageId: 'original', createdAt: 1000 };
   const original = { id: 'original', authorId: 'human', body: 'Question' };
-  const answer = { id: 'answer', authorId: 'agent', replyToId: 'original', body: 'Response' };
+  const answer = { id: 'answer', authorId: 'agent', replyToId: 'original', body: 'Response', createdAt: new Date(1001).toISOString() };
   let reads = 0, acks = 0;
   const options = { connection: { memberId: 'agent', roomId: 'room' }, hostId: 'host', signalId: 'signal', replyMessageId: 'answer',
     client: { messageThread: async id => ({ roomId: 'room', thread: id === 'original' ? original : answer }) },
@@ -27,7 +27,7 @@ test('durable reply is verified before ACK; retry never posts', async () => {
 });
 test('foreign, unrelated, deleted, empty or wrong-audience replies never ACK', async () => {
   for (const patch of [{ authorId: 'other' }, { replyToId: 'other' }, { id: 'other' },
-    { deletedAt: 'now' }, { body: '' }, { toMemberId: 'human' }]) {
+    { deletedAt: 'now' }, { body: '' }, { createdAt: new Date(999).toISOString() }, { toMemberId: 'human' }]) {
     const f = fixture(); Object.assign(f.answer, patch);
     await assert.rejects(completeReplyWake(f.options), /reply_evidence_not_confirmed/);
     assert.equal(f.counts().acks, 0);

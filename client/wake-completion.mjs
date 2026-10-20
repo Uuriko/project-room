@@ -26,7 +26,9 @@ export async function completeReplyWake({ connection, hostId, signalId, replyMes
     || original?.id !== signal.messageId || original.deletedAt || original.requestKind === 'reply'
     || answer?.id !== replyMessageId || answer.authorId !== connection.memberId
     || answer.replyToId !== signal.messageId || answer.deletedAt
-    || typeof answer.body !== 'string' || !answer.body.trim()) fail();
+    || typeof answer.body !== 'string' || !answer.body.trim()
+    || !Number.isFinite(signal.createdAt) || !Number.isFinite(Date.parse(answer.createdAt))
+    || Date.parse(answer.createdAt) < signal.createdAt) fail();
   // A private notification must stay in its original conversation; a public
   // reply cannot establish private handling, or vice versa.
   if (original.toMemberId
