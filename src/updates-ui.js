@@ -180,6 +180,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       const actions = document.createElement("div");
       actions.className = "updates-actions";
       for (const [name, label] of Object.entries(ACTION_LABELS)) {
+        // Owner decisions are below this list; do not offer an Open action
+        // unless this row has a supported work or conversation destination.
+        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId) continue;
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";

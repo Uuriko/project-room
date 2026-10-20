@@ -230,6 +230,10 @@ test("late owner attention page cannot return after signing in as a different me
 
 test("human attention hides shadow diagnostics until Advanced and reviews the actual receipt work", { timeout: 60000 }, async t => {
   const f = await setup(t, { pending: 1 }), { page } = f;
+  await page.locator(".updates-row").first().waitFor();
+  const update = page.locator(".updates-row").filter({ hasText: "Paging applicant 001 asks to join" });
+  assert.equal(await update.count(), 1);
+  assert.equal(await update.locator('[data-update-action="open"]').count(), 0, "a join decision has no unsupported Open action");
   f.store.jevShadow.record({ gate: "receipt", roomId: "commons", subject: "test-handoff", path: "work-claim:done", score: 0.1, decision: "escalate", escalate: true });
   await page.locator("#attention-refresh").click();
   await page.waitForFunction(() => document.querySelector("#attention-status").textContent === "");
