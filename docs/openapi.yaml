@@ -141,8 +141,8 @@ paths:
                   evaluatedAt: { type: string, format: date-time }
                   consistency: { type: string, enum: [live] }
         '401': { description: Invalid or missing credential }
-        '403': { description: Scope, binding or active membership denied }
-        '422': { description: Invalid query, duplicate parameter or incompatible cursor }
+        '403': { description: "Scope, binding or active membership denied" }
+        '422': { description: "Invalid query, duplicate parameter or incompatible cursor" }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/github/pr-webhook:
     post:
@@ -1109,7 +1109,7 @@ paths:
           description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
         '401': { description: Credential expired or revoked }
         '403': { description: Current membership or rooms read scope required }
-        '404': { description: Channel absent, or requested message absent or not visible in the selected scope }
+        '404': { description: "Channel absent, or requested message absent or not visible in the selected scope" }
         '413': { description: One current message exceeds the bounded read byte limit }
         '422': { description: Invalid selection }
   /api/inbox/setup:
@@ -1471,7 +1471,7 @@ paths:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
+        '429': { description: "stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects" }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
@@ -1707,7 +1707,7 @@ paths:
             and `total` stays the full match count.
       responses:
         '401': { description: unauthenticated }
-        '422': { description: invalid_search (bad q, kind, or limit) or invalid_search_cursor }
+        '422': { description: "invalid_search (bad q, kind, or limit) or invalid_search_cursor" }
         '200':
           description: Search results
           content:
@@ -3111,9 +3111,9 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '201': { description: Identity linked }
-        '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
+        '403': { description: "access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents" }
         '404': { description: identity_not_found - no such agent identity }
-        '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
+        '409': { description: "identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity" }
         '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array)" }
     delete:
       summary: Unlink an agent identity from a room
@@ -3766,8 +3766,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '401': { description: unauthenticated or inactive membership }
-        '403': { description: access_denied, insufficient_scope, or csrf_denied }
-        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '403': { description: "access_denied, insufficient_scope, or csrf_denied" }
+        '409': { description: "nothing_to_request, request_conflict, too_many_requests, or room_archived" }
         '422': { description: invalid_request or invalid_session_binding }
         '429': { description: rate_limited }
     get:
@@ -3848,7 +3848,7 @@ paths:
                   agents: { type: array, items: { type: object } }
                   generatedAt: { type: string, format: date-time }
         '401': { description: unauthenticated or inactive membership }
-        '403': { description: owner_required, access_denied, or insufficient_scope }
+        '403': { description: "owner_required, access_denied, or insufficient_scope" }
         '404': { description: room_not_found }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/members/me/wants-work:
@@ -3937,7 +3937,7 @@ paths:
                   lastWakeAt: { type: string, format: date-time, nullable: true }
                   foldedSinceWake: { type: integer }
         '401': { description: unauthenticated or inactive membership }
-        '403': { description: agent_only, access_denied, or insufficient_scope }
+        '403': { description: "agent_only, access_denied, or insufficient_scope" }
         '404': { description: room_not_found }
         '409': { description: room_archived }
         '422': { description: invalid_request }
@@ -4012,8 +4012,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoomPermissionRequestRecord'
         '401': { description: unauthenticated or inactive membership }
-        '403': { description: access_denied, insufficient_scope, or csrf_denied }
-        '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
+        '403': { description: "access_denied, insufficient_scope, or csrf_denied" }
+        '409': { description: "nothing_to_request, request_conflict, too_many_requests, or room_archived" }
         '422': { description: invalid_request or invalid_session_binding }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/access-requests/{requestId}/decide:
@@ -4062,7 +4062,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoomPermissionRequestRecord'
-        '403': { description: access_denied (including a named permission the reviewer lacks), insufficient_scope, or csrf_denied }
+        '403': { description: "access_denied (including a named permission the reviewer lacks), insufficient_scope, or csrf_denied" }
         '404': { description: not_found }
         '409': { description: already_decided or stale_membership; current room write policy may also refuse the decision }
         '422': { description: invalid_request }
@@ -5169,7 +5169,7 @@ paths:
                   hasMore: { type: boolean }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
-        '422': { description: invalid_claim_input — unknown or repeated query parameter, bad limit/cursor, bad view, or state outside the claim states }
+        '422': { description: "invalid_claim_input — unknown or repeated query parameter, bad limit/cursor, bad view, or state outside the claim states" }
         '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Register a work claim item
@@ -5264,9 +5264,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
-        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low }
-        '422': { description: invalid_claim_input, work_assignee_unknown_member, or squad_unknown }
+        '403': { description: "work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
+        '409': { description: "work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low" }
+        '422': { description: "invalid_claim_input, work_assignee_unknown_member, or squad_unknown" }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/config:
     get:
@@ -5305,7 +5305,7 @@ paths:
       responses:
         '200': { description: The saved caps }
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/status:
@@ -5390,7 +5390,7 @@ paths:
                       updated: { type: integer }
                       rateLimited: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -5529,7 +5529,7 @@ paths:
                       medianMs: { type: number, nullable: true }
                       measured: { type: integer }
         '401': { description: unauthenticated }
-        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
+        '403': { description: "not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted)" }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}:
     get:
@@ -5652,7 +5652,7 @@ paths:
                         items: { type: string }
                         description: Advisory per-kind reading list for the claim holder
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '404': { description: work_claim_not_found }
         '409':
           description: |
@@ -5858,11 +5858,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, guest_scope_denied, or existing membership/autonomy refusal }
+        '403': { description: "work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, guest_scope_denied, or existing membership/autonomy refusal" }
         '404': { description: work_claim_not_found }
         '409':
           description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, room_archived, or room_event_budget_low. Read the current item before deciding whether a fresh same-round request is appropriate
-        '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
+        '422': { description: "invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL" }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
@@ -5906,7 +5906,7 @@ paths:
                         owner: { type: [string, 'null'] }
                         title: { type: string }
         '401': { description: unauthenticated }
-        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
+        '403': { description: "not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted)" }
         '404': { description: work_claim_not_found }
         '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -5978,7 +5978,7 @@ paths:
                     items: { type: string }
                   truncated: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare; also insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
+        '403': { description: "work_not_owner — the claim's owner, the room owner, or manage_claims may declare; also insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly" }
         '404': { description: work_claim_not_found }
         '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
@@ -6031,7 +6031,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_review_rejected (review policy not satisfied), work_claims_not_permitted (no review or attest rights), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_review_rejected (review policy not satisfied), work_claims_not_permitted (no review or attest rights), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '404': { description: work_claim_not_found }
         '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
@@ -6083,9 +6083,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry), or room_event_budget_low }
+        '409': { description: "work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry), or room_event_budget_low" }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
@@ -6123,9 +6123,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
+        '403': { description: "work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly" }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
+        '409': { description: "work_claim_terminal (already done or closed), or room_event_budget_low" }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/cancel:
@@ -6161,9 +6161,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
+        '403': { description: "work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly" }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
+        '409': { description: "work_claim_terminal (already done or closed), or room_event_budget_low" }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/reassign:
@@ -6206,7 +6206,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '404': { description: work_claim_not_found }
         '409':
           description: |
@@ -6215,7 +6215,7 @@ paths:
             files overlap another live lease. room_event_budget_low when the
             room is nearly out of room events (owner and claim managers may
             still write).
-        '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
+        '422': { description: "invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member" }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/board/v2/claims:
     get:
@@ -6905,7 +6905,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: "work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly" }
         '404': { description: work_claim_not_found }
         '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
@@ -7949,7 +7949,7 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '409': { description: dispute_exists }
-        '422': { description: invalid_bounty_input, dispute_unavailable }
+        '422': { description: "invalid_bounty_input, dispute_unavailable" }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
     post:
       summary: Rule on a dispute (seated decider only)
@@ -8227,7 +8227,7 @@ paths:
           description: The pull request was already queued (duplicate true), or a requestId replay of the original response
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
-        '409': { description: land_queue_full, too_many_open_claims when the named claimant already holds the room's open-claim cap, or idempotency_conflict when requestId was reused for a different operation or is still in flight }
+        '409': { description: "land_queue_full, too_many_open_claims when the named claimant already holds the room's open-claim cap, or idempotency_conflict when requestId was reused for a different operation or is still in flight" }
         '422': { description: invalid_land_item }
         '503':
           description: >-
@@ -8885,7 +8885,7 @@ paths:
       responses:
         '200': { description: "{ unpublished: true, kind, id }" }
         '401': { description: Sign in required }
-        '403': { description: Operator is unset, or this account is not the operator }
+        '403': { description: "Operator is unset, or this account is not the operator" }
         '422': { description: Invalid body }
   /api/operator/export:
     get:
@@ -8984,7 +8984,7 @@ paths:
         '200': { description: "{ ok, verified, events, ... } restore summary" }
         '400': { description: Body could not be read }
         '401': { description: Wrong operator token }
-        '404': { description: Restore is not configured, or no backup under that key }
+        '404': { description: "Restore is not configured, or no backup under that key" }
         '405': { description: Method is not POST }
         '409': { description: Store already holds rooms }
         '422': { description: Backup is malformed or failed verification }
@@ -9771,7 +9771,7 @@ paths:
                 code: { type: string }
       responses:
         '200': { description: "{status: verified, email}" }
-        '401': { description: account_session_required, invalid_session, or invalid_email_code }
+        '401': { description: "account_session_required, invalid_session, or invalid_email_code" }
         '403': { description: origin_denied or csrf_denied }
         '422': { description: invalid_email_code }
         '429': { description: rate_limited }
@@ -10339,7 +10339,7 @@ paths:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
-        '409': { description: room_exists, request_conflict, or pilot_limit }
+        '409': { description: "room_exists, request_conflict, or pilot_limit" }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/oauth/sessions:
@@ -10587,7 +10587,7 @@ paths:
                   pattern: '^ub1_[a-f0-9]{64}$'
                   description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
-        '200': { description: The update, with state read when it was unread. duplicate is true on an exact retry. }
+        '200': { description: "The update, with state read when it was unread. duplicate is true on an exact retry." }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
         '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
@@ -10625,7 +10625,7 @@ paths:
                   pattern: '^ub1_[a-f0-9]{64}$'
                   description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
-        '200': { description: The update, state handled when it was actionable. duplicate is true on an exact retry. }
+        '200': { description: "The update, state handled when it was actionable. duplicate is true on an exact retry." }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
         '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
@@ -10663,7 +10663,7 @@ paths:
                   pattern: '^ub1_[a-f0-9]{64}$'
                   description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
       responses:
-        '200': { description: The update, state cleared. duplicate is true on an exact retry. }
+        '200': { description: "The update, state cleared. duplicate is true on an exact retry." }
         '401': { description: unauthenticated }
         '404': { description: update_not_found }
         '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
@@ -11759,7 +11759,7 @@ paths:
         '201': { description: "{ contractVersion, viewer, room, duplicate: false, template, ref }" }
         '200': { description: Idempotent replay of the same request (duplicate true) }
         '403': { description: "csrf_denied, origin_denied or room_creation_denied" }
-        '409': { description: room_exists, pilot_limit, or idempotency_conflict }
+        '409': { description: "room_exists, pilot_limit, or idempotency_conflict" }
         '422': { description: invalid_template or session_binding_required }
         '429': { description: rate_limited }
   /api/owner/overview:
@@ -11797,7 +11797,7 @@ paths:
           description: "{ contractVersion: 1, generatedAt, window, viewer, rooms: { considered, included, label, nextCursor }, decisions: { total, waiting, overdue, oldestAgeMs, items }, exceptions: { total, items }, roomErrors }"
         '401': { description: unauthenticated }
         '403': { description: owner_required }
-        '422': { description: invalid_overview_query, invalid_room or session_binding_required }
+        '422': { description: "invalid_overview_query, invalid_room or session_binding_required" }
   /api/account/profile:
     get:
       summary: Read the account's profile
@@ -12378,6 +12378,8 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_sla_dashboard }
   /api/rooms/{roomId}/collab/assignments:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Assign a thread to a room member
       description: >-
@@ -12412,6 +12414,9 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ assignments: [{ threadId, assignee, status, assignedAt, releasedAt?, history }] }" }
   /api/rooms/{roomId}/collab/assignments/{id}/release:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Release a thread assignment
       description: >-
@@ -12438,6 +12443,8 @@ paths:
         '200': { description: "{ assignmentId, assignment: { threadId, status: released, releasedAt, releasedBy, history } }" }
         '404': { description: assignment_not_found or assign_not_assigned }
   /api/rooms/{roomId}/collab/notes:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Add an internal note to a thread
       description: >-
@@ -12480,6 +12487,8 @@ paths:
         '200': { description: "{ notes: [{ noteId, threadId, author, body, tag, internal: true, createdAt }] }" }
         '422': { description: invalid_input (threadId required) }
   /api/rooms/{roomId}/collab/draft-locks/acquire:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Acquire a draft lock for a thread (agent only)
       description: >-
@@ -12507,6 +12516,8 @@ paths:
         '409': { description: collision_lock_held }
         '422': { description: collision_invalid }
   /api/rooms/{roomId}/collab/draft-locks/release:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Release a draft lock
       description: >-
@@ -12530,6 +12541,8 @@ paths:
         '403': { description: collision_forbidden }
         '404': { description: collision_lock_not_found }
   /api/rooms/{roomId}/collab/draft-locks:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     get:
       summary: Detect a draft collision on a thread
       description: >-
@@ -12547,6 +12560,8 @@ paths:
         '200': { description: "{ collision: boolean, holders: [...] }" }
         '422': { description: invalid_input (threadId required) }
   /api/rooms/{roomId}/collab/approvals:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Propose a draft for human approval (agent only)
       description: >-
@@ -12586,6 +12601,9 @@ paths:
         '200': { description: "{ proposals: [{ proposalId, threadId, byAgent, channel, status, draft, decidedBy?, decidedAt?, history }] }" }
         '422': { description: approval_invalid (unknown status) }
   /api/rooms/{roomId}/collab/approvals/{id}/decide:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Decide an approval proposal (human only)
       description: >-
@@ -12620,6 +12638,9 @@ paths:
         '409': { description: approval_transition }
         '422': { description: invalid_input (decision shapes) or approval_invalid }
   /api/rooms/{roomId}/collab/approvals/{id}/resubmit:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Resubmit a changes_requested proposal (agent only)
       description: >-
@@ -12650,6 +12671,8 @@ paths:
         '409': { description: approval_transition }
         '422': { description: approval_invalid }
   /api/rooms/{roomId}/collab/routing/mentions:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Record an agent mention routing event
       description: >-
@@ -12674,6 +12697,8 @@ paths:
         '201': { description: "{ records: [{ routingId, threadId, agent, status, occurredAt }], mentions: [...] }" }
         '422': { description: routing_invalid }
   /api/rooms/{roomId}/collab/routing:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     get:
       summary: List routing events for the room
       description: Room-token read of every journaled agent-routing record in this room.
@@ -12683,6 +12708,9 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ records: [{ routingId, threadId, agent, mode, policy, status, escalatedTo, context, from, createdAt, history, outcome?, resolvedBy?, resolvedAt? }], policies: { agentId: policy } }" }
   /api/rooms/{roomId}/collab/routing/{id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Resolve a routing record
       description: >-
@@ -12711,6 +12739,8 @@ paths:
         '409': { description: routing_transition }
         '422': { description: routing_invalid }
   /api/rooms/{roomId}/collab/routing/policy:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Set an agent routing policy
       description: >-
@@ -12734,6 +12764,8 @@ paths:
         '200': { description: "{ agentId, policy: { mode, scopes, escalateTo, note } }" }
         '422': { description: routing_invalid }
   /api/rooms/{roomId}/collab/handoffs:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Journal a room handoff to a named agent
       description: >-
@@ -12783,6 +12815,9 @@ paths:
         '200': { description: "{ handoffs: [{ handoffId, threadId, status, fromAgent, toAgent, createdAt, packet, history }] }" }
         '409': { description: handoff_no_account_scope }
   /api/rooms/{roomId}/collab/handoffs/{id}/transition:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Move a room handoff along its lifecycle
       description: >-
@@ -12813,6 +12848,8 @@ paths:
         '409': { description: handoff_no_account_scope or invalid_handoff_transition }
         '422': { description: invalid_handoff_status }
   /api/rooms/{roomId}/collab/envelopes:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Open a typed handoff envelope delegating work to an agent
       description: >-
@@ -12868,6 +12905,9 @@ paths:
         '200': { description: "{ envelopes: [{ envelopeId, status, roomId, envelope, history }] }" }
         '422': { description: invalid_envelope_status }
   /api/rooms/{roomId}/collab/envelopes/{id}/transition:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - { name: id, in: path, required: true, schema: { type: string } }
     post:
       summary: Move a handoff envelope along its lifecycle
       description: >-
@@ -12904,6 +12944,8 @@ paths:
         '409': { description: invalid_envelope_transition }
         '422': { description: envelope_checks_required or envelope_unknown_check or envelope_expiry_system_only }
   /api/rooms/{roomId}/collab/envelopes/sweep:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     post:
       summary: Expire past-due handoff envelopes
       description: >-
@@ -12917,6 +12959,8 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ swept: { expired: [envelopeId], escalated: [envelopeId] } }" }
   /api/rooms/{roomId}/collab/envelopes/metrics:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
     get:
       summary: Escalation-rate metrics for the room's handoff envelopes
       description: >-
@@ -13517,7 +13561,7 @@ paths:
         '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
         '409': { description: pilot_limit }
-        '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
+        '422': { description: "invalid_invite, invalid_invite_scope or invalid_invite_ttl" }
     delete:
       summary: Revoke an unredeemed agent invite code
       description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).
@@ -14645,7 +14689,7 @@ paths:
         '200': { description: Durable operation receipt with current recorded result }
         '401': { description: Current room authentication required }
         '403': { description: Scope or author/coordinator authority denied }
-        '409': { description: Revision conflict, changed retry, reserved attempt, stop pending or assistant unavailable }
+        '409': { description: "Revision conflict, changed retry, reserved attempt, stop pending or assistant unavailable" }
         '422': { description: Invalid action-specific input }
   /api/rooms/{roomId}/request-runs:
     get:
@@ -15253,7 +15297,7 @@ paths:
         with no error.data. Same handler at /room/a2a.
       security: []
       responses:
-        '200': { description: JSON-RPC result, or a JSON-RPC error object for a well-formed request the method cannot complete. }
+        '200': { description: "JSON-RPC result, or a JSON-RPC error object for a well-formed request the method cannot complete." }
         '400':
           description: Invalid JSON. Body is JsonRpcError (error.code -32700). Not the canonical error envelope.
           content:
@@ -16082,7 +16126,7 @@ paths:
                 verifier: { type: string }
       responses:
         '201': { description: HttpOnly native Room session installed; no token in JSON }
-        '401': { description: Invalid, expired, mismatched or consumed proof }
+        '401': { description: "Invalid, expired, mismatched or consumed proof" }
         '409': { description: Existing account cookie refused }
 
   /api/rooms/{roomId}/demigod-offers:
@@ -17644,6 +17688,14 @@ components:
             threads: { type: boolean }
             edit: { type: boolean }
         state: { type: string, enum: [active, disconnected, reconnect_required] }
+    Error:
+      description: Alias of ErrorBody kept for operations that reference it.
+      allOf:
+        - $ref: '#/components/schemas/ErrorBody'
+    ErrorEnvelope:
+      description: Alias of ErrorBody kept for operations that reference it.
+      allOf:
+        - $ref: '#/components/schemas/ErrorBody'
     ErrorBody:
       type: object
       properties:
@@ -18027,6 +18079,30 @@ components:
           type: array
           items: { $ref: '#/components/schemas/CapabilityNextAction' }
   responses:
+    BadRequest:
+      description: Request refused — fix the named fields and resend
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Unauthorized:
+      description: Missing, expired or revoked credential
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Forbidden:
+      description: Credential lacks the scope or membership for this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    TooManyRequests:
+      description: Rate limited — wait for Retry-After, then retry unchanged
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
     Conflict:
       description: The world moved — re-read, then decide; never blind-retry
       content:
