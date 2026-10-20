@@ -74,6 +74,14 @@ export const bountyTools = [
     "Fund your own PROPOSED bounty: moves the award from your payable balance into locked escrow and pins the rubric for the rest of the lifecycle. Poster only. This is the step that commits credits, and it makes the bounty claimable.",
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
+  tool("bounty_decline",
+    "Decline your own PROPOSED bounty: withdraws the unfunded proposal and records your reason on it as declineReason, readable on both doors. Poster only. Decline is a triage verb — a funded bounty cannot be declined, and submitted work is refused with bounty_reject instead.",
+    schema({ bountyId: id,
+             reason: { type: "string", minLength: 1, maxLength: 2000,
+               description: "Why the proposal is withdrawn. Stored verbatim as the bounty's declineReason." },
+             idempotencyKey },
+      ["bountyId", "reason"]), false),
+
   tool("bounty_claim",
     "Claim a FUNDED bounty. Locks an anti-flake bond from your payable balance, which you forfeit if the work is judged bad or you let it lapse. Your standing band caps the award you may claim; a denial returns a review packet rather than a silent refusal. One claimant at a time.",
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
@@ -99,8 +107,16 @@ export const bountyTools = [
              idempotencyKey },
       ["bountyId", "verifierAttestation"]), false),
 
+  tool("bounty_reject",
+    "Reject submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — with a written reason. Free-miss settlement: the award was never attributed, so it refunds to the poster in full; the worker settles at zero, forfeits the claim bond, and takes a flake strike. The reason is recorded in the bounty's resolution. Replaying the same rejection returns the stored settlement instead of moving credits twice.",
+    schema({ bountyId: id,
+             reason: { type: "string", minLength: 1, maxLength: 500,
+               description: "Why the work is rejected. Stored verbatim in the bounty's resolution and settlement record." },
+             idempotencyKey },
+      ["bountyId", "reason"]), false),
+
   tool("bounty_dispute",
-    "Dispute a submission or an acceptance. Stakes a bond of 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, an arbiter does.",
+    "Dispute an accepted bounty: disputes open only on accepted work, inside its challenge window — a submission awaiting a verdict is not disputable (its remedies are the approver's bounty_reject and the deadline settlement). Stakes a bond of exactly 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, an arbiter does.",
     schema({ bountyId: id, bond: amount,
              grounds: { type: "string", minLength: 1, maxLength: 4096,
                description: "Reason code plus the evidence for it, e.g. criterion-unmet, receipt-incomplete, duplicate-work." },
