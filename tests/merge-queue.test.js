@@ -232,7 +232,7 @@ const HEAD = "6c7c792b0a1b2c3d4e5f60718293a4b5c6d7e8f9";
 const rev = (memberId, verdict, at, extra = {}) => ({ memberId, verdict, at, summary: "", basis: { version: 1, owner: "lane", headSha: null }, ...extra });
 const claimWith = reviews => ({ id: "orch-x", owner: "lane", reviews });
 
-test("approval gate: an unreviewed PR is refused, which is the #1615 gap", () => {
+test("approval gate: an unreviewed PR passes; review is advisory", () => {
   assert.deepEqual(approvalGate({ claim: claimWith([]), headSha: HEAD }), { ok: true, approvedBy: [] }, "review is advisory");
   assert.equal(approvalGate({ claim: null, headSha: HEAD }).ok, false);
 });
@@ -246,11 +246,11 @@ test("approval gate: an approve counts only from a non-owner, bound to the enque
   assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @1ac2d27c" })]), headSha: HEAD }).approvedBy.length, 0, "a different head");
 });
 
-test("approval gate: the latest review per reviewer wins; any current changes_requested blocks", () => {
+test("approval gate: the latest review per reviewer wins; changes_requested is reported, never blocks", () => {
   const approve = rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "@6c7c792b ok" });
-  assert.equal(approvalGate({ claim: claimWith([approve, rev("inst", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false);
-  assert.equal(approvalGate({ claim: claimWith([approve, rev("fo", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false, "a later CHANGES supersedes the reviewer's approve");
-  assert.equal(approvalGate({ claim: claimWith([rev("fo", "changes_requested", "2026-10-06T07:00:00Z"), approve]), headSha: HEAD }).ok, true, "a later approve clears the reviewer's earlier CHANGES");
+  assert.deepEqual(approvalGate({ claim: claimWith([approve, rev("inst", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }), { ok: true, approvedBy: ["fo"], changesRequestedBy: ["inst"] });
+  assert.deepEqual(approvalGate({ claim: claimWith([approve, rev("fo", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }), { ok: true, approvedBy: [], changesRequestedBy: ["fo"] }, "a later CHANGES supersedes the reviewer's approve");
+  assert.deepEqual(approvalGate({ claim: claimWith([rev("fo", "changes_requested", "2026-10-06T07:00:00Z"), approve]), headSha: HEAD }), { ok: true, approvedBy: ["fo"] }, "a later approve clears the reviewer's earlier CHANGES");
 });
 
 test("operator release authority is exact-head, advisory, and cannot be self-issued through the claim", () => {
