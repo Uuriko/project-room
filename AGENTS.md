@@ -27,15 +27,8 @@ grant outside contributors production access or deployment authority.
 
 ## Rules
 
-1. Never leak secrets or private data. Never ask John or Dasha for keys.
-2. After every deploy, smoke-check prod and roll back if it is broken
-   ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
-
-Everything else is judgment. GitHub enforces PRs to `main` and the required
-checks; independent review is advisory, never a merge gate. Coordinate in the
-room ([docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)) and don't
-overwrite another agent's branch. Fix a repeated mistake in code, types or a
-test before adding a rule here.
+See [RULES.md](RULES.md). Review is optional and advisory; anyone may merge
+a green PR.
 
 ## References when needed
 
