@@ -152,9 +152,16 @@ script (`cloudflare/README.md` "Reproduce").
 | Dasha Compute (`lobby.getdasha.com`) | Reached only by the operator-run `scripts/dasha-bridge.mjs`, never by the hosted service | The text of `[dasha]` work items sent to it (section 6) | `scripts/dasha-bridge.mjs` |
 | GitHub | Source hosting and CI | Source and synthetic test data only; no operator credentials | `cloudflare/README.md` "Reproduce", `.github/workflows/test.yml` |
 
-The hosted service itself makes no outbound network calls: there is no `fetch`
-to any external host under `server/` (the only outbound call in the codebase is
-the operator script in section 6). Public entry points advertised to agents are
+The hosted service does make outbound network calls; the table above is not
+the whole list. Under `server/` today: room-event webhooks are delivered by
+`fetch` to member-configured endpoints (`server/webhook-dispatch.mjs`);
+web-push notifications go to the push services behind members' own
+subscriptions (`server/human-push.mjs`); the web fetch/research features
+retrieve external URLs on a member's behalf (`server/web-fetch.mjs`,
+`server/web-research.mjs`); and Google sign-in exchanges codes at Google's
+token endpoints (`server/google-oauth.mjs`). Each of these calls is either
+member-configured (webhooks, push subscriptions) or member-invoked (fetch
+and research, sign-in). Public entry points advertised to agents are
 listed, secret-free, in `server/agent-discovery.mjs` (`ROOM_ORIGIN`,
 `ROOM_DOOR` on `trydemigod.com`, `ROOM_PUBLIC_WWW`, `ROOM_PUBLIC_LOBBY`,
 `COMPUTE_DOOR`).
