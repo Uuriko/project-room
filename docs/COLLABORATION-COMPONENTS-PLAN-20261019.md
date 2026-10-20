@@ -367,3 +367,30 @@ entry/collaboration/reconnect checks passed 10 cases; onboarding HTTP tests pass
 2 cases. Remaining navigation/permissions and broader affected qualification are
 recorded at the next checkpoint. These are simulated participant journeys, not
 real-human research. No production deployment or notarized distribution claimed.
+
+### Subtraction qualification checkpoint
+
+Implementation: commits `f40ec67d` through `c59b2cbd`, published to draft PR #4288.
+The subtraction slice changes 53 files with 193 insertions and 3,094 deletions.
+Thirteen Updates/mobile-header browser cases pass. All nine permission cases pass
+across the repaired runs, including leaving Updates while a queue refresh is in
+flight. The seven access cases pass; an additional case confirms join requests
+have no unsupported Open button. Twenty-five packaging, historical migration,
+mobile-doc and touch-target checks pass, plus the genuine v27 upgrade writer-fence
+case and three landing checks. Retired assets are recognized only for packaging
+historical commits; they are absent from the current deployment manifest.
+
+Affected qualification selected 250 files: 1,716 tests passed, one skipped and two
+failed on historical-package recognition. Both failures were repaired and pass
+in the 25-test focused run. The earlier 59-case browser batch had 52 passes and
+seven obsolete-route/focus failures; all seven pass after route updates. Do not
+present either original batch as an entirely green run. Broad local `npm test`
+was started before the final fixture repairs and is not frozen-head evidence;
+hosted Node24 remains required for release. The earlier local Node26 OG golden
+mismatch remains a known runtime qualification concern, not a waived check.
+
+Screenshots: `/Users/johnpotter/Documents/ChatGPT/project room/outputs/product-subtraction-20261019/native-room.png`
+and `mobile-room.png` in the same directory. These show native WKWebView and a
+390px browser fixture, respectively; they are not physical-device or human-study
+qualification. Refresh recovery, stored records and agent APIs were deliberately
+retained. No merge, deployment, signing or notarization is claimed here.
