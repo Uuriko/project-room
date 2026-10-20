@@ -45,7 +45,7 @@ function fixture(t) {
     return { sourceId, sendId: reserved.receipt.send.id, reader, preview };
   };
   f.server = async (options = {}) => {
-    const server = createRoomServer({ store: f.store, ...options });
+    const server = createRoomServer({ enableDeferredInbox: true, store: f.store, ...options });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
     const origin = "http://127.0.0.1:" + server.address().port;
@@ -285,7 +285,7 @@ test("the owner-authenticated import trigger works off loopback, enforces sessio
   const local = await f.server({ channelWebhooks: webhooks });
   response = await local.post(trigger, { requestId: "local-1" }); value = await response.json();
   assert.equal(response.status, 201, JSON.stringify(value)); assert.equal(value.registered, false); assert.equal(value.imported, 0); assert.equal(value.live.state, "not_configured");
-  assert.throws(() => createRoomServer({ store: f.store, telegram: { token: FAKE_TOKEN } }), /telegramConfig/);
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, telegram: { token: FAKE_TOKEN } }), /telegramConfig/);
   // Email connections carry no live block and cannot be triggered.
   const { emailContractFixture } = await import("../scripts/email-contract-fixture.mjs");
   const email = emailContractFixture(); email.connection.accountId = f.auth.account.id; f.configure(email.connection);
