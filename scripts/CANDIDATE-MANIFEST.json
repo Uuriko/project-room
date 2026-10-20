@@ -66,7 +66,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:a5edccd46833367bc06f94cd5c92758d0a333aacab567345f98a5f79ba307016",
-    "src/app.js": "sha256:8490092d8420adbc6f916085651e810f22698c04bdde178aff7c890ed3f05453",
+    "src/app.js": "sha256:0a486a7c29a12b6371713953bf21e55783e2a89ff763988edc2d740bcd8aabe1",
     "src/auth-signin-ui.js": "sha256:4ab8fcecc993a503b1540a394bf72956ffa69a56e4db0eb60f9a16c29113c474",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -132,7 +132,7 @@
     "src/signin-navigation.js": "sha256:bf9d8f72b1c9a1014309b137690d611581f2376db2566ae9b088b87dfbe3a226",
     "src/spend-pricing-ui.js": "sha256:96906eb2bd688a37a9eda1f4744c722c3100d160278f1d4df791d987725617fd",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:48c5664847ff07dd9f8f009606ba0d3ee32da68ff28d9b428acee4ef9ae32e22",
+    "src/styles.css": "sha256:2e9f5e1434b0c090c788c2c7e72b75784aca5bad2c9ab53aa8ade9c33b77d047",
     "src/updates-ui.js": "sha256:cc614d1a76799f35ac563c2f4cf3176019b932d47b9591ce9e574a86b50be28b",
     "src/work-announcements.js": "sha256:18fe08703df19663b853712933eb64fd448cc2905b0cb9154d015b27ddf51633",
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
@@ -160,6 +160,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:5fb31c018d35638960d3d38cbd3df6981dababd125a70e586df394f97085a856"
+    "package.json": "sha256:a0ecc0508a21abeaf847f5f72fcb3d91d76cc2014206ee0bce8491f6eef16f5e"
   }
 }
