@@ -38,13 +38,9 @@ async function boot(t, { viewport = { width: 1280, height: 800 }, coarse = false
 
 async function openBoard(page) {
   await page.locator("#main").waitFor({ state: "visible" });
-  // Below 940px the sidebar (which holds the Board button) sits behind the
-  // sidebar toggle by design; open it first when the toggle is the visible one.
-  const toggle = page.locator("#sidebar-toggle");
-  if (await toggle.isVisible()) await toggle.click();
   await page.locator("#tasks-board-open").click();
   await page.locator("#board-dialog").waitFor({ state: "visible" });
-  await page.locator(".live-chip").waitFor();
+  await page.locator("#work-board .board-empty, #work-board .board-columns").waitFor();
 }
 
 // S1: the empty-board copy a non-writer sees must be their actual options,
@@ -83,6 +79,7 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   await signInFixture(page, fixture.keys.owner);
   await openBoard(page);
   const noteInput = page.locator('#board-new-item input[name="note"]');
+  await page.locator('[data-board-disclosure="create"] > summary').click();
   assert.equal(await noteInput.count(), 1, "note input exists");
   const label = await page.locator('#board-new-item label:has(input[name="note"])').textContent();
   assert.match(label, /Note/, "note input is label-associated");
@@ -139,14 +136,14 @@ test("coarse pointer keeps 44px touch targets on board controls", { timeout: 900
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  // At 390px the sidebar toggle is the visible board entry point (the sidebar
-  // sits behind it below 940px); it carries the icon-button coarse rule.
+  // Both room navigation and Work keep coarse-pointer touch targets.
   const toggleBox = await page.locator("#sidebar-toggle").boundingBox();
   assert.ok(toggleBox.width >= 44 && toggleBox.height >= 44,
     `sidebar toggle is ${toggleBox.width}x${toggleBox.height}px on coarse pointer`);
   await openBoard(page);
   const openBox = await page.locator("#tasks-board-open").boundingBox();
   assert.ok(openBox.height >= 44, `board open button is ${openBox.height}px tall on coarse pointer`);
+  await page.locator('[data-board-disclosure="create"] > summary').click();
   const submitBox = await page.locator('#board-new-item button[type="submit"]').boundingBox();
   assert.ok(submitBox.height >= 44, `new-item submit is ${submitBox.height}px tall on coarse pointer`);
   const noteBox = await page.locator('#board-new-item input[name="note"]').boundingBox();

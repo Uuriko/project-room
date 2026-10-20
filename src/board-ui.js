@@ -899,7 +899,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
-  const form = canWrite ? newItemForm() : "";
+  const form = canWrite ? `<details class="board-disclosure" data-board-disclosure="create"><summary data-focus-key="board-create-toggle">${uiText("board.disclosure.create")}</summary>${newItemForm()}</details>` : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const bar = filterBarHtml(filter);
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
@@ -920,7 +920,8 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
+  const options = `<details class="board-disclosure" data-board-disclosure="options"><summary data-focus-key="board-options-toggle">${uiText("board.disclosure.options")}</summary><div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div></details>`;
+  return `${needsMe}<div class="board-tools">${form}${options}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {
@@ -989,10 +990,15 @@ export function installWorkBoard({ client, getState, getSession }) {
   // claims; cleared on room/member context change.
   let filter = { q: "", mine: false };
   let pendingCaret = null;
+  let paintedContext = null;
 
   function paint() {
     const state = getState();
     const session = getSession();
+    const owned = context();
+    const preserve = owned && paintedContext === owned;
+    const expanded = preserve ? [...root.querySelectorAll("[data-board-disclosure][open]")].map(node => node.dataset.boardDisclosure) : [];
+    const draft = preserve ? [...root.querySelectorAll("#board-new-item input")].map(node => [node.name, node.value]) : [];
     const active = document.activeElement;
     const restoreFocus = !active || active === document.body || root.contains(active);
     if (pendingFocus) stick = { key: pendingFocus.key ?? null, id: pendingFocus.id ?? null, status: pendingStatus };
@@ -1006,6 +1012,12 @@ export function installWorkBoard({ client, getState, getSession }) {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
       loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
     });
+    paintedContext = owned;
+    for (const name of expanded) root.querySelector(`[data-board-disclosure="${CSS.escape(name)}"]`)?.setAttribute("open", "");
+    for (const [name, value] of draft) {
+      const field = root.querySelector(`#board-new-item [name="${CSS.escape(name)}"]`);
+      if (field) field.value = value;
+    }
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
     if (stick?.status) {
@@ -1389,7 +1401,17 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = newItemCreateBody(data);
       if (!body) return;
       const title = body.title;
-      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
+      const owned = context();
+      const submitted = [...data.entries()];
+      flySubmit(created, async () => {
+        const result = await client.request(client.path("/work-claims"), { method: "POST", data: body });
+        const current = context() === owned ? root.querySelector("#board-new-item") : null;
+        if (current) {
+          const latest = new FormData(current);
+          if (submitted.every(([name, value]) => latest.get(name) === value)) current.reset();
+        }
+        return result;
+      }, { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");

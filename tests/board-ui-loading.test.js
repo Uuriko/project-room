@@ -134,6 +134,10 @@ async function completionFixture(t) {
       listeners.get(type).push(listener);
     },
     contains(node) { return node === button || node === form || node === field; },
+    querySelectorAll(selector) {
+      assert.ok(["[data-board-disclosure][open]", "#board-new-item input"].includes(selector));
+      return [];
+    },
     querySelector(selector) {
       if (selector === "#board-status") return line;
       if (selector === '[data-focus-key="board-filter-q"]') return field;
@@ -263,6 +267,12 @@ function focusDom(t) {
     addEventListener(type, listener) { assert.ok(["input", "click", "submit"].includes(type)); listeners.set(type, listener); },
     contains: node => nodes.includes(node),
     querySelector: query,
+    querySelectorAll(selector) {
+      if (selector === "[data-board-disclosure][open]") return nodes.filter(node =>
+        Object.hasOwn(node.attrs, "data-board-disclosure") && Object.hasOwn(node.attrs, "open"));
+      assert.equal(selector, "#board-new-item input");
+      return nodes.filter(node => node.tag === "input" && node.parent?.closest("#board-new-item"));
+    },
     set innerHTML(html) {
       if (nodes.includes(active)) active = body;
       nodes = [];
@@ -270,6 +280,9 @@ function focusDom(t) {
       sanitizeHtml(html, {
         onOpenTag(tag, attrs) {
           const node = { tag, attrs, parent: stack.at(-1),
+            get name() { return attrs.name; },
+            get value() { return attrs.value ?? ""; },
+            set value(value) { attrs.value = value; },
             get dataset() {
               return Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("data-"))
                 .map(([key, value]) => [key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
