@@ -176,8 +176,9 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.locator("#updates-dialog").waitFor({ state: "hidden" });
     await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, reviewIds[0]);
     assert.equal(new URL(page.url()).hash, `#pr-record/work/${encodeURIComponent(reviewIds[0])}`);
-    assert.equal(await card(reviewIds[0]).locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await card(reviewIds[0]).locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await card(reviewIds[0]).locator(".mode").textContent(), "read · revision 2");
+    await card(reviewIds[0]).locator(".work-details > summary").click();
     assert.match(await card(reviewIds[0]).innerText(), /Current review evidence 1/);
     assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to Updates");
     const historyState = await page.evaluate(() => JSON.stringify(history.state));
@@ -221,6 +222,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   const beforeNestedMarks = store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count;
   await openReview(review.id).press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+  await card(reviewIds[0]).locator(".work-details > summary").click();
   await openSearch(page);
   await page.locator("#message-search").fill("Review exact result 2");
   await page.locator('#search-list [data-open-work="review:next"]').press("Enter");
@@ -228,7 +230,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.waitForFunction(expected => location.hash === expected, `#pr-record/work/${encodeURIComponent(id)}`);
     await page.waitForFunction(({ workId, label }) => {
       const task = [...document.querySelectorAll("[data-work-record-id]")].find(node => node.dataset.workRecordId === workId);
-      return task?.querySelector(".work-details")?.open && document.querySelector("#work-navigation-return")?.textContent === label;
+      return Boolean(task) && document.querySelector("#work-navigation-return")?.textContent === label;
     }, { workId: id, label: backLabel });
     assert.equal(await page.locator("#updates-dialog").isVisible(), false);
     assert.equal(await card(id).count(), 1);
@@ -236,10 +238,12 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await assertNestedTask(reviewIds[1], "Back to conversation");
   await page.goBack();
   await assertNestedTask(reviewIds[0], "Back to Updates");
+  assert.equal(await card(reviewIds[0]).locator(".work-details").evaluate(node => node.open), true, "Back restores the disclosure explicitly opened before navigating away");
   await page.goForward();
   await assertNestedTask(reviewIds[1], "Back to conversation");
   await page.locator("#work-navigation-return").press("Enter");
   await assertNestedTask(reviewIds[0], "Back to Updates");
+  assert.equal(await card(reviewIds[0]).locator(".work-details").evaluate(node => node.open), true, "Back restores the disclosure explicitly opened before navigating away");
   await page.locator("#work-navigation-return").press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
   await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
@@ -250,6 +254,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.deepEqual(await page.locator("#message-input").evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [5, 12, "forward"]);
   await page.goForward();
   await assertNestedTask(reviewIds[0], "Back to Updates");
+  assert.equal(await card(reviewIds[0]).locator(".work-details").evaluate(node => node.open), false, "Forward enters the focused task without expanding Details");
   await page.locator("#work-navigation-return").press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
   await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);

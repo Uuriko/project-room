@@ -267,7 +267,7 @@ for (const mobile of [false, true]) test(`work destination ${mobile ? 'mobile' :
   await page.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
   await f.card.waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
-  assert.equal(await f.card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await f.card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my room draft');
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my thread draft');

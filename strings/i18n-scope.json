@@ -29,6 +29,7 @@
   "src/browser-session.js",
   "src/chat-suggestions.js",
   "src/client.js",
+  "src/clipboard.js",
   "src/composer-files.js",
   "src/contribution-brief.js",
   "src/conversation-intent.js",

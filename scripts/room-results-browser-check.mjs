@@ -96,7 +96,7 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
   await f.row("native-result").locator("[data-result-work]").click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
-  assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), true);
+  assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), false);
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), true);
   assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
@@ -360,6 +360,8 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
   await f.open(); await f.row("native-result").locator("[data-result-work]").click();
   const card = p.locator('[data-work-record-id="native-result"]');
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "ordinary task navigation stays focused");
+  await card.locator(".work-details > summary").click();
   await card.locator("[data-read-result]").click(); await f.ready();
   assert.equal(await card.locator("#result-dialog").count(), 1);
   assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
@@ -537,14 +539,49 @@ for (const mobile of [false, true]) test(`older result resolves its reply conver
   assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
 });
 
-test("stalled clipboard recovers without losing the result or download", { timeout: 30000 }, async t => {
+test("stalled clipboard preserves download and fences copies across collaboration views", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
-  await p.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => new Promise(() => {}) } }));
+  await p.evaluate(() => {
+    window.copyCalls = 0;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => {
+      window.copyCalls++;
+      return new Promise(resolve => { window.finishCopy = resolve; });
+    } } });
+  });
   await p.locator("#result-copy-text").click();
-  await p.locator("#result-use-status").filter({ hasText: "Could not copy" }).waitFor();
-  assert.equal(await p.locator("#result-copy-text").isDisabled(), false);
+  await p.locator("#result-use-status").filter({ hasText: "Clipboard is still busy" }).waitFor();
+  assert.equal(await p.locator("#result-copy-text").isDisabled(), true);
   assert.equal(await p.locator("#result-download").isVisible(), true);
   assert.equal(await p.locator("#result-body").textContent(), f.body);
+  await p.locator("#close-result").click();
+  await f.row("native-result").locator("[data-result-work]").click();
+  const card = p.locator('[data-work-record-id="native-result"]');
+  await card.locator("[data-copy-result]").click();
+  const input = p.locator("#result-copy-preview"), copy = p.locator("#result-copy-button");
+  await input.fill("My next draft");
+  assert.equal(await copy.isDisabled(), true);
+  await copy.dispatchEvent("click");
+  assert.equal(await p.evaluate(() => window.copyCalls), 1, "another surface cannot issue a competing write");
+  await p.locator("#result-copy-close").click();
+  if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
+  await card.getByRole("button", { name: "Use my AI", exact: true }).click();
+  assert.equal(await p.locator("#packet-copy").isDisabled(), true);
+  await p.locator("#packet-copy").dispatchEvent("click");
+  assert.equal(await p.evaluate(() => window.copyCalls), 1);
+  await p.evaluate(() => window.finishCopy());
+  await p.waitForFunction(() => !document.getElementById("packet-copy").disabled);
+  assert.equal(await p.locator("#portable-status").textContent(), "", "old copy cannot report success on another view");
+  await p.locator("#portable-close").click();
+  await card.locator("[data-copy-result]").click();
+  assert.equal(await input.inputValue(), "My next draft");
+  await copy.click();
+  await p.locator("#result-copy-status").filter({ hasText: "Clipboard is still busy" }).waitFor();
+  await input.fill("Edited while the clipboard is pending");
+  assert.equal(await copy.isDisabled(), true);
+  await p.evaluate(() => window.finishCopy());
+  await p.waitForFunction(() => !document.getElementById("result-copy-button").disabled);
+  assert.equal(await input.inputValue(), "Edited while the clipboard is pending");
+  assert.equal(await p.locator("#result-copy-status").textContent(), "", "late completion does not label newer edits copied");
 });
 
 for (const delayed of [false, true]) test(`withdrawing prior version clears comparison: ${delayed ? "delayed response" : "already rendered"}`, { timeout: 30000 }, async t => {

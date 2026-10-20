@@ -1,3 +1,4 @@
+import { clipboard } from "./clipboard.js";
 import { canReplyToResult } from "./result-availability.js";
 import { uiText } from "./strings.js";
 import { WORK_STATES as S, isRoomArchived } from "./events.js";
@@ -47,6 +48,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const view = resultView;
     if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
     resultElement("close-result").textContent = uiText(view.fromResults ? "result.back" : "result.collapse");
+    if (!clipboard.busy && resultElement("result-use-status").textContent === uiText("clipboard.pending")) resultElement("result-use-status").textContent = "";
+    if (clipboard.busy && !view.copying) resultElement("result-use-status").textContent = uiText("clipboard.pending");
     const focused = resultReader.contains(document.activeElement) ? document.activeElement : null;
     const textMessage = getState().messages.find(message => message.id === view.textMessageId);
     if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };
@@ -70,7 +73,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     retry.disabled = !view.error;
     for (const action of ["result-copy-text", "result-download"]) {
       resultElement(action).hidden = !usableText(view);
-      resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying);
+      resultElement(action).disabled = action === "result-copy-text" && Boolean(view.copying || clipboard.busy);
     }
     if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement("close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
@@ -101,17 +104,13 @@ export function installResultReader({ client, getState, getSession, sameSession,
   resultElement("result-download").textContent = uiText("result.download");
   resultElement("result-copy-text").addEventListener("click", async () => {
     const view = resultView;
-    if (!usableText(view) || view.copying) return;
+    if (!usableText(view) || view.copying || clipboard.busy) return;
     view.copying = true; resultStatus();
     resultElement("result-use-status").textContent = "";
     try {
-      let timer;
-      try {
-        await Promise.race([navigator.clipboard.writeText(view.body), new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error()), 1500);
-        })]);
-      } finally { clearTimeout(timer); }
-      if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copied");
+      const outcome = await clipboard.copy(view.body);
+      if (outcome === "failed") throw new Error("clipboard_failed");
+      if (usableText(view)) resultElement("result-use-status").textContent = uiText(outcome === "copied" ? "result.copied" : "clipboard.pending");
     } catch {
       if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.copyFailed");
     } finally {
@@ -224,5 +223,6 @@ export function installResultReader({ client, getState, getSession, sameSession,
 
   new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
     .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
+  clipboard.subscribe(resultStatus);
   return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult };
 }

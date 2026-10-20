@@ -237,6 +237,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .blocker { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--amber); background: #241b12; }
 .blocker strong { color: var(--amber); font-size: .72rem; }
 .blocker p { margin: .25rem 0 0; color: #e8caa8; font-size: .75rem; }
+:root[data-theme="light"] .blocker { background: var(--panel); color: var(--text); }
+:root[data-theme="light"] .blocker p { color: var(--text); }
 .decision { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--blue); background: #101f36; }
 .decision strong { color: #a9c8ff; font-size: .72rem; }
 .decision p { margin: .25rem 0 0; color: #c5d4ee; font-size: .75rem; }

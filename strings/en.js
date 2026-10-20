@@ -519,5 +519,6 @@ export default {
   "result.back": "Back to results",
   "result.collapse": "Collapse result",
   "activity.recent": "Recent activity",
-  "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text."
+  "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text.",
+  "clipboard.pending": "Clipboard is still busy. You can keep working."
 };
