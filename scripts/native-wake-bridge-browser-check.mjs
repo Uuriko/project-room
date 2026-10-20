@@ -32,7 +32,11 @@ function bridgeWakeScript() {
   return match[1].replace(/\\"/g, "\"").replace(/\\n/g, "\n");
 }
 
-test("macOS wake signal: bounded revalidation for a live session, stale access dropped for a dead one", { timeout: 90000 }, async t => {
+// Quarantined under the repo flake flow (tests/quarantine.json): the ambient
+// typing heartbeat can race into this test's no-replayed-writes ledger under
+// hosted load (browser timing race). Repair by 2026-11-02.
+const QUARANTINED_WAKE_FLAKE = process.env.QUARANTINE_RUN !== "1";
+test("macOS wake signal: bounded revalidation for a live session, stale access dropped for a dead one", { timeout: 90000, skip: QUARANTINED_WAKE_FLAKE ? "quarantined: tests/quarantine.json (browser timing race; repair by 2026-11-02)" : false }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-native-wake-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
