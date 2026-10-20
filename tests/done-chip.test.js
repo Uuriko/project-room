@@ -9,7 +9,7 @@ test("done chip renders only for terminally finished work (round-2 #117)", () =>
   assert.ok(terminalWork(done));
   const chip = doneChip(done);
   assert.match(chip, /done-chip/);
-  assert.match(chip, /✓ Done/);
+  assert.match(chip, />Done</);
 
   assert.equal(doneChip({ state: "working" }), "");
   assert.equal(doneChip({ state: "completed" }), ""); // no receipt: not terminal

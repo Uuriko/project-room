@@ -262,7 +262,7 @@ test("pick on a confirm-gated suggestion returns a challenge; confirm requires {
     id: "s1", index: 1, kind: "release_grant", title: "Release the grant",
     reason: "confirm-class action: cannot be undone", gate: "confirm",
     api: { method: "POST", path: `/api/rooms/${ROOM}/grants/g1/release`, body: {} },
-    deepLink: null, draft: null, badge: "⚠ confirm — cannot be undone",
+    deepLink: null, draft: null, badge: "Confirm: cannot be undone",
   };
   const h = harness({ store, sources, decide: () => [confirmSuggestion] });
   const card = await deriveOne(h);
@@ -311,7 +311,7 @@ test("refetch {fired:true} from acting is refused — an unconfirmed confirm-cla
     id: "s1", index: 1, kind: "release_grant", title: "Release the grant",
     reason: "confirm-class action: cannot be undone", gate: "confirm",
     api: { method: "POST", path: `/api/rooms/${ROOM}/grants/g1/release`, body: {} },
-    deepLink: null, draft: null, badge: "⚠ confirm — cannot be undone",
+    deepLink: null, draft: null, badge: "Confirm: cannot be undone",
   };
   const h = harness({ store, sources, decide: () => [confirmSuggestion] });
   const card = await deriveOne(h);
