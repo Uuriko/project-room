@@ -1,3 +1,4 @@
+import { installRoomWebMCP } from "./webmcp.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -509,6 +510,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
+    roomWebMCP.stop();
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
@@ -703,6 +705,8 @@ const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs
 // #3342: Owner Cockpit shell on the account home — cross-room Decisions +
 // Exceptions from /api/owner/overview. Decide actions execute against the
 // existing per-room decide endpoint with account-mode room credentials.
+const roomWebMCP = installRoomWebMCP({ document, client, getState: () => state, getSession: () => session });
+window.addEventListener("pagehide", () => roomWebMCP.stop());
 const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cockpit"), decide: async action => {
   const session = accountClient.currentSession("deciding an access request", { authenticated: true });
   return accountClient.request(action.path, { method: action.method, data: action.body, session,
@@ -1915,6 +1919,7 @@ function renderContent(selector, html) {
   restoreDisclosures(container, saved);
 }
 function render() {
+  roomWebMCP.sync();
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
