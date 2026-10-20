@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS, AGENT_CARD_A2A_PATH } from "./agent-discovery.mjs";
-import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
+import { discoveryDoc, discoveryCacheControl, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS, AGENT_CARD_A2A_PATH } from "./agent-discovery.mjs";
+import { MCP_SERVER_CARD_PATH, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import "./mcp-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
 import { isRoomMcpPath, roomMcpFetchResponse } from "./mcp-http.mjs";
@@ -96,7 +96,7 @@ function discoveryHeaders(type, pathname) {
   const card = pathname && discoveryDoc(pathname) === discoveryDoc(MCP_SERVER_CARD_PATH);
   return {
     "Content-Type": type,
-    "Cache-Control": card ? MCP_DISCOVERY_CACHE_CONTROL : "no-store",
+    "Cache-Control": discoveryCacheControl(pathname),
     ...(card ? MCP_SERVER_CARD_CORS : {}),
     "X-Robots-Tag": "all", "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"

@@ -41,7 +41,7 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { discoveryDoc, discoveryCacheControl, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -1885,6 +1885,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end();
         }
         const packet = discoveryDoc("/llms.txt");
+        res.setHeader("Cache-Control", discoveryCacheControl("/llms.txt"));
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
@@ -1902,6 +1903,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
+        // Per-deploy discovery documents are cacheable (see
+        // discoveryCacheControl); the skills catalog stays no-store
+        // because of the live member injection just below.
+        res.setHeader("Cache-Control", discoveryCacheControl(url.pathname));
         if (discovery === MCP_SERVER_CARD_DOC) {
           res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
           for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);

@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../server/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS, JOIN_TIERS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, discoveryCacheControl, DISCOVERY_CACHE_CONTROL, DISCOVERY_PATHS, JOIN_TIERS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
@@ -205,6 +205,33 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
   assert.equal(discoveryDoc("/room/llms.txt").body, discoveryDoc("/llms.txt").body);
   assert.equal(discoveryDoc("/room/llms-full.txt").body, discoveryDoc("/llms-full.txt").body);
   assert.equal(discoveryDoc("/room/.well-known/agent.json").body, discoveryDoc("/.well-known/agent.json").body);
+});
+
+test("discovery documents are cacheable per deploy; live and per-user surfaces stay no-store", async t => {
+  const origin = await serve(t);
+  // PERF-QUICK: the discovery stack changes only at deploy (the packets
+  // embed the deployed revision), so every alias of a per-deploy document
+  // carries the shared-cache policy instead of the server-wide no-store.
+  for (const path of DISCOVERY_PATHS) {
+    const get = await fetch(origin + path);
+    assert.equal(get.headers.get("cache-control"), discoveryCacheControl(path), path);
+    await get.text();
+  }
+  assert.equal(DISCOVERY_CACHE_CONTROL, "public, max-age=3600");
+  assert.equal(discoveryCacheControl("/llms.txt"), DISCOVERY_CACHE_CONTROL);
+  assert.equal(discoveryCacheControl("/llms-full.txt"), DISCOVERY_CACHE_CONTROL);
+  assert.equal(discoveryCacheControl("/.well-known/agent.json"), DISCOVERY_CACHE_CONTROL);
+  assert.equal(discoveryCacheControl("/kits.txt"), DISCOVERY_CACHE_CONTROL);
+  // The skills catalog is the exception: http.mjs injects the live
+  // published-member layer at serve time, so it is not per-deploy bytes.
+  assert.equal(discoveryCacheControl("/skills"), "no-store");
+  assert.equal(discoveryCacheControl("/room/skills"), "no-store");
+  // Non-discovery surfaces keep the server-wide no-store.
+  const health = await fetch(`${origin}/api/health`);
+  assert.equal(health.headers.get("cache-control"), "no-store");
+  await health.text();
+  assert.equal(discoveryCacheControl("/api/health"), "no-store");
+  assert.equal(discoveryCacheControl("/no-such-doc"), "no-store");
 });
 
 test("agents.json is a machine-readable flows/steps/actions doc served at /agents.json and /room aliases", async t => {

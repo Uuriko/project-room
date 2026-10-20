@@ -4,7 +4,7 @@ import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
-import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
+import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "./governance.mjs";
 import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
@@ -1683,4 +1683,23 @@ export function isEdgeDoorUrl(url) {
 export function discoveryDoc(pathname) {
   const canonical = ALIASES[pathname] ?? pathname;
   return CANONICAL[canonical] ?? null;
+}
+
+// Cache policy for the discovery plane (PERF-QUICK, from the EFF-PRODUCT-PERF
+// census): every canonical discovery document is generated from code and
+// config at load and changes only when a new build deploys — the packets
+// even embed the deployed revision — so the documents may sit in shared
+// caches instead of re-downloading on every agent session start. The value
+// matches the MCP server card's existing policy. Two exceptions stay
+// no-store: the skills catalog (http.mjs injects the live published-member
+// layer at serve time, so its bytes are not per-deploy) and any path that
+// is not a discovery document at all.
+export const DISCOVERY_CACHE_CONTROL = "public, max-age=3600";
+
+export function discoveryCacheControl(pathname) {
+  const doc = discoveryDoc(pathname);
+  if (!doc) return "no-store";
+  if (doc === MCP_SERVER_CARD_DOC) return MCP_DISCOVERY_CACHE_CONTROL;
+  if (doc === CANONICAL[SKILLS_CATALOG_PATH]) return "no-store";
+  return DISCOVERY_CACHE_CONTROL;
 }

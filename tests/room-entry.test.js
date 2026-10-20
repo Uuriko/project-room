@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { runInThisContext } from "node:vm";
 import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../server/room-entry.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../server/agent-discovery.mjs";
+import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW, DISCOVERY_CACHE_CONTROL } from "../server/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -19,6 +19,20 @@ test("Demigod HTML entry redirects to the canonical app with query preserved", a
   const packet = roomEntry(new Request("https://www.trydemigod.com/room", {headers:{Accept:"text/plain"}}));
   assert.equal(packet.status, 200);
   assert.match(await packet.text(), /Project Room/);
+});
+
+test("edge door serves per-deploy discovery documents with the shared-cache policy", async () => {
+  // PERF-QUICK: same policy as the origin — the documents change only at
+  // deploy. The skills catalog stays no-store (live member layer upstream).
+  for (const path of ["/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/kits.txt", "/room/join.txt"]) {
+    const response = roomEntry(new Request(`https://www.trydemigod.com${path}`));
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get("Cache-Control"), DISCOVERY_CACHE_CONTROL, path);
+    await response.text();
+  }
+  const skills = roomEntry(new Request("https://www.trydemigod.com/room/skills"));
+  assert.equal(skills.headers.get("Cache-Control"), "no-store");
+  await skills.text();
 });
 
 test("entry handler leaves other Demigod pages and hosts to existing routing", () => {
