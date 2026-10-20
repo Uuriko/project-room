@@ -15,7 +15,7 @@ export async function main(argv = process.argv.slice(2)) {
   const client = new RoomAgentClient(connection);
   const page = await wake.wait({ hostId: argv[5], cadenceSeconds: 60, waitMs: 0 });
   if (page.status === 'listener_contended') { console.log(JSON.stringify({ status: 'listener_contended' })); return; }
-  for (const signal of page.pendingWakes.slice(0, 10)) {
+  for (const signal of page.pendingWakes.slice(0, 1)) {
     const pointer = roomEventPointer(signal, connection.roomId);
     if (!pointer) continue;
     const receipt = await queueRoomPointer({ binding, pointer, journal: argv[3], authorize: async () => { await client.checkConnection(); return true; } });
