@@ -198,7 +198,12 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
-    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
+    // The embedded orient repeats two top-level fields byte for byte:
+    // availableClaims is openClaims and orientation is orientation. In a
+    // busy room that doubled ~20 KB of claims (qa-pack-duplicate-claims).
+    // Send each once and say where the shared copy lives.
+    const { availableClaims, orientation, ...orient } = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
+    pack.orient = { ...orient, sharedWithPack: { availableClaims: "openClaims", orientation: "orientation" } };
   }
   return pack;
 }
