@@ -464,7 +464,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "7da2679c8eb8424f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2110,7 +2110,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "7da2679c8eb8424f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
