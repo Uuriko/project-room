@@ -731,7 +731,7 @@ const shapes = {
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy joinedVia",
-  [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active membershipEndReason",
+  [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
@@ -4481,7 +4481,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       refuseArchivedWrite(room.state);
-      const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
+      const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId, ...(leftMemberId ? { rejoinOfMemberId: leftMemberId } : {}) });
       let state;
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
@@ -5879,7 +5879,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command, expectedSessionBinding = null) {
+  command(token, roomId, command, expectedSessionBinding = null, internal = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
     // command transaction cannot roll back, so remember the spend and refund
@@ -6089,6 +6089,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ...command.data,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
+            // Internal-only (display-name policy v3): the account-deletion
+            // flow ends a membership with membershipEndReason so the reducer
+            // can free the name. The field is NOT in the public command
+            // shape — validateCommand refuses it in command.data — so only
+            // this internal option (and stored history) can carry it; a
+            // forged stamp on an owner remove / member leave is impossible.
+            ...(command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false
+              && internal?.membershipEndReason === "account_deleted"
+              ? { membershipEndReason: "account_deleted" } : {}),
           }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }

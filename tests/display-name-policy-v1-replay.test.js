@@ -38,8 +38,8 @@ function open(t) {
   return store;
 }
 
-test("live writes stamp display-name policy v2", () => {
-  assert.equal(DISPLAY_NAME_POLICY_VERSION, 2);
+test("live writes stamp display-name policy v3", () => {
+  assert.equal(DISPLAY_NAME_POLICY_VERSION, 3);
 });
 
 test("a v1-stamped name that only the G16b first-word rule refuses still replays", () => {

@@ -21,7 +21,12 @@ export function invitationJoinedEvent(record) {
       invitationId: record.id,
       rolePolicyVersion: record.role_policy_version,
       authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-      displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION
+      displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION,
+      // A targeted-invitation rejoin supersedes the account's self-left
+      // member record; acceptInvitation computes it from the event log
+      // (memberSelfLeft) and names it here so the v3 roster check spares
+      // exactly that record. Absent for ordinary first joins.
+      ...(record.rejoinOfMemberId ? { rejoinOfMemberId: record.rejoinOfMemberId } : {})
     }
   });
 }
@@ -41,6 +46,9 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // the expected event takes the joined event's own stamp. Unknown stamps are
   // not normalised away — they still mismatch and fail the sweep.
   else if ([1, 2, 3].includes(joined?.data?.displayNamePolicyVersion)) expected.data.displayNamePolicyVersion = joined.data.displayNamePolicyVersion;
+  // A rejoin's joined event names the self-left record it superseded; that
+  // field is part of the event's own shape, so the expected event takes it.
+  if (typeof joined?.data?.rejoinOfMemberId === "string") expected.data.rejoinOfMemberId = joined.data.rejoinOfMemberId;
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)

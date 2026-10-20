@@ -1,6 +1,6 @@
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
-import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
+import { assertMemberDisplayNameAvailable, displayNameSkeleton } from "./display-name-guard.js";
 import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
@@ -468,10 +468,17 @@ const DISPLAY_NAME_POLICY_VERSIONS = new Set([1, 2, 3]);
 function assertStampedDisplayName(data, members) {
   const version = data.displayNamePolicyVersion;
   if (!DISPLAY_NAME_POLICY_VERSIONS.has(version)) return;
+  // A targeted-invitation rejoin (acceptInvitation) names the self-left
+  // record it supersedes in rejoinOfMemberId — server-computed there from
+  // the event log (memberSelfLeft), never client-supplied: the command
+  // shape for this type does not admit the field. Sparing that one record
+  // lets the same account return under its own name as a new member
+  // identity; every other removed member's name stays reserved.
+  const excludeId = [data.memberId ?? null, data.rejoinOfMemberId ?? null].filter(id => id !== null);
   assertMemberDisplayNameAvailable(data.displayName, members, {
     firstWordRule: version >= 2,
     includeInactive: version >= 3,
-    excludeId: data.memberId ?? null,
+    excludeId,
   });
 }
 // Live message.pinned commands stamp this (store.command injects it at
@@ -1176,17 +1183,36 @@ function changeMemberAccess(state, incoming) {
     throw new Error("Unsupported membership authority policy");
   }
   if (member.id === state.room.ownerId && (!incoming.data.active || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  // Display-name policy v3: reactivation runs no admission check anywhere
+  // else, so guard it here — reactivating a member whose name a DISTINCT
+  // active member now holds would put two active members under one name.
+  // Exact-name (skeleton) collisions only: the returning member's own
+  // inactive record never blocks, and inactive records never block.
+  if (incoming.data.active === true && member.active === false) {
+    const skeleton = displayNameSkeleton(member.displayName);
+    const holder = Object.values(state.members).find(other =>
+      other.id !== member.id && other.active !== false && displayNameSkeleton(other.displayName) === skeleton);
+    if (holder) {
+      const error = new Error(`That display name is already used in this room. Suggested name: ${member.displayName} 2.`);
+      error.code = "display_name_unavailable";
+      error.reason = "duplicate";
+      throw error;
+    }
+  }
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
   // Display-name policy v3: how a membership ended decides whether the
   // member's name stays reserved in the room. Account deletion ends the
   // membership AND frees the name (bug-deleted-account-member-stays-active-
-  // 20261010: the next joiner with that name must not 422); the deletion
-  // flow stamps membershipEndReason on its deactivation commands, and the
-  // marker is derived here and mirrored onto the event like delegatedAdmin,
-  // never trusted from a stored record alone. Any other ending (owner
-  // removal, self-leave) keeps the name reserved. Reactivation clears it.
+  // 20261010: the next joiner with that name must not 422). The deletion
+  // flow passes membershipEndReason through the store's INTERNAL command
+  // option — the field is refused in public command data (validateCommand's
+  // shape has no such field), so only the deletion flow and stored history
+  // can carry it — and the marker is derived here and mirrored onto the
+  // event like delegatedAdmin, never trusted from a stored record alone.
+  // Any other ending (owner removal, self-leave) keeps the name reserved.
+  // Reactivation clears it.
   if (incoming.data.active === false && incoming.data.membershipEndReason === "account_deleted") {
     member.membershipEndedBy = "account_deleted";
     incoming.data.membershipEndedBy = "account_deleted";

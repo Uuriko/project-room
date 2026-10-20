@@ -124,6 +124,10 @@ function activeNameList(activeNames, { includeInactive = false, excludeId = null
   const records = Array.isArray(activeNames) ? activeNames
     : activeNames && typeof activeNames === 'object' ? Object.values(activeNames)
     : [];
+  // excludeId: one member id, or a list of them — records the admission is
+  // allowed to supersede (the joiner's own inactive record; the self-left
+  // record a targeted-invitation rejoin replaces).
+  const excluded = new Set(excludeId == null ? [] : Array.isArray(excludeId) ? excludeId : [excludeId]);
   const names = [];
   for (const record of records) {
     if (record && typeof record === 'object' && !Array.isArray(record) && record.active === false) {
@@ -139,7 +143,7 @@ function activeNameList(activeNames, { includeInactive = false, excludeId = null
       // on the record from the deletion flow's deactivation event).
       if (!includeInactive) continue;
       if (record.membershipEndedBy === "account_deleted") continue;
-      if (excludeId !== null && recordName(record).id === excludeId) continue;
+      if (excluded.has(recordName(record).id)) continue;
     }
     const { name } = recordName(record);
     if (typeof name === 'string' && name.trim()) names.push(name);

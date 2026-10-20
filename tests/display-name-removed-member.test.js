@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T, applyEvent, event, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, applyEvent, event, replay, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { assessMemberDisplayName } from "../server/display-name-guard.mjs";
 
 const post = async (origin, path, body, token) => {
@@ -129,11 +129,12 @@ test("a membership ended by account deletion frees the name; a plain removal doe
   const { store, ownerKey } = await serve(t);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "deleted-human", displayName: "Departed", kind: "human", permissions: ["steer"] } });
   const member = store.room("commons").state.members["deleted-human"];
-  // The account-deletion flow's deactivation shape (server/account-deletion.mjs).
+  // The account-deletion flow's deactivation shape (server/account-deletion.mjs):
+  // the reason rides the store's internal command option, never command data.
   store.command(ownerKey, "commons", {
     id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
-    data: { memberId: "deleted-human", expectedMemberRevision: member.revision, permissions: member.permissions, active: false, membershipEndReason: "account_deleted" },
-  });
+    data: { memberId: "deleted-human", expectedMemberRevision: member.revision, permissions: member.permissions, active: false },
+  }, null, { membershipEndReason: "account_deleted" });
   const ended = store.room("commons").state.members["deleted-human"];
   assert.equal(ended.active, false);
   assert.equal(ended.membershipEndedBy, "account_deleted");
@@ -145,6 +146,68 @@ test("a membership ended by account deletion frees the name; a plain removal doe
   assert.equal(assessMemberDisplayName("Departed", members, { includeInactive: true }).reason, "duplicate", "the new active holder blocks the name");
   const withoutHolder = Object.fromEntries(Object.entries(members).filter(([id]) => id !== "next-human"));
   assert.equal(assessMemberDisplayName("Departed", withoutHolder, { includeInactive: true }).available, true, "the deletion-ended record alone does not hold the name");
+});
+
+test("a forged membershipEndReason in public command data is refused and frees nothing", async t => {
+  const { store, ownerKey, origin } = await serve(t);
+  const invite1 = store.invites.create(ownerKey, "commons", { profile: "chat" });
+  const ann = await post(origin, "/api/agent-invites/redeem", { code: invite1.code, displayName: "Forged Stamp" });
+  assert.equal(ann.status, 201, ann.text);
+  const memberId = ann.json.memberId;
+  const member = () => store.room("commons").state.members[memberId];
+  const forged = key => () => store.command(key, "commons", {
+    id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId, expectedMemberRevision: member().revision, permissions: member().permissions, active: false, membershipEndReason: "account_deleted" },
+  });
+  // Owner remove carrying the forged field in public command data: the
+  // command shape refuses the field outright, so the removal never happens
+  // and the name is never freed. A member's own leave is refused the same way.
+  assert.throws(forged(ownerKey), /Unexpected field: membershipEndReason/);
+  assert.equal(member().active, true, "the forged owner-remove changed nothing");
+  assert.throws(forged(store.issueAccessKey("commons", memberId)), /Unexpected field: membershipEndReason/);
+  assert.equal(member().active, true, "the forged self-leave changed nothing");
+  // A clean owner removal ends the membership WITHOUT the deletion marker,
+  // and the name stays reserved: a fresh redeem under it still 422s.
+  const removed = setMemberActive(store, ownerKey, memberId, false);
+  assert.equal(removed.active, false);
+  assert.equal(removed.membershipEndedBy, undefined);
+  const invite2 = store.invites.create(ownerKey, "commons", { profile: "chat" });
+  const reuse = await post(origin, "/api/agent-invites/redeem", { code: invite2.code, displayName: "Forged Stamp" });
+  assert.equal(reuse.status, 422, reuse.text);
+  assert.equal(reuse.json.error.code, "display_name_unavailable");
+  assert.equal(reuse.json.displayNameReason, "duplicate");
+});
+
+test("reactivation is refused while a distinct active member holds the name; allowed when none does", () => {
+  let tick = 0;
+  const ev = (type, data, actorId = "owner") => event({
+    type, actorId, roomId: "commons", id: randomUUID(), idempotencyKey: randomUUID(),
+    at: new Date(Date.UTC(2026, 9, 5) + (tick++) * 1000).toISOString(), data,
+  });
+  const add = (memberId, version) => ev(T.MEMBER_ADDED, { memberId, displayName: "Shared Name", kind: "human", permissions: ["steer"], displayNamePolicyVersion: version });
+  const setActive = (state, memberId, active) => {
+    const m = state.members[memberId];
+    return ev(T.MEMBER_ACCESS_CHANGED, { memberId, expectedMemberRevision: m.revision, permissions: [...m.permissions], active });
+  };
+  let state = replay([...initialRoom("commons")]);
+  state = applyEvent(state, add("first-holder", DISPLAY_NAME_POLICY_VERSION));
+  state = applyEvent(state, setActive(state, "first-holder", false));
+  assert.equal(state.members["first-holder"].active, false);
+  // A distinct member admitted under the v2-era rules now actively holds
+  // the name (its era let an inactive member's name be reused).
+  state = applyEvent(state, add("second-holder", 2));
+  assert.equal(state.members["second-holder"].active, true);
+  // Reactivating the first holder would put two active members under one
+  // name; the reducer refuses it.
+  assert.throws(() => applyEvent(state, setActive(state, "first-holder", true)), /already used/);
+  // Positive control: with no distinct active holder, reactivation applies
+  // and the member keeps its name.
+  let solo = replay([...initialRoom("commons")]);
+  solo = applyEvent(solo, add("first-holder", DISPLAY_NAME_POLICY_VERSION));
+  solo = applyEvent(solo, setActive(solo, "first-holder", false));
+  solo = applyEvent(solo, setActive(solo, "first-holder", true));
+  assert.equal(solo.members["first-holder"].active, true);
+  assert.equal(solo.members["first-holder"].displayName, "Shared Name");
 });
 
 test("reducer: a v2-stamped member.added replays under the rules of its era; a current-stamp add of a removed member's name is refused", async t => {
