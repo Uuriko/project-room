@@ -150,6 +150,24 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({ path: `${shots}/work-entry-${theme}-${width}.png` });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+  }
+  assert.equal(await page.locator(".room-topbar #tasks-board-open").isVisible(), true, "Work is directly reachable in the room header");
+  assert.equal(await page.locator("#tasks-board-open").count(), 1);
+  assert.ok((await page.locator("#tasks-board-open").boundingBox()).height >= 44);
+  await page.locator("#tasks-board-open").focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.id === "tasks-board-open");
+  await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+  await page.setViewportSize({ width: 1280, height: 800 });
   await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".board-empty").waitFor();
@@ -1241,7 +1259,7 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
 // conversation title — never <body>. The native <dialog> return chain
 // bottoms out at <body> when the palette was opened from body focus, and
 // when the recorded opener is removed while the board is open.
-test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+test("board close returns focus to the opener, Work, or conversation title", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -1284,17 +1302,22 @@ test("board close returns focus to the opener, else the conversation title", { t
   await dialog.waitFor({ state: "hidden" });
   await focusLandsOn("message-input");
 
-  // No opener: the palette was opened from body focus, so the fallback
-  // anchor — the conversation title — takes focus instead of <body>.
+  // No opener: the now-visible Work control takes focus instead of <body>.
   await page.evaluate(() => document.activeElement?.blur());
   await openBoard(page);
   await closeWithEscape();
-  await focusLandsOn("conversation-title");
+  await focusLandsOn("tasks-board-open");
 
   // Opener removed while the board is open: the same fallback applies.
   await page.locator("#message-input").click();
   await openBoard(page);
   await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("tasks-board-open");
+  // If the Work control is also unavailable, retain the title fallback.
+  await page.locator("#tasks-board-open").click();
+  await dialog.waitFor({ state: "visible" });
+  await page.locator("#tasks-board-open").evaluate(node => { node.hidden = true; });
   await closeWithEscape();
   await focusLandsOn("conversation-title");
 });

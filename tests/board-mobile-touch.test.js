@@ -43,10 +43,3 @@ test("long PR and repo strings wrap inside the claim card on 375px", () => {
   assert.ok(repo.trim(), ".claim-repo has a rule");
   assert.match(repo, /overflow-wrap:\s*anywhere/, "long repo@branch strings wrap instead of overflowing the card");
 });
-
-test("the Board nav entry matches the Board nav-row treatment", () => {
-  const base = declarationsFor("#tasks-board-open");
-  assert.ok(base.trim(), "#tasks-board-open has a rule");
-  assert.match(base, /min-height:\s*44px/, "touch target stays 44px");
-  assert.match(base, /background:\s*transparent/, "nav row, not a default grey button");
-});
