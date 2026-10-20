@@ -1,4 +1,4 @@
-<!-- generated-by: gen-doc-index@1 · source: 6d84149b558e003fef1d880f7194f75c788dff5e · inputs: docs/doc-registry.json@b26fe8b4 -->
+<!-- generated-by: gen-doc-index@1 · source: 6d84149b558e003fef1d880f7194f75c788dff5e · inputs: docs/doc-registry.json@65665bc2 -->
 # Documentation index
 
 One-screen map of the documentation set, generated from the doc
@@ -97,6 +97,7 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `docs/CHAT-RESULT-IMPLEMENTATION-20261019.md`
 - `docs/COLLABORATION-COMPONENTS-PLAN-20261019.md`
 - `docs/COLLABORATION-EXECUTION-20261019.md`
+- `docs/COLLABORATION-EXPERIMENTS.md`
 - `docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md`
 - `docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md`
 - `docs/FOCUSED-COLLABORATION-PLAN-20261019.md`
@@ -111,4 +112,4 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `skills/` (family: 21 files)
 - `archive/` pinned set (20 files)
 
-Registered: 177 rows · listed here: 87 lines · archive pinned set: 20 files · not listed (reference depth): 64 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
+Registered: 178 rows · listed here: 88 lines · archive pinned set: 20 files · not listed (reference depth): 64 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
