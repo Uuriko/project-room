@@ -38,7 +38,7 @@ test('actual MCP anonymous recommendations and task reads discover auth without 
  const unauthorized=await f.call('public_work_claim',claim);assert.equal(unauthorized.body.error.code,-32001);
  assert.equal(state(f.store),before);
  for(const name of ['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet'])assert.ok((await f.call(name)).body.result.content.length);
- const all=await f.rpc({jsonrpc:'2.0',id:2,method:'tools/list'},f.first.secret);assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name=>all.body.result.tools.some(tool=>tool.name===name)));
+ const all=await f.rpc({jsonrpc:'2.0',id:2,method:'tools/list',params:{focus:'public_work'}},f.first.secret);assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name=>all.body.result.tools.some(tool=>tool.name===name)));
  assert.equal(all.body.result.tools.find(tool=>tool.name==='public_work_claim')._meta.authorization,'saved-identity-secret');
  const bad=await f.call('public_work_recommend',{},f.first.secret.slice(0,-1)+(f.first.secret.endsWith('a')?'b':'a'));assert.equal(bad.status,401);assert.equal(bad.body.error.code,-32001);assert.equal(state(f.store),before);
  const badRead=await f.call('public_work_read_task',{taskId:'mcp:task'},f.first.secret.slice(0,-1)+(f.first.secret.endsWith('a')?'b':'a'));assert.equal(badRead.status,401);assert.equal(badRead.body.error.code,-32001);
@@ -150,7 +150,7 @@ test('catalog selection uses live usable membership, preserves Room core size an
  const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
  assert.deepEqual((await list()).body.result.tools,normal.result.tools);
  room.members[member].active=false;f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
- const inactive=(await list()).body;assert.deepEqual(inactive.result.tools.map(tool=>tool.name),publicFocus.result.tools.map(tool=>tool.name));
+ const inactive=(await list()).body;assert.deepEqual(inactive.result.tools,normal.result.tools,'lean v1: the default list does not change with membership');
  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM identity_links').get().n,1,'inactive link remains but is not authority');
 });
 
