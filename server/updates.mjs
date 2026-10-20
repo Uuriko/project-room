@@ -1,3 +1,4 @@
+import { isHumanAside } from "../src/aside.js";
 import { messageRepository } from "./message-repository.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
@@ -219,6 +220,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
 
   for (const message of byId.receivedBy(memberId)) {
     if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (isHumanAside(state.members, message.authorId, message.body)) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({
@@ -301,15 +303,32 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       `SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added'
          AND json_extract(body,'$.data.joinedVia')='one-time-code' AND json_extract(body,'$.data.referredBy')=? ORDER BY sequence DESC LIMIT 20`
     ).all(roomId, memberId);
+    // Presence events are grouped: one join is one item; several joins are
+    // one line naming who joined, so a burst of agents does not flood the feed.
+    const joins = [];
     for (const row of rows) {
       const event = JSON.parse(row.body), data = event.data ?? {};
       const joined = state.members?.[data.memberId];
       if (!joined || joined.active === false) continue;
-      const at = iso(event.at);
+      joins.push({ memberId: data.memberId, name: joined.displayName, at: iso(event.at) });
+    }
+    if (joins.length === 1) {
+      const [{ memberId: joinedId, name, at }] = joins;
       items.push(draft({
-        kind: "agent_joined", roomId, key: `joined|${data.memberId}`,
-        title: clip(`${joined.displayName} joined with a one-time code`), actor: data.memberId, createdAt: at, updatedAt: at,
-        basis: data.memberId, sourceRef: { memberId: data.memberId },
+        kind: "agent_joined", roomId, key: `joined|${joinedId}`,
+        title: clip(`${name} joined with a one-time code`), actor: joinedId, createdAt: at, updatedAt: at,
+        basis: joinedId, sourceRef: { memberId: joinedId },
+        next: null
+      }));
+    } else if (joins.length > 1) {
+      const [newest] = joins, oldest = joins[joins.length - 1];
+      const names = joins.slice(0, 3).map(join => join.name);
+      const rest = joins.length - names.length;
+      const title = `${names.join(", ")}${rest ? ` and ${rest} more` : ""} joined with one-time codes`;
+      items.push(draft({
+        kind: "agent_joined", roomId, key: `joined|group|${newest.memberId}`,
+        title: clip(title), actor: newest.memberId, createdAt: oldest.at, updatedAt: newest.at,
+        basis: joins.map(join => join.memberId).join(","), sourceRef: { memberIds: joins.map(join => join.memberId) },
         next: null
       }));
     }
