@@ -15,6 +15,7 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { checkHostContext } from "./agent-heartbeats.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
@@ -303,6 +304,11 @@ function validSignalIds(signalIds) {
     && signalIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128);
 }
 
+function validHostContext(value) {
+  if (value === undefined || value === null) return true;
+  try { checkHostContext(value); return true; } catch { return false; }
+}
+
 function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
@@ -319,7 +325,8 @@ function validWakeArgs(name, args) {
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
       && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
-      && (args.workWakes === undefined || typeof args.workWakes === "boolean");
+      && (args.workWakes === undefined || typeof args.workWakes === "boolean")
+      && validHostContext(args.context);
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
