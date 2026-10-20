@@ -895,6 +895,9 @@ export class AgentPluginStore {
     if (!authority || authority.ownerId !== ownerMemberId) {
       throw new AgentPluginError(403, "owner_required", "Only the room owner can seed directory cards");
     }
+    if (typeof this.store.room(roomId)?.state?.room?.archivedAt === "string") {
+      throw new AgentPluginError(409, "room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
+    }
     return this.mutate(() => {
       const members = authority.members ?? {};
       const seeded = [], skipped = [];
