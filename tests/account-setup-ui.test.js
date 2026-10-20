@@ -5,7 +5,7 @@
 // reset(), the in-room name-only variant, and completed-setup silence.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installAccountSetup } from "../src/account-setup-ui.js";
+import { installAccountSetup } from "../archive/deferred-email/src/account-setup-ui.js";
 
 function installDom(t) {
   const created = [];
@@ -206,7 +206,7 @@ test("an explicit room-name request opens deferred setup and resolves after savi
 
 // QA8: password signup used to make the first room before asking for a name,
 // so the owner joined as "Owner". nameBeforeFirstRoom asks first.
-import { nameBeforeFirstRoom } from "../src/account-setup-ui.js";
+import { nameBeforeFirstRoom } from "../archive/deferred-email/src/account-setup-ui.js";
 
 test("first room: the name is asked before the room is made", async () => {
   const calls = [];

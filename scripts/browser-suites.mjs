@@ -28,6 +28,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // states plainly that nothing runs it — an unwired file must be a visible
 // decision here, never an accident of a hand-kept list elsewhere.
 export const BROWSER_SUITE_EXCLUSIONS = {
+  // John deferred the private email workspace from v1.
+  "gmail-setup-browser-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "gmail-workspace-browser-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-unified-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-collaboration-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-quarantine-review-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-telegram-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-conversation-browser-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "inbox-browser-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+  "account-workspace-check.mjs": "Deferred email workspace; retained only for future reconsideration, not run in v1",
+
   // Aggregator gates: test.yml runs these against the shard receipts.
   "browser-shards-check.mjs": "test.yml `browser` aggregator job runs it against the shard receipts; it is the gate, not a suite",
   "unit-shards-check.mjs": "test.yml `unit` aggregator job runs it against the shard receipts; it is the gate, not a suite",

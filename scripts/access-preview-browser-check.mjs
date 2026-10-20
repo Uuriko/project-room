@@ -34,6 +34,7 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  if (pending) await page.locator("#topbar-updates").click();
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   return { ...f, page, errors, send, access, addRequest };
 }
@@ -45,6 +46,7 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
   // consolidation (the account-panel door is retired). It needs no
   // account: the browser mints a self-serve identity to file with.
   await page.goto(`${origin}/join`);
+  await page.locator("#join-request > summary").click();
   await page.locator("#join-request-room").fill(`${origin}/?room=commons`);
   await page.locator("#join-request-name").fill("Confirmation applicant");
   const form = page.locator("#join-request-form"), status = page.locator("#join-request-status");
@@ -209,6 +211,7 @@ test("late owner attention page cannot return after signing in as a different me
     await route.fulfill({ response });
   });
   await page.locator("#attention-next").click(); await held;
+  await page.locator("#updates-close").click();
   await page.locator("#session-menu-button").click();
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -227,12 +230,18 @@ test("late owner attention page cannot return after signing in as a different me
 
 test("human attention hides shadow diagnostics until Advanced and reviews the actual receipt work", { timeout: 60000 }, async t => {
   const f = await setup(t, { pending: 1 }), { page } = f;
+  await page.waitForFunction(() => !document.querySelector("#updates-status").textContent.includes("Loading"));
+  const update = page.locator(".updates-row").filter({ hasText: "Paging applicant 001 asks to join" });
+  assert.equal(await update.count(), 0, "the actionable decision is not duplicated as a generic update");
+  assert.equal(await update.locator('[data-update-action="open"]').count(), 0, "a join decision has no unsupported Open action");
   f.store.jevShadow.record({ gate: "receipt", roomId: "commons", subject: "test-handoff", path: "work-claim:done", score: 0.1, decision: "escalate", escalate: true });
   await page.locator("#attention-refresh").click();
   await page.waitForFunction(() => document.querySelector("#attention-status").textContent === "");
   assert.equal(await page.locator(".attention-jev_escalation").count(), 0, "default human view has no shadow measurement");
   assert.equal(await page.locator("#attention-count").textContent(), "1", "the genuine pending request remains actionable");
+  await page.locator("#updates-close").click();
   await enableHumanAdvanced(page);
+  await page.locator("#topbar-updates").click();
   const shadow = page.locator(".attention-jev_escalation");
   await shadow.waitFor();
   const review = shadow.getByRole("link", { name: "Review" });
@@ -244,6 +253,7 @@ test("human attention hides shadow diagnostics until Advanced and reviews the ac
   await page.locator("#human-advanced").uncheck();
   await closeSettings(page);
   await page.waitForFunction(() => document.querySelectorAll(".attention-jev_escalation").length === 0);
+  await page.locator("#topbar-updates").click();
   await page.locator('.attention-access_request .attention-decide[data-action-index="0"]').click();
   await page.locator("#needs-attention").waitFor({ state: "hidden" });
   assert.equal(f.store.jevShadow.list({ roomId: "commons", escalate: true }).length, 1, "measurement retained for diagnostics after real request approval");
