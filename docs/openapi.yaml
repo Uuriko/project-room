@@ -14928,25 +14928,32 @@ paths:
         Pre-write check for agents. Every file path held by a live work claim
         (claimed, in progress, blocked or delivered, lease not lapsed), with
         the claim id, owner and lease expiry, plus the live claims
-        themselves. Derived from the same records as the work-claims list;
-        never writes.
+        themselves, capped at 200 claims; claimsTotal appears when the map
+        was cut, and a cut map is not proof that a path is free. Titles and
+        paths are member-written: rows created by another member carry
+        untrusted: true and the response carries contentTrust, as on the
+        work-claims list. Derived from the same records as the work-claims
+        list; never writes.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ schema, paths: { path: [{ claimId, owner, leaseExpiresAt }] }, claims }" }
+        '200': { description: "{ schema, paths: { path: [{ claimId, owner, leaseExpiresAt }] }, claims: [{ claimId, title, owner, state, leaseExpiresAt, files, untrusted? }], claimsTotal?, contentTrust }" }
         '401': { description: unauthenticated }
         '403': { description: not_member or insufficient_scope }
   /api/rooms/{roomId}/work-ready:
     get:
       summary: Ready work (read-only)
       description: |
-        Unclaimed work claims whose dependencies are all done or closed, in
-        board order, capped at 100. Each row carries the claim id, title,
-        files, tags and dependencies so an agent can pick one and claim it.
+        Unclaimed work claims whose dependencies are all done (the same rule
+        as work-claims-read?queue=ready; a closed dependency was retired
+        without delivery and does not unblock), sorted by claim id, capped at
+        100; readyTotal appears when the list was cut. Each row carries the
+        claim id, title, files, tags and dependencies so an agent can pick one
+        and claim it; rows created by another member carry untrusted: true.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ schema, ready: [{ claimId, title, files, tags, dependsOn }] }" }
+        '200': { description: "{ schema, ready: [{ claimId, title, files, tags, dependsOn, untrusted? }], readyTotal?, contentTrust }" }
         '401': { description: unauthenticated }
         '403': { description: not_member or insufficient_scope }
   /api/rooms/{roomId}/activation-pack:
