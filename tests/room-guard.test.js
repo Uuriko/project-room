@@ -11,7 +11,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { gitChangedFiles, parseGuardArgs, runGuard } from '../scripts/room-guard.mjs';
+import { claimAccuracy, fetchOpenPrs, gitChangedFiles, overlapsByFile, parseGuardArgs, prOverlaps, runGuard, selfPrefixes } from '../scripts/room-guard.mjs';
 
 async function fixture(t) {
   const store = new RoomStore(':memory:');
@@ -145,4 +145,79 @@ test('a lease a few minutes past its stamp still blocks, and a bad path does not
   assert.deepEqual(blocked.conflicts.map(conflict => conflict.claimId), ['bad']);
   const usage = await runGuard({ files: ['../outside'], client: strictDouble({ workClaims: async () => { throw new Error('room should not be called'); } }), memberId: 'me' });
   assert.equal(usage.code, 2);
+});
+
+
+// --prs and --claim: open PRs carry no lease, so they are reported, never
+// blocking; a claim's file list is checked against the actual change.
+const NOW = Date.parse('2026-10-20T05:00:00Z');
+const board = claims => ({ workClaims: async () => claims });
+const liveClaim = (id, owner, files) => ({ id, owner, state: 'claimed', files, leaseExpiresAt: '2026-10-20T10:00:00Z' });
+const openPr = (number, branch, files, hoursAgo = 1) => ({ number, branch, files, updatedAt: new Date(NOW - hoursAgo * 3600000).toISOString() });
+
+test('prOverlaps skips your own branch prefix and files already reported as claimed', () => {
+  const prs = [openPr(1, 'jill/a', ['server/x.mjs', 'docs/y.md']), openPr(2, 'claude/other', ['server/x.mjs']),
+    openPr(3, 'codex/b', ['server/z.mjs']), openPr(4, 'jill/c', ['server/held.mjs'])];
+  const files = ['server/x.mjs', 'server/z.mjs', 'server/held.mjs'];
+  assert.deepEqual(selfPrefixes('claude/mine', undefined), ['claude/']);
+  assert.deepEqual(selfPrefixes('main', undefined), []);
+  const overlaps = prOverlaps(prs, files, { selfBranch: 'claude/mine', claimed: new Set(['server/held.mjs']) });
+  assert.deepEqual(overlaps.map(pr => [pr.number, pr.files]), [[1, ['server/x.mjs']], [3, ['server/z.mjs']]]);
+  assert.deepEqual(prOverlaps(prs, files, { selfBranch: 'claude/mine', mine: [] }).map(pr => pr.number), [1, 2, 3, 4], '--mine overrides the prefix');
+});
+
+test('overlapsByFile groups a hot file onto one line, newest first', () => {
+  const overlaps = [openPr(7, 'jill/old', ['server/http.mjs'], 50), openPr(8, 'jill/new', ['server/http.mjs'], 2),
+    openPr(9, 'codex/mid', ['server/http.mjs'], 10), openPr(10, 'lab/x', ['server/http.mjs'], 30)];
+  assert.deepEqual(overlapsByFile(overlaps, NOW), ['  server/http.mjs: 4 open PRs; newest #8 jill/new, updated 2h ago; #9 codex/mid, updated 10h ago; #10 lab/x, updated 30h ago; +1 more']);
+});
+
+test('claimAccuracy names changed files outside the claim and claimed files left unchanged', () => {
+  const claims = [liveClaim('mine', 'me', ['server/a.mjs', 'docs/', 'server/unused.mjs'])];
+  assert.deepEqual(claimAccuracy(claims, 'mine', ['server/a.mjs', 'docs/guide.md', 'server/http.mjs']),
+    { found: true, unclaimedChanges: ['server/http.mjs'], unusedClaims: ['server/unused.mjs'] });
+  assert.deepEqual(claimAccuracy(claims, 'missing', ['server/a.mjs']), { found: false });
+});
+
+test('runGuard reports PR overlaps and claim accuracy without changing the exit code', async () => {
+  const claims = [liveClaim('mine', 'me', ['server/a.mjs']), liveClaim('theirs', 'them', ['server/b.mjs'])];
+  const clean = await runGuard({ files: ['server/a.mjs', 'server/c.mjs'], client: board(claims), memberId: 'me', now: NOW,
+    openPrs: [openPr(5, 'jill/x', ['server/c.mjs'])], selfBranch: 'claude/y', claimId: 'mine' });
+  assert.equal(clean.code, 0, 'open PRs are advisory');
+  assert.deepEqual(clean.prOverlaps.map(pr => pr.number), [5]);
+  assert.match(clean.lines.join('\n'), /server\/c\.mjs: 1 open PR; newest #5 jill\/x/);
+  assert.match(clean.lines.join('\n'), /changed but not in claim mine .*: server\/c\.mjs/);
+  const blocked = await runGuard({ files: ['server/b.mjs'], client: board(claims), memberId: 'me', now: NOW, openPrs: [openPr(6, 'jill/z', ['server/b.mjs'])] });
+  assert.equal(blocked.code, 1, 'a live claim still blocks');
+  assert.deepEqual(blocked.prOverlaps, [], 'the claim report already covers that file');
+  const offline = await runGuard({ files: ['server/a.mjs'], client: board(claims), memberId: 'me', now: NOW, prsUnavailable: 'gh CLI not installed' });
+  assert.equal(offline.code, 0);
+  assert.match(offline.lines.join('\n'), /open pull requests unavailable \(gh CLI not installed\); not checked/);
+  const exact = await runGuard({ files: ['server/a.mjs'], client: board(claims), memberId: 'me', now: NOW, claimId: 'mine' });
+  assert.match(exact.lines.join('\n'), /claim mine lists exactly the changed files/);
+});
+
+test('fetchOpenPrs pages explicitly and records renamed-from paths', async () => {
+  const calls = [];
+  const pulls = Array.from({ length: 100 }, (_, i) => ({ number: i + 1, head: { ref: `b${i + 1}` }, updated_at: '2026-10-20T00:00:00Z' }));
+  const gh = async args => {
+    calls.push(args.join(' '));
+    const path = args[1];
+    if (path.startsWith('repos/o/r/pulls?state=open')) return JSON.stringify(path.endsWith('page=1') ? pulls : [{ number: 101, head: { ref: 'b101' } }]);
+    const number = Number(/pulls\/(\d+)\/files/.exec(path)[1]);
+    return JSON.stringify(number === 101 ? [{ filename: 'new.mjs', previous_filename: 'old.mjs' }] : [{ filename: `f${number}.mjs` }]);
+  };
+  const prs = await fetchOpenPrs('o/r', { gh, concurrency: 4 });
+  assert.equal(prs.length, 101);
+  assert.deepEqual(prs.find(pr => pr.number === 101).files, ['new.mjs', 'old.mjs']);
+  assert.ok(calls.every(call => !call.includes('--paginate')), 'no Link-header pagination');
+  assert.ok(calls.includes('api repos/o/r/pulls?state=open&per_page=100&page=2'));
+});
+
+test('parseGuardArgs accepts --prs, --repo, --mine and --claim and rejects misuse', () => {
+  assert.deepEqual(parseGuardArgs(['--prs', '--repo', 'Uuriko/project-room', '--mine', 'claude/,lab/', '--claim', 'c1']).options,
+    { strict: false, warn: false, json: false, files: undefined, base: undefined, prs: true, repo: 'Uuriko/project-room', claim: 'c1', mine: ['claude/', 'lab/'] });
+  assert.match(parseGuardArgs(['--repo', 'a/b']).error, /only apply with --prs/);
+  assert.match(parseGuardArgs(['--prs', '--repo', 'not a repo']).error, /OWNER\/NAME/);
+  assert.match(parseGuardArgs(['--claim']).error, /needs a value/);
 });
