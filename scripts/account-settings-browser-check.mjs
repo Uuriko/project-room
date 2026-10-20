@@ -47,7 +47,7 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   const { page, origin, key, accountId, f } = await setup(t);
   await page.goto(origin + "/?account=1");
   await signInFixture(page, key);
-  await page.locator("#inbox-panel").waitFor();
+  await page.locator("#account-rooms-panel").waitFor();
 
   // Desktop topbar exposes Sign-in & security directly (the session-menu
   // fold is mobile-only).
@@ -60,11 +60,12 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   await body.getByText("Email magic link").waitFor();
   assert.ok((await body.textContent()).includes("browser@example.invalid"));
 
-  // Honest provider-unconfigured states (no OAuth or mail bindings in the fixture).
-  for (const note of ["GitHub sign-in isn’t configured on this Room.",
-    "Google sign-in isn’t configured on this Room.", "Email delivery isn’t configured on this Room"]) {
-    await body.getByText(note, { exact: false }).first().waitFor();
+  // Unconfigured OAuth choices are omitted; account email recovery still
+  // explains unavailable delivery because it affects linked methods.
+  for (const provider of ["google", "github"]) {
+    assert.equal(await body.locator(`a[href="/api/auth/${provider}/link/start"]`).count(), 0);
   }
+  await body.getByText("Email delivery isn’t configured on this Room", { exact: false }).first().waitFor();
 
   // Disable the magic method through the real UI.
   await methodRow(page, "Email magic link").getByRole("button", { name: "Disable" }).click();
@@ -151,7 +152,7 @@ test("sign-in UI: email link returns to the existing account with a configured m
   assert.ok(typeof sent[0].code === "string" && sent[0].code.length > 0);
   assert.equal(typeof sent[0].link, "string");
   await magic.goto(sent[0].link);
-  await magic.locator("#inbox-panel").waitFor();
+  await magic.locator("#account-rooms-panel").waitFor();
   const account = await magic.request.get(origin + "/api/account-session");
   assert.equal((await account.json()).account.id, magicId, "email verification returns the existing account");
   assert.doesNotMatch(magic.url(), /magic=/, "one-use credential is stripped from the URL");
@@ -215,7 +216,7 @@ for (const method of ['GET', 'POST']) test(`Profile ignores a held ${method} res
   f.store.updateAccountProfile('profile-next-account', { displayName: 'Next private account name' });
   f.store.accountLogins.linkPasswordMethod('profile-next-account', { email: 'profile-next@example.invalid', verifier: hashPassword('synthetic-next-password') });
   await page.goto(origin + '/?account=1'); await signInFixture(page, key);
-  await page.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await page.locator("#account-rooms-panel").waitFor({ state: 'visible' });
   let captured, release;
   const committed = new Promise(resolve => { captured = resolve; });
   const held = new Promise(resolve => { release = resolve; });

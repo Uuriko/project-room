@@ -111,7 +111,7 @@ test("coverage is account-scoped: another account sees an empty dashboard", t =>
 
 async function httpFixture(t) {
   const { f, token, binding, hold1, hold2 } = coverageFixture(t);
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -176,7 +176,7 @@ test("GET /api/inbox/quarantine/coverage on an empty queue returns null coverage
   const key = f.store.issueAccountAccessKey(account.id);
   const slot = f.store.createAccountSessionSlot();
   const session = { token: slot.token, ...f.store.loginAccountSession(slot.token, key, 0) };
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;

@@ -237,6 +237,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .blocker { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--amber); background: #241b12; }
 .blocker strong { color: var(--amber); font-size: .72rem; }
 .blocker p { margin: .25rem 0 0; color: #e8caa8; font-size: .75rem; }
+:root[data-theme="light"] .blocker { background: var(--panel); color: var(--text); }
+:root[data-theme="light"] .blocker p { color: var(--text); }
 .decision { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--blue); background: #101f36; }
 .decision strong { color: #a9c8ff; font-size: .72rem; }
 .decision p { margin: .25rem 0 0; color: #c5d4ee; font-size: .75rem; }
@@ -564,11 +566,6 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 /* min-width: 0 lets the nowrap line shrink to the card; without it the line's full
    length sets the page's minimum width and a phone's layout viewport grows with it. */
 .needs-attention { min-width: 0; }
-#activity-preview-list { grid-template-columns: minmax(0, 1fr); }
-#activity-preview-list > li { min-width: 0; }
-#activity-preview-list .rb-event-link { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#activity-preview-list .rb-actor, #activity-preview-list .rb-detail, #activity-preview-list time { display: inline; }
-#activity-preview-list time { margin: 0 .4rem; color: var(--muted); }
 .attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 .attention-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--line-soft); border-radius: .5rem; background: rgb(255 255 255 / 2%); }
 .attention-body { flex: 1 1 18rem; min-width: 0; }
@@ -927,10 +924,7 @@ summary { overflow-wrap: anywhere; }
   .room-main { overflow: visible; min-height: 32rem; }
   .timeline { flex: 1 0 auto; min-height: 12rem; overflow: visible; }
 }
-@media (max-height: 500px) {
-  .app-shell > #main { flex: 0 0 auto; }
-  .room-main { min-height: 32rem; }
-}
+/* Short windows retain bounded room scrolling so navigation cannot cover the composer. */
 @container room-shell (max-width: 40em) {
   .topbar { flex-direction: row; align-items: center; gap: .5rem; }
   .brand div { display: none; }
@@ -1155,15 +1149,6 @@ summary { overflow-wrap: anywhere; }
 .result-diff span { display: block; white-space: pre-wrap; }
 .result-diff .diff-added { color: var(--green); background: rgb(79 208 155 / 12%); }
 .result-diff .diff-removed { color: var(--red); background: rgb(255 123 123 / 12%); text-decoration: line-through; }
-
-/* W4-43 H1: recipe suggestion chips */
-.recipe-strip { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0; }
-.recipe-chip { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; max-width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
-.recipe-chip .recipe-chip-label { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
-/* W4-47 H6: recipe dry-run preview panel */
-.recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
-.recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
-.recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
 
 /* Issue #6 A2: room lifecycle (create, archive, leave) */
 #account-rooms-list .inbox-row small.inbox-row-kind { grid-column: 1; font-size: .75rem; color: var(--muted); }
@@ -1629,33 +1614,7 @@ summary { overflow-wrap: anywhere; }
 .agent-first-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .agent-first-run-hint { font-size: .85rem; color: var(--muted); }
 .agent-first-run-dismiss { font: inherit; cursor: pointer; }
-.land-queue-list { display: flex; flex-direction: column; gap: .35rem; }
-.land-card { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .8rem; line-height: 1.3; }
-.land-card .land-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12rem; }
-.land-sha { font-family: ui-monospace, monospace; color: var(--muted); }
-.land-checks { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; background: var(--muted); }
-.land-checks-green { background: #3fb950; }
-.land-checks-red { background: #f85149; }
-.land-checks-pending { background: #d29922; }
-.land-badge { font-size: .68rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem; }
 
-/* Bounties & credits panel (#3437): in-room human money surface. */
-.bounty-board { display: flex; flex-direction: column; gap: .75rem; }
-.bounty-balance { display: flex; flex-wrap: wrap; gap: .35rem .75rem; font-size: var(--text-sm); }
-.bounty-balance strong { width: 100%; }
-.bounty-form { display: grid; gap: .5rem; }
-.bounty-form h4, .bounty-receipts h4 { margin: 0; font-size: var(--text-sm); }
-.bounty-list { display: flex; flex-direction: column; gap: .5rem; }
-.bounty-row { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .6rem; }
-.bounty-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: var(--text-sm); }
-.bounty-amount { margin-left: auto; font-weight: 600; }
-.bounty-review { display: grid; gap: .5rem; margin-top: .5rem; }
-.bounty-delivery { margin: 0; font-size: var(--text-sm); }
-.bounty-rubric { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
-.bounty-rubric li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: var(--text-sm); }
-.bounty-actions { display: flex; gap: .5rem; }
-.bounty-receipts ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; font-size: var(--text-sm); }
-.bounty-receipt-hot { outline: 2px solid var(--blue); border-radius: .35rem; }
 
 /* Email/password entry and focused recovery screens. */
 .app-shell:has(#auth-panel:not([hidden])) .topbar .brand { visibility: hidden; }
@@ -1742,6 +1701,7 @@ summary { overflow-wrap: anywhere; }
    to this footer sends a restored reading position to the bottom. */
 .site-footer { margin: 2rem 1rem 1rem; color: var(--muted); font-size: var(--text-sm); overflow-anchor: none; }
 .site-footer a { color: inherit; }
+body:has(#main:not([hidden])) .site-footer { display: none; }
 
 /* Updates destination. Styles live here so the page content policy allows them. */
 #updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }
@@ -1814,3 +1774,30 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
 .inline-result .portable-actions { flex-wrap: wrap; }
+
+#account-rooms-panel { max-width: 40rem; margin: 1.5rem auto; }
+#account-rooms-search { width: 100%; }
+#account-rooms-filter-status:empty, #account-rooms-status:empty { display: none; }
+#account-rooms-panel #owner-cockpit { margin-top: 1.5rem; }
+body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
+@media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }
+
+#account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
+body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
+
+#signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
+
+.result-row:has(> .inline-result:not([hidden])) > button[data-read-result],
+.result-row:has(> .inline-result:not([hidden])) > p,
+.result-row:has(> .inline-result:not([hidden])) > .result-meta { display: none; }
+.result-row > .inline-result { border: 0; padding: 0; margin: 0; background: transparent; }
+#room-results-list:has(.inline-result:not([hidden])) > .result-row:not(:has(.inline-result:not([hidden]))) { display: none; }
+#room-results-list > .result-row:has(.inline-result:not([hidden])) { border: 0; padding-block: 0; }
+
+/* One pinned result beside the conversation; the mobile reader stays contextual. */
+@media (min-width: 1100px) {
+  .community-shell:has(> .result-docked:not([hidden])) { grid-template-columns: 12rem minmax(0, 1fr) minmax(20rem, .85fr); }
+  #main > .result-docked { grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: var(--space-5); border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--panel); }
+  #main > .result-docked #result-body { max-height: none; border: 0; padding: 0; }
+  #main > .result-docked .portable-actions { position: sticky; bottom: 0; padding-block: var(--space-3); background: var(--panel); }
+}

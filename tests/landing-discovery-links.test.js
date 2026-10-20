@@ -15,11 +15,10 @@ import { fileURLToPath } from "node:url";
 
 const read = path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 
-test("the landing links open work and the receipts gallery from the sign-in wall (F2)", () => {
+test("the sign-in wall does not add public-work and receipt navigation", () => {
   const html = read("../index.html");
   const routes = html.slice(html.indexOf('id="signin-entry-routes"'), html.indexOf("</section>", html.indexOf('id="signin-entry-routes"')));
-  assert.match(routes, /<a class="text-button" href="\/offers">Open work<\/a>/);
-  assert.match(routes, /<a class="text-button" href="\/receipts">Receipts<\/a>/);
+  assert.doesNotMatch(routes, /href="\/(?:offers|receipts)"/);
 });
 
 test("the landing footer links the gallery and names no single receipt (F2, PROOF-WALL-FLIP)", () => {
