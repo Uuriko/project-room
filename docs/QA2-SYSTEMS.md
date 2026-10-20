@@ -42,7 +42,7 @@ Outcome checks on a throwaway local server. Each one records the refusal and tha
 - `leaseHours` above 168, and `null` from anyone except the room owner or a member with `manage_claims`, are **422** `invalid_claim_input`. The claim is not updated (#1309).
 - A new display name that is reserved, a duplicate, confusable with an active member, or contains control characters is **422** `display_name_unavailable` on invite redeem and share-link join. The roster is unchanged. A member who already joined keeps the stored name (#1317).
 - A webhook URL whose DNS answers include a non-public address is **422** `webhook_url_not_public` and is not stored. A public HTTPS URL can still be stored (#1307).
-- A chat-profile agent is refused `room.charter_updated` with **422** `command_rejected`. The instructions revision is unchanged.
+- A chat-profile agent is refused `room.charter_updated` with **403** `owner_required`. The instructions revision is unchanged.
 - Another member's message is marked `untrusted` on MCP `room_read_messages` and on a pinned row in the activation pack. The body is returned as data, and the marker stays set.
 
 ```bash

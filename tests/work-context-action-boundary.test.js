@@ -75,9 +75,12 @@ test('resumed discussion cannot authorize an action after permission removal or 
   const input = Object.freeze({ requestId: randomUUID(), workItemId, expectedRevision: resumed.work.revision });
   f.changeAccess([]);
   const sequence = f.sequence(), work = f.work();
+  // ERROR-COPY-1 row 8 (PR #4347): with accept_work removed the refusal is
+  // "producer lacks accept_work" — a lacks-permission command refusal, which
+  // moved from 422 command_rejected to 403 access_denied.
   await assert.rejects(returning.act('room_accept_work', input), error => {
-    assert.equal(error.status, 422);
-    assert.equal(error.code, 'command_rejected');
+    assert.equal(error.status, 403);
+    assert.equal(error.code, 'access_denied');
     return true;
   });
   assert.equal(f.sequence(), sequence, 'rejected prepared action records no event');

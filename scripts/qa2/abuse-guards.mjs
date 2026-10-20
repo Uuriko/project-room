@@ -330,10 +330,13 @@ try {
     escalation: "Ask the owner.",
   }));
   const revisionAfter = must(await req("GET", `${roomPath}/charter`, owner.secret), "charter after").currentRevision;
+  // ERROR-COPY-1 row 8 (PR #4347): command-path "Only the Room owner may …"
+  // refusals moved from 422 command_rejected to the 403 class — this scenario
+  // now pins 403 owner_required. The revision-unchanged half is unchanged.
   guard(
     "R1",
-    "a chat-profile agent is refused a room instructions update with 422 command_rejected and the revision is unchanged",
-    charter.status === 422 && codeOf(charter) === "command_rejected" && /owner/i.test(charter.json?.error?.message ?? "") && revisionAfter === revisionBefore,
+    "a chat-profile agent is refused a room instructions update with 403 owner_required and the revision is unchanged",
+    charter.status === 403 && codeOf(charter) === "owner_required" && /owner/i.test(charter.json?.error?.message ?? "") && revisionAfter === revisionBefore,
     `status ${charter.status} ${codeOf(charter)}; revision ${revisionBefore} -> ${revisionAfter}`,
   );
 
