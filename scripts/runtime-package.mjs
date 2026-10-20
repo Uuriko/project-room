@@ -403,7 +403,10 @@ optional.push("src/work-reducers.js", "src/message-reducers.js", "src/spend-pric
 optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
 optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
-export const allowed = new Set([...required, ...optional]);
+// Retired UI files remain recognized only when an historical commit contains them.
+// They are not advertised or required by the current runtime.
+const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board"].map(name => `src/${name}.js`);
+export const allowed = new Set([...required, ...optional, ...historicalAssets]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
 // offending path/value so a PR author can fix it in one cycle instead of

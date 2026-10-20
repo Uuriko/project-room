@@ -116,7 +116,7 @@ export async function clickChrome(page, selector) {
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
   }
-  if (['#topbar-activity', '#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
+  if (['#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
     await ensureSidebarClosed(page);
     const more = page.locator('#room-more');
     if (!(await more.evaluate(node => node.open))) await more.locator(':scope > summary').click();
