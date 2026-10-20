@@ -175,11 +175,82 @@ export function identityNamesForRoom(db, roomId) {
 // mention of Grok (parity with tokenContinues in inbox-agent-routing.mjs).
 const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]/u.test(text[end]);
 
+// Addressing beyond a single @name (Reason-style):
+//   @*              every active member except the sender
+//   @person/*       every active agent whose accountable person is <person>
+//   @person/agent   that person's agent named <agent>
+//   @repo:<name>    every active agent whose presence says it is in <name>
+//                   (full "owner/repo" or just the repo name)
+// <person> is a human member's display name or member id. @squad/<name> is
+// left to squads. Returns null when the text at nameAt is not an address,
+// so the plain @name scan runs; returns [] for an address that names nobody.
+const addressEnds = (text, end) => !handleContinues(text, end) && text[end] !== "/" && text[end] !== ":";
+function resolveAddress(members, identityNames, repos, text, nameAt, senderMemberId) {
+  const active = Object.entries(members ?? {}).filter(([, m]) => m && m.active !== false);
+  const lower = text.toLowerCase();
+  if (text[nameAt] === "*") {
+    if (handleContinues(text, nameAt + 1)) return null;
+    return active.map(([id]) => id).filter(id => id !== senderMemberId);
+  }
+  if (lower.startsWith("repo:", nameAt)) {
+    const match = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?/.exec(text.slice(nameAt + 5));
+    if (!match) return [];
+    const want = match[0].replace(/[.]+$/, "").toLowerCase();
+    return active.filter(([id, m]) => m.kind === "agent" && id !== senderMemberId && typeof repos?.[id] === "string"
+      && [repos[id].toLowerCase(), repos[id].toLowerCase().split("/").pop()].includes(want)).map(([id]) => id);
+  }
+  let person = null, longest = 0;
+  for (const [id, m] of active) {
+    if (m.kind !== "human") continue;
+    for (const label of [id, m.displayName]) {
+      if (typeof label !== "string" || !label.trim()) continue;
+      const end = nameAt + label.length;
+      if (lower.slice(nameAt, end) === label.toLowerCase() && text[end] === "/" && label.length > longest) {
+        person = id; longest = label.length;
+      }
+    }
+  }
+  if (!person || lower.slice(nameAt, nameAt + longest) === "squad") return null;
+  const slashAt = nameAt + longest + 1;
+  const agents = active.filter(([id, m]) => m.kind === "agent" && m.accountableHumanId === person && id !== senderMemberId);
+  if (text[slashAt] === "*") return agents.map(([id]) => id);
+  let best = [], bestLength = 0;
+  for (const [id, m] of agents) {
+    for (const label of [id, m.displayName, identityNames?.[id]]) {
+      if (typeof label !== "string" || !label.trim()) continue;
+      const end = slashAt + label.length;
+      if (lower.slice(slashAt, end) !== label.toLowerCase() || !addressEnds(text, end)) continue;
+      if (label.length > bestLength) { best = []; bestLength = label.length; }
+      if (label.length === bestLength && !best.includes(id)) best.push(id);
+    }
+  }
+  return best.length === 1 ? best : [];
+}
+
+// Member id -> the repo its agent's latest presence reports, for @repo:<name>.
+// Never throws: a database without presence context has no repos.
+export function repoNamesForRoom(db, roomId) {
+  try {
+    const rows = db.prepare(
+      `SELECT l.member_id AS memberId, c.context_json AS json FROM identity_links l
+       JOIN agent_host_context c ON c.agent_id=l.identity_id
+       JOIN agent_hosts h ON h.agent_id=c.agent_id AND h.host_id=c.host_id
+       WHERE l.room_id=? ORDER BY h.last_seen_at ASC`).all(roomId);
+    const out = {};
+    for (const row of rows) {
+      try { const repo = JSON.parse(row.json).repo; if (typeof repo === "string" && repo) out[row.memberId] = repo; } catch { /* skip */ }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
 // longer label to a shorter recipient. Silent @_mentions, email addresses,
 // inactive members, and self-mentions do not create delivery targets.
-export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
+export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId, { repos = {} } = {}) {
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
   const lowerText = text.toLowerCase(), found = [];
@@ -187,6 +258,11 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
     const nameAt = at + 1;
+    const addressed = resolveAddress(members, identityNames, repos, text, nameAt, senderMemberId);
+    if (addressed) {
+      for (const target of addressed) if (!found.includes(target)) found.push(target);
+      continue;
+    }
     let matches = [], longest = 0;
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
