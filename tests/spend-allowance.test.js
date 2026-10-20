@@ -50,7 +50,8 @@ test("reducer: owner-only, strict shape, revisioned, clearable and replayable", 
   const f = await serve(t);
   assert.equal(spendAllowance(f.state()), null, "no allowance is the default");
   for (const actor of ["guest", "agent"]) {
-    assert.throws(() => f.send(actor, T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 }), { status: 422, code: "command_rejected", message: /Only the Room owner may set the spend allowance/ });
+    // ERROR-COPY-1 row 8: owner-only command refusal -> 403 owner_required (was 422 command_rejected).
+    assert.throws(() => f.send(actor, T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 }), { status: 403, code: "owner_required", message: /Only the Room owner may set the spend allowance/ });
   }
   assert.equal(f.state().room.spendAllowance, undefined, "a refused allowance leaves no trace");
   for (const data of [{ allowanceCents: -1, periodDays: 30 }, { allowanceCents: 1.5, periodDays: 30 }, { allowanceCents: 100000001, periodDays: 30 },
@@ -198,9 +199,11 @@ test("route: members read it, only the owner sets it, and the body is strict", a
   assert.equal(shown.json.allowance.allowanceCents, 5000); assert.equal(shown.json.headroomCents, 5000);
   const cleared = await f.request(path, { method: "POST", token: f.keys.owner, data: { allowanceCents: null } });
   assert.equal(cleared.status, 201); assert.equal((await f.request(path, { token: f.keys.owner })).json.allowance, null);
-  // The generic command path stays owner-only too.
+  // The generic command path stays owner-only too — and, since ERROR-COPY-1
+  // row 8, it answers in the same 403 owner_required class as the dedicated
+  // route above (was 422 command_rejected).
   const viaCommands = await f.request("/api/rooms/commons/commands", { method: "POST", token: f.keys.guest, data: { id: randomUUID(), type: T.ROOM_SPEND_ALLOWANCE_SET, data: { allowanceCents: 1, periodDays: 1 } } });
-  assert.equal(viaCommands.status, 422); assert.equal(viaCommands.json.error.code, "command_rejected");
+  assert.equal(viaCommands.status, 403); assert.equal(viaCommands.json.error.code, "owner_required");
 });
 
 test("agent room owner can set the existing room-wide allowance and non-owner malformed writes reveal no schema", async t => {

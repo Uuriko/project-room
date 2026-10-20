@@ -45,7 +45,8 @@ test("charter preserves exact versions, clearing and old receipt retries without
 
 test("only active human owner updates; invalid and stale instructions leave no writes", async t => {
   const f = await setup(t), before = auditRecovery(f.store).dataSha256;
-  for (const actor of ["guest", "producer", "reviewer"]) assert.throws(() => f.send(data(), undefined, actor), { code: "command_rejected" });
+  // ERROR-COPY-1 row 8: non-owner charter updates refuse 403 owner_required (was command_rejected).
+  for (const actor of ["guest", "producer", "reviewer"]) assert.throws(() => f.send(data(), undefined, actor), { code: "owner_required" });
   for (const patch of [{ purpose: "" }, { purpose: " " }, { purpose: "a".repeat(1001) }, { purpose: "\uD800" }, { outputs: {} }, { purpose: null }, { expectedRevision: null }, { expectedRevision: Number.MAX_SAFE_INTEGER }, { extra: "not allowed" }]) {
     assert.throws(() => f.send({ ...data(), ...patch }));
   }
@@ -135,5 +136,5 @@ test("MCP orientation follows charter changes across reconnect without adding au
   const work = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
   assert.equal(work.context.charter.revision, 2); assert.equal(work.work.revision, 0);
   assert.equal((await f.client.snapshot()).cursor, 0);
-  assert.throws(() => f.store.command(f.keys.producer, "commons", { id: "attempt-charter", type: CHARTER_TYPE, data: data(2) }), { code: "command_rejected" });
+  assert.throws(() => f.store.command(f.keys.producer, "commons", { id: "attempt-charter", type: CHARTER_TYPE, data: data(2) }), { code: "owner_required" });
 });
