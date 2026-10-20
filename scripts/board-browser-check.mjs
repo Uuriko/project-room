@@ -282,7 +282,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(new URL(page.url()).hash, canonicalHash);
     assert.equal(await dialog.evaluate(node => node.open), false, "the Board no longer traps focus over work");
     assert.equal(await record.locator("h3").innerText(), "Canonical work behind the Board card");
-    assert.equal(await record.locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await record.locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
   };
   const assertBoardReturn = async (url, scrollTop) => {

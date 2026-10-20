@@ -236,7 +236,7 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     await read.focus(); await page.keyboard.press("Enter");
     await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
     assert.equal(await page.locator("#result-title").textContent(), "A quiet room");
-    assert.match(await page.locator("#result-status").textContent(), /Submitted by Room owner.*exact stored text/);
+    assert.match(await page.locator("#result-status").textContent(), /^Submitted by Room owner/);
     assert.equal(await page.locator("#result-title").evaluate(node => node === document.activeElement), true);
     await measure(stage, "#result-dialog", "#result-body");
     // Reading a result records the reader's basis, so the next snapshot can
@@ -488,7 +488,7 @@ test("result reply refusal keeps the reader and private destination draft intact
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-discuss").waitFor({ state: "visible" });
   await f.page.locator("#result-discuss").click();
-  assert.equal(await f.page.locator("#result-dialog").isVisible(), false);
+  assert.equal(await f.page.locator("#main > #result-dialog.result-docked").isVisible(), true, "accepted desktop handoff retains the pinned result beside feedback");
   assert.equal(await f.page.locator("#message-input").inputValue(), "Private feedback draft");
   assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
 });

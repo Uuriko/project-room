@@ -334,7 +334,7 @@ for (const mobile of [false, true]) test(`task finder ${mobile ? 'touch' : 'keyb
   await query.fill('> Orbit <b>agenda</b>');
   await p.locator(`[data-room-task="${pair}"]`).click();
   const card = p.locator(`[data-work-record-id="${pair}"]`), back = p.locator('#work-navigation-return');
-  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(new URL(p.url()).hash, `#pr-record/work/${encodeURIComponent(pair)}`);
   assert.equal(await p.locator('#conversation-title').textContent(), '# general');
