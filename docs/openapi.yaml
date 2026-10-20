@@ -14122,11 +14122,14 @@ paths:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, threadIds: [thread-root ids] } plus the viewer ownership envelope" }
+        '200': { description: "{ roomId, threadIds: [thread-root ids], snoozedThreadIds: [thread-root ids] } plus the viewer ownership envelope" }
     post:
       summary: Mute or unmute a thread
       description: >-
-        Body: `{ threadId, muted }`. `threadId` may be any message in the
+        Body: `{ threadId, muted, until? }`. `until: "next_message"` snoozes
+        the thread instead: it is hidden until someone else posts in it, then
+        surfaces again on its own. `muted: false` clears a mute or a snooze.
+        `threadId` may be any message in the
         thread and resolves to the thread root; 404 message_not_found when it
         names no message in this room. Idempotent both ways; 422
         invalid_thread_mute on a malformed body.
