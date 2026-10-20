@@ -21,6 +21,7 @@
     "gate": "bash scripts/pre-push.sh",
     "lint": "node scripts/lint.mjs && node scripts/lint-design-tokens.mjs && node scripts/reachability.mjs --check && node scripts/i18n-harness.mjs --check && node scripts/build-ui-strings.mjs --check",
     "build:og-atlas": "node scripts/build-og-atlas.mjs",
+    "build:og-assets": "node scripts/build-og-assets.mjs",
     "github-app:check": "node scripts/github-app-check.mjs",
     "analytics:backfill": "node scripts/analytics-backfill.mjs",
     "analytics:bond-shadow": "node scripts/claim-bond-shadow.mjs",

@@ -351,7 +351,7 @@ optional.push("server/operator-archive.mjs"); // operator archive door for the p
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
 optional.push("server/receipt-share.mjs"); // EXP-5: receipt verdict line, JSON-LD, share text, OG fields (imported by server/http.mjs, server/receipts-page.mjs, server/proof-page.mjs)
-optional.push("server/og-render.mjs"); // runtime OG renderer (imported by server/http.mjs for per-receipt OG cards)
+optional.push("server/og-render.mjs", "server/og-assets-embedded.mjs"); // runtime OG renderer (imported by server/http.mjs for per-receipt OG cards) + its embedded asset fallback (imported by server/og-render.mjs)
 optional.push("og/base-receipt.png", "og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png"); // OG renderer base card + Inter glyph atlases (read by server/og-render.mjs)
 optional.push("server/receipt-verify.mjs"); // verify-at-read-time receipt engine (re-exported by server/receipts-live.mjs; imports server/bounty-escrow.mjs + server/public-read-model.mjs)
 optional.push("server/legal-store.mjs", "server/legal-pages.mjs", "server/legal-routes.mjs", "server/legal-documents.mjs"); // terms, privacy, public reports, unpublish
