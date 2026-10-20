@@ -320,6 +320,9 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO thread_mutes(room_id,member_id,thread_id,created_at)
     VALUES('commons','owner','recovery-thread',?)`)
     .run(f.now());
+  f.store.db.prepare(`INSERT INTO thread_snoozes(room_id,member_id,thread_id,snoozed_at)
+    VALUES('commons','owner','recovery-snoozed',?)`)
+    .run(f.now());
   // Seed one autonomy-tier row so the capture comparison covers
   // agent_autonomy_tiers (operator prerequisites rescope, PR #953).
   f.store.db.prepare(`INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by)

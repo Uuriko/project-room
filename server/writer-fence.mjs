@@ -295,6 +295,9 @@ export const unfencedAdditiveTables = Object.freeze([
   // room-visible state change. DDL is shared with server/thread-mutes.mjs
   // (convergent).
   "thread_mutes",
+  // thread_snoozes: snooze a thread until its next message. Same shape and
+  // reasoning as thread_mutes (private read-time filter), same module.
+  "thread_snoozes",
   // referrals (referral attribution): one row per joined referee, the
   // queryable source of truth behind the referral board. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,

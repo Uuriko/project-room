@@ -4893,7 +4893,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "thread-mutes" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
+        if (!exact(data, Object.hasOwn(data ?? {}, "until") ? ["threadId", "muted", "until"] : ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId, muted and optional until are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
