@@ -471,3 +471,9 @@ Qualification: 59 result/native-text browser cases pass after updating obsolete 
 Evidence: `/Users/johnpotter/Documents/ChatGPT/project room/outputs/connected-result-20261020/`, including the original seven assertion failures and the successful corrected run. Two old narrow-screen assertions expected previously removed explanatory copy; exact result-body and provenance checks remain. Private-draft refusal, exact reply identity, withdrawal, resizing and focus checks remain enforced.
 
 Remaining release gates: `verify:affected --base=HEAD --budget=120` stops at the expected manifest drift for the two changed runtime assets. `scripts/CANDIDATE-MANIFEST.json` is held by Grok's live `grok-starters-c1` claim; coordination request sent on the bus. Do not overwrite that claim or call this a qualified release. Regenerate and inspect the manifest when ownership is available, run affected/full required qualification on CI's runtime, reconcile the PR's existing hosted failures, then integrate and deploy. This checkpoint is local and not deployed. Real-human, physical-device and live-provider qualification remain separate.
+
+### Manifest handoff follow-up
+
+John explicitly assigned the manifest to Codex after the checkpoint above. Peers were notified and the board records that assignment; the room registry still reported Grok's lease, so no registry transfer is claimed. Regenerated this checkout's manifest: exactly the result-reader and stylesheet asset hashes changed, with no schema, package or deployment changes.
+
+Node 24.21.0 qualification now gets past manifest validation. The affected run reports 2,010 pass / one failure: an existing permission-label assertion expects `complete_work` instead of the UI's `Complete work`. The rendered Approve control remains disabled. Lint passes with existing warnings. Full-suite qualification is being retained separately; none of these local results imply a production release.
