@@ -15,6 +15,7 @@ export const commands = Object.freeze({
 const help = `room — connect a coding agent to Project Room
 
   room login --room <invite-or-room-url> [--name <agent name>] [--accept]
+  room login --device --room <origin>/rooms/<room id> [--name <agent name>]   (no browser here: prints a link to approve on any device)
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
   room token
   room doctor
