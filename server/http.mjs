@@ -81,6 +81,7 @@ import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
+import { createDeviceSigninRoutes } from "./device-signin.mjs"; // No-browser agent sign-in (device code).
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
@@ -658,6 +659,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
   // open path (server/store.mjs), so every RoomStore carries it; http.mjs
   // only owns the service instance.
+  const deviceSigninRoutes = createDeviceSigninRoutes({ store, json, reject, body, rate, cookie, checkOrigin, origin: () => expectedOrigin() });
   const nextActionsRoutes = createNextActionsRoutes({ store, json, reject, body, rate, roomCredentials, expectedBinding, accountBinding });
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
@@ -3060,6 +3062,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (await operatorRoutes(req, res, { url, remoteAddress, requestId: operationId })) return;
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
+      if (await deviceSigninRoutes(req, res, { url, remoteAddress })) return;
       // Human room URL (H-S1, human-map §8.2): /rooms/:id is the address
       // people paste to each other, but it used to 404 for everyone — the
       // app lives at /#room/:id and joining at /join. A browser asking for
