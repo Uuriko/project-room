@@ -31,7 +31,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 export const unfencedAdditiveTables = Object.freeze([
   "public_work_tasks", "public_work_requests", "public_work_receipts", "public_work_claim_writer_permit", // Public namespaces use a separate transaction permit; v36 private claims remain compatible.
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
-  "public_work_reviews", "public_work_review_requests", "public_work_review_versions", // Private review projections/journals/version history never alter existing claims, receipts or awards.
+  "public_work_reviews", "public_work_review_requests", "public_work_review_versions", "public_work_review_reads", // Private review projections/journals/version history and the outcome-read journal never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
