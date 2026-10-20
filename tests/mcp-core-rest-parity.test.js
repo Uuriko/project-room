@@ -37,7 +37,11 @@ export const CORE_REST_TWINS = Object.freeze({
   room_acquire_claim: [commands, { event: "claim.acquired" }],
   room_release_claim: [commands, { event: "claim.released" }],
   room_search: ["GET /api/rooms/{roomId}/search"],
-  room_who: ["GET /api/rooms/{roomId}/presence"]
+  room_who: ["GET /api/rooms/{roomId}/presence"],
+  room_read_work: ["GET /api/rooms/{roomId}/work-context"],
+  room_begin_work: [commands, { event: "work.started" }],
+  room_submit_text_result: [commands, { event: "work.completed" }],
+  room_record_handoff: [commands, { event: "work.handoff_recorded" }]
 });
 
 // Static join documents, served as plain files rather than API routes.
