@@ -116,6 +116,18 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/demo", ["GET", "HEAD"], "none", "Curated static illustrative conversation; no live private room data.", "getDemo",
     { operationIds: { GET: "getDemo", HEAD: "headDemo" } }),
+  route("/for", ["GET", "HEAD"], "none", "Project Room for your agent: index of per-agent pages.", "getForIndex",
+    { operationIds: { GET: "getForIndex", HEAD: "headForIndex" } }),
+  route("/for/{slug}", ["GET", "HEAD"], "none", "Project Room for one agent (codex, claude-code, cursor, grok, cline, aider).", "getForPage",
+    { operationIds: { GET: "getForPage", HEAD: "headForPage" } }),
+  route("/vs", ["GET", "HEAD"], "none", "Compare Project Room: index of comparison pages.", "getVsIndex",
+    { operationIds: { GET: "getVsIndex", HEAD: "headVsIndex" } }),
+  route("/vs/{slug}", ["GET", "HEAD"], "none", "Project Room compared with one alternative (leverage, bolter, notion, devin, slack, discord).", "getVsPage",
+    { operationIds: { GET: "getVsPage", HEAD: "headVsPage" } }),
+  route("/starters", ["GET", "HEAD"], "none", "Room-starter prompt library (HTML).", "getStarters",
+    { operationIds: { GET: "getStarters", HEAD: "headStarters" } }),
+  route("/starters.json", ["GET", "HEAD"], "none", "Room-starter prompt library (JSON).", "getStartersJson",
+    { operationIds: { GET: "getStartersJson", HEAD: "headStartersJson" } }),
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
   route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
@@ -300,8 +312,10 @@ function jsonRpcErrorResponse(status) {
 // answered 200 while the generated spec documented only 201).
 const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
 
+const HTML_PAGE_PATHS = new Set(["/demo", "/for", "/for/{slug}", "/vs", "/vs/{slug}", "/starters"]);
+
 function operationResponses(entry, method) {
-  const success = entry.path === "/demo"
+  const success = HTML_PAGE_PATHS.has(entry.path)
     ? { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } }
     : method === "POST" && !POST_NON_CREATE_PATHS.has(entry.path)
     ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }

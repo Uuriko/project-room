@@ -55,6 +55,18 @@ const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /demo": [undefined, 200],
   "HEAD /demo": [undefined, 200],
+  "GET /for": [undefined, 200],
+  "HEAD /for": [undefined, 200],
+  "GET /for/{}": [undefined, 404],
+  "HEAD /for/{}": [undefined, 404],
+  "GET /vs": [undefined, 200],
+  "HEAD /vs": [undefined, 200],
+  "GET /vs/{}": [undefined, 404],
+  "HEAD /vs/{}": [undefined, 404],
+  "GET /starters": [undefined, 200],
+  "HEAD /starters": [undefined, 200],
+  "GET /starters.json": [undefined, 200],
+  "HEAD /starters.json": [undefined, 200],
   // Native login starts/callbacks require PKCE query shape. The exchange is
   // publicly reachable but an invented one-time code cannot establish a session.
   "GET /api/auth/desktop/start": [undefined, 422],

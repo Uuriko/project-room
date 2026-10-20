@@ -1,0 +1,28 @@
+// Phase 2 C1: room-starter prompt library served at /starters and
+// /starters.json. Each starter: who is in the room and the opening prompt.
+export const STARTERS = Object.freeze([
+  { id: "ship-a-feature", title: "Ship a feature with two agents", who: "You, Codex, Claude Code",
+    prompt: "We are shipping <feature>. Codex: write the plan as work items with the files each one touches. Claude Code: claim the first unclaimed item and open a pull request. Each of you claims files before editing and posts one line when you start and when you finish." },
+  { id: "review-room", title: "Pull request review room", who: "You, two reviewer agents",
+    prompt: "Review pull request <link>. Each reviewer posts findings as a numbered list with file and line. Mark each finding blocking or not. I decide what lands." },
+  { id: "bug-bash", title: "Bug bash", who: "Your team, any agents",
+    prompt: "Bug bash on <area> for the next hour. Post each bug as one work item with steps to reproduce. Agents: claim a bug, reproduce it first, then fix it in a small pull request." },
+  { id: "launch-checklist", title: "Launch checklist", who: "You, a teammate, one agent",
+    prompt: "We launch <thing> on <date>. Agent: turn this into a checklist of work items with owners and due dates, then post a daily catch-up of what is done, blocked and next." },
+  { id: "research-sprint", title: "Research sprint", who: "You, two research agents",
+    prompt: "Research <question>. Each agent takes a different angle, cites sources, and posts a one-paragraph answer. Then compare answers and list where you disagree." },
+  { id: "onboard-a-repo", title: "Onboard a new repo", who: "You, one agent",
+    prompt: "Read <repo>. Post a map of the codebase: main modules, how to run tests, the riskiest areas. Then list five small first issues as unclaimed work items." },
+  { id: "flaky-tests", title: "Fix flaky tests", who: "You, Codex",
+    prompt: "Find the five flakiest tests in CI from the last week. For each one, post the failure rate and a likely cause, then claim and fix the top one." },
+  { id: "design-handoff", title: "Design to code handoff", who: "You, a designer, Cursor",
+    prompt: "Here is the design: <link>. Cursor: list the components you will build, claim them one at a time, and post a screenshot when each one matches the design." },
+  { id: "weekly-planning", title: "Weekly planning", who: "Your team, one agent",
+    prompt: "Plan this week. Agent: read last week's receipts and open work, propose the top five items with owners, and ask each owner to accept or swap." },
+  { id: "incident-room", title: "Incident room", who: "On-call person, any agents",
+    prompt: "Incident: <symptom>. Agents: gather logs and recent deploys, post a timeline, and propose one rollback and one fix. Do nothing destructive without my yes." },
+  { id: "docs-refresh", title: "Docs refresh", who: "You, Claude Code",
+    prompt: "Find pages in <docs path> that no longer match the code. Post each mismatch as a work item, then fix them one small pull request at a time." },
+  { id: "second-opinion", title: "Second opinion", who: "You, two agents from different vendors",
+    prompt: "Here is my plan: <plan>. Each of you: list the three biggest risks and one thing you would cut. Answer independently, then read each other's answer and reply once." },
+]);
