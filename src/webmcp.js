@@ -92,6 +92,7 @@ export function installRoomWebMCP({ document, client, getState, getSession, fetc
         busy = true; locked = true;
         const claim = definition.name === "room_post" ? null : await request(`/work-claims/${encodeURIComponent(args.id)}`);
         const item = claim?.claim ?? claim;
+        if (definition.name === "room_release" && item?.owner !== session.member.id) return errorResult("not_claim_owner", "You can only release your own claim.");
         const title = definition.name === "room_post" ? "Post message" : definition.name === "room_claim" ? "Claim work" : "Release claim";
         const detail = `${getState().room.title ?? getState().room.name ?? session.roomId}\n${definition.name === "room_post" ? args.body : `${item.title ?? args.id} (${args.id})`}`;
         if (!await confirm({ title, detail, signal })) return { status: "cancelled" };

@@ -40,9 +40,15 @@ test('post waits for confirmation; cancel has no request; successful post uses h
   assert.equal(f.calls.length,1);const call=f.calls[0];assert.equal(call.method,'POST');assert.equal(call.headers['X-Session-Binding'],'private-binding');assert.equal(JSON.parse(call.body).data.body,'Exact text');
 });
 for(const name of ['room_claim','room_release'])test(`${name} uses Board route and release round fence`,async()=>{
-  const f=fixture({respond:()=>({id:'task',title:'Task',claimedAt:'round',history:[{}],historyOmitted:3})});
+  const f=fixture({respond:()=>({id:'task',title:'Task',owner:'human',claimedAt:'round',history:[{}],historyOmitted:3})});
   assert.equal((await f.run(name,{id:'task'})).status,'recorded');assert.equal(f.calls[0].method,'GET');assert.match(f.calls[1].url,new RegExp('/work-claims/task/'+(name==='room_claim'?'claim':'release')+'$'));
   if(name==='room_release')assert.deepEqual(JSON.parse(f.calls[1].body),{expectedClaimedAt:'round',expectedHistoryLength:4});
+});
+for (const owner of ['another-member', null, undefined]) test(`release refuses a claim not owned by the signed-in user (${owner})`,async()=>{
+  let confirmations=0;
+  const f=fixture({confirm:async()=>{confirmations++;return true;},respond:()=>({id:'task',title:'Task',owner,claimedAt:'round',history:[{}]})});
+  assert.equal((await f.run('room_release',{id:'task'})).code,'not_claim_owner');
+  assert.equal(confirmations,0);assert.equal(f.calls.length,1);assert.equal(f.calls[0].method,'GET');
 });
 test('batch maps message/file reads and supports excerpt continuation',async()=>{
   const f=fixture({respond:url=>url.includes('/files/')?{attachment:{id:'f',state:'committed',mimeType:'text/plain',data:btoa('file body')}}:{messages:[{id:'m',body:'message body'}]}});

@@ -17,6 +17,17 @@ for (const native of [false, true]) test(`browser tool post is inert until visib
    await page.evaluate(async()=>{window.roomTools=new Map((await document.modelContext.getTools()).map(tool=>[tool.name,{execute:async args=>JSON.parse(await document.modelContext.executeTool(tool,JSON.stringify(args)))}]));});
  }
  await page.waitForFunction(()=>window.roomTools.size===7);
+ let releaseWrites=0;
+ await page.route('**/work-claims/foreign-claim**',async route=>{
+   if(route.request().method()!=='GET')releaseWrites++;
+   await route.fulfill({json:{id:'foreign-claim',title:'Another member work',owner:'worker',claimedAt:'round',history:[]}});
+ });
+ await page.evaluate(()=>{window.releaseResult=null;window.roomTools.get('room_release').execute({id:'foreign-claim'}).then(r=>window.releaseResult=r);});
+ await page.waitForFunction(()=>window.releaseResult||document.querySelector('#webmcp-confirm')?.open);
+ if(await page.locator('#webmcp-confirm').isVisible())await page.locator('#webmcp-confirm button').filter({hasText:'Cancel'}).click();
+ await page.waitForFunction(()=>window.releaseResult);
+ assert.equal((await page.evaluate(()=>window.releaseResult)).code,'not_claim_owner');
+ assert.equal(releaseWrites,0);
  const clock=f.store.now;let offset=0;f.store.now=()=>clock()+offset;
  for(let i=0;i<61;i++) {offset+=3000;f.store.command(f.keys.owner,'commons',{id:`webmcp-seed-${i}`,type:'message.posted',data:{messageId:`webmcp-seed-${i}`,body:`pagination needle ${i}`}});}
  const matches=await page.evaluate(async()=>{let cursor,ids=[];do{const r=await window.roomTools.get('room_search').execute({query:'pagination needle',limit:5,...(cursor?{cursor}:{})},{signal:new AbortController().signal});ids.push(...r.messages.map(m=>m.id));cursor=r.nextCursor;}while(cursor);return ids;});assert.equal(new Set(matches).size,61);
