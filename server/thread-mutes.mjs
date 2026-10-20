@@ -34,7 +34,32 @@ export const threadMutesSchema = `
     PRIMARY KEY (room_id, member_id, thread_id)
   );
   CREATE INDEX IF NOT EXISTS thread_mutes_member ON thread_mutes(room_id, member_id);
+  CREATE TABLE IF NOT EXISTS thread_snoozes (
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    snoozed_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, member_id, thread_id)
+  );
 `;
+
+// Snooze until the next message: the thread is hidden like a mute until
+// someone else posts in it after the snooze, then it surfaces again on its
+// own. Read-time only, like mutes: no event, nothing to clear later.
+const atMs = value => typeof value === "number" ? value : Date.parse(value ?? "");
+export function wokenThreadIds(messages, memberId, snoozes) {
+  const since = new Map(snoozes.map(row => [row.thread_id, row.snoozed_at]));
+  const woken = new Set();
+  if (!since.size) return woken;
+  for (const message of messages ?? []) {
+    if (message.authorId === memberId) continue;
+    const at = atMs(message.createdAt);
+    if (!Number.isFinite(at)) continue;
+    const root = threadRootOf(messages, message.id);
+    if (since.has(root) && at > since.get(root)) woken.add(root);
+  }
+  return woken;
+}
 
 // Walk a message up to its thread root. Returns "" when the message is
 // unknown (the caller turns that into a 404); a broken chain resolves to
@@ -92,18 +117,33 @@ export class ThreadMutes {
       this._roomState(roomId); // 404 on unknown room before leaking rows.
       const rows = this.db.prepare("SELECT thread_id FROM thread_mutes WHERE room_id=? AND member_id=? ORDER BY thread_id")
         .all(roomId, auth.member.id);
-      return Object.freeze({ roomId, threadIds: Object.freeze(rows.map(r => r.thread_id)), ...this._viewer(auth) });
+      const snoozed = [...this._activeSnoozes(roomId, auth.member.id)].sort();
+      return Object.freeze({ roomId, threadIds: Object.freeze(rows.map(r => r.thread_id)), snoozedThreadIds: Object.freeze(snoozed), ...this._viewer(auth) });
     });
   }
 
-  // Write model: { threadId, muted }. threadId may be any message in the
-  // thread; it resolves to the thread root. Idempotent both ways.
+  // Active snoozes for one member: snoozed threads nobody else has posted in since.
+  _activeSnoozes(roomId, memberId) {
+    let rows;
+    try {
+      rows = this.db.prepare("SELECT thread_id, snoozed_at FROM thread_snoozes WHERE room_id=? AND member_id=?").all(roomId, memberId);
+    } catch { return new Set(); }
+    if (!rows.length) return new Set();
+    const woken = wokenThreadIds(this.store.room(roomId)?.state?.messages, memberId, rows);
+    return new Set(rows.map(r => r.thread_id).filter(id => !woken.has(id)));
+  }
+
+  // Write model: { threadId, muted, until? }. threadId may be any message in
+  // the thread; it resolves to the thread root. until "next_message" snoozes
+  // instead of muting. muted false clears both. Idempotent both ways.
   set(token, roomId, data, binding = null) {
     if (!data || typeof data !== "object" || Array.isArray(data)) fail(422, "invalid_thread_mute", "threadId and muted are required");
     const keys = Object.keys(data);
-    if (!keys.includes("threadId") || !keys.includes("muted") || keys.some(key => !["threadId", "muted"].includes(key))) {
-      fail(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
+    if (!keys.includes("threadId") || !keys.includes("muted") || keys.some(key => !["threadId", "muted", "until"].includes(key))) {
+      fail(422, "invalid_thread_mute", "threadId, muted and until are the accepted fields");
     }
+    if (Object.hasOwn(data, "until") && data.until !== "next_message") fail(422, "invalid_thread_mute", "until must be next_message");
+    if (data.until && data.muted !== true) fail(422, "invalid_thread_mute", "until only applies when muted is true");
     if (typeof data.threadId !== "string" || !data.threadId.trim() || data.threadId.length > 384) {
       fail(422, "invalid_thread_mute", "threadId must be a message id");
     }
@@ -121,14 +161,19 @@ export class ThreadMutes {
       };
       if (!rootId || hidden(data.threadId) || hidden(rootId)) fail(404, "message_not_found", "No such thread in this room");
       const now = this.store.now();
-      if (data.muted) {
+      if (data.muted && data.until) {
+        this.db.prepare("INSERT OR REPLACE INTO thread_snoozes (room_id,member_id,thread_id,snoozed_at) VALUES(?,?,?,?)")
+          .run(roomId, memberId, rootId, now);
+      } else if (data.muted) {
         this.db.prepare("INSERT OR IGNORE INTO thread_mutes (room_id,member_id,thread_id,created_at) VALUES(?,?,?,?)")
           .run(roomId, memberId, rootId, now);
       } else {
         this.db.prepare("DELETE FROM thread_mutes WHERE room_id=? AND member_id=? AND thread_id=?")
           .run(roomId, memberId, rootId);
+        this.db.prepare("DELETE FROM thread_snoozes WHERE room_id=? AND member_id=? AND thread_id=?")
+          .run(roomId, memberId, rootId);
       }
-      return Object.freeze({ roomId, memberId, threadId: rootId, muted: data.muted, ...this._viewer(auth) });
+      return Object.freeze({ roomId, memberId, threadId: rootId, muted: data.muted, ...(data.until ? { until: data.until } : {}), ...this._viewer(auth) });
     });
   }
 
@@ -137,7 +182,7 @@ export class ThreadMutes {
   mutedThreadIds(roomId, memberId) {
     try {
       const rows = this.db.prepare("SELECT thread_id FROM thread_mutes WHERE room_id=? AND member_id=?").all(roomId, memberId);
-      return new Set(rows.map(r => r.thread_id));
+      return new Set([...rows.map(r => r.thread_id), ...this._activeSnoozes(roomId, memberId)]);
     } catch {
       return new Set();
     }
