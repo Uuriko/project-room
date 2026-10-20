@@ -43,3 +43,21 @@ test("eligibility is rechecked after a previously valid result is withdrawn", ()
   const f = fixture(); assert.equal(f.reply("result"), true); f.calls.length = 0;
   f.message.deletedAt = 1; assert.equal(f.reply("result"), false); assert.deepEqual(f.calls, []);
 });
+
+test("feedback never retargets a composed reply to another message", () => {
+  for (const content of [{ body: "Answer to someone else" }, { files: ["attachment"] }]) {
+    const f = fixture();
+    f.draft(Object.freeze({ replyToId: "other-message", ...content }));
+    assert.equal(f.reply("result"), false);
+    assert.deepEqual(f.calls, ["blocked"]);
+  }
+});
+test("feedback continues a draft already addressing this result", () => {
+  const f = fixture(); f.draft({ replyToId: "result", body: "My feedback", files: ["attachment"] });
+  assert.equal(f.reply("result"), true);
+  assert.deepEqual(f.calls, [["open", "result", "thread"], ["reply", "result"]]);
+});
+test("an empty reply selection can be retargeted", () => {
+  const f = fixture(); f.draft({ replyToId: "other-message", body: "  ", files: [] });
+  assert.equal(f.reply("result"), true);
+});

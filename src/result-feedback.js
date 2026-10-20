@@ -12,7 +12,9 @@ export function createResultFeedback({ getState, getConversation, isBlocked,
     const destination = conversation?.rootById.get(message.id);
     if (!destination || !conversation.threads.has(destination)) return false;
     const draft = getDraft(destination);
-    if (draft?.pending || draft?.toMemberId) { onBlocked(); return false; }
+    const hasContent = Boolean(draft?.body?.trim() || draft?.files?.length);
+    const differentReply = hasContent && draft.replyToId && draft.replyToId !== message.id;
+    if (draft?.pending || draft?.toMemberId || differentReply) { onBlocked(); return false; }
     openThread(message, destination);
     setReply(message.id);
     return true;

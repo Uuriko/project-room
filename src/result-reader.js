@@ -258,7 +258,10 @@ export function installResultReader({ client, getState, getSession, sameSession,
         && message.body === value.result.text.body);
       // Ordinary answers already have an authorized, readable conversation
       // message. Keep saved historical selections in the exact-version reader.
-      if (message && !view.withdrawn && !view.recovered && value.result.text.body.length <= 1200) {
+      const item = getState().workItems[view.workItemId];
+      const currentFirstResult = !view.previousCompletionEventId && item?.state === S.COMPLETED
+        && !item.supersededBy && matchesReceipt(view.receipt, item.receipt);
+      if (message && currentFirstResult && !view.withdrawn && !view.recovered && value.result.text.body.length <= 1200) {
         closeResult(false);
         onOriginal(message.id);
         return;

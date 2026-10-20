@@ -3950,7 +3950,8 @@ const replyToSharedResult = createResultFeedback({
   getState: () => state, getConversation: () => conversation,
   isBlocked: () => busy || requestReading || pendingMessage || composerFiles.some(file => file.status === "uploading"),
   getDraft: destination => destination === composerKey()
-    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value } : drafts.get(destination),
+    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
+      body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
   onBlocked: () => notice(uiText("result.replyBlocked")),
   openThread(message, destination) {
     setActiveChannel(messageChannelId(message));
