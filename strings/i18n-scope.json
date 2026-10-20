@@ -93,6 +93,8 @@
   "src/reply-requests.js",
   "src/request-access.js",
   "src/result-availability.js",
+  "src/result-comparison.js",
+  "src/result-feedback.js",
   "src/result-reader.js",
   "src/retention-ui.js",
   "src/return-brief.js",

@@ -362,6 +362,7 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   const card = p.locator('[data-work-record-id="native-result"]');
   await card.locator("[data-read-result]").click(); await f.ready();
   assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   assert.equal(await p.locator("dialog:modal").count(), 0);
@@ -486,6 +487,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
   assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   await p.locator("#result-discuss").click();

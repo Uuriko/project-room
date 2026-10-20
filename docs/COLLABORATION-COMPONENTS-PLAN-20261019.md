@@ -85,6 +85,7 @@ Hiding controls is insufficient. Keep only distinct user outcomes, not one butto
 | Existing choice | Decision | Reason |
 | --- | --- | --- |
 | Standalone Paste AI draft on every work card | Remove | Duplicates the return step already inside Use my AI; retains the existing import path and private draft recovery without another card option. |
+| Duplicate DONE badge beside Completed on work cards | Remove | States the same completion twice; retain the canonical work status and separate review status. |
 | Changed-byte count in human revision summary | Remove | Reviewers need meaningful edits; machine byte accounting adds text without helping judge the result. Line differences and exact text remain. |
 | View result / Reply | Keep | Reading an artifact and responding to it are the central collaboration flow. |
 | Share draft | Keep provisionally | Creates a version-linked proposal with stale-basis handling, unlike an ordinary chat message. A future composer integration can replace the separate editor only if it preserves these semantics. |
@@ -114,3 +115,9 @@ Research does not establish demand or human preference. Synthetic journeys valid
 - Reading/details collapse initially failed two assertions because the opener is outside the details element. Fixed by targeting the owning card's details. Corrected desktop/phone focus plus revision journeys: 4/4 pass.
 - Cold packaging/controller checks: 27/27 pass before the subsequent presentation-only edits.
 - Full local unit run and final affected/lint verification remain running; do not call this a release receipt.
+
+### Publication qualification limits
+
+Final affected run found the newly tracked controller modules missing from the i18n scan inventory. Added only those two paths to i18n-scope.json; no baseline counts changed. Focused E4 rerun and preflight pass. Full ESLint reported zero errors (290 warnings); final changed-file lint and remaining checks are being reconciled.
+
+The broad Node26 full run reported an OG PNG golden-hash mismatch and a public-read latency threshold failure under concurrent load. The same OG test fails in the untouched previous checkout on this runtime. These are retained failures, not waived checks or proof of a production regression. Full run remains incomplete; hosted Node24 qualification is required before landing. Do not call the broad test run exact frozen-head evidence: this turn's user-directed subtraction edits occurred during it.
