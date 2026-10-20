@@ -1701,6 +1701,7 @@ summary { overflow-wrap: anywhere; }
    to this footer sends a restored reading position to the bottom. */
 .site-footer { margin: 2rem 1rem 1rem; color: var(--muted); font-size: var(--text-sm); overflow-anchor: none; }
 .site-footer a { color: inherit; }
+body:has(#main:not([hidden])) .site-footer { display: none; }
 
 /* Updates destination. Styles live here so the page content policy allows them. */
 #updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }

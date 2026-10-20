@@ -27,7 +27,7 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.locator('.room-topbar #session-menu').waitFor();
     assert.equal(await page.locator('.app-shell > .topbar').isVisible(), false);
-    for (const selector of ['#topbar-search-toggle', '#topbar-catchup', '#room-more > summary', '#session-menu-button']) {
+    for (const selector of ['#topbar-search-toggle', '#topbar-updates', '#room-more > summary', '#session-menu-button']) {
       const box = await page.locator(selector).boundingBox();
       assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, `${selector} remains in viewport`);
       assert.ok(box.width >= 24 && box.height >= 24, `${selector} has a usable target`);

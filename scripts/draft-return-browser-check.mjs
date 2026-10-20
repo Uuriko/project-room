@@ -293,7 +293,7 @@ for (const mobile of [false, true]) test(`draft choices ${mobile ? 'mobile' : 'd
     await page.locator(`[data-message-record-id="${id}"]`).waitFor({ state: 'visible' });
   }
   await page.locator('#message-input').fill('Keep my unsent note');
-  await page.locator('#topbar-catchup').click();
+  await clickChrome(page, '#topbar-catchup');
   await page.locator('#rb-attention-list [data-view-drafts][data-open-work="human-handoff"]').click();
   await page.locator('#catchup-dialog').waitFor({ state: 'hidden' });
   const choices = f.card.locator('.work-drafts');

@@ -263,7 +263,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // The rail entry opens to live current sections and a frozen first page of history.
     const panel = page.locator("#return-brief-panel");
-    await page.locator("#topbar-catchup").click();
+    await openCatchUp(page);
     await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent && !document.querySelector("#rb-refresh-button").disabled);
     if (!await panel.evaluate(node => node.open)) {
       await Promise.all([

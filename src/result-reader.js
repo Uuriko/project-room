@@ -9,11 +9,23 @@ import { currentResult } from "./work-selectors.js";
 // with their controllers; asynchronous responses must still own this view.
 export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
-  clearResultComparison, loadResultComparison, onDiscuss, onOriginal }) {
+  clearResultComparison, loadResultComparison, onDiscuss, onOriginal, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
   let resultView = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
   const wide = matchMedia("(min-width: 1100px)");
+  const savedKey = "project-room:result-selection:v1";
+  const selectionLifetime = 12 * 60 * 60 * 1000;
+  function forgetSelection() { try { storage?.removeItem(savedKey); } catch { /* Reading works without storage. */ } }
+  function saveSelection(view) {
+    if (view.fromResults) return;
+    try {
+      const scope = recoveryScope();
+      if (!scope) return;
+      storage?.setItem(savedKey, JSON.stringify({ scope, expires: Date.now() + selectionLifetime,
+        workItemId: view.workItemId, receipt: view.receipt }));
+    } catch { forgetSelection(); }
+  }
   const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
   function usableText(view) {
     return view && view === resultView && view.loaded && !view.withdrawn && !view.error
@@ -85,7 +97,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (focused && (!focused.getClientRects().length || focused.disabled)) resultElement("close-result").focus({ preventScroll: true });
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
-  function closeResult(restore = true) {
+  function closeResult(restore = true, preserveSaved = false) {
+    if (!preserveSaved) forgetSelection();
     const view = resultView;
     resultView = null; resultReader.classList.remove("result-docked"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
@@ -159,6 +172,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (onDiscuss(message) === false) return;
     if (wide.matches && resultView === view) {
       view.fromResults = false;
+      saveSelection(view);
       resultStatus();
     } else closeResult(false);
   });
@@ -178,6 +192,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       if (!owns()) return;
       if (value?.result?.receipt?.eventId !== view.receipt.completionEventId
         || value.result.receipt.evidenceVersion !== view.receipt.evidenceVersion) throw new Error("Pinned version changed");
+      view.reportedById = value.result.receipt.reportedById;
+      view.previousCompletionEventId = value.result.receipt.nativeText?.previousCompletionEventId;
       // Text taken out of the room is served as an absence, so say so rather
       // than showing an empty box: the result was still reported and verified,
       // and the receipt still names what it was verified against.
@@ -204,6 +220,40 @@ export function installResultReader({ client, getState, getSession, sameSession,
     view.error = false; view.retrying = true; resultStatus();
     loadExactResult(view);
   });
+  function openResult(view, title, focus = true) {
+      resultView = view;
+      resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
+      resultElement("result-original").hidden = true;
+      resultElement("result-discuss").hidden = true;
+      resultElement("result-copy-text").hidden = true;
+      resultElement("result-download").hidden = true;
+      resultElement("result-use-status").textContent = "";
+      const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
+      resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
+      if (view.restoreDetails) workRecord(view.workItemId).querySelector(".work-details").open = false;
+      mountResultReader(); resultReader.hidden = false;
+      if (focus) resultElement("result-title").focus();
+      loadExactResult(view);
+  }
+  function restoreSelection() {
+    if (resultView || !getState() || !getSession()) return;
+    try {
+      const raw = storage?.getItem(savedKey);
+      if (!raw) return;
+      if (raw.length > 4096) throw new Error("oversized selection");
+      const saved = JSON.parse(raw), now = Date.now();
+      const identifier = value => typeof value === "string" && value.length > 0 && value.length <= 512;
+      if (!recoveryScope() || saved.scope !== recoveryScope()
+        || !Number.isFinite(saved.expires) || saved.expires <= now || saved.expires > now + selectionLifetime
+        || !identifier(saved.workItemId) || !identifier(saved.receipt?.completionEventId)
+        || !identifier(saved.receipt?.evidenceVersion)) throw new Error("invalid selection");
+      const item = getState().workItems[saved.workItemId];
+      if (!item) { forgetSelection(); return; }
+      openResult({ generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id,
+        workItemId: item.id, receipt: { completionEventId: saved.receipt.completionEventId, evidenceVersion: saved.receipt.evidenceVersion },
+        fromResults: false, restoreDetails: false }, item.title, false);
+    } catch { forgetSelection(); }
+  }
   function readResult(e) {
     const read = e.target.closest("[data-read-result]");
     if (read && getState() && !isBusy()) {
@@ -212,21 +262,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
       const fromResults = Boolean(read.closest("#room-results-list"));
       if (fromResults && !currentResult(item)) return true;
       const view = { generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id, workItemId: item.id,
-        fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-      resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
-      resultElement("result-original").hidden = true;
-      resultElement("result-discuss").hidden = true;
-      resultElement("result-copy-text").hidden = true;
-      resultElement("result-download").hidden = true;
-      resultElement("result-use-status").textContent = "";
-      const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
-      resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
+        fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById };
       // Details are the entry path, not a second toolbar above the open result.
       // Restore them only when closing back to the originating control.
-      if (view.restoreDetails) workRecord(item.id).querySelector(".work-details").open = false;
-      mountResultReader(); resultReader.hidden = false;
-      resultElement("result-title").focus();
-      loadExactResult(view);
+      forgetSelection();
+      saveSelection(view);
+      openResult(view, item.title);
       return true;
     }
     return false;
@@ -236,5 +277,5 @@ export function installResultReader({ client, getState, getSession, sameSession,
     .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
   wide.addEventListener("change", resultStatus);
   clipboard.subscribe(resultStatus);
-  return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult };
+  return { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreSelection };
 }

@@ -479,3 +479,55 @@ John explicitly assigned the manifest to Codex after the checkpoint above. Peers
 Node 24.21.0 qualification now gets past manifest validation. The affected run reports 2,010 pass / one failure: an existing permission-label assertion expects `complete_work` instead of the UI's `Complete work`. The rendered Approve control remains disabled. Lint passes with existing warnings. Full-suite qualification is being retained separately; none of these local results imply a production release.
 
 Final local result: repaired that stale assertion and explicitly asserted that the unavailable full-grant button stays disabled; all 27 permission retry cases pass. The full Node 24.21.0 run completed with **11,341 passed, 31 skipped, zero failures** (451 seconds). It includes the repaired test; runtime source stayed unchanged during the run. Logs are retained beside the earlier evidence as `connected-result-full-node24.log`, `connected-result-affected-node24.log`, `connected-result-permission-node24.log` and `connected-result-lint-node24.log`. Manifest and regression repair are commit `7a797646`. Hosted checks on the updated PR remain distinct from these local results; merge/deployment and real-human/device/provider qualification are not completed by this receipt.
+
+## Finish the chat–result–return flow: execution plan (2026-10-20)
+
+The [collaboration experiments](COLLABORATION-EXPERIMENTS.md) informed the choice of a conversation-first surface with contextual reading. Their automated results do not establish a human usability winner. This next slice completes that real flow rather than adding another work model.
+
+### Outcome and boundaries
+
+A person starts in chat, receives a result, replies to that exact version, leaves, and resumes without reconstructing context. Desktop keeps the pinned result beside the composer; narrow screens use contextual reading and return to the composer for feedback. Mac and web share the reader implementation. Existing conversation recovery owns drafts and thread selection. Existing agent work/discussion/checkpoint APIs own continuation. No new editor, approval mechanism, execution queue, or mandatory task form.
+
+### 1. Repair the release baseline
+
+Read hosted logs for the exact PR head. The first known failure is documentation reachability, repaired by the link above without editing the index another agent holds. Inspect completed browser shards next. Reproduce each actual failure locally, identify whether the interaction broke or a test still targets a removed control, and preserve the original output. Updated tests must use the visible supported path and retain their authority, draft, focus and exact-version assertions. Never turn missing functionality into a passing test by skipping it.
+
+### 2. Restore the inspected result safely
+
+The recovery audit shows that thread/channel/composer recovery already exists. Add a small reader-owned selection record to the same storage chosen for drafts: tab session storage on web, local storage in the Mac shell. Save only room/member scope, work ID, completion event ID, evidence version and bounded display provenance, with a twelve-hour expiry. Do not persist result bodies or credentials. Use one bounded record, not an unbounded per-room cache.
+
+Only conversation-side reading is resumed automatically; a Results settings-modal inspection does not become a new background panel on reload. Reply on desktop makes the selected result conversation-side. Explicit close removes the record. Access-end cleanup preserves selection only for the same recovery cases as drafts, and clears rendered text regardless. A different scope, invalid/oversized record, expired selection or inaccessible work must not restore.
+
+Run restoration once after the initial authorized snapshot and draft restoration, respecting explicit deep links. Re-fetch the saved completion through the existing result API and validate completion/evidence identity. Reuse current withdrawal and stale-response guards. Do not replace the saved version with the current receipt. Avoid stealing focus from the recovered composer. User navigation or closing must invalidate a pending read. A newer completion should label an earlier inspected version, not replace it.
+
+### 3. Connect feedback to continuation
+
+Extend the existing real local transport journey. Verify the human reply refers to the pinned evidence message, is posted once with the intended audience, and appears in the agent's focused work discussion/checkpoint stream. Exercise reconnect/restart and agent revision using the existing contracts. No fabricated provider invocation or inferred approval. Reuse unchanged contract coverage rather than adding an alternative mock agent implementation.
+
+### 4. Simplify the completed interaction
+
+Inspect desktop and narrow screenshots with the reader open, then with feedback focused. Remove only demonstrably duplicated status/actions in this path. Preserve essential version, audience, withdrawal and failure information. Keep comparison and secondary controls contextual. Check keyboard order, return focus, long content, resizing and overflow. Avoid broad unrelated cosmetic edits while release failures remain.
+
+### 5. Qualification matrix
+
+Exercise reload with unsent feedback; exact older version after later completion; explicit close followed by reload; expired/malformed/wrong-scope selection; access loss; withdrawn text; blocked storage; and desktop/mobile transitions. Assert both the useful result and the absence of unintended writes or cached sensitive text. Use existing browser fixtures and native WebKit smoke; distinguish simulated users and browser phone viewports from real humans and physical devices.
+
+After source stabilizes, regenerate the candidate manifest, inspect its exact asset changes, run affected checks, lint and required full qualification on Node 24. Preserve failing runs and focused repair evidence. Runtime changes justify fresh qualification; documentation-only updates do not justify repeated expensive execution.
+
+### 6. Integration, deployment and completion
+
+Checkpoint source and evidence together, push the existing PR and inspect exact-head hosted checks. Reconcile current main and peers before acquiring the merge/deployment lanes. Merge only after required checks pass; preserve others' ancestry and work. Deploy through the documented release lane, then independently verify deployed revision, readiness, both entry routes, assets and a disposable collaboration journey. Record actual completion separately from reported CI/deploy success.
+
+Developer ID/notarized Mac distribution remains deferred. Real-human, physical-device and live-provider qualification remain explicit limits. Any unfinished gate must remain listed with a concrete next action; do not describe a local checkpoint as a released v1.
+
+### Implementation and qualification checkpoint
+
+Implemented reader selection recovery in the existing controller, using the draft controller's chosen storage and scope. The persisted record contains only scope, expiry, work ID and pinned receipt identifiers; provenance and content come from the fresh authorized response. Explicit close clears selection; unload/session-expiry recovery preserves identifiers while clearing the visible reader. Restoration respects explicit URL fragments and does not focus the reader. Closed/replaced views reject late responses. No endpoint, schema or agent execution change.
+
+The public marketing footer is now absent inside an active room. Its overlap with large-text work controls reproduced in the existing help journey; that case passes after removal. The public signed-out footer remains available. No extra controls were introduced.
+
+The hosted contract failure was an orphaned experiment document, now linked above. Browser failures targeted removed direct Catch up controls, assumed secondary work details expanded on navigation, or asserted old verbose action-context copy. Updated them to use visible Updates navigation, focused work cards with explicit Details disclosure, and actual pinned evidence URLs/submitted command versions. Preserved audience, ownership, session, revision and draft assertions. The shared-cookie test now opens the protected brief before replacing the cookie, so it exercises the intended mismatched response rather than timing out after the earlier Updates request correctly ends access.
+
+Evidence: 71 result/comparison/browser cases pass (including seven new recovery/boundary scenarios); 88 of 89 broader action/invitation/session/layout/draft/first-use cases passed, followed by the repaired cookie case passing independently. Five other hosted repair cases passed; the large-text overlap case failed in that run and then passed after the footer repair. Affected checks pass 435/435. Lint passes with existing warnings. Native WebKit signup, messaging, durable draft and window reopen pass. Screenshot of restored pinned feedback inspected. Full Node 24 qualification is running. Evidence directory: `/Users/johnpotter/Documents/ChatGPT/project room/outputs/resume-flow-20261020/`.
+
+Fresh GitHub protection readback requires only `room/release-lease`, consistent with John's prior removal of mandatory CI contexts. Other hosted checks remain useful advisory evidence and actual failures require assessment. The existing guarded coordinator must bind the real lease/head/base; do not reinstall the older five-context protection. Initial readback finds RELEASE-PAUSE, MERGE-SLOT and ROLE-DEPLOYER unclaimed; re-read immediately before acting.

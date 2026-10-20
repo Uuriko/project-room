@@ -481,6 +481,7 @@ const client = new RoomClient({
         restoreComposer(draft);
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
       }
+      if (!location.hash) restoreResultSelection();
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
@@ -524,7 +525,7 @@ const client = new RoomClient({
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
     clearResultComparison($("#action-result-diff"));
-    closeResult(false);
+    closeResult(false, leavingPage || sessionExpired || openingFromList);
     selectWorkView("work");
     renderContent("#room-results-list", "");
     roomCursor = 0; catchUpBoundary = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
@@ -6098,8 +6099,9 @@ function resultRow(item) {
 }
 const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
   createResultComparison({ client, getState: () => state, esc });
-const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult } = installResultReader({
+const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFocus, read: readResult, restore: restoreResultSelection } = installResultReader({
   client, getState: () => state, getSession: () => session, sameSession,
+  storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,

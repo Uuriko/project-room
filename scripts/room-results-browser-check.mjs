@@ -652,3 +652,79 @@ for (const mobile of [false, true]) test(`connected result feedback keeps exact 
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await f.capture(mobile ? "connected-feedback-phone" : "connected-feedback-desktop");
 });
+
+const selectionKey = "project-room:result-selection:v1";
+test("reopen restores the inspected result and feedback without upgrading its version", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Please retain the original introduction.");
+  const saved = await p.evaluate(key => JSON.parse(sessionStorage.getItem(key)), selectionKey);
+  assert.deepEqual(Object.keys(saved).sort(), ["expires", "receipt", "scope", "workItemId"]);
+  assert.equal(JSON.stringify(saved).includes(f.body), false);
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_BLOCKER_RESOLVED, { resolution: "Revised the introduction" });
+  const body = "A newer result that must not replace the inspected original.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "revision-after-leaving", workItemId: "native-result", body });
+  f.change("native-result", T.WORK_COMPLETED, { summary: "Revision", nextAction: "Review", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: saved.receipt.completionEventId, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
+  await p.reload(); await f.ready();
+  assert.equal(await p.locator("#message-input").inputValue(), "Please retain the original introduction.");
+  assert.match(await p.locator("#result-status").textContent(), /Earlier result/);
+  assert.equal(await p.locator("#result-dialog").evaluate(node => node.contains(document.activeElement)), false, "restore does not steal focus");
+  await f.capture("restored-pinned-feedback");
+  await p.locator("#close-result").click();
+  await p.reload(); await p.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false, "explicit close stays closed");
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
+
+for (const invalid of ["expired", "wrong-scope", "malformed"]) test(`result recovery rejects ${invalid} selection`, { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await p.evaluate(({ key, invalid }) => {
+    const saved = JSON.parse(sessionStorage.getItem(key));
+    if (invalid === "expired") saved.expires = 1;
+    if (invalid === "wrong-scope") saved.scope += ":different-member";
+    sessionStorage.setItem(key, invalid === "malformed" ? "{" : JSON.stringify(saved));
+  }, { key: selectionKey, invalid });
+  await p.reload(); await p.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
+
+test("restored result fetches withdrawal instead of retaining old text", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(m => m.id === messageId).revision ?? 0 });
+  await p.reload(); await p.locator("#result-status").filter({ hasText: "Text withdrawn" }).waitFor();
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.equal(await p.locator("#result-copy-text").isVisible(), false);
+});
+
+test("closing a pending restored read fences its late response", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  await p.route("**/work-result?**", async route => { const response = await route.fetch(); await gate; await route.fulfill({ response }).catch(() => {}); });
+  t.after(() => release());
+  await p.reload(); await p.locator("#result-dialog").waitFor({ state: "visible" });
+  await p.locator("#close-result").click(); release();
+  await p.unroute("**/work-result?**", { behavior: "wait" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-body").textContent(), "");
+});
+
+test("blocked selection storage does not prevent reading or feedback", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await p.evaluate(key => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(k, value) { if (k === key) throw new DOMException("Blocked", "SecurityError"); return original.call(this, k, value); };
+  }, selectionKey);
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Feedback still works without selection persistence.");
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
