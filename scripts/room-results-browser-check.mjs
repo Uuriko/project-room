@@ -96,7 +96,7 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
   await f.row("native-result").locator("[data-result-work]").click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
-  assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), true);
+  assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), false);
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), true);
   assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
@@ -151,7 +151,7 @@ for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`
   await f.open(); await f.read(); await f.ready();
   const discuss = p.locator("#result-dialog").getByRole("button", { name: "Reply", exact: true });
   await discuss.focus(); await p.keyboard.press("Enter");
-  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-dialog").isVisible(), !guest, "desktop retains the result; phone returns to the composer");
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await input.evaluate(node => node === document.activeElement), true);
   assert.equal(await input.inputValue(), "");
@@ -360,8 +360,13 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
   await f.open(); await f.row("native-result").locator("[data-result-work]").click();
   const card = p.locator('[data-work-record-id="native-result"]');
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "ordinary task navigation stays focused");
+  await card.locator(".work-details > summary").click();
   await card.locator("[data-read-result]").click(); await f.ready();
-  assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await (mobile ? card.locator("#result-dialog") : p.locator("#main > #result-dialog.result-docked")).count(), 1, "reader uses the available screen space");
+  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
+  assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   assert.equal(await p.locator("dialog:modal").count(), 0);
   assert.equal(await p.locator("#result-title").evaluate(node => { const box = node.getBoundingClientRect(); return node === document.activeElement && box.top >= 0 && box.bottom <= innerHeight; }), true, "opening starts at the result heading");
   await f.capture(mobile ? "inline-result-initial-phone-light" : "inline-result-initial-desktop-dark");
@@ -371,12 +376,13 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   await p.locator("#close-result").focus();
   f.reopen("native-result");
   await p.waitForFunction(() => document.querySelector("#result-status").textContent.startsWith("Earlier result"));
-  assert.equal(await card.locator("#result-body").textContent(), f.body, "rerender keeps the inspected version inline");
+  assert.equal(await p.locator("#result-body").textContent(), f.body, "rerender keeps the inspected version");
   assert.equal(await p.locator("#close-result").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(f.state().workItems["native-result"].receipt, receipt);
   await f.capture(mobile ? "inline-result-phone-light" : "inline-result-desktop-dark");
   await p.keyboard.press("Escape");
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), true, "closing restores the original details and action");
   assert.equal(await card.locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#message-input").inputValue(), "My next thought while reading");
 });
@@ -482,7 +488,10 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const card = p.locator(`[data-work-record-id="${task.id}"]`);
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
-  assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await p.locator("#main > #result-dialog.result-docked").count(), 1, "desktop result remains beside conversation");
+  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
+  assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
+  assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   await p.locator("#result-discuss").click();
   await p.locator("#message-input").fill("Continue this transport result");
   await p.locator('#message-form button[type="submit"]').click();
@@ -530,14 +539,49 @@ for (const mobile of [false, true]) test(`older result resolves its reply conver
   assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
 });
 
-test("stalled clipboard recovers without losing the result or download", { timeout: 30000 }, async t => {
+test("stalled clipboard preserves download and fences copies across collaboration views", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
-  await p.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => new Promise(() => {}) } }));
+  await p.evaluate(() => {
+    window.copyCalls = 0;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => {
+      window.copyCalls++;
+      return new Promise(resolve => { window.finishCopy = resolve; });
+    } } });
+  });
   await p.locator("#result-copy-text").click();
-  await p.locator("#result-use-status").filter({ hasText: "Could not copy" }).waitFor();
-  assert.equal(await p.locator("#result-copy-text").isDisabled(), false);
+  await p.locator("#result-use-status").filter({ hasText: "Clipboard is still busy" }).waitFor();
+  assert.equal(await p.locator("#result-copy-text").isDisabled(), true);
   assert.equal(await p.locator("#result-download").isVisible(), true);
   assert.equal(await p.locator("#result-body").textContent(), f.body);
+  await p.locator("#close-result").click();
+  await f.row("native-result").locator("[data-result-work]").click();
+  const card = p.locator('[data-work-record-id="native-result"]');
+  await card.locator("[data-copy-result]").click();
+  const input = p.locator("#result-copy-preview"), copy = p.locator("#result-copy-button");
+  await input.fill("My next draft");
+  assert.equal(await copy.isDisabled(), true);
+  await copy.dispatchEvent("click");
+  assert.equal(await p.evaluate(() => window.copyCalls), 1, "another surface cannot issue a competing write");
+  await p.locator("#result-copy-close").click();
+  if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
+  await card.getByRole("button", { name: "Use my AI", exact: true }).click();
+  assert.equal(await p.locator("#packet-copy").isDisabled(), true);
+  await p.locator("#packet-copy").dispatchEvent("click");
+  assert.equal(await p.evaluate(() => window.copyCalls), 1);
+  await p.evaluate(() => window.finishCopy());
+  await p.waitForFunction(() => !document.getElementById("packet-copy").disabled);
+  assert.equal(await p.locator("#portable-status").textContent(), "", "old copy cannot report success on another view");
+  await p.locator("#portable-close").click();
+  await card.locator("[data-copy-result]").click();
+  assert.equal(await input.inputValue(), "My next draft");
+  await copy.click();
+  await p.locator("#result-copy-status").filter({ hasText: "Clipboard is still busy" }).waitFor();
+  await input.fill("Edited while the clipboard is pending");
+  assert.equal(await copy.isDisabled(), true);
+  await p.evaluate(() => window.finishCopy());
+  await p.waitForFunction(() => !document.getElementById("result-copy-button").disabled);
+  assert.equal(await input.inputValue(), "Edited while the clipboard is pending");
+  assert.equal(await p.locator("#result-copy-status").textContent(), "", "late completion does not label newer edits copied");
 });
 
 for (const delayed of [false, true]) test(`withdrawing prior version clears comparison: ${delayed ? "delayed response" : "already rendered"}`, { timeout: 30000 }, async t => {
@@ -577,4 +621,110 @@ test("withdrawal keeps keyboard focus inside the reader", { timeout: 30000 }, as
   const focus = await p.evaluate(() => ({ id: document.activeElement.id, tag: document.activeElement.tagName,
     visible: Boolean(document.activeElement.getClientRects().length), reader: document.querySelector("#result-dialog").contains(document.activeElement) }));
   assert.equal(focus.reader && focus.visible, true, JSON.stringify(focus));
+});
+
+
+for (const mobile of [false, true]) test(`connected result feedback keeps exact context: ${mobile ? "phone" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile }), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
+  await p.locator("#message-input").fill("Keep this exact revision and change the introduction.");
+  if (mobile) {
+    assert.equal(await p.locator("#result-dialog").isVisible(), false, "phone returns room to feedback composer");
+  } else {
+    assert.equal(await p.locator("#main > #result-dialog.result-docked").count(), 1);
+    assert.equal(await p.locator("#result-body").textContent(), f.body);
+    f.reopen("native-result");
+    await p.locator("#result-status").filter({ hasText: "Earlier result" }).waitFor();
+    assert.equal(await p.locator("#result-body").textContent(), f.body, "later work state cannot replace pinned text");
+    await p.setViewportSize({ width: 390, height: 844 });
+    await p.waitForFunction(() => !document.querySelector("#result-dialog").classList.contains("result-docked"));
+    assert.equal(await p.locator("#message-input").inputValue(), "Keep this exact revision and change the introduction.");
+    await p.setViewportSize({ width: 1440, height: 1000 });
+    await p.waitForFunction(() => document.querySelector("#result-dialog").classList.contains("result-docked"));
+    await f.capture("connected-feedback-desktop-open");
+    await p.locator("#close-result").click();
+  }
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep this exact revision and change the introduction.");
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(mobile ? "connected-feedback-phone" : "connected-feedback-desktop");
+});
+
+const selectionKey = "project-room:result-selection:v1";
+test("reopen restores the inspected result and feedback without upgrading its version", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Please retain the original introduction.");
+  const saved = await p.evaluate(key => JSON.parse(sessionStorage.getItem(key)), selectionKey);
+  assert.deepEqual(Object.keys(saved).sort(), ["expires", "receipt", "scope", "workItemId"]);
+  assert.equal(JSON.stringify(saved).includes(f.body), false);
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_BLOCKER_RESOLVED, { resolution: "Revised the introduction" });
+  const body = "A newer result that must not replace the inspected original.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "revision-after-leaving", workItemId: "native-result", body });
+  f.change("native-result", T.WORK_COMPLETED, { summary: "Revision", nextAction: "Review", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: saved.receipt.completionEventId, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
+  await p.reload(); await f.ready();
+  assert.equal(await p.locator("#message-input").inputValue(), "Please retain the original introduction.");
+  assert.match(await p.locator("#result-status").textContent(), /Earlier result/);
+  assert.equal(await p.locator("#result-dialog").evaluate(node => node.contains(document.activeElement)), false, "restore does not steal focus");
+  await f.capture("restored-pinned-feedback");
+  await p.locator("#close-result").click();
+  await p.reload(); await p.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false, "explicit close stays closed");
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
+
+for (const invalid of ["expired", "wrong-scope", "malformed"]) test(`result recovery rejects ${invalid} selection`, { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await p.evaluate(({ key, invalid }) => {
+    const saved = JSON.parse(sessionStorage.getItem(key));
+    if (invalid === "expired") saved.expires = 1;
+    if (invalid === "wrong-scope") saved.scope += ":different-member";
+    sessionStorage.setItem(key, invalid === "malformed" ? "{" : JSON.stringify(saved));
+  }, { key: selectionKey, invalid });
+  await p.reload(); await p.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
+
+test("restored result fetches withdrawal instead of retaining old text", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(m => m.id === messageId).revision ?? 0 });
+  await p.reload(); await p.locator("#result-status").filter({ hasText: "Text withdrawn" }).waitFor();
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.equal(await p.locator("#result-copy-text").isVisible(), false);
+});
+
+test("closing a pending restored read fences its late response", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  await p.route("**/work-result?**", async route => { const response = await route.fetch(); await gate; await route.fulfill({ response }).catch(() => {}); });
+  t.after(() => release());
+  await p.reload(); await p.locator("#result-dialog").waitFor({ state: "visible" });
+  await p.locator("#close-result").click(); release();
+  await p.unroute("**/work-result?**", { behavior: "wait" });
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-body").textContent(), "");
+});
+
+test("blocked selection storage does not prevent reading or feedback", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await p.evaluate(key => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(k, value) { if (k === key) throw new DOMException("Blocked", "SecurityError"); return original.call(this, k, value); };
+  }, selectionKey);
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Feedback still works without selection persistence.");
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
 });

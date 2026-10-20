@@ -406,7 +406,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
 
 // Owns post-login discovery, preference persistence, draft recovery and first-screen simplicity.
 for (const [width, height] of [[1280, 800], [390, 844]]) {
-  test(`the attention preview shows one line, can be dismissed, and gives the timeline its room back (${width}x${height})`, { timeout: 60000 }, async t => {
+  test(`the conversation has no duplicate attention preview (${width}x${height})`, { timeout: 60000 }, async t => {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
     const post = (key, data) => f.store.command(key, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data });
     const mine = [];
@@ -417,27 +417,14 @@ for (const [width, height] of [[1280, 800], [390, 844]]) {
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
     await page.goto(origin); await signInFixture(page, f.keys.owner);
-    await page.locator('#activity-preview').waitFor({ state: 'visible' });
-    // Three unread replies are counted, but only the newest is listed: a glance, not a reading surface.
-    assert.equal((await page.locator('#activity-preview-count').textContent()).trim(), '3');
-    assert.equal(await page.locator('#activity-preview-list li').count(), 1);
-    // A long nowrap line must ellipsize inside the card, not widen the page (at larger text it did, and a phone's layout viewport grew with it).
+    await page.locator('#main').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#activity-preview').count(), 0);
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'the preview never makes the page wider than the screen');
-    await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
-    const height1 = await page.locator('.timeline').evaluate(n => n.getBoundingClientRect().height);
-    await page.locator('#activity-preview-dismiss').click();
-    assert.equal(await page.locator('#activity-preview').isHidden(), true);
-    const height2 = await page.locator('.timeline').evaluate(n => n.getBoundingClientRect().height);
-    assert.ok(height2 >= height1 + 60, `dismissing returns the space to the timeline (${height1} -> ${height2})`);
-    // Still dismissed after the preview refreshes with the same unread items.
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await page.waitForTimeout(800);
-    assert.equal(await page.locator('#activity-preview').isHidden(), true);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   });
 }
 
-test('human Advanced tools stay out of the door and preserve squad drafts and saved preferences', { timeout: 60000 }, async t => {
+test('human settings preserve saved preferences without a squad surface', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({store:f.store, streamInterval:40});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser=await browserType.launch({headless:true});
@@ -475,21 +462,7 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
   assert.equal(await page.getByRole('link',{name:'Demo conversation'}).isVisible(),true);
   await page.locator('#connect-guide-open').click(); await page.locator('#connect-guide-close').click();
   await page.locator('#human-advanced').check(); await page.keyboard.press('Escape');
-  await page.locator('#squads-open').click();
-  await page.locator('#squads-list input[name=name]').fill('team');
-  await page.locator('#squads-list input[name=goal]').fill('Ship together');
-  await page.locator('#squads-list input[name=memberId][value=guest]').check();
-  f.store.command(f.keys.guest,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:crypto.randomUUID(),body:'chat while drafting'}});
-  await page.waitForTimeout(200);
-  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Ship together');
-  await page.locator('#squads-list button[type=submit]').click();
-  await page.locator('#squads-list .squad-card').waitFor();
-  assert.match(f.store.db.prepare("SELECT members_json FROM squads WHERE name='team'").get().members_json,/guest/);
-  await page.locator('#squads-list input[name=name]').fill('team');
-  await page.locator('#squads-list input[name=goal]').fill('Keep this rejected draft');
-  await page.locator('#squads-list button[type=submit]').click();
-  await page.locator('#squads-list [role=alert]').waitFor();
-  assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Keep this rejected draft');
+  assert.equal(await page.locator('#squads-open, #squads-dialog').count(), 0);
   assert.deepEqual(errors,[]);
 });
 
