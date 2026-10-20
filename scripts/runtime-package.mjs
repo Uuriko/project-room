@@ -316,6 +316,7 @@ optional.push("server/restore-ndjson.mjs"); // whole-store NDJSON restore (impor
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
+optional.push("server/email-unsubscribe.mjs", "server/notify-email.mjs"); // one-click unsubscribe route (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
 optional.push("agent-signin.html"); // Standalone agent sign-in template (loaded by GET /agent-signin, not a raw URL)
