@@ -1,6 +1,6 @@
 // M-02 mobile claim→finish journey (390px/375px viewports): the Board UI's
 // touch targets and card overflow on phones. #2034 set the 44px coarse-pointer
-// floor; the Board's two <summary> disclosures and the Tasks-nav Squads entry
+// floor; the Board's two <summary> disclosures and the Tasks-nav entry
 // fell through it, and long PR URLs / repo@branch strings overflow the claim
 // card on narrow viewports (sibling elements already carry overflow-wrap).
 import test from "node:test";
@@ -44,9 +44,9 @@ test("long PR and repo strings wrap inside the claim card on 375px", () => {
   assert.match(repo, /overflow-wrap:\s*anywhere/, "long repo@branch strings wrap instead of overflowing the card");
 });
 
-test("the Squads nav entry matches the Board nav-row treatment", () => {
-  const base = declarationsFor("#squads-open");
-  assert.ok(base.trim(), "#squads-open has a rule");
+test("the Board nav entry matches the Board nav-row treatment", () => {
+  const base = declarationsFor("#tasks-board-open");
+  assert.ok(base.trim(), "#tasks-board-open has a rule");
   assert.match(base, /min-height:\s*44px/, "touch target stays 44px");
   assert.match(base, /background:\s*transparent/, "nav row, not a default grey button");
 });

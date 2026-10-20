@@ -3,7 +3,7 @@
  "corpus": "repo",
  "repo": "Uuriko/project-room",
  "registry_path_in_repo": "docs/doc-registry.json",
- "reconciled_at_base": "2feda87c770902f07a2828b139cd3df4d3d49815",
+ "reconciled_at_base": "6d84149b558e003fef1d880f7194f75c788dff5e",
  "seeded_at": "2026-10-19",
  "seeded_by": "DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18)",
  "seed_sources": [
@@ -33,6 +33,12 @@
   ],
   "note": "the whole tracked tree, minus exclusions"
  },
+ "scope_notes": [
+  {
+   "section": "§2.1",
+   "text": "Email integration status: the Inbox is deferred from v1 (its quickstart is archived at archive/deferred-email/INBOX-QUICKSTART.md)."
+  }
+ ],
  "docs": [
   {
    "path": "(examples)",
@@ -3015,9 +3021,9 @@
     ]
    },
    "ttl_days": null,
-   "last_reviewed": "2026-10-18",
-   "size_cap_bytes": 3072,
-   "budget_bytes": 3072,
+   "last_reviewed": "2026-10-20",
+   "size_cap_bytes": 4096,
+   "budget_bytes": 4096,
    "status": "active",
    "seed_state": "classified",
    "classification_note": null,
@@ -3027,7 +3033,7 @@
    "supersedes": null,
    "exception": null,
    "verified_at": null,
-   "note": "one-screen map, generated from the registry (programme \u00a72.1 #12); over-cap exception retired at the W-D1 landing \u2014 the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap",
+   "note": "one-screen map, generated from the registry (programme \u00a72.1 #12); over-cap exception retired at the W-D1 landing \u2014 the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap. Cap raised 3,072 -> 4,096 at the ruling 31 registry refresh (2026-10-20, REFRESH-DOCS-2): main's front-page headlines joined the map (13 rows + the inbox scope note); the map remains one screen (3,399 B at the refresh).",
    "seed_rule": "programme \u00a72.1 #12",
    "seed": {
     "census_grade": "A",
@@ -5892,7 +5898,475 @@
     "census_size": 620,
     "last_change": "2026-10-02"
    }
+  },
+ {
+  "path": "docs/USER-GUIDE.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": "user-guide",
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.1",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 3110,
+   "last_change": "2026-10-06"
   }
+ },
+ {
+  "path": "docs/JOINING.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": "joining",
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-15",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.1",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 8773,
+   "last_change": "2026-10-15"
+  }
+ },
+ {
+  "path": "docs/join.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": "join-link",
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-13",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.1",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 1589,
+   "last_change": "2026-10-13"
+  }
+ },
+ {
+  "path": "docs/UNIFIED-CONVERSATION-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-19",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 6228,
+   "last_change": "2026-10-19"
+  }
+ },
+ {
+  "path": "docs/CHAT-RESULT-IMPLEMENTATION-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-20",
+  "size_cap_bytes": 40960,
+  "budget_bytes": 40960,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 36439,
+   "last_change": "2026-10-20"
+  }
+ },
+ {
+  "path": "docs/COLLABORATION-EXECUTION-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-19",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 7557,
+   "last_change": "2026-10-19"
+  }
+ },
+ {
+  "path": "docs/FOCUSED-COLLABORATION-PLAN-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-19",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 11965,
+   "last_change": "2026-10-19"
+  }
+ },
+ {
+  "path": "docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-19",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 6971,
+   "last_change": "2026-10-19"
+  }
+ },
+ {
+  "path": "docs/COLLABORATION-COMPONENTS-PLAN-20261019.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-20",
+  "size_cap_bytes": 71680,
+  "budget_bytes": 71680,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 68460,
+   "last_change": "2026-10-20"
+  }
+ },
+ {
+  "path": "docs/FOCUSED-DELIVERY-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 30720,
+  "budget_bytes": 30720,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 28015,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/RELEASE-ACCEPTANCE-EXECUTION-20261018.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 17281,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 18117,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/PROJECT-ROOM-TOTAL-BACKLOG.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 133120,
+  "budget_bytes": 133120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "RULING-31-ADD",
+   "census_size": 131241,
+   "last_change": "2026-10-18"
+  }
+ }
  ],
  "families": [
   {

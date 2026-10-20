@@ -163,7 +163,7 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   await form.waitFor({ state: "visible" });
   await page.waitForLoadState("networkidle");
   assert.equal(requests.includes("/src/app.js"), false, "workspace stays unloaded at first paint and idle");
-  for (const path of ["/src/client.js", "/src/events.js", "/src/legacy-reaction-aliases.js", "/src/inbox-ui.js", "/src/request-access.js"])
+  for (const path of ["/src/client.js", "/src/events.js", "/src/legacy-reaction-aliases.js", "/src/workspace-navigation.js", "/src/request-access.js"])
     assert.equal(requests.includes(path), false, path);
   // Agent sign-in is the standalone /agent-signin page on current main
   // (decision #37): the wall button is a link there, and the page's own
@@ -270,9 +270,9 @@ test("an incoming room link owns navigation while its workspace module downloads
   const route = await held;
   assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
   assert.equal(await page.locator("#session-menu-button").isDisabled(), true, "account controls wait for their handlers");
-  const button = await page.locator("#google-signin").boundingBox();
+  const button = await page.locator('[data-signin-form="password"] button[type="submit"]').boundingBox();
   await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);
-  assert.equal(requests.includes("/api/auth/google/start"), false, "old sign-in cannot replace pending entry");
+  assert.equal(requests.some(path => path.startsWith("/api/auth/")), false, "old sign-in cannot replace pending entry");
   await route.continue();
   await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
   assert.equal(await page.locator("#session-menu-button").isEnabled(), true);

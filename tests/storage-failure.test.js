@@ -112,9 +112,10 @@ test("an injected SQLITE_FULL rolls the command back, returns 503 storage_unavai
   assert.equal(body.category, "unavailable");
   assert.equal(refused.headers.get("retry-after"), "30");
   assert.match(body.operationId, /^op_/);
-  // operationId is random base64url (op_Gs8rerr_ once matched "err_"), so check
-  // everything except that one generated field.
-  const { operationId: _operationId, ...rest } = body;
+  // Random base64url identifiers can contain driver words: op_Gs8rerr_
+  // matched ERR_, and eid_iaMFUllhJrn- matched FULL in hosted coverage.
+  assert.match(body.errorId, /^eid_[A-Za-z0-9_-]+$/);
+  const { operationId: _operationId, errorId: _errorId, ...rest } = body;
   assert.doesNotMatch(JSON.stringify(rest), /SQLITE|disk|full|readonly|ERR_/i, "driver text must not reach the client");
   assert.deepEqual(snapshot(), before, "no partial write: event log, command journal, projection and checkpoint are unchanged");
   assert.deepEqual(store.storageStatus(), { failures: 1, threshold: 2, unavailable: false });

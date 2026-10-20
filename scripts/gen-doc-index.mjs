@@ -27,6 +27,12 @@
 // leave their trust section and are listed under "Demoted"; DELETE-CANDIDATE
 // paths are omitted and counted in the footer.
 //
+// Scope notes: a registry may carry a top-level "scope_notes" array of
+// {"section": "§2.N", "text": "..."} — registry-carried scope facts (e.g. a
+// deferred feature whose doc moved to the archive) that are not doc rows.
+// Each note renders as a blockquote at the end of its named section, in
+// array order. Added at the ruling 31 registry refresh (2026-10-20).
+//
 // Usage:
 //   node gen-doc-index.mjs --registry <registry.json> [--out <INDEX.md>]
 //                          [--check] [--demotions <demotions.json>]
@@ -140,6 +146,7 @@ out.push("# Documentation index");
 out.push("");
 out.push("One-screen map of the documentation set, generated from the doc");
 out.push("registry. The full listing is the registry view (`docs/doc-registry.md`).");
+const scopeNotes = Array.isArray(reg.scope_notes) ? reg.scope_notes : [];
 for (const s of SECTIONS) {
   const lines = collapse(bySection.get(s.tag)).map(lineFor).filter(Boolean);
   if (s.tag === "§2.6" && archivePresent.length) {
@@ -149,8 +156,10 @@ for (const s of SECTIONS) {
       if (rung === "DEMOTE") demotedLines.push(l); else { lines.push(l); listedLines++; }
     } else deleteOmitted++;
   }
-  if (!lines.length) continue;
+  const notes = scopeNotes.filter((n) => n && n.section === s.tag && typeof n.text === "string");
+  if (!lines.length && !notes.length) continue;
   out.push("", `## ${s.title}`, "", ...lines);
+  for (const n of notes) out.push("", `> Scope note: ${n.text}`);
 }
 if (demotedLines.length) {
   out.push("", "## Demoted by the ladder — verify before trusting", "", ...demotedLines.sort());

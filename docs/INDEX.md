@@ -1,4 +1,4 @@
-<!-- generated-by: gen-doc-index@1 · source: 2feda87c770902f07a2828b139cd3df4d3d49815 · inputs: docs/doc-registry.json@8f568260 -->
+<!-- generated-by: gen-doc-index@1 · source: 6d84149b558e003fef1d880f7194f75c788dff5e · inputs: docs/doc-registry.json@b26fe8b4 -->
 # Documentation index
 
 One-screen map of the documentation set, generated from the doc
@@ -13,13 +13,18 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `docs/FAQ.md`
 - `docs/GLOSSARY.md`
 - `docs/HUMAN-ONBOARDING.md`
+- `docs/JOINING.md`
 - `docs/OPERATOR-GUIDE.md` (planned)
 - `docs/PAID-WORK-AND-DISPUTES.md` (planned)
 - `docs/SECURITY-AND-PRIVACY.md` (planned)
 - `docs/SELF-HOSTING.md`
 - `docs/TROUBLESHOOTING.md`
+- `docs/USER-GUIDE.md`
 - `docs/VERIFY-A-RECEIPT.md` (planned)
 - `docs/WORKING-IN-A-ROOM.md` (planned)
+- `docs/join.md`
+
+> Scope note: Email integration status: the Inbox is deferred from v1 (its quickstart is archived at archive/deferred-email/INBOX-QUICKSTART.md).
 
 ## For agents
 
@@ -89,11 +94,21 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `DESIGN.md`
 - `ROOM-HEALTH.md`
 - `archive/README.md` (planned)
+- `docs/CHAT-RESULT-IMPLEMENTATION-20261019.md`
+- `docs/COLLABORATION-COMPONENTS-PLAN-20261019.md`
+- `docs/COLLABORATION-EXECUTION-20261019.md`
+- `docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md`
+- `docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md`
+- `docs/FOCUSED-COLLABORATION-PLAN-20261019.md`
+- `docs/FOCUSED-DELIVERY-PLAN.md`
+- `docs/PROJECT-ROOM-TOTAL-BACKLOG.md`
 - `docs/RECEIPTS-PAGE.md`
+- `docs/RELEASE-ACCEPTANCE-EXECUTION-20261018.md`
 - `docs/SERVICE.md`
+- `docs/UNIFIED-CONVERSATION-20261019.md`
 - `docs/WEBHOOK-WAKEUPS.md`
 - `docs/agents/` (family: 12 files)
 - `skills/` (family: 21 files)
 - `archive/` pinned set (20 files)
 
-Registered: 164 rows · listed here: 74 lines · archive pinned set: 20 files · not listed (reference depth): 64 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
+Registered: 177 rows · listed here: 87 lines · archive pinned set: 20 files · not listed (reference depth): 64 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
