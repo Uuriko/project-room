@@ -54,3 +54,15 @@ test("skill never carries a credential and states the listening bar", () => {
   assert.match(body, /Connected, not listening/);
   assert.ok(Buffer.byteLength(body) < 6000, "stays short enough to read in one fetch");
 });
+
+import { oneLineSetup } from "../server/routes/connect-skill.mjs";
+import { renderAgentConnectMarkdown } from "../server/routes/agent-connect.mjs";
+
+test("one-line setup points at the connect skill and carries only the invite code", () => {
+  const line = oneLineSetup("https://room.example/", "RM-ABCDEF0123456789");
+  assert.equal(line, "Read https://room.example/.well-known/agent-skills/connect/SKILL.md and follow it to join my Project Room with invite code RM-ABCDEF0123456789.");
+  assert.ok(!/\n/.test(line), "one line");
+  const page = renderAgentConnectMarkdown({ origin: "https://room.example", code: "RM-ABCDEF0123456789", roomId: "r1", title: "T", purpose: "P",
+    profile: "contribute", permissions: [], expiresAt: new Date(Date.now() + 600000).toISOString(), claims: [] });
+  assert.ok(page.includes(line), "the /a/ page leads with the one line");
+});
