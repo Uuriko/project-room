@@ -88,13 +88,13 @@ test("every served MCP tool exists in code", () => {
   }
 });
 
-test("round-1 scoping is pinned: public_work_recommend and room_list_work live outside the default profile", () => {
+test("lean v1 scoping: public_work_recommend stays outside the default profile and room_list_work is in it", () => {
   const profiles = servedProfiles();
   const names = list => list.map(t => t.name);
   // The default core profile is intentionally the short catalog; these two
   // are discovered via focus profiles and the enrolled server card.
   assert.ok(!names(profiles["core (default)"]).includes("public_work_recommend"), "public_work_recommend is not in the default profile");
-  assert.ok(!names(profiles["core (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
+  assert.ok(names(profiles["core (default)"]).includes("room_list_work"), "room_list_work is in the default profile");
   assert.ok(names(profiles["focus=public_work"]).includes("public_work_recommend"), "public_work_recommend is in focus=public_work");
   assert.ok(names(profiles["focus=work"]).includes("room_list_work"), "room_list_work is in focus=work");
   // The enrolled server-card list is the member core catalog (#3769): it
