@@ -208,7 +208,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // that is tens of KB, mostly people who left weeks ago. The brief keeps what
 // decides the next call: who is around, what you may do, and up to three
 // things to pick up. Presence comes from store.presence(): watching or a
-// command within ONLINE_MS is online, within ACTIVE_MS is recent, older is
+// a live derived presence state is online, within ACTIVE_MS is recent, older is
 // counted as quiet rather than listed.
 //
 // The brief is bounded, not just small on small rooms: at most BRIEF_AROUND
@@ -216,7 +216,6 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // text is clipped, and the serialized UTF-8 body is held to BRIEF_BYTES by
 // dropping lower-priority detail in a fixed order. `full` always points at
 // the unbounded pack.
-const BRIEF_ONLINE_MS = 15 * 60 * 1000;
 const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
 const BRIEF_ITEMS = 3;
 const BRIEF_AROUND = 8;
@@ -236,7 +235,10 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   for (const member of Array.isArray(presenceMembers) ? presenceMembers : []) {
     if (!member || member.memberId === viewerId) continue;
     const age = nowMs - seen(member.lastSeenAt);
-    const state = member.watching || age <= BRIEF_ONLINE_MS ? "online" : age <= BRIEF_ACTIVE_MS ? "recent" : null;
+    // Enrollment contributes to legacy lastSeenAt; it cannot prove availability.
+    // Use the shared presence derivation for liveness, never a fresh timestamp.
+    const live = member.watching || member.state === "working" || member.state === "listening";
+    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : null;
     if (!state) { quiet += 1; continue; }
     listed.push({ handle: clip(member.displayName, 40), kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
       workingOn: Array.isArray(member.workingOn) ? member.workingOn.slice(0, 1).map(item => clip(item.title ?? item.workItemId, 60)) : [] });

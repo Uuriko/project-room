@@ -343,3 +343,32 @@ test("brief keeps its byte budget with maximum-length ids, without cutting ids o
   if (brief.room?.slug) assert.equal(brief.room.slug, roomSlug, "ids are never cut");
   if (brief.you) assert.equal(brief.you.memberId, id("me-"));
 });
+
+test("view=brief: a member who was added but never connected is not listed as online", async t => {
+  // Research r142: presence()'s lastSeenAt includes the member.added time.
+  const f = fixture(t);
+  f.store.command(f.ownerKey, ROOM, { id: "pack-add-ghost", type: T.MEMBER_ADDED, data: {
+    memberId: "ghost", displayName: "Ghost Agent", kind: "agent", permissions: ["accept_work"], accountableHumanId: "owner" } });
+  f.store.command(f.ownerKey, ROOM, { id: "pack-add-absent", type: T.MEMBER_ADDED, data: {
+    memberId: "absent", displayName: "Absent Human", kind: "human", permissions: ["accept_work"] } });
+  const origin = await serve(t, f.store);
+  const res = await fetch(`${origin}/api/rooms/${ROOM}/activation-pack?view=brief`, { headers: { Authorization: `Bearer ${f.workerKey}` } });
+  assert.equal(res.status, 200);
+  const brief = await res.json();
+  const stateOf = handle => brief.around.find(member => member.handle === handle)?.state ?? "quiet";
+  assert.equal(stateOf("Room owner"), "online", "the owner just acted");
+  assert.notEqual(stateOf("Ghost Agent"), "online", "joining is not being online");
+  assert.notEqual(stateOf("Absent Human"), "online", "joining is not being online");
+});
+
+ test("brief never promotes idle, unknown, unreachable or future observations to online", () => {
+  const now = Date.parse("2026-10-20T00:00:00Z");
+  const pack = { contentTrust: "data", room: { slug: "r", title: "R", state: "active" },
+    members: [], openWork: [], openClaims: [], coordinationNorms: {}, participationRules: {} };
+  const members = ["idle", "unknown", "unreachable", "listening", "working"].map(state => ({
+    memberId: state, displayName: state, kind: "agent", state, lastSeenAt: new Date(now).toISOString() }));
+  members.push({ memberId: "future", displayName: "future", kind: "agent", lastSeenAt: new Date(now + 60000).toISOString() });
+  const brief = briefActivationPack(pack, members, now);
+  assert.deepEqual(brief.around.filter(m => m.state === "online").map(m => m.handle).sort(), ["listening", "working"]);
+  assert.equal(brief.around.some(m => m.handle === "future"), false);
+});

@@ -143,6 +143,8 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   const browser = await send(origin, `/a/${code}`, { headers: { Accept: "text/html" } });
   assert.equal(browser.status, 200);
   assert.match(browser.headers.get("content-type"), /^text\/html/);
+  assert.match(browser.text, /pre\{[^}]*overflow-wrap:anywhere/);
+  assert.match(browser.text, /input\{[^}]*box-sizing:border-box/);
   assert.match(browser.text, /This link is for your AI agent\. Paste it into Claude Code, Codex, Cursor or any agent with web access\./);
   assert.match(browser.text, /id="copy"/);
   assert.match(browser.text, /noindex/);
