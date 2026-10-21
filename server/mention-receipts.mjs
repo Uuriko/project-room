@@ -7,7 +7,8 @@
 //
 // delivered is true for every row: the row is the delivery record. read and
 // acked are true once the state has moved to acknowledged or responded.
-// timed_out was delivered and was not read.
+// Deadline state is independent of read/response evidence. False means no
+// recorded evidence; legacy timeout rows cannot reconstruct lost history.
 
 const READ_STATES = new Set(["acknowledged", "responded"]);
 
@@ -18,8 +19,11 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
     const rows = store.db.prepare(
       `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
               m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt,
-              json_extract(e.body, '$.data.messageId') AS messageId
+              json_extract(e.body, '$.data.messageId') AS messageId,
+              o.acknowledged, o.acknowledged_at AS acknowledgedAt, o.responded_at AS respondedAt
        FROM mention_states m
+       LEFT JOIN mention_observations o ON o.room_id=m.room_id
+         AND o.message_event_id=m.message_event_id AND o.mentioned_member_id=m.mentioned_member_id
        JOIN events e ON e.room_id = m.room_id AND e.id = m.message_event_id
        WHERE m.room_id = ? AND json_extract(e.body, '$.actorId') = ?
          AND json_extract(e.body, '$.type') = 'message.posted'
@@ -36,8 +40,10 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
         displayName: members[row.memberId]?.displayName ?? row.memberId,
         delivered: true,
         state: row.state,
-        read: READ_STATES.has(row.state),
-        acked: READ_STATES.has(row.state),
+        read: READ_STATES.has(row.state) || Boolean(row.acknowledged),
+        acked: READ_STATES.has(row.state) || Boolean(row.acknowledged),
+        acknowledgedAt: row.acknowledgedAt == null ? null : new Date(row.acknowledgedAt).toISOString(),
+        respondedAt: row.respondedAt == null ? null : new Date(row.respondedAt).toISOString(),
         createdAt: new Date(row.createdAt).toISOString(),
         timeoutAt: new Date(row.timeoutAt).toISOString(),
         decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString()

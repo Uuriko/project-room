@@ -207,3 +207,110 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   }
   return pack;
 }
+
+// GET …/activation-pack?view=brief: the first read for a newly joined agent.
+// The full pack lists every member and every open item; in a long-lived room
+// that is tens of KB, mostly people who left weeks ago. The brief keeps what
+// decides the next call: who is around, what you may do, and up to three
+// things to pick up. Presence comes from store.presence(): watching or a
+// a live derived presence state is online, within ACTIVE_MS is recent, older is
+// counted as quiet rather than listed.
+//
+// The brief is bounded, not just small on small rooms: at most BRIEF_AROUND
+// members are listed (the rest are counted in aroundMore), member-authored
+// text is clipped, and the serialized UTF-8 body is held to BRIEF_BYTES by
+// dropping lower-priority detail in a fixed order. `full` always points at
+// the unbounded pack.
+const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
+const BRIEF_ITEMS = 3;
+const BRIEF_AROUND = 8;
+export const BRIEF_BYTES = 2048;
+
+const clip = (value, max) => {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const chars = [...text];
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : text;
+};
+const briefBytes = value => Buffer.byteLength(JSON.stringify(value));
+
+export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = null) {
+  const seen = value => (typeof value === "string" ? Date.parse(value) : typeof value === "number" ? value : NaN);
+  const listed = [];
+  let quiet = 0;
+  for (const member of Array.isArray(presenceMembers) ? presenceMembers : []) {
+    if (!member || member.memberId === viewerId) continue;
+    const age = nowMs - seen(member.lastSeenAt);
+    // Enrollment contributes to legacy lastSeenAt; it cannot prove availability.
+    // Use the shared presence derivation for liveness, never a fresh timestamp.
+    const live = member.watching || member.state === "working" || member.state === "listening";
+    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : null;
+    if (!state) { quiet += 1; continue; }
+    listed.push({ handle: clip(member.displayName, 40), kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
+      workingOn: Array.isArray(member.workingOn) ? member.workingOn.slice(0, 1).map(item => clip(item.title ?? item.workItemId, 60)) : [] });
+  }
+  listed.sort((a, b) => (a.state === b.state ? (seen(b.lastSeenAt) || 0) - (seen(a.lastSeenAt) || 0) : a.state === "online" ? -1 : 1));
+  const around = listed.slice(0, BRIEF_AROUND);
+  const you = pack.members.find(member => member.id === viewerId) ?? null;
+  const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
+    id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
+  const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
+    .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
+  const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
+  const firstClaim = claims[0]?.claimAction;
+  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
+    : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
+      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+  const brief = {
+    contentTrust: pack.contentTrust,
+    view: "brief",
+    room: { slug: pack.room.slug, title: clip(pack.room.title, 80), state: pack.room.state },
+    purpose: clip(pack.orientation?.purpose ?? "", 280),
+    you: you ? { memberId: you.id, handle: clip(you.handle, 40), permissions: you.permissions } : null,
+    around,
+    aroundMore: listed.length - around.length,
+    quietMembers: quiet,
+    pickUp: [...claims, ...unclaimed],
+    openWorkTotal: pack.openWork.length,
+    recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
+      .map(decision => ({ statement: clip(decision.statement, 140), at: decision.at ?? null })),
+    rules: { ...pack.coordinationNorms, ...pack.participationRules },
+    next,
+    full: `${roomPath}/activation-pack`,
+    eventCursor: pack.eventCursor,
+    generatedAt: pack.generatedAt
+  };
+  // Over budget (long ids, multibyte text): shed detail in a fixed order.
+  // Each step keeps the brief valid; `truncated` tells the reader to use `full`.
+  const shed = [
+    () => { for (const member of brief.around) member.workingOn = []; },
+    () => { brief.recentDecisions = []; },
+    () => { while (brief.around.length > 3) { brief.around.pop(); brief.aroundMore += 1; } },
+    () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
+    () => { brief.aroundMore += brief.around.length; brief.around = []; },
+    () => { brief.pickUp = brief.pickUp.slice(0, 1); },
+    () => { for (const item of brief.pickUp) delete item.claimAction; },
+    () => { delete brief.rules; brief.recentDecisions = []; },
+  ];
+  for (const step of shed) {
+    if (briefBytes(brief) <= BRIEF_BYTES) break;
+    step();
+    brief.truncated = true;
+  }
+  if (briefBytes(brief) <= BRIEF_BYTES) return brief;
+  // Last resort (maximum-length ids repeat across room, you, next and full):
+  // a minimal brief that still says where to go. Ids and route strings are
+  // never cut; free text goes first.
+  return {
+    contentTrust: brief.contentTrust,
+    view: "brief",
+    truncated: true,
+    room: { slug: brief.room.slug },
+    you: brief.you ? { memberId: brief.you.memberId, permissions: brief.you.permissions } : null,
+    aroundCount: brief.around.length + brief.aroundMore,
+    quietMembers: brief.quietMembers,
+    openWorkTotal: brief.openWorkTotal,
+    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    full: brief.full,
+    eventCursor: brief.eventCursor
+  };
+}
