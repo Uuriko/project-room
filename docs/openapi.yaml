@@ -3862,6 +3862,83 @@ paths:
         '403': { description: owner_required, access_denied, or insufficient_scope }
         '404': { description: room_not_found }
         '429': { description: rate_limited }
+  /api/rooms/{roomId}/room_land:
+    get:
+      summary: List the merge train
+      description: >-
+        Merge train entries (held, queued, in_batch, landed, returned,
+        rolled_back) and the last 10 batches. With view=metrics, returns
+        merges per day, main breaks, prod rollbacks and flaky jobs instead.
+        Same reads as room_land actions list and metrics. Scoped API keys
+        require rooms:read.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: view
+          in: query
+          required: false
+          schema: { type: string, enum: [metrics] }
+      responses:
+        '200':
+          description: Entries and batches, or metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries: { type: array, items: { type: object } }
+                  batches: { type: array, items: { type: object } }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: room_not_found }
+    post:
+      x-room-permission: member
+      summary: Enqueue, approve, remove, or report smoke on the merge train
+      description: >-
+        Same call as the room_land MCP tool. action enqueue (repo, prNumber,
+        claimantMemberId optional) classifies the PR by touched paths: safe
+        PRs queue, PRs touching auth, billing, deletion, migrations or
+        secrets/config are held for the room owner. approve (owner, entryId)
+        queues a held PR. remove (claimant or owner, entryId). smoke (owner,
+        batchId, ok) confirms a landed batch or rolls it back. pause and resume
+        (owner) are the kill switch. metrics as in GET. Scoped API keys
+        require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [enqueue, list, approve, remove, smoke, pause, resume, metrics] }
+                reason: { type: string, maxLength: 300 }
+                repo: { type: string }
+                prNumber: { type: integer }
+                claimantMemberId: { type: string }
+                entryId: { type: string }
+                batchId: { type: string }
+                ok: { type: boolean }
+      responses:
+        '200': { description: Updated entry or batch result }
+        '201': { description: Entry enqueued }
+        '401': { description: unauthenticated or inactive membership }
+        '403': { description: access_denied, insufficient_scope, owner_only or forbidden }
+        '404': { description: not_found }
+        '409': { description: invalid_state or invalid_transition }
+        '422': { description: invalid_request or invalid_land_item }
+        '502': { description: github_unavailable }
+        '503': { description: github_unconfigured }
   /api/rooms/{roomId}/members/me/wants-work:
     get:
       summary: Read your own "new ready work" wake preference
