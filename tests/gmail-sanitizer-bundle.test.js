@@ -36,6 +36,18 @@ test('Room HTML policy removes active elements and keeps safe links protected', 
   assert.match(value, /href="https:\/\/example.test\/"/);
 });
 
+test('Room HTML policy discards noscript contents instead of promoting them to live markup', () => {
+  // GHSA-x3q4 class: sanitize-html 2.18.0's default nonTextTags omits noscript,
+  // so without the explicit option in safeGmailHtml the implied-close discard
+  // never engages and fallback-only noscript contents leak through the deployed
+  // policy as ordinary live markup and text.
+  assert.equal(safeGmailHtml('<p>before</p><noscript><p>inside-para</p></noscript><p>after</p>'), '<p>before</p><p>after</p>');
+  assert.equal(safeGmailHtml('<div><noscript></div><a href="https://evil.test/x">hidden-link</a></noscript><p>tail</p>'), '<div></div><p>tail</p>');
+  assert.equal(safeGmailHtml('<p>x</p><noscript>plain text only</noscript><p>y</p>'), '<p>x</p><p>y</p>');
+  // Control: ordinary content outside noscript is untouched.
+  assert.equal(safeGmailHtml('<p>Readable <a href="https://example.test/">link</a></p>'), '<p>Readable <a href="https://example.test/" target="_blank" rel="noopener noreferrer">link</a></p>');
+});
+
 // The advisory concerns namespace-prefixed tags, not only bare <animate>.
 test('vendored sanitizer blocks namespace-prefixed SMIL URL retargeting', () => {
   for (const tag of ['animate', 'animateColor', 'animateMotion', 'animateTransform', 'set']) {

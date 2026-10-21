@@ -8,7 +8,12 @@ export const safeGmailHtml = value => sanitizeHtml(value, {
   allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'hr', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'span', 'div', 'sub', 'sup'],
   allowedAttributes: { a: ['href', 'title', 'target', 'rel'] }, allowedSchemes: ['https', 'http', 'mailto'], allowProtocolRelative: false,
   transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }) },
-  enforceHtmlBoundary: true
+  enforceHtmlBoundary: true,
+  // sanitize-html 2.18.0's default nonTextTags omits noscript, so its implied-close
+  // discard (GHSA-x3q4) never engages and noscript contents leak through as live
+  // markup/text. List the defaults explicitly plus noscript so fallback-only
+  // content is discarded, not promoted.
+  nonTextTags: ['script', 'style', 'textarea', 'option', 'xmp', 'noscript']
 });
 export const gmailHeader = (m, name) => m.payload?.headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 export function gmailParts(payload, result = { text: [], html: [], attachments: [] }, path = '0') {
