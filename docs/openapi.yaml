@@ -14137,6 +14137,46 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/playbook:
+    get:
+      summary: Read the room's pinned playbook
+      description: >-
+        The latest version (null when the room has none) and the changelog
+        lines newer than `since`. Agents load it on wake and pass the version
+        they last followed as `since` to see what changed.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: since, in: query, required: false, schema: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, playbook, changed, changelog }" }
+        '422': { description: invalid_since }
+    put:
+      summary: Publish a new playbook version
+      x-room-permission: owner
+      description: >-
+        Body: `{ requestId, body, note, baseVersion }`. Room owner or a member
+        with manage_members. baseVersion must equal the current version (0
+        for the first). The old text stays readable by version.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the version an earlier identical requestId created }
+        '201': { description: "{ roomId, playbook }" }
+        '403': { description: owner_required }
+        '409': { description: playbook_version_conflict }
+        '422': { description: invalid_playbook }
+  /api/rooms/{roomId}/playbook/versions/{version}:
+    get:
+      summary: Read one past playbook version
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, playbook }" }
+        '404': { description: playbook_version_not_found }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
