@@ -211,6 +211,34 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     }
   }
 
+  // 2c. SEC2-C-B verification drift: an active identity-linked member
+  // seated in a room whose policy requires verified identities, while
+  // the identity carries no attestation. Unverify suspends gated seats
+  // in the same act, so this derived item is the standing signal for
+  // the drift that remains reachable — a policy switched on over
+  // already-seated members, an owner seat (never attestation-gated),
+  // or a suspension that could not run (named on the unverify result).
+  const plugin = store.agentPlugin;
+  if (plugin && plugin.roomVerificationPolicy(roomId).requireVerified) {
+    const members = room.state.members ?? {};
+    const links = store.db.prepare(
+      "SELECT identity_id AS identityId, member_id AS memberId FROM identity_links WHERE room_id=?").all(roomId);
+    for (const link of links) {
+      const member = Object.hasOwn(members, link.memberId) ? members[link.memberId] : null;
+      if (!member || member.active === false) continue;
+      if (plugin.verificationLevel(link.identityId) === "verified") continue;
+      items.push(Object.freeze({
+        kind: "verification_drift",
+        id: link.identityId,
+        severity: "action",
+        title: `Unverified member seated: ${member.displayName ?? link.memberId}`,
+        detail: "This room requires verified identities, but this member's identity has no verification attestation (withdrawn or never granted). Re-verify the identity or remove the member.",
+        actions: Object.freeze([Object.freeze({ action: "review", method: "GET",
+          path: `/api/agent-identities/${encodeURIComponent(link.identityId)}/verification` })]),
+      }));
+    }
+  }
+
   // 3. Spend-allowance headroom running out (or already over).
   const spend = spendAllowanceReport(room.state, nowMs);
   if (spend.allowance && typeof spend.headroomCents === "number"

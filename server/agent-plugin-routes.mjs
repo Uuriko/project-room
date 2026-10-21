@@ -625,12 +625,15 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 201, store.agentPlugin.verifyIdentity({ identityId, verifiedBy: auth.identityId }));
   });
 
-  const unverifyIdentity = translate(async (req, res, { identityId }) => {
+  // SEC2-C-B: revocation authority is attestation-scoped, not
+  // any-room-owner: the store requires the original attester or a
+  // membership admin of a room where the identity is seated (a caller
+  // who owns no room at all can hold that standing), and re-evaluates
+  // the identity's seats in verified-gated rooms in the same act.
+  const unverifyIdentity = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-identity-verify:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
-      reject(403, "not_room_owner", "Only a room owner can revoke a verification attestation");
-    }
-    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId }));
+    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId, revokedBy: auth.identityId }));
   });
 
   const identityVerification = translate(async (req, res, { identityId }) => {
@@ -1097,7 +1100,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
     if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
     const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;
-    if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
+    if (unverifyMatch) { await unverifyIdentity(req, res, { remoteAddress, identityId: pathId(unverifyMatch[1]) }); return true; }
     const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
     if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
     const secretRotateMatch = method === "POST" ? SECRET_ROTATE_ROUTE.exec(pathname) : null;

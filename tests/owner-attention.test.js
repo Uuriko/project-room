@@ -290,3 +290,26 @@ test("exactly at the cap keeps insertion order; past the cap actions move first"
   assert.equal(report.itemCount, 26);
   assert.equal(report.items[0].kind, "spend", "past the cap, actions come first");
 });
+
+// SEC2-C-B: roster drift — an active identity-linked member seated in a
+// room whose policy requires verified identities, while the identity
+// carries no attestation, surfaces as a needs-attention item. Unverify
+// suspends gated seats in the same act; this derived item is the standing
+// signal for the drift that remains reachable (a policy switched on over
+// already-seated members, an owner seat, a suspension that could not run).
+test("SEC2-C-B: verification drift item appears only for gated rooms with unverified seated members", t => {
+  const f = setup(t);
+  const agent = f.store.identities.create("Drift agent");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  // Policy off: an unverified seated member is not drift.
+  assert.equal(f.report().items.some(item => item.kind === "verification_drift"), false);
+  // Policy on: the same seat is now seated against the room's own rule.
+  f.store.agentPlugin.setRoomVerificationPolicy({ roomId: "commons", requireVerified: true, setBy: "owner" });
+  const drift = f.report().items.filter(item => item.kind === "verification_drift");
+  assert.equal(drift.length, 1);
+  assert.equal(drift[0].id, agent.identityId);
+  assert.equal(drift[0].severity, "action");
+  // Attesting the identity resolves the drift.
+  f.store.agentPlugin.verifyIdentity({ identityId: agent.identityId, verifiedBy: "owner" });
+  assert.equal(f.report().items.some(item => item.kind === "verification_drift"), false);
+});
