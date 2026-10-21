@@ -54,9 +54,11 @@ test("AccountClient.adopt takes only a complete authenticated session view", () 
   }
 });
 
-test("the workspace adopts the signed-in view and opens the first room without waiting on the list", () => {
+test("in-workspace sign-in confirms the session before unfencing; the room opens without waiting on the list", () => {
   const app = read("src/app.js");
-  assert.match(app, /onSignedIn: async signedIn => \{\n    const adopted = accountClient\.adopt\(signedIn\);\n    const restoration = adopted \? Promise\.resolve\(adopted\) : accountClient\.restore\(\);/);
+  // Invitation/re-auth sign-in must not adopt: a failed account-session read keeps private state fenced.
+  assert.match(app, /onSignedIn: async \(\) => \{\n    const restoration = accountClient\.restore\(\);/);
+  assert.doesNotMatch(app, /accountClient\.adopt\(/);
   assert.match(app, /if \(body\?\.room\?\.id\) loadAccountRooms\(\)\.catch\(\(\) => \{\}\);/);
   assert.doesNotMatch(app, /if \(body\?\.room\?\.id\) await loadAccountRooms\(\);/);
 });

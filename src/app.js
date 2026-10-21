@@ -827,9 +827,11 @@ const signinUI = createAuthSigninUI({
     setFormStatus($("#auth-link-error"),
       `${message} Request a new link or continue with Google.`, true);
   },
-  onSignedIn: async signedIn => {
-    const adopted = accountClient.adopt(signedIn);
-    const restoration = adopted ? Promise.resolve(adopted) : accountClient.restore();
+  // In-workspace sign-in (invitation, re-auth) always confirms the identity
+  // with GET /api/account-session before leaving the fence: private room state
+  // stays fenced if that read fails. The adopt() shortcut is for the entry page.
+  onSignedIn: async () => {
+    const restoration = accountClient.restore();
     const restoreGeneration = accountClient.generation;
     try {
       const restored = await restoration;
