@@ -186,9 +186,9 @@ describe('P2 history monotonicity: any op sequence keeps history append-only, or
     });
   }
 
-  it('SEC-2 trim boundary: past 200 stamps the newest 200 are kept and the rest counted', () => {
+  it('SEC-2 trim boundary: past 200 stamps the row keeps the newest 200, counted — and the spill keeps the rest', () => {
     const clock = makeClock();
-    const { registry } = makeClaimRoom(clock);
+    const { registry, storage } = makeClaimRoom(clock);
     const id = 'trim-claim';
     applyClaimOp(registry, ROOM_ID, { kind: 'create', id, agent: 'agent-a' }, clock.tick());
     applyClaimOp(registry, ROOM_ID, { kind: 'claim', id, agent: 'agent-a', leaseHours: null }, clock.tick());
@@ -196,17 +196,31 @@ describe('P2 history monotonicity: any op sequence keeps history append-only, or
     for (let i = 0; i < NOTES; i++) {
       applyClaimOp(registry, ROOM_ID, { kind: 'note', id, agent: 'agent-a', text: `note ${i}` }, clock.tick());
     }
-    const item = registry.get(ROOM_ID, id);
     const totalAppends = 2 + NOTES; // created + claimed + notes
-    assert.equal(item.history.length, 200, 'history keeps at most 200 entries');
-    assert.equal(item.historyOmitted, totalAppends - 200, 'trimmed stamps are counted, not lost');
+    // The stored row keeps the SEC-2 shape: newest 200 entries, the rest
+    // counted — the bound on the row itself is unchanged.
+    const stored = JSON.parse([...storage.state.work_claims.values()].find(row => row.claim_id === id).item_json).data;
+    assert.equal(stored.history.length, 200, 'stored row keeps at most 200 entries');
+    assert.equal(stored.historyOmitted, totalAppends - 200, 'trimmed stamps are counted, not lost');
+    assert.equal(stored.history[0].action, 'note', 'oldest stamps (created/claimed/early notes) trimmed first');
+    assert.equal(stored.history[199].note, `note ${NOTES - 1}`, 'newest stamp is last');
+    // W3: the trimmed prefix lives in the spill under its lifetime seqs.
+    const spilled = [...storage.state.work_claim_history.values()]
+      .filter(row => row.claim_id === id).sort((a, b) => a.seq - b.seq);
+    assert.equal(spilled.length, totalAppends - 200, 'every trimmed stamp is spilled');
+    assert.deepEqual(spilled.map(row => row.seq), Array.from({ length: totalAppends - 200 }, (_, i) => i));
+    assert.equal(JSON.parse(spilled[0].stamp_json).action, 'created');
+    // The registry read reunites spill + row: the full lifetime history,
+    // ordered, duplicate-free, gapless — nothing is destroyed any more.
+    const item = registry.get(ROOM_ID, id);
+    assert.equal(item.history.length, totalAppends, 'read returns the full lifetime history');
+    assert.equal(item.historyOmitted, undefined, 'reunited read folds the counter away');
     assert.equal(claimHistoryLength(item), totalAppends, 'lifetime length still changes on every write');
-    // Newest 200, ordered, duplicate-free, gapless rounds (single round here).
     for (let i = 1; i < item.history.length; i++) {
-      assert.ok(item.history[i - 1].at < item.history[i].at, 'trimmed history stays ordered');
+      assert.ok(item.history[i - 1].at < item.history[i].at, 'reunited history stays ordered');
     }
-    assert.equal(new Set(item.history.map(s => JSON.stringify(s))).size, 200, 'no duplicates across the trim');
-    assert.equal(item.history[0].action, 'note', 'oldest stamps (created/claimed/early notes) trimmed first');
-    assert.equal(item.history[199].note, `note ${NOTES - 1}`, 'newest stamp is last');
+    assert.equal(new Set(item.history.map(s => JSON.stringify(s))).size, totalAppends, 'no duplicates across the reunion');
+    assert.equal(item.history[0].action, 'created', 'the created stamp is first again');
+    assert.equal(item.history[totalAppends - 1].note, `note ${NOTES - 1}`, 'newest stamp is last');
   });
 });

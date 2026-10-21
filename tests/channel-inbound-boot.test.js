@@ -9,11 +9,8 @@ import { ChannelWebhookInbox } from "../server/channel-import.mjs";
 import { defaultServerArgs } from "../server/boot-options.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
-// The default boot path (server.mjs) builds its server arguments through
-// defaultServerArgs. This test pins the one behavior that makes Telegram
-// inbound usable outside Cloudflare: a valid webhook delivery is journaled
-// (202) instead of answered 409 channel_webhook_unavailable.
-test("the default boot path wires a webhook inbox: valid delivery journals, bad secret is denied", async t => {
+// Compatibility fixtures can exercise archived connectors without exposing them in v1.
+test("v1 refuses inbound email workspace routes; explicit compatibility mode retains webhook authorization", async t => {
   const f = createAcceptanceFixture(); f.filename = join(f.directory, "room.sqlite");
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const telegram = telegramContractFixture();
@@ -31,7 +28,19 @@ test("the default boot path wires a webhook inbox: valid delivery journals, bad 
 
   const args = defaultServerArgs({ store: f.store });
   assert.ok(args.channelWebhooks instanceof ChannelWebhookInbox, "boot args carry a webhook inbox");
-  const server = createRoomServer(args);
+  const defaultServer = createRoomServer(args);
+  await new Promise(resolve => defaultServer.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch("http://127.0.0.1:" + defaultServer.address().port + "/api/inbox/webhooks/" + telegram.connection.id, {
+      method: "POST", body: JSON.stringify(telegram.updates[0]),
+      headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": secret }
+    });
+    assert.equal(response.status, 404, "v1 does not expose the deferred connector");
+  } finally {
+    defaultServer.closeStreams(); defaultServer.closeAllConnections();
+    await new Promise(resolve => defaultServer.close(resolve));
+  }
+  const server = createRoomServer({ ...args, enableDeferredInbox: true });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
