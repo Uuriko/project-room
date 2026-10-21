@@ -3125,6 +3125,10 @@ function captureWorkOrigin(extra = {}) {
     windowScroll: [window.scrollX, window.scrollY], focus,
     focusKey: focus?.dataset?.focusKey ?? null,
     searchWorkId: focus?.closest?.("#search-results") ? focus.dataset.openWork : null,
+    search: extra.searchKey || focus?.closest?.("#search-results") ? {
+      key: extra.searchKey ?? focus.dataset.searchKey, query: $("#message-search").value,
+      mentions: mentionsFilterOn(), pinned: pinnedFilterOn(), scroll: $("#search-results").scrollTop
+    } : null,
     messageId: focus?.closest?.("[data-message-record-id]")?.dataset.messageRecordId ?? null,
     messageWorkId: focus?.closest?.("[data-open-work]")?.dataset.openWork ?? null,
     claimId: focus?.closest?.("[data-claim-id]")?.dataset.claimId ?? null,
@@ -3132,6 +3136,7 @@ function captureWorkOrigin(extra = {}) {
     boardColumnsScroll: $("#work-board .board-columns")?.scrollLeft ?? 0 };
 }
 function sameWorkOrigin(a, b) {
+  if (a.search?.query !== b.search?.query || a.search?.mentions !== b.search?.mentions || a.search?.pinned !== b.search?.pinned) return false;
   if (a.type !== b.type || a.channelId !== b.channelId || a.threadId !== b.threadId
     || JSON.stringify(a.mode ?? null) !== JSON.stringify(b.mode ?? null)) return false;
   // JDOT-COH-UPDATES-PAGE begin
@@ -3139,7 +3144,7 @@ function sameWorkOrigin(a, b) {
     .every(key => a.updates?.[key] === b.updates?.[key]);
   // JDOT-COH-UPDATES-PAGE end
   if (a.type === "board") return a.claimId === b.claimId && a.focusKey === b.focusKey;
-  const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
+  const key = value => value.search?.key || value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
 }
 function showWorkDestination(kind, id, presentation = "focus") {
@@ -3271,6 +3276,15 @@ async function restoreWorkOrigin(ticket) {
       activeWorkNavigationId = id;
     }
   }
+  if (origin.search) {
+    $("#message-search").value = origin.search.query;
+    $("#search-mentions").setAttribute("aria-pressed", String(origin.search.mentions));
+    $("#search-pinned").setAttribute("aria-pressed", String(origin.search.pinned));
+    $("#search-form").hidden = false;
+    $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
+    searchCollapsed = false; renderSearch();
+    $("#search-results").scrollTop = origin.search.scroll;
+  }
   const input = $("#message-input");
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
@@ -3291,11 +3305,12 @@ async function restoreWorkOrigin(ticket) {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
     const keyed = origin.focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === origin.focusKey) : null;
     const claim = origin.claimId ? $(`#work-board [data-claim-id="${CSS.escape(origin.claimId)}"] h4`) : null;
+    const searchHit = origin.search?.key ? [...$("#search-results").querySelectorAll("[data-search-key]")].find(node => node.dataset.searchKey === origin.search.key) : null;
     const search = origin.searchWorkId ? $(`#search-results [data-open-work="${CSS.escape(origin.searchWorkId)}"]`) : null;
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
     const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
-    const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
+    const target = [searchHit, origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
     target?.focus({ preventScroll: true });
     if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
@@ -5146,10 +5161,15 @@ $("#main").addEventListener("click", e => {
   e.preventDefault();
   if (busy) return;
   // JDOT-COH-NAV begin
-  if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
+  if (!link.dataset.openWork && !(link.dataset.openMessage && link.closest("#search-results"))) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
   // JDOT-COH-NAV end
   if (link.dataset.openMessage) {
-    if (narrowSearch.matches && link.closest("#search-results")) { searchCollapsed = true; $("#search-results").hidden = true; }
+    if (link.closest("#search-results")) {
+      if (navigateWorkRecord("message", link.dataset.openMessage, { searchKey: link.dataset.searchKey }) && narrowSearch.matches) {
+        searchCollapsed = true; $("#search-results").hidden = true;
+      }
+      return;
+    }
     history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
