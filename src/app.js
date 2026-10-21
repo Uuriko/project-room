@@ -974,7 +974,13 @@ async function openPersonalRoomAfterSignup() {
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
+// The verification resume is a convenience on top of the normal landing. A
+// failed read must fall through to that landing, not strand the tab (the
+// intent stays in sessionStorage for 30 minutes and would repeat on reload).
 async function resumeEmailVerification() {
+  try { return await resumeEmailVerificationOnce(); } catch { return false; }
+}
+async function resumeEmailVerificationOnce() {
   if (!verificationIntent) return false;
   const intent = verificationIntent;
   const clear = () => {
@@ -2885,7 +2891,7 @@ function syncRequestComposer() {
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
   setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
-  $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
+  $("#request-refresh").hidden = !request || !changed || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
@@ -3992,8 +3998,13 @@ const replyToSharedResult = createResultFeedback({
     revealMessage(message.id);
     switchThread(destination, true);
   },
-  setReply(messageId) {
+  setReply(messageId, quote) {
     replyToId = messageId;
+    if (quote) {
+      const input = $("#message-input");
+      if (!input.value.startsWith(quote)) input.value = quote + input.value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     updateReply(); saveComposer(); persistDrafts();
     $("#message-input").focus();
   }
@@ -5105,10 +5116,12 @@ const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
 addEventListener("wheel", event => {
   noteReaderScroll();
-  // A short conversation cannot emit a scroll event. A downward wheel over
-  // its visible messages still expresses reading through to the end.
+  // A conversation at its end cannot emit a scroll event for a downward
+  // wheel: a short list has nothing to scroll, and a longer list already at
+  // the bottom has nowhere to go. A downward wheel over its visible
+  // messages still expresses reading through to the end.
   const list = $("#message-list");
-  if (event.deltaY > 0 && list.contains(event.target) && list.scrollHeight <= list.clientHeight && nearBottomOfList()) scheduleHorizonAdvance();
+  if (event.deltaY > 0 && list.contains(event.target) && nearBottomOfList()) scheduleHorizonAdvance();
 }, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
@@ -6158,7 +6171,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) { return replyToSharedResult(message.id); },
+  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);

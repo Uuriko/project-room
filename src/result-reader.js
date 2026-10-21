@@ -11,7 +11,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   isBusy, canDiscuss, memberLabel, workRecord, focusRecord,
   clearResultComparison, loadResultComparison, onDiscuss, onOriginal, storage = null, recoveryScope = () => null }) {
   const $ = selector => document.querySelector(selector);
-  let resultView = null;
+  let resultView = null, pointerSelection = null;
   const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
   const wide = matchMedia("(min-width: 1100px)");
   const savedKey = "project-room:result-selection:v1";
@@ -125,6 +125,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const textMessage = getState().messages.find(message => message.id === view.textMessageId);
     if (textMessage?.deletedAt) view.withdrawn = { by: textMessage.deletedBy, at: textMessage.deletedAt };
     if (view.withdrawn) {
+      pointerSelection = null;
       view.body = "";
       resultElement("result-body").textContent = "";
       resultElement("result-body").hidden = true;
@@ -150,6 +151,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   }
   function closeResult(restore = true, preserveSaved = false) {
+    pointerSelection = null;
     if (!preserveSaved) forgetSelection();
     const view = resultView;
     finishResize();
@@ -202,8 +204,26 @@ export function installResultReader({ client, getState, getSession, sameSession,
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   resultElement("result-discuss").textContent = uiText("result.discuss");
-  resultElement("result-discuss").addEventListener("click", async () => {
+  function selectedPassage() {
+    const view = resultView, body = resultElement("result-body"), selection = window.getSelection();
+    if (!usableText(view) || !selection?.rangeCount || selection.isCollapsed || body.textContent !== view.body) return null;
+    const range = selection.getRangeAt(0);
+    if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) return null;
+    const prefix = range.cloneRange();
+    prefix.selectNodeContents(body);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = prefix.toString().length;
+    return { body: view.body, start, end: start + range.toString().length };
+  }
+  // Pointer focus may collapse a text selection before click is dispatched.
+  resultElement("result-discuss").addEventListener("pointerdown", () => {
+    pointerSelection = { view: resultView, selection: selectedPassage() };
+  });
+  resultElement("result-discuss").addEventListener("pointercancel", () => { pointerSelection = null; });
+  resultElement("result-discuss").addEventListener("click", async event => {
     const view = resultView;
+    const selection = event.detail && pointerSelection?.view === view ? pointerSelection.selection : selectedPassage();
+    pointerSelection = null;
     if (!view || view.resolving || !canDiscuss()) return;
     if (needsConversation(view)) {
       view.resolving = true; resultStatus();
@@ -222,7 +242,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const message = resultDiscussionMessage(view);
     if (!message) { resultElement("result-use-status").textContent = uiText("result.conversationUnavailable"); return; }
     resultElement("result-use-status").textContent = "";
-    if (onDiscuss(message) === false) return;
+    if (onDiscuss(message, selection) === false) return;
     if (wide.matches && resultView === view) {
       view.fromResults = false;
       saveSelection(view);

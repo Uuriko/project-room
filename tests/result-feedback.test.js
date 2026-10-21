@@ -11,7 +11,7 @@ function fixture() {
   const reply = createResultFeedback({ getState: () => state, getConversation: () => conversation,
     isBlocked: () => blocked, getDraft: () => draft, onBlocked: () => calls.push("blocked"),
     openThread: (message, destination) => calls.push(["open", message.id, destination]),
-    setReply: id => calls.push(["reply", id]) });
+    setReply: (id, quote) => calls.push(quote ? ["reply", id, quote] : ["reply", id]) });
   return { state, message, calls, conversation, reply, draft: value => { draft = value; }, block: () => { blocked = true; } };
 }
 
@@ -60,4 +60,27 @@ test("feedback continues a draft already addressing this result", () => {
 test("an empty reply selection can be retargeted", () => {
   const f = fixture(); f.draft({ replyToId: "other-message", body: "  ", files: [] });
   assert.equal(f.reply("result"), true);
+});
+
+test("selected feedback quotes the exact source while preserving the destination draft", () => {
+  const f = fixture(); f.message.body = "First\nSecond\nThird";
+  const draft = Object.freeze({ body: "Please clarify", replyToId: "result" }); f.draft(draft);
+  assert.equal(f.reply("result", { body: f.message.body, start: 6, end: 12 }), true);
+  assert.deepEqual(f.calls, [["open", "result", "thread"], ["reply", "result", "> Second\n\n"]]);
+  assert.equal(draft.body, "Please clarify");
+});
+
+test("stale or invalid selections never navigate or modify the draft", () => {
+  for (const selection of [{ body: "old", start: 0, end: 3 }, { body: "Current", start: -1, end: 3 },
+    { body: "Current", start: 0, end: 99 }, { body: "Current", start: 2, end: 2 },
+    { body: "Current", start: 0.5, end: 3 }, { start: 0, end: 1 }]) {
+    const f = fixture(); f.message.body = "Current";
+    assert.equal(f.reply("result", selection), false); assert.deepEqual(f.calls, []);
+  }
+});
+
+test("selection cannot bypass a private destination draft", () => {
+  const f = fixture(); f.message.body = "Current"; f.draft({ body: "private", toMemberId: "someone" });
+  assert.equal(f.reply("result", { body: "Current", start: 0, end: 3 }), false);
+  assert.deepEqual(f.calls, ["blocked"]);
 });

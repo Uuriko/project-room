@@ -102,6 +102,7 @@
   "src/room-roster.js",
   "src/room-templates.js",
   "src/seed.js",
+  "src/service-origin.js",
   "src/session-expiry.js",
   "src/share-invite-code.js",
   "src/share-links.js",
