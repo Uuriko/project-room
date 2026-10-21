@@ -89,6 +89,7 @@
   "src/reminders.js",
   "src/reply-requests.js",
   "src/request-access.js",
+  "src/request-progress.js",
   "src/result-availability.js",
   "src/result-comparison.js",
   "src/result-feedback.js",

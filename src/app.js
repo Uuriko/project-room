@@ -4601,6 +4601,8 @@ function syncComposerHint() {
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
 $("#message-input").addEventListener("keydown", e => {
+  // Composition owns candidate navigation and confirmation before any chat shortcut.
+  if (e.isComposing || e.keyCode === 229) return;
   const list = $("#mention-list"), open = list && !list.hidden;
   const matches = open ? mentionChoices() : [];
   if (open && matches.length) {

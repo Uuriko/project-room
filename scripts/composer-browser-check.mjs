@@ -200,6 +200,21 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await options.first().getAttribute("id"), "mention-option-0");
     assert.equal(await input.getAttribute("aria-expanded"), null);
     assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-0");
+    // Composition candidate navigation/confirmation must not operate the mention picker.
+    // The send-only IME cases below cannot catch this earlier shortcut consumer.
+    for (const key of ["ArrowDown", "ArrowUp", "Enter", "Tab"]) {
+      for (const composition of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+        const prevented = await input.evaluate((node, init) => {
+          const event = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+          node.dispatchEvent(event);
+          return event.defaultPrevented;
+        }, { key, ...composition });
+        assert.equal(prevented, false, `IME ${key} remains available to text entry`);
+        assert.equal(await input.inputValue(), "Hi @", "composition does not insert a mention");
+        assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-0");
+        assert.equal(await mentionList.isVisible(), true);
+      }
+    }
     await page.keyboard.press("ArrowDown");
     assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-1");
     assert.equal(await options.nth(1).getAttribute("aria-selected"), "true");
