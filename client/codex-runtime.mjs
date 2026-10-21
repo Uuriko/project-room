@@ -227,7 +227,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const unsubscribe = rpc.subscribe(receive);
     const timer = setTimeout(() => fail(new Error("Runtime outcome uncertain; reconcile original turn")), timeoutMs);
     let interruption;
-    const abort = () => { interruption ??= stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
+    const abort = () => { if (get(id)?.turn_id) interruption ??= stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
     input.signal?.addEventListener("abort", abort, { once: true });
     // Attach rejection handler before awaiting turn/start (notifications may race).
     completed.catch(() => {});
