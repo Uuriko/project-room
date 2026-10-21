@@ -67,7 +67,7 @@ test("authenticated MCP reports field reasons and serves replyToId", async t => 
   const mcp = createHostedRoomMcp(store);
   const call = (name, args) => mcp(rpc("tools/call", { name, arguments: args }), { authorization: `Bearer ${identity.secret}` });
 
-  const listed = await mcp(rpc("tools/list"), { authorization: `Bearer ${identity.secret}` });
+  const listed = await mcp(rpc("tools/list", { profile: "core" }), { authorization: `Bearer ${identity.secret}` });
   assert.equal(listed.result.profile, "core");
   assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length + 4);
   assert.ok(listed.result.tools.every(tool => MCP_TOOL_NAME_RE.test(tool.name)));
