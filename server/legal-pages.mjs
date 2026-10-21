@@ -38,7 +38,9 @@ function escapeHtml(value) {
 }
 
 function inline(text) {
-  return escapeHtml(text).replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]+|mailto:[^\s)]+)\)/g, `<a href="$2">$1</a>`);
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]+|mailto:[^\s)]+)\)/g, `<a href="$2">$1</a>`);
 }
 
 export function renderMarkdown(markdown) {
@@ -72,7 +74,7 @@ function pageHtml({ title, main }) {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
-<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
+<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}main,code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
 </head><body>
 <main>${main}</main>
 <footer>${LEGAL_FOOTER_LINKS}</footer>
