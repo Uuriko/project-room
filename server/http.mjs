@@ -116,7 +116,7 @@ import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
-import { createGrantAgentResolver } from "./oauth-grant-agents.mjs";
+import { createGrantAgentResolver, createGrantAgentRemovalCheck } from "./oauth-grant-agents.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
@@ -580,6 +580,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // together — no client can obtain a token before the doors bind the
     // agent principal (REV-4092-S1 note N1).
     resolveGrantAgent: createGrantAgentResolver(store),
+    // CURE-4416-REMOVE: whole-agent removal is durable at the token
+    // authority too — once the (account, client) binding is revoked, the
+    // provider refuses the grant's token verification, code exchanges,
+    // and refreshes, so no stale family can resurrect the removed agent.
+    isGrantAgentRemoved: createGrantAgentRemovalCheck(store),
   });
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
@@ -1981,6 +1986,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const revoked = oauthProvider.revokeSession({ userId: auth.account.id, familyId: oauthSessionKill[1] });
         if (revoked === 0) reject(404, "session_not_found", "No such active session");
         return json(res, 200, { revoked });
+      }
+      // DELETE /api/oauth/agents/:id — remove one connected agent the
+      // signed-in account owns (CURE-4416-REMOVE). The :id is the client
+      // id whose grant acts as the agent. This is the consent screen's
+      // "remove the agent to end its access everywhere" promise made
+      // real: the binding and the agent identity are revoked, its room
+      // members are deactivated (oauthGrantAgents.remove), and the
+      // client's live token families are revoked in the same request, so
+      // no refresh or stale code can resurrect it (the provider also
+      // refuses removed bindings at its own seams). Owner-only by
+      // construction: removal is scoped to the caller's account, and an
+      // agent the caller never connected — or another account's agent —
+      // answers 404, so a caller can't probe for other accounts' agents.
+      // The first-party Mac app client holds no agent binding and
+      // answers 404 here; its session ends by signing out of the app.
+      const oauthAgentRemove = /^\/api\/oauth\/agents\/([^/]{1,128})$/.exec(url.pathname);
+      if (oauthAgentRemove && req.method === "DELETE") {
+        rate(`oauth-agent-remove:${remoteAddress}`, 30);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected agents");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        protectWrite(req, auth, false);
+        const clientId = oauthAgentRemove[1];
+        const existing = store.oauthGrantAgents.binding({ accountId: auth.account.id, clientId });
+        if (!existing) reject(404, "agent_not_found", "No such connected agent");
+        const removed = store.oauthGrantAgents.remove({ accountId: auth.account.id, clientId });
+        const revoked = oauthProvider.revokeAllForUser({ userId: auth.account.id, clientId });
+        return json(res, 200, { removed: removed.removed, identityId: removed.identityId, revoked });
       }
       // GET /api/account/sessions + DELETE /api/account/sessions/{id}
       // (account-session inventory + targeted revocation, CX4) live in the

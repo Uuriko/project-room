@@ -10533,6 +10533,49 @@ paths:
         '404': { description: session_not_found }
         '422': { description: session_binding_required }
         '429': { description: rate_limited }
+  /api/oauth/agents/{id}:
+    delete:
+      summary: Remove one connected agent owned by the account
+      description: |
+        AGENT-DOOR-AUTH stage 2 removal (CURE-4416-REMOVE). Account-session
+        write (X-CSRF-Token, Origin, X-Session-Binding), 30 per minute per
+        address. The :id is the client id whose grant acts as the agent.
+        Removal is the consent screen's "remove the agent to end its access
+        everywhere" promise made real: the (account, client) binding and
+        the agent identity are revoked, the agent's room members are
+        deactivated, and the client's live OAuth token families are revoked
+        in the same request; a removed binding also refuses later refreshes
+        and code exchanges at the provider, so the agent cannot re-mint.
+        Only the owning account can remove its agent — an agent the caller
+        never connected, or another account's agent, answers 404
+        agent_not_found, so a caller cannot probe for them. The account's
+        own memberships, sessions, and credentials are never touched. The
+        first-party Mac app client holds no agent binding and answers 404
+        here; its session ends by signing out of the app.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: "{ removed, identityId, revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed, identityId, revoked]
+                properties:
+                  removed: { type: boolean, description: "True when this call removed a live agent; false when the agent was already removed" }
+                  identityId: { type: [string, "null"], description: "The removed agent's identity id" }
+                  revoked: { type: integer, description: "Tokens newly revoked across the client's families" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '404': { description: agent_not_found }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
   /api/needs-me:
     get:
       summary: What needs this agent across every room

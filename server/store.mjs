@@ -4085,9 +4085,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const member = this.oauthGrantAgents.ensureAgentMember({
       roomId, identityId: binding.identityId, displayName: binding.displayName, ownerMember,
     });
+    // CURE-4416-REMOVE: permissions evaluate at use against the owner's
+    // CURRENT ceiling in this room. The stored member carries the grant's
+    // own set (the owner's permissions ∩ the agent-safe set, taken at
+    // materialization); the effective set for this use is that set
+    // intersected with what the owner holds NOW, so narrowing the owner
+    // narrows the grant at every door, and re-widening restores up to the
+    // granted set — never beyond it, which is what "the grant can never
+    // widen what the owner themselves could do" means at use time, not
+    // only at materialization. The stored member is deliberately NOT
+    // rewritten: its set is the grant's own ceiling for the re-widen leg.
+    // When nothing was narrowed away the stored member is returned
+    // untouched (no copy, no behaviour change).
+    const grantedPermissions = member.permissions ?? [];
+    const ownerPermissions = ownerMember.permissions ?? [];
+    const effectivePermissions = grantedPermissions.filter(permission => ownerPermissions.includes(permission));
+    const boundMember = effectivePermissions.length === grantedPermissions.length
+      ? member
+      : { ...member, permissions: effectivePermissions };
     return {
       account: { id: accountId, active: true, revision: accountRow.revision, authEpoch: accountRow.auth_epoch },
-      member, roomId, ownerMember,
+      member: boundMember, roomId, ownerMember,
     };
   }
   accountRooms(token, binding, { after = null } = {}) {

@@ -54,7 +54,7 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent, isGrantAgentRemoved } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -69,6 +69,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     "isAccountActive must be a function if given");
   check(resolveGrantAgent === undefined || typeof resolveGrantAgent === "function",
     "resolveGrantAgent must be a function if given");
+  check(isGrantAgentRemoved === undefined || typeof isGrantAgentRemoved === "function",
+    "isGrantAgentRemoved must be a function if given");
 
   const sqlite = db ? createOAuthProviderSqlite(db) : null;
   const clientStore = clients ?? sqlite?.clients ?? new Map();
@@ -80,6 +82,14 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // Caller-owned sink for security signals (e.g. reuse-detected). The module
   // itself does no I/O; the HTTP layer wires this to its logging/journaling.
   const emitSecurityEvent = onSecurityEvent ?? (() => {});
+
+  // CURE-4416-REMOVE: whole-agent removal, as a provider-level predicate.
+  // When the host wires isGrantAgentRemoved, a removed (account, client)
+  // binding refuses at every token-authority seam — verification,
+  // exchange, and refresh — so no stale family can resurrect the agent.
+  // Unwired providers (unit fixtures) keep the pre-cure behaviour.
+  const grantAgentRemoved = ({ userId, clientId }) =>
+    typeof isGrantAgentRemoved === "function" && isGrantAgentRemoved({ userId, clientId }) === true;
 
   // Register an OAuth client (e.g. Muse). redirectUris must be exact-match
   // https URIs (http allowed only for localhost, per RFC 6749 §3.1.2.1).
@@ -234,6 +244,12 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const a = Buffer.from(expected);
     const b = Buffer.from(record.codeChallenge);
     check(a.length === b.length && timingSafeEqual(a, b), "PKCE verification failed");
+    // A code approved before its agent was removed no longer exchanges:
+    // removal ends the grant's access everywhere, and a stale code must
+    // not mint a fresh family for a dead principal.
+    if (grantAgentRemoved({ userId: record.userId, clientId: record.clientId })) {
+      fail("invalid_grant", "the grant's agent was removed");
+    }
     // Bind the minted family to the code record BEFORE issuing, so the
     // linkage survives even if the issuer throws after this point.
     const familyId = `oarf_${newSecret(16)}`;
@@ -328,6 +344,14 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(!record.revoked, "refresh token revoked");
     if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_request", "refresh token expired"); }
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
+    // A removed agent's families cannot refresh. This check sits BEFORE
+    // the stage-2 lazy bind below on purpose: for a pre-stage-2 unstamped
+    // family the lazy bind would mint-or-bind through the resolver, and
+    // on a revoked binding that mints a successor agent — resurrecting
+    // the removed agent with no consent screen.
+    if (grantAgentRemoved({ userId: record.userId, clientId: record.clientId })) {
+      fail("invalid_grant", "the grant's agent was removed");
+    }
     check(record.clientId === clientId, "client_id mismatch");
     // Issue the replacement pair BEFORE revoking the old token (#2944).
     // issueTokenPair can still throw (validateScopes, or
@@ -378,6 +402,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     // Deleted/deactivated accounts lose API access immediately, even if a
     // token row somehow survived the deletion purge.
     if (isAccountActive && !isAccountActive(record.userId)) return null;
+    // A removed agent's surviving access tokens stop verifying at the
+    // token authority itself, not only at the doors' binding check.
+    if (grantAgentRemoved({ userId: record.userId, clientId: record.clientId })) return null;
     return Object.freeze({
       userId: record.userId,
       clientId: record.clientId,

@@ -794,6 +794,10 @@
       "path": "/api/needs-me"
     },
     {
+      "method": "DELETE",
+      "path": "/api/oauth/agents/{id}"
+    },
+    {
       "method": "GET",
       "path": "/api/oauth/sessions"
     },
@@ -4326,6 +4330,10 @@
     {
       "method": "HEAD",
       "path": "/api/needs-me"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/oauth/agents/{id}"
     },
     {
       "method": "GET",

@@ -267,3 +267,17 @@ export function createGrantAgentResolver(store, { accountPrincipalClients = ACCO
     return Object.freeze({ agentIdentityId: resolved.identityId });
   };
 }
+
+// The removal check factory — the resolver's companion shape, injected by
+// server/http.mjs into the provider and reused verbatim by tests. A
+// binding that EXISTS and is revoked is a removed agent: the provider
+// refuses its token verification, exchanges, and refreshes, so removal
+// cannot be undone by a stale family re-binding a successor at refresh
+// time. A pair with no binding was never approved (nothing was removed),
+// and a live binding is ordinary — only the revoked state is a removal.
+export function createGrantAgentRemovalCheck(store) {
+  return ({ userId, clientId }) => {
+    const binding = store.oauthGrantAgents.binding({ accountId: userId, clientId });
+    return binding !== null && binding.revokedAt !== null;
+  };
+}
