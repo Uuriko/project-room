@@ -10,7 +10,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
-import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
+import { activeWorkIds, attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
@@ -58,7 +58,7 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
-import { paintClaimChat, placeClaims } from "./board-ui.js";
+import { overviewBoardRows, paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
@@ -6084,8 +6084,10 @@ const actionSpecs = {
 // the snapshot's work items: an overview that counts only work items says
 // "0 of 0" while the board holds active claims (UT-HUMAN-WEB leg 4, the
 // starter claim specimen). The overview therefore reads the board claims
-// for the open room and counts both stores; the read is cached per room
-// and refreshed on each overview opening, never on a render tick.
+// for the open room and counts the union of the two stores — the stores
+// are dual registrations of the same work, so the merge is by work id;
+// the read is cached per room and refreshed on each overview opening,
+// never on a render tick.
 let overviewBoard = { roomId: null, claims: null, flight: null, failedRoom: null };
 async function refreshOverviewBoard(roomId) {
   if (overviewBoard.flight) return overviewBoard.flight;
@@ -6124,12 +6126,16 @@ function renderRoomOverview() {
   const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
   // Board claims active on the board (every placed column except Landed),
   // in board order; the starter claim reads with its real claim state and
-  // claimant, never as generic "work".
+  // claimant, never as generic "work". Claims and work items are dual
+  // registrations of the same work, so the merge unions by id: a claim
+  // already listed as a work row is not listed again, and the counter's
+  // total adds only board claims beyond the full active work set.
   const roomId = state.room?.id;
   if (overviewBoard.roomId !== roomId && overviewBoard.failedRoom !== roomId) void refreshOverviewBoard(roomId);
-  const placed = overviewBoard.roomId === roomId && overviewBoard.claims ? placeClaims(overviewBoard.claims, Date.now()) : null;
-  const boardActive = placed ? [...placed.ready, ...placed.claimed, ...placed.blocked, ...placed.review] : [];
-  const boardShown = boardActive.slice(0, 3);
+  const board = overviewBoard.roomId === roomId && overviewBoard.claims
+    ? overviewBoardRows(overviewBoard.claims, Date.now(), new Set(activeWorkIds(state)), new Set(orientation.activeWork.map(item => item.id)))
+    : { shown: [], extraTotal: 0 };
+  const boardShown = board.shown;
   const claimStateLabel = item => item.owner
     ? `${item.state === "in_progress" ? "In progress" : "Claimed"} by ${state.members[item.owner]?.displayName ?? item.owner}`
     : item.state === "unclaimed" ? "Ready — unclaimed" : item.state.replaceAll("_", " ");
@@ -6141,7 +6147,7 @@ function renderRoomOverview() {
   renderContent("#room-overview-content",
     (orientation.purposeSource.kind === "instructions" ? `<p class="form-hint">Room instructions · version ${orientation.purposeSource.revision} · ${esc(time(orientation.purposeSource.updatedAt))}</p>` : "")
     + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
-    + section(`Active work · ${orientation.activeWork.length + boardShown.length} of ${orientation.activeWorkTotal + boardActive.length}`, activeRows, "No active work yet. Start with a conversation.")
+    + section(`Active work · ${orientation.activeWork.length + boardShown.length} of ${orientation.activeWorkTotal + board.extraTotal}`, activeRows, "No active work yet. Start with a conversation.")
     + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
     + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here.")
     + `<section><h3>All results</h3><p><button type="button" class="text-button" data-open-results>Open the room's Results</button></p></section>`);

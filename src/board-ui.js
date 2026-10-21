@@ -77,6 +77,23 @@ export function placeClaims(items, now = Date.now()) {
   return columns;
 }
 
+// The Overview lists snapshot work items beside board claims, but the two
+// stores are dual registrations of the same work (claim rows mirror
+// work-item ids): a claim whose id is a work item is that work, not a
+// second one. Given the room's full active work ids and the ids the
+// Overview already lists as work rows, returns the board rows to list
+// (claims already listed as work are skipped) and the number of active
+// board claims that add distinct work beyond the full active work set —
+// so the Overview counter unions by id instead of adding the two stores.
+export function overviewBoardRows(items, now, workIds, shownWorkIds) {
+  const placed = placeClaims(items, now);
+  const active = [...placed.ready, ...placed.claimed, ...placed.blocked, ...placed.review];
+  return {
+    shown: active.filter(item => !shownWorkIds.has(item.id)).slice(0, 3),
+    extraTotal: active.filter(item => !workIds.has(item.id)).length
+  };
+}
+
 function memberName(members, id) {
   if (!id) return "";
   const member = members?.[id];

@@ -26,15 +26,27 @@ export function completedResults(state) {
 
 // Compact orientation shared by Overview and the authenticated activation pack.
 // Read-only source projection: never a generated consensus or an access grant.
-export function roomOrientation(state) {
-  const instructions = state.room.charter;
-  // A submitted result that still waits on verification or a decision is
-  // current work, not history; otherwise it vanishes from both lists.
+// A submitted result that still waits on verification or a decision is
+// current work, not history; otherwise it vanishes from both lists.
+function activeWorkList(state) {
   const awaitingGate = item => item.state === "completed" && Boolean(item.receipt?.eventId)
     && Boolean(item.receipt?.evidenceVersion) && !terminalWork(item);
-  const work = Object.values(state.workItems).filter(item => !item.supersededBy
+  return Object.values(state.workItems).filter(item => !item.supersededBy
     && (["proposed", "accepted", "working", "blocked"].includes(item.state) || awaitingGate(item)))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+}
+
+// Ids of the full active work set, in orientation order (roomOrientation
+// lists only the first three). The work-claims board is a dual registration
+// of the same work — its rows mirror work-item ids — so a surface merging
+// the two stores unions against this set and counts each work once.
+export function activeWorkIds(state) {
+  return activeWorkList(state).map(item => item.id);
+}
+
+export function roomOrientation(state) {
+  const instructions = state.room.charter;
+  const work = activeWorkList(state);
   return {
     version: 1,
     purpose: instructions?.purpose ?? state.room.purpose ?? "",
