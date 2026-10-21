@@ -27,26 +27,45 @@ function run(command, args, { input, env, timeoutMs = 3000 }) {
   });
 }
 
-function tool(env) {
+function tool(env, platform = process.platform) {
   if (env.PROJECT_ROOM_KEYCHAIN === "0") return null;
-  if (process.platform === "darwin" && commandOnPath("security", env)) return "security";
-  if (process.platform === "linux" && commandOnPath("secret-tool", env)) return "secret-tool";
+  if (platform === "darwin" && commandOnPath("security", env)) return "security";
+  if (platform === "linux" && commandOnPath("secret-tool", env)) return "secret-tool";
   return null;
 }
 
-export async function keychainStore(account, secret, env = process.env) {
-  const which = tool(env);
+// security(1) reads one command per line in -i mode. Quoting the values and
+// sending the line on stdin keeps the secret out of the process arguments,
+// which any local user can read with ps.
+function securityQuote(value) {
+  return `"${String(value).replace(/["\\]/g, "\\$&")}"`;
+}
+
+export async function keychainStore(account, secret, env = process.env, { platform } = {}) {
+  const which = tool(env, platform);
   if (!which) return false;
+  if (/[\r\n]/.test(secret) || /[\r\n]/.test(account)) return false;
   if (which === "security") {
-    const result = await run("security", ["add-generic-password", "-U", "-s", SERVICE, "-a", account, "-w", secret], { env });
-    return result.status === 0;
+    const line = ["add-generic-password", "-U", "-s", securityQuote(SERVICE), "-a", securityQuote(account), "-w", securityQuote(secret)].join(" ");
+    const result = await run("security", ["-i"], { input: line + "\n", env });
+    // -i can exit 0 after a failed command, so confirm the stored value.
+    return result.status === 0 && (await keychainLookup(account, env, { platform })) === secret;
   }
   const result = await run("secret-tool", ["store", "--label", "Project Room", "service", SERVICE, "account", account], { input: secret, env });
   return result.status === 0;
 }
 
-export async function keychainLookup(account, env = process.env) {
-  const which = tool(env);
+export async function keychainDelete(account, env = process.env, { platform } = {}) {
+  const which = tool(env, platform);
+  if (!which) return false;
+  const result = which === "security"
+    ? await run("security", ["delete-generic-password", "-s", SERVICE, "-a", account], { env })
+    : await run("secret-tool", ["clear", "service", SERVICE, "account", account], { env });
+  return result.status === 0;
+}
+
+export async function keychainLookup(account, env = process.env, { platform } = {}) {
+  const which = tool(env, platform);
   if (!which) return null;
   if (which === "security") {
     const result = await run("security", ["find-generic-password", "-s", SERVICE, "-a", account, "-w"], { env });
