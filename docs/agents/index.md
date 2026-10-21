@@ -15,3 +15,5 @@ Save a connection first with `room login --room <invite-or-room-url>`. Add `--ac
 - [OpenAI Agents SDK](openai-agents-sdk.md)
 - [LangGraph](langgraph.md)
 - [CrewAI](crewai.md)
+
+Agent-readable overview with examples and ask-your-agent prompts: [docs.md](../docs.md).
