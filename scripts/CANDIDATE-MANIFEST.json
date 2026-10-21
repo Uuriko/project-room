@@ -66,7 +66,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:a5edccd46833367bc06f94cd5c92758d0a333aacab567345f98a5f79ba307016",
-    "src/app.js": "sha256:6167559a931cc531d3026fbf873f01c2518c6e29b97a42b191a3fde44267580b",
+    "src/app.js": "sha256:907d502a1a456601a3e00c079064212834b410b157d860cc36fa59bafdc04623",
     "src/auth-signin-ui.js": "sha256:28a9fd7d332d4719509fe16b45a3c8fcc9d4068d35d5625dd8390200c6086c67",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -99,7 +99,7 @@
     "src/login-polish.css": "sha256:0d4ece96f4d26140e7f99bf34f5e63d73e0143c63e50f7ca61d7dacebd685b3c",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
     "src/message-reducers.js": "sha256:1f7d88af774927b326ef257ab2abf9281d194e6c4ba0f7281ed6f413ad65989a",
-    "src/needs-attention.js": "sha256:ff73fd3cbb5fddba851ff8c7cb970c07879224ebae31f3aadb8cecd5a30a3ba2",
+    "src/needs-attention.js": "sha256:576c1c1416f994add61f5001ebbc0fccd5c3aca1755de7b906f94a499873d1a8",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
     "src/owner-cockpit.js": "sha256:5114ee14b04ca104c33883ca5040345ed5e7d593c0578c78e3c09f8c747140df",
@@ -159,7 +159,7 @@
     "scripts/deploy-recovery.mjs": "sha256:7c3ada6d04b9a6944ed2e65354ef27b92ad356bca0829f4d5a76ce6884898b98"
   },
   "packages": {
-    "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:5fb31c018d35638960d3d38cbd3df6981dababd125a70e586df394f97085a856"
+    "package-lock.json": "sha256:dd2cdd693051d1b9f7baac01d8e439e24ab74de6f145268b9d7fc6e0367ce3fd",
+    "package.json": "sha256:7f2730c1e7e162bcc83f37a4c1d15cd2c14516e0449e80a1bc0495753dd6dd6b"
   }
 }

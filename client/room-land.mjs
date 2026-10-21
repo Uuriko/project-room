@@ -3,7 +3,7 @@
 // Same request posture as RoomAgentClient: fixed origin, bearer never follows
 // a redirect, no ambient credentials, and a 15s deadline a caller can narrow.
 import { assertServiceOrigin, RoomClientError } from "./room-agent.mjs";
-import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../src/service-origin.js";
 import { validId } from "../src/events.js";
 
 export class RoomLandClient {
