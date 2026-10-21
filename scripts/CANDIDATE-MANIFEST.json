@@ -127,7 +127,7 @@
     "src/room-roster.js": "sha256:938feb4cf75c13f4ffbda8e59b6354b00c3a6512fc05de1fc902dbbd82f2a5e1",
     "src/session-expiry.js": "sha256:1a288b04f564674b402a97704aa0c501ce0cea29398b875f3192188e26ee9575",
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
-    "src/share-links.js": "sha256:92d590cae19b394d5bf034a4239b4c52a23c4e46e1220a926762edd23e1ffce8",
+    "src/share-links.js": "sha256:ce03429195ce0d26c498f9ffc9f7434c8997251b50944687717c48d8a3581ac4",
     "src/signin-entry.js": "sha256:c797b5df7ed8961ce43bb812725d6ac27ec38401ef4d320e74480d40f05c7b42",
     "src/signin-navigation.js": "sha256:bf9d8f72b1c9a1014309b137690d611581f2376db2566ae9b088b87dfbe3a226",
     "src/spend-pricing-ui.js": "sha256:96906eb2bd688a37a9eda1f4744c722c3100d160278f1d4df791d987725617fd",
