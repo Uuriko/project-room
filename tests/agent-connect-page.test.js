@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { connectFields } from "../server/routes/agent-connect.mjs";
+import { connectFields, UNAVAILABLE } from "../server/routes/agent-connect.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-connect-"));
@@ -91,7 +91,12 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, /Project Room Commons/);
   assert.match(agent.text, /A shared place to hang out, think, and make things together\./);
   assert.match(agent.text, /You can take tasks\./);
-  assert.match(agent.text, /expires in \d+ minutes/);
+  assert.match(agent.text, /Single use\. This link expires in 30 minutes\./);
+  assert.match(agent.text, /requestId/);
+  assert.match(agent.text, /keep it private like a password/, "a code plus requestId can recover the identity");
+  assert.match(agent.text, /\/mcp\?profile=full to join/, "hosts that only call listed tools still get a way to join");
+  assert.match(agent.text, new RegExp(`room_identity_mint.*room_join with \\{"inviteCode":"${code}"\\}`));
+  assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
   assert.equal(agent.text.includes("pri_"), false);
   assert.equal(agent.text.includes("rak_"), false);
@@ -147,7 +152,11 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   assert.equal(JSON.stringify(joined.connect).includes(joined.mcpToken.credential), false);
   assert.equal(joined.starter.claimId, "starter");
   assert.equal(joined.starter.title, "Starter task");
-  const roomToken = joined.mcpToken.credential;
+  // The page says to save identitySecret, the durable credential (#3380):
+  // the rest of the walk must work with it alone.
+  assert.match(page.text, /Save the response field identitySecret/);
+  assert.equal(typeof joined.identitySecret, "string", "a minted invite join returns the durable secret");
+  const roomToken = joined.identitySecret;
   const listed = await send(origin, "/mcp", {
     method: "POST", token: roomToken, body: { jsonrpc: "2.0", id: "1", method: "tools/list" },
   });
@@ -185,7 +194,7 @@ test("expired, used, and unknown invite pages say to ask for a new link", { time
   const minted = await send(origin, "/api/rooms/commons/agent-invites", {
     method: "POST", token: ownerKey, body: { profile: "chat", expiresInMinutes: 30 },
   });
-  const line = "Ask the room owner for a new link.\n";
+  const line = UNAVAILABLE;
   const unknown = await send(origin, "/a/RM-0123456789ABCDEF");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.text, line);
@@ -212,9 +221,9 @@ test("a dead invite link opened in a browser gets a page with a way home", { tim
   assert.match(html.text, /<a href="\/">/);
   assert.match(html.headers.get("content-security-policy"), /default-src 'none'/);
   const md = await send(origin, "/a/RM-0123456789ABCDEF?format=md", { headers: { Accept: "text/html" } });
-  assert.equal(md.text, "Ask the room owner for a new link.\n");
+  assert.equal(md.text, UNAVAILABLE);
   const plain = await send(origin, "/a/RM-0123456789ABCDEF");
-  assert.equal(plain.text, "Ask the room owner for a new link.\n");
+  assert.equal(plain.text, UNAVAILABLE);
 });
 
 test("the invite page allows 30 reads a minute from one address", async t => {
@@ -248,4 +257,28 @@ test("redeem keeps the chosen display name and returns a suggestion when the gua
   assert.equal(again.status, 201, again.text);
   assert.equal(again.json.displayName, "Kept Name");
   assert.equal(store.room("commons").state.members[again.json.memberId].displayName, "Kept Name");
+});
+
+test("an MCP-only agent can follow the page: mint, then room_join with the invite code", { timeout: 60000 }, async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await send(origin, "/api/rooms/commons/agent-invites", {
+    method: "POST", token: ownerKey, body: { profile: "contribute", expiresInMinutes: 30 },
+  });
+  assert.equal(minted.status, 201, minted.text);
+  const code = minted.json.code;
+  const page = await send(origin, `/a/${code}`, { headers: { Accept: "*/*" } });
+  assert.match(page.text, /room_identity_mint/);
+  const call = (token, name, args) => send(origin, "/mcp", {
+    method: "POST", token, body: { jsonrpc: "2.0", id: randomUUID(), method: "tools/call", params: { name, arguments: args } },
+  });
+  const mint = await call(null, "room_identity_mint", { displayName: "MCP Only Agent" });
+  assert.equal(mint.status, 200, mint.text);
+  const secret = mint.json.result.structuredContent?.secret;
+  assert.equal(typeof secret, "string", mint.text);
+  const joined = await call(secret, "room_join", { inviteCode: code });
+  assert.equal(joined.status, 200, joined.text);
+  assert.notEqual(joined.json.result?.isError, true, joined.text);
+  const pack = await send(origin, "/api/rooms/commons/activation-pack", { token: secret });
+  assert.equal(pack.status, 200, pack.text);
+  assert.equal(pack.json.orient.member.handle, "MCP Only Agent");
 });

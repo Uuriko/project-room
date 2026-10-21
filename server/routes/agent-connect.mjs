@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 
 const PAGE_BUDGET = 3072;
-const UNAVAILABLE = "Ask the room owner for a new link.\n";
+export const UNAVAILABLE = "Ask the room owner for a new link.\nAlready redeemed it? Resend the same redeem request with the same requestId, or with your saved identity secret as the Bearer token, to get your connection again.\n";
 const HOSTED_ORIGIN = "https://room.trydemigod.com";
 
 const PERMISSION_WORDS = Object.freeze({
@@ -77,6 +77,15 @@ function minutesLeft(expiresAt) {
   return Math.max(0, Math.ceil(ms / 60000));
 }
 
+// "43198 minutes" is arithmetic for the reader; say it the way a person would.
+export function expiryWords(expiresAt) {
+  const minutes = minutesLeft(expiresAt);
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (minutes < 120) return unit(minutes, "minute");
+  if (minutes < 48 * 60) return unit(Math.round(minutes / 60), "hour");
+  return unit(Math.round(minutes / 1440), "day");
+}
+
 function permissionLine(profile, permissions) {
   if (PERMISSION_WORDS[profile]) return PERMISSION_WORDS[profile];
   const names = Array.isArray(permissions) ? permissions.filter(name => typeof name === "string") : [];
@@ -85,8 +94,8 @@ function permissionLine(profile, permissions) {
 
 function curl(method, url, body) {
   const headers = body
-    ? `-H 'authorization: Bearer $PROJECT_ROOM_SECRET' -H 'content-type: application/json' -d '${body}'`
-    : `-H 'authorization: Bearer $PROJECT_ROOM_SECRET'`;
+    ? `-H "authorization: Bearer $PROJECT_ROOM_SECRET" -H 'content-type: application/json' -d '${body}'`
+    : `-H "authorization: Bearer $PROJECT_ROOM_SECRET"`;
   const verb = method === "GET" ? "" : `-X ${method} `;
   return `curl -sS ${verb}${url} ${headers}`.replace(/\s+/g, " ").trim();
 }
@@ -111,17 +120,20 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     `Room: ${plain(title, 120) || roomId}`,
     `Purpose: ${plain(purpose, 400) || "This room has no purpose text."}`,
     permissionLine(profile, permissions),
-    `This link expires in ${minutesLeft(expiresAt)} minutes.`,
+    `Single use. This link expires in ${expiryWords(expiresAt)}.`,
     "",
     "## 1. Redeem",
     "",
-    "The response field mcpToken.credential is a room-scoped token shown once. Store it in a secret store or a file with mode 0600. Never print it into chat.",
+    "Save the response field identitySecret: your durable credential, shown once, with no scheduled expiry (it can still be rotated or revoked); it works on /mcp and every room route. Store it in a secret store or a file with mode 0600. Never print it into chat. (mcpToken.credential is a 30-day token for this room only; you do not need it.)",
+    "To make a retry safe, add \"requestId\" (any UUID) to the body and keep it private like a password: with this code it can recover your identity. Resending the same request returns your connection again, even after the link is used: with your identitySecret as the Bearer token it keeps that credential; with no credential it works for 30 days and rotates in a fresh identitySecret.",
     "",
     `curl -sS -X POST ${base}/api/agent-invites/redeem -H 'content-type: application/json' -d '${redeemBody}'`,
     "",
+    `MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}. If your host only calls listed tools and room_join is missing, connect once to ${connect.mcpUrl}?profile=full to join, then reconnect without it.`,
+    "",
     "## 2. Connect",
     "",
-    "Set PROJECT_ROOM_SECRET to that token. The commands below do not contain the token.",
+    "Set PROJECT_ROOM_SECRET to identitySecret. The commands below do not contain it.",
     "",
     `Claude Code: ${connect.claude}`,
     `Codex: ${connect.codex}`,
@@ -172,7 +184,7 @@ function renderHtml({ pageUrl, origin, code, roomId, title, purpose, profile, pe
   const steps = renderAgentConnectMarkdown({
     origin, code, roomId, title, purpose, profile, permissions, expiresAt, claims: [],
   });
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Agent invite</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}button,input{font:inherit}input{width:100%;margin:.5rem 0}pre{white-space:pre-wrap}</style></head><body><p>This link is for your AI agent. Paste it into Claude Code, Codex, Cursor or any agent with web access.</p><p><input id="link" readonly value="${escapeHtml(pageUrl)}"><button id="copy" type="button">Copy</button></p><details><summary>Three steps</summary><pre>${escapeHtml(steps)}</pre></details><script>${COPY_SCRIPT}</script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Agent invite</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}button,input{font:inherit}input{width:100%;margin:.5rem 0}pre{white-space:pre-wrap}</style></head><body><p>This link is for your AI agent. Paste it into Claude Code, Codex, Cursor or any agent with web access.</p><p><input id="link" readonly value="${escapeHtml(pageUrl)}"><button id="copy" type="button">Copy</button></p><h2>Steps for the agent</h2><pre>${escapeHtml(steps)}</pre><script>${COPY_SCRIPT}</script></body></html>`;
 }
 
 function finish(res, req, status, type, body, extra = {}) {
@@ -190,7 +202,7 @@ function finish(res, req, status, type, body, extra = {}) {
 
 // A person who opens a dead link in a browser gets a small page with a way
 // home; agents and other non-HTML readers keep the one plain line.
-const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1><p>${UNAVAILABLE.trim()}</p><p><a href="/">Go to Project Room</a></p></body></html>`;
+const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1>${UNAVAILABLE.trim().split("\n").map(line => `<p>${line}</p>`).join("")}<p><a href="/">Go to Project Room</a></p></body></html>`;
 
 function unavailable(res, req, status, url) {
   if (url && !wantsMarkdown(req, url)) {
