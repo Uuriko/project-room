@@ -158,17 +158,14 @@ test("item 2(7): the dependencies-unmet refusal drops the reassign-the-dependenc
 
 // ---------------------------------------------------------------- item (3)
 function makeResearch(serviceOpts = {}) {
+  // The module's own schema plus the rooms stub its journal writes
+  // against — the same minimal harness shape as tests/web-research.test.js.
+  // The docs leg and the planner never touch the fetch-cache tables
+  // (sources are ["docs"] throughout), so those are not created here.
   const db = new DatabaseSync(":memory:");
   db.exec(webResearchSchema);
   db.exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)");
   db.prepare("INSERT OR IGNORE INTO rooms(id) VALUES('room1')").run();
-  db.exec(`CREATE TABLE IF NOT EXISTS web_fetch_cache (
-    key TEXT PRIMARY KEY, url TEXT NOT NULL, final_url TEXT NOT NULL,
-    markdown TEXT NOT NULL, metadata_json TEXT NOT NULL, bytes INTEGER NOT NULL,
-    fetched_at INTEGER NOT NULL)`);
-  db.exec(`CREATE TABLE IF NOT EXISTS web_fetch_cache_rooms (
-    cache_key TEXT NOT NULL, room_id TEXT NOT NULL, fetched_at INTEGER NOT NULL,
-    PRIMARY KEY (cache_key, room_id))`);
   const store = { db, now: () => 1_000_000, webFetch: null };
   return new WebResearch(store, serviceOpts);
 }
