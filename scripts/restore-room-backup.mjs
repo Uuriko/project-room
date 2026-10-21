@@ -10,6 +10,9 @@
 // file's sha256, then replays. --save writes the reassembled NDJSON (mode 0600).
 // --audit report restores even when the recovery audit flags drift between a
 // stored projection and the current reducer, and prints the audit result.
+// A trailer-absent export is refused (ruling 34, as at the operator HTTP
+// doors): a torn modern backup is indistinguishable from a legacy one.
+// --legacy restores a confirmed pre-trailer export at "watermark-only".
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -70,10 +73,16 @@ export function messageDigestLine(sequence, event) {
   return `${sequence}\t${event.id}\t${event.data?.messageId ?? ""}\t${event.data?.body ?? ""}\n`;
 }
 
+// Ruling 34: the last non-empty line of a modern export is its trailer.
+export function hasTrailer(ndjson) {
+  const end = ndjson.trimEnd();
+  try { return JSON.parse(end.slice(end.lastIndexOf("\n") + 1))?.kind === "trailer"; } catch { return false; }
+}
+
 async function main() {
   const { values } = parseArgs({ options: {
     from: { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
-    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }
+    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }, legacy: { type: "boolean" }
   } });
   process.umask(0o077);
   if (!values.to) throw new Error("Pass --to <new sqlite path>");
@@ -88,6 +97,8 @@ async function main() {
   }
   if (values.save) writeFileSync(values.save, ndjson, { mode: 0o600, flag: "wx" });
   const watermark = JSON.parse(ndjson.slice(0, ndjson.indexOf("\n")));
+  if (!values.legacy && !hasTrailer(ndjson))
+    throw new Error("Export has no trailer: refusing a trailer-absent restore (ruling 34), because a torn modern backup is indistinguishable from a legacy one. Pass --legacy only for a confirmed pre-trailer export");
   let result;
   try { result = replayNdjson(ndjson, values.to, { audit: values.audit ?? "strict" }); }
   catch (error) {

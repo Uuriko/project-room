@@ -39,8 +39,9 @@ honestly cannot survive yet.
     its result still names the weaker level (`trailer: "absent"`,
     `contentVerification: "watermark-only"`). Library-level replay
     (`replayNdjson`, `replayNdjsonInto`, the KV replay session) keeps
-    its legacy semantics unchanged; only the production door fails
-    closed.
+    its legacy semantics unchanged; the production doors and the
+    restore CLI (`scripts/restore-room-backup.mjs`, which refuses a
+    trailer-absent export unless `--legacy` is passed) fail closed.
   - *KV-native restore (the #3409 fix; deployed to production in revision
     `7ca2e955` on 2026-10-16):*
     `POST /api/operator/restore-from-backup` restores the daily backup
