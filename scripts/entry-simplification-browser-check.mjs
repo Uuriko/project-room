@@ -96,8 +96,8 @@ for (const width of [390, 1280]) for (const javaScriptEnabled of [true, false]) 
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       await page.screenshot({ path: `test-results/startup/${width}-${theme}-${javaScriptEnabled ? 'delayed' : 'nojs'}.png`, fullPage: true });
     }
-    assert.equal(await page.locator('#static-hero').isVisible(), !javaScriptEnabled, 'fallback content is for nonscripting browsers, not a loading flash');
-    assert.equal(await page.locator('.app-shell > .topbar').isVisible(), javaScriptEnabled, 'no-JS visitors do not see inert session controls');
+    assert.equal(await page.locator('#static-hero').isVisible(), true, 'fallback remains until the entry module actually executes');
+    assert.equal(await page.locator('.app-shell > .topbar').isVisible(), false, 'unstarted visitors do not see inert session controls');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (javaScriptEnabled) {
       release();
@@ -110,21 +110,26 @@ for (const width of [390, 1280]) for (const javaScriptEnabled of [true, false]) 
   });
 }
 
-test('a failed sign-in module can recover through the visible reload action', { timeout: 30000 }, async t => {
+for (const resource of ['entry.js', 'browser-session.js', 'signin-entry.js']) test(`a failed ${resource} can recover after its download resumes`, { timeout: 30000 }, async t => {
   const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
-  await page.route('**/src/signin-entry.js', route => route.abort());
+  page.setDefaultTimeout(5000);
+  const route = `**/src/${resource}`;
+  await page.route(route, request => request.abort());
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.locator('#entry-retry').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#auth-error').isVisible(), true);
+  const early = resource !== 'signin-entry.js';
+  await page.locator(early ? '#static-hero' : '#entry-retry').waitFor({ state: 'visible' });
+  if (early) assert.match(await page.locator('#static-hero').innerText(), /PROJECT ROOM/);
+  else assert.equal(await page.locator('#auth-error').isVisible(), true);
   mkdirSync('test-results/startup', { recursive: true });
-  await page.screenshot({ path: 'test-results/startup/failed-module.png' });
-  await page.unroute('**/src/signin-entry.js');
-  await page.locator('#entry-retry').click();
+  await page.screenshot({ path: `test-results/startup/failed-${resource}.png` });
+  await page.unroute(route);
+  if (early) await page.reload();
+  else await page.locator('#entry-retry').click();
   await page.locator('#auth-panel input[type="email"]').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#entry-retry').count(), 0);
-  await page.screenshot({ path: 'test-results/startup/recovered-module.png' });
+  await page.screenshot({ path: `test-results/startup/recovered-${resource}.png` });
 });
