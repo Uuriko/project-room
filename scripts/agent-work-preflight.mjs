@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { readResumablePreparation } from "../client/work-context-cache.mjs";
+import { createWorkBrief } from "../client/work-brief.mjs";
 
 export async function readPreparation(client, workItemId, since = 0) {
   if (!Number.isSafeInteger(since) || since < 0) throw new Error("Invalid checkpoint");
@@ -67,10 +68,16 @@ export function needsReview(preparation, checkout) {
 
 async function main() {
   const [directory, workItemId, sinceText = "0", ...extra] = process.argv.slice(2);
-  if (!directory || !workItemId || extra.length || (sinceText !== "--resume" && !/^\d+$/.test(sinceText))) {
-    throw new Error("Usage: node scripts/agent-work-preflight.mjs PRIVATE_CONNECTION_DIRECTORY WORK_ID [CHECKPOINT|--resume]");
+  if (!directory || !workItemId || extra.length || (!["--resume", "--brief"].includes(sinceText) && !/^\d+$/.test(sinceText))) {
+    throw new Error("Usage: node scripts/agent-work-preflight.mjs PRIVATE_CONNECTION_DIRECTORY WORK_ID [CHECKPOINT|--resume|--brief]");
   }
   const connection = readAgentConnection(directory), client = new RoomAgentClient(connection);
+  if (sinceText === "--brief") {
+    const workBrief = await createWorkBrief(await client.workContext(workItemId));
+    console.log(JSON.stringify({ type: "agent_work_brief", status: "context_observed", workBrief,
+      boundary: "Selected work only. Discussion, checkout and execution are not inspected. This observation does not authorize work." }, null, 2));
+    return;
+  }
   const preparation = sinceText === "--resume"
     ? await readResumablePreparation(client, workItemId, { connection, directory })
     : await readPreparation(client, workItemId, Number(sinceText));

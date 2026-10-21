@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 // #3342 Owner Cockpit slice 1 — the account-home shell for the cross-room
 // Decisions queue + Exceptions feed served by GET /api/owner/overview.
 // The server merges and sorts; this module only renders what it is given
@@ -61,19 +62,26 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
   }
 
   function render(doc) {
-    section.hidden = false;
     const { decisions, exceptions, rooms } = doc;
+    const notesOpen = exceptionsBox.querySelector("details")?.open;
+    const notices = exceptions.items.filter(item => item.severity === "info");
+    const actionable = exceptions.items.filter(item => item.severity !== "info");
+    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length);
+    const heading = section.querySelector("h3");
+    if (heading) heading.hidden = !decisions.total && !actionable.length && !doc.roomErrors?.length;
+    section.setAttribute("aria-labelledby", heading?.hidden ? "cockpit-notes-title" : "owner-cockpit-title");
     const parts = [`${decisions.waiting} waiting`];
     if (decisions.oldestAgeMs > 0) parts.push(`oldest ${formatAge(decisions.oldestAgeMs).replace("waiting ", "")}`);
     if (decisions.overdue > 0) parts.push(`${decisions.overdue} overdue`);
     if (rooms.label) parts.push(`across ${rooms.label}`);
-    summary.textContent = parts.join(" · ");
+    summary.textContent = decisions.total ? parts.join(" · ") : "";
     decisionsBox.innerHTML = decisions.total === 0
-      ? `<p class="form-hint">Inbox zero — nothing needs you.</p>`
+      ? ""
       : decisions.items.map(renderItem).join("");
     exceptionsBox.innerHTML = exceptions.total === 0
-      ? `<p class="form-hint">No exceptions in window.</p>`
-      : `<h4>Exceptions</h4>` + exceptions.items.map(renderException).join("");
+      ? ""
+      : (actionable.length ? `<h4>Exceptions</h4>` + actionable.map(renderException).join("") : "")
+        + (notices.length ? uiText("human.roomNotesHtml", { open: notesOpen ? "open" : "", content: notices.map(renderException).join("") }) : "");
     stubsBox.innerHTML = (doc.roomErrors ?? []).map(stub =>
       `<p class="form-hint">Couldn't read room ${esc(stub.roomId)} (${esc(stub.error)}) — it is excluded from these totals.</p>`).join("");
     for (const button of decisionsBox.querySelectorAll("[data-cockpit-decide]")) {
@@ -108,6 +116,9 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
       section.hidden = error?.code === "owner_required" || error?.status === 403;
       if (!section.hidden) {
         section.hidden = false;
+        const heading = section.querySelector("h3");
+        if (heading) heading.hidden = false;
+        section.setAttribute("aria-labelledby", "owner-cockpit-title");
         summary.textContent = "Couldn't load what needs you. Refresh to retry.";
         decisionsBox.innerHTML = "";
         exceptionsBox.innerHTML = "";

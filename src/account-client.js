@@ -85,6 +85,7 @@ export const sameAccountSession = (candidate, owner) => Boolean(candidate?.accou
   && candidate.sessionBinding === owner.sessionBinding;
 
 export class AccountClient {
+  #invalidatedGeneration = -1;
   constructor({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
     this.fetcher = fetcher;
     this.session = null;
@@ -106,6 +107,7 @@ export class AccountClient {
   invalidate(generation, session) {
     if (!this.owns(generation, session)) return false;
     this.generation++;
+    this.#invalidatedGeneration = this.generation;
     this.session = null;
     return true;
   }
@@ -156,6 +158,10 @@ export class AccountClient {
   }
   async confirm() {
     const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
+    // A sibling read can confirm expiry first. A newer restore also clears
+    // session temporarily, but it must keep ownership of the replacement UI.
+    const superseded = () => this.session === null && this.generation === generation + 1
+      && this.#invalidatedGeneration === this.generation ? false : null;
     let value;
     try {
       // Name the session this read is checking: a delayed confirmation must
@@ -164,7 +170,7 @@ export class AccountClient {
     } catch (error) {
       // A response that lands after a newer session replaced this one is
       // obsolete: never let it touch the replacement, whatever it reports.
-      if (!this.owns(generation, session)) return null;
+      if (!this.owns(generation, session)) return superseded();
       // Ownership ended (signed out, revoked, binding rotated): retire the
       // view instead of throwing. Uncertain failures (5xx, offline) keep
       // the session so the caller can retry.
@@ -175,7 +181,7 @@ export class AccountClient {
       }
       throw error;
     }
-    if (!this.owns(generation, session)) return null;
+    if (!this.owns(generation, session)) return superseded();
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
   }

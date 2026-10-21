@@ -119,15 +119,16 @@ function howTo(name, steps) {
 
 const style = `:root{color-scheme:dark;--bg:#202127;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--line:#393b45;--font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 var(--font)}
-main{max-width:720px;margin:auto;padding:40px 20px}
+main{max-width:720px;margin:auto;padding:40px 20px;overflow-wrap:anywhere}
 h1{font-size:clamp(28px,6vw,42px);line-height:1.15;letter-spacing:-.04em}
 h2{font-size:23px;margin-top:32px}
 p,li{color:var(--muted)}
 h1,h2{color:var(--text)}
 a{color:var(--blue)}
-pre{overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
+pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{overflow-wrap:anywhere}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 

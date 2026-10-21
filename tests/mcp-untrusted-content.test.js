@@ -120,11 +120,13 @@ test("room_read_messages marks other members' text and leaves the caller's own u
   assert.equal(pinned.untrusted, true);
   assert.equal(pack.openWork.find(item => item.id === "trust-work").untrusted, true);
 
-  const orientResponse = await fetch(`${origin}/api/rooms/${roomId}/orient`, {
+  // The standalone /orient endpoint was deleted (register D1); the same
+  // builder payload rides inside the context response's orient embed.
+  const orientResponse = await fetch(`${origin}/api/rooms/${roomId}/context`, {
     headers: { Authorization: `Bearer ${owner.secret}` }
   });
   assert.equal(orientResponse.status, 200);
-  const orient = await orientResponse.json();
+  const orient = (await orientResponse.json()).orient;
   assert.equal(orient.contentTrust, CONTENT_TRUST);
   assert.equal(orient.orientation.trust, "owner");
   assert.equal(orient.work.find(item => item.id === "trust-work").untrusted, true);

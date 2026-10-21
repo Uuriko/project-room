@@ -47,7 +47,14 @@ export function createRoomApi({ origin, secret, signal }) {
       return call(origin, "/api/agent-heartbeats/ack", { ...auth, method: "POST", body: { signalIds } });
     },
     async orient(roomId) {
-      return call(origin, `/api/rooms/${encodeURIComponent(roomId)}/orient`, auth);
+      // The standalone GET /orient endpoint was deleted (simplification
+      // register D1, PR #4161); the orient payload rides inside the
+      // activation pack's `orient` embed, which is the same buildOrient
+      // output. A failed pack read (403/404 for a non-member or unknown
+      // room) is returned as-is so callers keep their membership semantics.
+      const pack = await call(origin, `/api/rooms/${encodeURIComponent(roomId)}/activation-pack`, auth);
+      if (!pack.ok) return pack;
+      return { ok: true, status: pack.status, value: pack.value?.orient ?? null };
     },
     async updates(roomId) {
       const items = [];
