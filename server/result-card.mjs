@@ -95,3 +95,18 @@ export function feedbackForAgent(proposal) {
     default: return null;
   }
 }
+
+// One approval-queue proposal as a card: who drafted it, where it stands.
+export function resultCardForProposal(proposal) {
+  const drafter = proposal.byAgent?.label ?? proposal.byAgent?.id ?? "agent";
+  const steps = [{ label: `Drafted by ${drafter}${proposal.version > 1 ? ` (v${proposal.version})` : ""}` }];
+  if (proposal.status === "pending") steps.push({ label: "Approve", status: "waiting", waitingOn: "owner" });
+  else if (proposal.status === "changes_requested") steps.push({ label: "Revise", status: "waiting", waitingOn: "agent" });
+  else steps.push({ label: proposal.status === "approved" ? "Approved" : "Rejected", status: proposal.status === "approved" ? "done" : "failed" });
+  const card = buildResultCard({
+    title: proposal.draft?.subject || `Draft for ${proposal.channel}`,
+    summary: proposal.draft?.body ? proposal.draft.body.slice(0, 600) : null,
+    steps, approval: proposal,
+  });
+  return Object.freeze({ proposalId: proposal.proposalId, threadId: proposal.threadId, card });
+}

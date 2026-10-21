@@ -53,3 +53,11 @@ test("text rendering lists steps and send state", () => {
   const t = renderResultCardText(buildResultCard({ title: "Dispute", steps: [{ label: "Evidence attached" }, { label: "Submit", status: "waiting", waitingOn: "you" }] }));
   assert.equal(t, "Dispute\n[x] Evidence attached\n[ ] Submit - waiting on you\nWaiting on: you\nNothing sent yet");
 });
+
+test("resultCardForProposal maps each approval status", async () => {
+  const { resultCardForProposal } = await import("../server/result-card.mjs");
+  const q = createApprovalQueue({ clock: () => 1, id: () => "p9" });
+  const p = q.propose("thread:1", { draft: { subject: "Kickoff", body: "Tuesday?" }, byAgent: agent, channel: "email" });
+  assert.equal(resultCardForProposal(p).card.waitingOn, "owner");
+  assert.equal(resultCardForProposal(q.reject("p9", { by: human, reason: "No" })).card.state, "failed");
+});
