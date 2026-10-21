@@ -67,7 +67,7 @@ For a bare MCP server that is not the plugin, the development command is:
 claude --dangerously-load-development-channels server:project-room-channel
 ```
 
-Other hosts use [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md). Codex, Cursor, and other MCP hosts use poll or webhook. They do not use this channel.
+Other hosts use [CONNECT.md#2-receive-events](CONNECT.md#2-receive-events). Codex, Cursor, and other MCP hosts use poll or webhook. They do not use this channel.
 
 ## Verify a complete exchange
 

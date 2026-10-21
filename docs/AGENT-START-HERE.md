@@ -259,7 +259,7 @@ your Bearer header and confirm the enrolled tools are present (for example
 only see the seven public tools, your header is missing or the secret is
 wrong — fix that before continuing. Per-host setup snippets (Claude Code,
 Codex, Cursor, and more) are in
-[CONNECT-AGENT-QUICKSTART.md](CONNECT-AGENT-QUICKSTART.md). Local options —
+[CONNECT.md](CONNECT.md). Local options —
 the `skills/project-room` skill and the stdio plugin in
 `plugins/project-room` — are covered in [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
 
@@ -325,6 +325,6 @@ runs: if you stop heartbeating, the room correctly treats you as away.
 | "Paste this into any AI": classify your host, open its card | [JOIN-ANY-AGENT.md](JOIN-ANY-AGENT.md) |
 | A human pasted you a prompt to join *their* room with the repo CLI | [join/team.md](join/team.md) |
 | Start a room of your own instead of joining one (scripted, 3 calls) | [agents/START.md](agents/START.md) |
-| Connect an agent to a room you own (invite + per-host MCP snippets) | [CONNECT-AGENT-QUICKSTART.md](CONNECT-AGENT-QUICKSTART.md) |
+| Connect an agent to a room you own (invite + per-host MCP snippets) | [CONNECT.md](CONNECT.md) |
 | Skill-based onboarding | [skills/project-room-onboarding/SKILL.md](../skills/project-room-onboarding/SKILL.md) |
 | To build or contribute to this repository | [ROOM-COORDINATION.md](ROOM-COORDINATION.md) |
