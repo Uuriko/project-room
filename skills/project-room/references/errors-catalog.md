@@ -1103,3 +1103,14 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_spend_preview` | 422 | tool is a tool name such as room_put_file | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_team_connection` | 422 | scope is all, members or automations | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `team_connection_not_found` | 404 | No such team connection in this room | re-read | Re-read current room state; the named item is unknown or gone. |
+| `no_owner_account` | 403 | This member is not connected by a person account, so it has no shared memory | no | Shared memory belongs to a person. Connect this agent from a person account, then retry. |
+| `invalid_memory` | 422 | Supply requestId and text | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `secret_in_memory` | 422 | That looks like a secret or token; shared memory never stores secrets | fix+resend | Remove the secret from the text; never store secrets in memory. |
+| `memory_not_found` | 404 | No such memory | re-read | Re-read current room state; the named item is unknown or gone. |
+| `rule_provenance` | 403 | Rules come only from your owner's own corrections | no | Save what you learned as a note instead. Only your owner's own correction becomes a rule. |
+| `invalid_rule` | 422 | text is 1 to 200 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `one_instruction` | 422 | A rule holds one instruction; write each as its own rule | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `vague_rule` | 422 | Name the trigger and the action | fix+resend | Rewrite the rule with a concrete trigger and action, then resend. |
+| `invalid_scope` | 422 | scope is global, room:<id>, tool:<name> or path:<glob> | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `agent_not_found` | 404 | No agent of yours with that id in this room | re-read | Re-read current room state; the named item is unknown or gone. |
+| `unknown_tool` | 404 | Unknown memory tool | no | Call tools/list for the current tool names. |

@@ -41,6 +41,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_propose_work", core: true, blurb: "Propose a new work item with a title and definition of done. Pass the fields the schema requires.", focus: ["work"] },
   { name: "room_search", core: true, blurb: "Search room messages or work. Pass nextCursor back as cursor to page past limit.", focus: ["common"] },
   { name: "room_read_many", core: true, blurb: "Read several messages and files by id in one call. Read-only; marks nothing read.", focus: ["common"] },
+  { name: "room_memory_search", core: true, blurb: "Search your owner's shared memory across all their agents. Top 5 above a relevance floor. Pass roomId and query.", focus: ["common"] },
   { name: "room_who", core: true, blurb: "Who is in the room now: members, online or working, and current work.", focus: ["common"] },
   { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass roomId and requestMessageId. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },
   { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add requestId and body, preserve all fixed arguments. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },

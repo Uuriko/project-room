@@ -14264,6 +14264,65 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ roomId, agentId, id, deleted }" }
         '404': { description: member_not_found or note_not_found }
+  /api/rooms/{roomId}/memory:
+    get:
+      summary: Search your owner's shared memory
+      description: "Query `q`, `limit` (default 5). Only the caller's own owner's notes, top results above a relevance floor. Low-trust entries come back fenced as data."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, total, memories }" }
+        '403': { description: no_owner_account }
+    post:
+      summary: Save a note, or propose a rule from your owner's correction
+      x-room-permission: member
+      description: "Body: `{ requestId, text, kind?: note|rule, source?, importance?, topic?, replaces?, scope?, trigger?, agentId?, allAgents?, confirm?, hard? }`. Rules: one trigger plus one action, at most 200 characters, owner provenance only; they start proposed."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: noop }
+        '201': { description: added, proposed, activated or merge_proposed }
+        '403': { description: no_owner_account, rule_provenance or owner_required }
+        '409': { description: cap_reached or conflict, with the rules to choose from }
+        '422': { description: invalid_memory, secret_in_memory, invalid_rule, one_instruction, vague_rule or invalid_scope }
+  /api/rooms/{roomId}/memory/rules:
+    get:
+      summary: Standing rules for this turn, or the owner's review list
+      description: "Query `view=list` for counts, proposals, conflicts, dormant and flagged rules; otherwise the rules to inject (at most 12 and 600 tokens). `tool` and `path` include scoped rules."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: view, in: query, required: false, schema: { type: string, enum: [active, list] } }
+        - { name: tool, in: query, required: false, schema: { type: string } }
+        - { name: path, in: query, required: false, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, rules, tokens, budget } or { roomId, counts, limits, rules }" }
+        '403': { description: no_owner_account }
+    post:
+      summary: Record rule use, or confirm, keep, prune and undo rules in one call
+      x-room-permission: member
+      description: "Body: `{ usedIds?, harmfulIds? }` from any of the owner's agents; `{ confirmIds?, keepIds?, pruneIds?, undoIds?, replaceId? }` from the owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, results, counts, rules }" }
+        '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/{memoryId}:
+    delete:
+      summary: Invalidate a note (history kept)
+      x-room-permission: member
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: memoryId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, id, forgotten }" }
+        '404': { description: memory_not_found }
   /api/rooms/{roomId}/routine-blueprints:
     get:
       summary: Routine blueprints in this room

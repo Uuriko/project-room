@@ -84,7 +84,7 @@ test("anonymous stranger mints a secret over MCP and authenticates with it", asy
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
   const enrolledNames = listed.json.result.tools.map(tool => tool.name);
-  assert.equal(enrolledNames.length, 24, `enrolled default catalog must be 24 tools, got ${enrolledNames.length}`);
+  assert.equal(enrolledNames.length, 25, `enrolled default catalog must be 25 tools, got ${enrolledNames.length}`);
   assert.ok(enrolledNames.includes("room_join"), "enrolled catalog must include identity-gated room_join");
   const check = await call(origin, "room_check_access", {}, created.secret);
   const checkResult = unwrapCall(check, "room_check_access");
@@ -196,7 +196,7 @@ test("mint text block withholds the secret and privateKey; enrollment runs on st
   // from structuredContent authenticates and unlocks the enrolled catalog.
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
-  assert.equal(listed.json.result.tools.length, 24, "enrolled catalog must list from the structuredContent secret alone");
+  assert.equal(listed.json.result.tools.length, 25, "enrolled catalog must list from the structuredContent secret alone");
   const check = await call(origin, "room_check_access", {}, created.secret);
   assert.equal(unwrapCall(check, "room_check_access").structuredContent.status, "credential_accepted");
 });

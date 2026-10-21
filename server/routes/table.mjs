@@ -22,6 +22,7 @@ import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
 import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { SELF_WAKE_ROUTES } from "./self-wake.mjs"; // Amp-style self-wake: an agent schedules its own next check
+import { AGENT_MEMORY_ROUTES } from "./agent-memory.mjs"; // shared memory and standing rules per person
 import { SHARING_LIMIT_ROUTES } from "./sharing-limits.mjs"; // Town-style sharing limits per agent
 import { APPROVAL_ROUTES } from "./approvals.mjs"; // Town-style approve, then act
 import { PLAYBOOK_ROUTES } from "./playbook.mjs"; // Town-style shared playbook
@@ -67,7 +68,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...DEMO_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...SELF_WAKE_ROUTES, ...SHARING_LIMIT_ROUTES, ...APPROVAL_ROUTES, ...PLAYBOOK_ROUTES, ...GROUP_REVIEW_ROUTES, ...SPEND_METER_ROUTES, ...OUTBOUND_ROUTES, ...PERMISSION_MODE_ROUTES, ...SPEND_PREVIEW_ROUTES, ...TEAM_CONNECTION_ROUTES, ...BRIEFING_ROUTES, ...ROUTINE_ROUTES, ...AGENT_NOTE_ROUTES, ...PR_WEBHOOK_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...SELF_WAKE_ROUTES, ...SHARING_LIMIT_ROUTES, ...APPROVAL_ROUTES, ...PLAYBOOK_ROUTES, ...GROUP_REVIEW_ROUTES, ...SPEND_METER_ROUTES, ...OUTBOUND_ROUTES, ...PERMISSION_MODE_ROUTES, ...SPEND_PREVIEW_ROUTES, ...TEAM_CONNECTION_ROUTES, ...BRIEFING_ROUTES, ...ROUTINE_ROUTES, ...AGENT_NOTE_ROUTES, ...AGENT_MEMORY_ROUTES, ...PR_WEBHOOK_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

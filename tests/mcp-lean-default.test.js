@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 
-const LEAN = ["room_needs_me", "room_read_messages", "room_post_message", "room_reply", "room_list_work", "room_acquire_claim", "room_release_claim", "room_read_work", "room_begin_work", "room_submit_text_result", "room_record_handoff", "room_propose_work", "room_search", "room_read_many", "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"];
+const LEAN = ["room_needs_me", "room_read_messages", "room_post_message", "room_reply", "room_list_work", "room_acquire_claim", "room_release_claim", "room_read_work", "room_begin_work", "room_submit_text_result", "room_record_handoff", "room_propose_work", "room_search", "room_read_many", "room_memory_search", "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"];
 
-test("lean default lists the 20 room tools first, then the join helpers", () => {
+test("lean default lists the 21 room tools first, then the join helpers", () => {
   const names = listedMcpTools("core").map(tool => tool.name);
-  assert.deepEqual(names.slice(0, 20), LEAN);
+  assert.deepEqual(names.slice(0, 21), LEAN);
 });
 
 test("default list is byte-identical for members, non-members and anonymous callers", () => {
