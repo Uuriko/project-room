@@ -2446,6 +2446,15 @@
         "openWorldHint": false
       }
     },
+    "room_list_requests": {
+      "inputSchema": "321236af9d9af96f",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_mcp_snippet": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -2489,6 +2498,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_reply": {
+      "inputSchema": "7da2ddf2ad93430b",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_respond_to_request": {

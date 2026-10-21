@@ -10,7 +10,8 @@ test("default tools/list profile is lean with room_search_actions", () => {
   const names = listedMcpTools().map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), name);
   assert.ok(names.includes("room_search_actions"));
-  assert.ok(LEAN_MCP_TOOLS.length <= 12);
+  assert.equal(LEAN_MCP_TOOLS.length, 12);
+  for (const name of ["room_reply", "room_list_requests"]) assert.ok(names.includes(name), name);
   assert.deepEqual(liveEnrolledMcpTools().map(t => t.name), names);
 });
 
