@@ -10,9 +10,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../server/room-entry.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
-import { CORE_MCP_TOOLS, ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
+import { ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
-import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import {
   MCP_DISCOVERY_CACHE_CONTROL, MCP_DISCOVERY_CACHE_SCOPE, MCP_DISCOVERY_TTL_MS,
   MCP_SERVER_CARD_DESCRIPTION, MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_NAME
