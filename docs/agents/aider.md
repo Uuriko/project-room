@@ -4,9 +4,15 @@ Aider has no MCP client. Each person on the team still runs this in the shared r
 
 ## Command
 
+Replace the URL below with your room URL or invitation. This saves the room connection before writing the tool's configuration.
+
+```sh
+room setup aider --room "<invite-or-room-url>"
 ```
-room setup aider
-```
+
+If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
+
+Already connected on this machine? Run `room setup aider` to use the saved connection.
 
 ## What it writes
 

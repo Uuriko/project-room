@@ -2,7 +2,7 @@
 // until the isolated host adapter adopts the typed envelope and policy gate.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { realpathSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHostEnvelope, validateHostPolicy } from "../client/host-context-policy.mjs";
@@ -37,7 +37,7 @@ test("untrusted request fields cannot masquerade as host policy or a tool grant"
 });
 
 test("host policy has one explicit no-network, no-secret, no-external-effects profile", t => {
-  const root = mkdtempSync(join(tmpdir(), "room-host-policy-contract-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "room-host-policy-contract-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const checkout = join(root, "checkout"); mkdirSync(checkout);
   assert.equal(validateHostPolicy(policy(checkout), checkout).checkout, checkout);
@@ -50,7 +50,7 @@ test("host policy has one explicit no-network, no-secret, no-external-effects pr
 });
 
 test("symlink alias cannot smuggle a different checkout into policy", t => {
-  const root = mkdtempSync(join(tmpdir(), "room-host-policy-link-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "room-host-policy-link-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const checkout = join(root, "checkout"), link = join(root, "linked");
   mkdirSync(checkout); symlinkSync(checkout, link);
