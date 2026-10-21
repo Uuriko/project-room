@@ -34,7 +34,7 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   assert.equal(await page.locator('#room-assistant').isVisible(), false, 'ordinary chat remains quiet');
   if (width > 940) await ensureSidebarOpen(page);
   else await ensureSidebarClosed(page);
-  await page.locator('#nav-rooms').click();
+  await clickChrome(page, '#nav-rooms');
   await page.locator('#account-rooms-list button').first().waitFor();
   await page.getByText('Room notes', { exact: true }).waitFor();
   assert.equal(await page.locator('#owner-cockpit-title').isVisible(), false);
@@ -75,4 +75,56 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   await page.screenshot({ path: `test-results/entry/invite-unavailable-${width}.png` });
   await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
+});
+
+// Hold the real entry resource before startup can remove the static fallback.
+// This catches first-paint regressions that settled sign-in screenshots miss.
+for (const width of [390, 1280]) for (const javaScriptEnabled of [true, false]) {
+  test(`startup at ${width}: scripting ${javaScriptEnabled ? 'delayed' : 'disabled'}`, { timeout: 30000 }, async t => {
+    const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const browser = await chromium.launch({ headless: true });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(async () => { release(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
+    const page = await browser.newPage({ viewport: { width, height: 900 }, javaScriptEnabled });
+    if (javaScriptEnabled) await page.route('**/src/entry.js', async route => { await gate; await route.continue(); });
+    await page.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'commit' });
+    await page.waitForFunction(() => [...document.querySelectorAll('link[rel="stylesheet"]')].every(link => link.sheet));
+    mkdirSync('test-results/startup', { recursive: true });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await page.screenshot({ path: `test-results/startup/${width}-${theme}-${javaScriptEnabled ? 'delayed' : 'nojs'}.png`, fullPage: true });
+    }
+    assert.equal(await page.locator('#static-hero').isVisible(), !javaScriptEnabled, 'fallback content is for nonscripting browsers, not a loading flash');
+    assert.equal(await page.locator('.app-shell > .topbar').isVisible(), javaScriptEnabled, 'no-JS visitors do not see inert session controls');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    if (javaScriptEnabled) {
+      release();
+      await page.locator('#auth-panel').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('#static-hero').count(), 0);
+      await page.locator('#auth-panel input[type="email"]').waitFor({ state: 'visible' });
+    } else {
+      assert.equal(await page.getByText('JavaScript is off. Enable JavaScript to sign in.', { exact: true }).isVisible(), true);
+    }
+  });
+}
+
+test('a failed sign-in module can recover through the visible reload action', { timeout: 30000 }, async t => {
+  const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  await page.route('**/src/signin-entry.js', route => route.abort());
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.locator('#entry-retry').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#auth-error').isVisible(), true);
+  mkdirSync('test-results/startup', { recursive: true });
+  await page.screenshot({ path: 'test-results/startup/failed-module.png' });
+  await page.unroute('**/src/signin-entry.js');
+  await page.locator('#entry-retry').click();
+  await page.locator('#auth-panel input[type="email"]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#entry-retry').count(), 0);
+  await page.screenshot({ path: 'test-results/startup/recovered-module.png' });
 });
