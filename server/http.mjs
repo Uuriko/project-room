@@ -772,9 +772,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // family (for room writes, "write": 60 mutations/minute per
       // credential); retry terms are computed from the live window, so
       // every field is truthful at emit time.
+      // CURE-4396: the Retry-After HEADER is deliberately not set here.
+      // The catch-all below assigns the flat 60 that has always been the
+      // rate_limited header contract ("retry after a minute"); a computed
+      // per-window header value broke that contract for aged windows
+      // (access-review allowance pin). The precise computed terms live in
+      // the body detail, which is what F-2 chartered.
       const retryAfterSeconds = Math.max(1, Math.ceil((entry.until - now) / 1000));
       const error = new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-        { "Retry-After": String(retryAfterSeconds), "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+        { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
       error.detail = { rateLimit: { scope: family, limit: maximum, windowSeconds: 60, remaining: 0, retryAfterSeconds, resetAt: new Date(entry.until).toISOString() } };
       throw error;
     }

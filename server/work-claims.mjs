@@ -1066,6 +1066,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     parentClaimId: parentClaimIdOf(parentClaimId, id),
     evidenceRefs: evidenceRefsOf(evidenceRefs),
     premiseFlag: null,
+    progressMessageId: null,
     acceptanceCriteria: acceptanceCriteriaOf(acceptanceCriteria),
     delivery: null,
     verification: null,
