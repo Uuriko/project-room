@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { aiCatalog } from "../server/agent-discovery.mjs";
 import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
+import { actionMetaToolDefs } from "../server/mcp-action-search.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
 import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
@@ -55,6 +56,7 @@ function servedProfiles() {
 function codeToolNames() {
   return new Set([
     ...hostedMcpToolDefs.map(t => t.name),
+    ...actionMetaToolDefs.map(t => t.name),
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
     ...identityMintMcpDefinitions.map(t => t.name),
