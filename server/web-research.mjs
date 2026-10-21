@@ -491,8 +491,8 @@ export class WebResearch {
     if (isWorkersRuntime()) return [];
     const roots = this._corpusRoots();
     // Loud, never a silent empty leg: a caller who asked for the docs
-    // corpus and got nothing back must be able to tell "no corpus in this
-    // runtime" from "the corpus has no match". research() surfaces this in
+    // corpus and got nothing back must be able to tell a missing corpus
+    // apart from a corpus with no match. research() surfaces this in
     // the result's fetch_errors; the plan leg reports the same fact as a
     // skipped leg with this reason.
     if (!roots) fail(500, "docs_corpus_unavailable",
