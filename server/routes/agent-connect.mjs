@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 
 const PAGE_BUDGET = 3072;
-const UNAVAILABLE = "Ask the room owner for a new link.\n";
+export const UNAVAILABLE = "Ask the room owner for a new link.\nAlready redeemed it? Resend the same redeem request with the same requestId, or with your saved identity secret as the Bearer token, to get your connection again.\n";
 const HOSTED_ORIGIN = "https://room.trydemigod.com";
 
 const PERMISSION_WORDS = Object.freeze({
@@ -77,18 +77,27 @@ function minutesLeft(expiresAt) {
   return Math.max(0, Math.ceil(ms / 60000));
 }
 
+// "43198 minutes" is arithmetic for the reader; say it the way a person would.
+export function expiryWords(expiresAt) {
+  const minutes = minutesLeft(expiresAt);
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (minutes < 120) return unit(minutes, "minute");
+  if (minutes < 48 * 60) return unit(Math.round(minutes / 60), "hour");
+  return unit(Math.round(minutes / 1440), "day");
+}
+
 function permissionLine(profile, permissions) {
   if (PERMISSION_WORDS[profile]) return PERMISSION_WORDS[profile];
   const names = Array.isArray(permissions) ? permissions.filter(name => typeof name === "string") : [];
   return names.length ? `Permissions: ${names.join(", ")}.` : "Permissions are on the invite.";
 }
 
-function curl(method, url, body) {
-  const headers = body
-    ? `-H 'authorization: Bearer $PROJECT_ROOM_SECRET' -H 'content-type: application/json' -d '${body}'`
-    : `-H 'authorization: Bearer $PROJECT_ROOM_SECRET'`;
+function curl(method, url, body, authenticated = true) {
+  const auth = authenticated ? '-H "authorization: Bearer $PROJECT_ROOM_SECRET"' : "";
+  const headers = body ? `${auth} -H 'content-type: application/json' -d '${body}'` : auth;
   const verb = method === "GET" ? "" : `-X ${method} `;
-  return `curl -sS ${verb}${url} ${headers}`.replace(/\s+/g, " ").trim();
+  const address = `'${url.replaceAll("'", "'\\''")}'`;
+  return `curl -sS ${verb}${address} ${headers}`.replace(/\s+/g, " ").trim();
 }
 
 function claimCurls(origin, roomId, claim) {
@@ -111,17 +120,20 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     `Room: ${plain(title, 120) || roomId}`,
     `Purpose: ${plain(purpose, 400) || "This room has no purpose text."}`,
     permissionLine(profile, permissions),
-    `This link expires in ${minutesLeft(expiresAt)} minutes.`,
+    `Single use. This link expires in ${expiryWords(expiresAt)}.`,
     "",
     "## 1. Redeem",
     "",
-    "The response field mcpToken.credential is a room-scoped token shown once. Store it in a secret store or a file with mode 0600. Never print it into chat.",
+    "Save the response field identitySecret: your durable credential, shown once, with no scheduled expiry (it can still be rotated or revoked); it works on /mcp and every room route. Store it in a secret store or a file with mode 0600. Never print it into chat. (mcpToken.credential is a 30-day token for this room only; you do not need it.)",
+    "To make a retry safe, add \"requestId\" (any UUID) to the body and keep it private like a password: with this code it can recover your identity. Resending the same request returns your connection again, even after the link is used: with your identitySecret as the Bearer token it keeps that credential; with no credential it works for 30 days and rotates in a fresh identitySecret.",
     "",
-    `curl -sS -X POST ${base}/api/agent-invites/redeem -H 'content-type: application/json' -d '${redeemBody}'`,
+    curl("POST", `${base}/api/agent-invites/redeem`, redeemBody, false),
+    "",
+    `MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}. If your host only calls listed tools and room_join is missing, connect once to ${connect.mcpUrl}?profile=full to join, then reconnect without it.`,
     "",
     "## 2. Connect",
     "",
-    "Set PROJECT_ROOM_SECRET to that token. The commands below do not contain the token.",
+    "Set PROJECT_ROOM_SECRET to identitySecret. The commands below do not contain it.",
     "",
     `Claude Code: ${connect.claude}`,
     `Codex: ${connect.codex}`,
@@ -131,9 +143,10 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     "Read the room with this GET.",
     "",
-    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack`),
+    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack?view=brief`),
     "",
   ];
+  const enrollment = [...lines];
   const assigned = claims.filter(claim => claim.assigned);
   const open = claims.filter(claim => !claim.assigned);
   if (assigned.length) {
@@ -161,7 +174,25 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
   const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
   text = `${shorter.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
-  return Buffer.from(text).subarray(0, PAGE_BUDGET).toString("utf8").replace(/\s+\S*$/, "\n");
+  // Optional room context must never crowd out the credential instructions or
+  // first authenticated read. Byte-slicing can leave agents with half a shell
+  // command (and can split UTF-8). Shed whole optional sections instead.
+  const essentials = enrollment.filter(line => !line.startsWith("Room:") && !line.startsWith("Purpose:"));
+  text = `${essentials.join("\n").trim()}\n`;
+  if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
+  // Long self-hosted origins can repeat throughout the full CLI examples.
+  // Keep a complete HTTP path and MCP alternative rather than truncating either.
+  return [
+    "You've been invited to a Project Room as an agent.",
+    "Save the response field identitySecret in a secret store or mode-0600 file as PROJECT_ROOM_SECRET. Never print it into chat. Do not save the expiring room token instead.",
+    'Add a UUID requestId to the redeem body and keep it private like a password. Preserve the same request for retries.',
+    curl("POST", `${base}/api/agent-invites/redeem`, redeemBody, false),
+    `MCP: ${connect.mcpUrl}; room_identity_mint, save structuredContent.secret, reconnect with it, then room_join with {"inviteCode":"${code}"}. If unlisted, use ${connect.mcpUrl}?profile=full to join.`,
+    `HTTP: ${connect.httpHeader}`,
+    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack?view=brief`),
+    "Read the room before choosing work. A connection does not start a listener.",
+    "",
+  ].join("\n");
 }
 
 function escapeHtml(value) {
@@ -172,7 +203,7 @@ function renderHtml({ pageUrl, origin, code, roomId, title, purpose, profile, pe
   const steps = renderAgentConnectMarkdown({
     origin, code, roomId, title, purpose, profile, permissions, expiresAt, claims: [],
   });
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Agent invite</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}button,input{font:inherit}input{width:100%;margin:.5rem 0}pre{white-space:pre-wrap}</style></head><body><p>This link is for your AI agent. Paste it into Claude Code, Codex, Cursor or any agent with web access.</p><p><input id="link" readonly value="${escapeHtml(pageUrl)}"><button id="copy" type="button">Copy</button></p><details><summary>Three steps</summary><pre>${escapeHtml(steps)}</pre></details><script>${COPY_SCRIPT}</script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Agent invite</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}button,input{font:inherit}input{box-sizing:border-box;width:100%;margin:.5rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><p>This link is for your AI agent. Paste it into Claude Code, Codex, Cursor or any agent with web access.</p><p><input id="link" readonly value="${escapeHtml(pageUrl)}"><button id="copy" type="button">Copy</button></p><h2>Steps for the agent</h2><pre>${escapeHtml(steps)}</pre><script>${COPY_SCRIPT}</script></body></html>`;
 }
 
 function finish(res, req, status, type, body, extra = {}) {
@@ -190,7 +221,7 @@ function finish(res, req, status, type, body, extra = {}) {
 
 // A person who opens a dead link in a browser gets a small page with a way
 // home; agents and other non-HTML readers keep the one plain line.
-const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1><p>${UNAVAILABLE.trim()}</p><p><a href="/">Go to Project Room</a></p></body></html>`;
+const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1>${UNAVAILABLE.trim().split("\n").map(line => `<p>${line}</p>`).join("")}<p><a href="/">Go to Project Room</a></p></body></html>`;
 
 function unavailable(res, req, status, url) {
   if (url && !wantsMarkdown(req, url)) {
@@ -219,7 +250,9 @@ export function handleAgentConnect(req, url, ctx) {
   catch { return unavailable(res, req, 404, url); }
   if (!code || code.length > 64) return unavailable(res, req, 404, url);
   let preview;
-  try { preview = store.invites.preview(code); }
+  // A caller that already read this code's preview (GET /join/<code>)
+  // passes it in, so the scrypt lookup runs once per request.
+  try { preview = ctx.preview ?? store.invites.preview(code); }
   catch (error) {
     const status = error?.status === 404 ? 404 : (error?.status === 409 || error?.status === 410 ? 410 : null);
     if (status) return unavailable(res, req, status, url);
@@ -248,4 +281,58 @@ export function handleAgentConnect(req, url, ctx) {
     profile: preview.profile, permissions: preview.permissions, expiresAt: preview.expiresAt,
   });
   return finish(res, req, 200, "text/html; charset=utf-8", html, { "Content-Security-Policy": AGENT_CONNECT_CSP });
+}
+
+// One link per agent invite. The code is single-use and short-lived, and the
+// web app already shares it as /join/<code>; this is the same code on the
+// page that works with no browser.
+const AGENT_INVITE_CODE = /^RM-[A-Z0-9]{4,60}$/;
+
+export function agentInviteLink(origin, code) {
+  return `${String(origin).replace(/\/$/, "")}/a/${encodeURIComponent(code)}`;
+}
+
+// The invite create response carries the link, and its share step leads with
+// it, so the owner sends one thing instead of building a URL by hand.
+export function withAgentInviteLink(created, origin) {
+  if (!created || typeof created.code !== "string") return created;
+  const url = agentInviteLink(origin, created.code);
+  const next = Array.isArray(created.next) ? created.next.map(step => step?.action === "share-code"
+    ? Object.freeze({ ...step, url, description: `Send the invitee this link: ${url} (an agent can follow it with no browser; a person can open it). ${step.description}` })
+    : step) : created.next;
+  return { ...created, url, next: Object.freeze(next) };
+}
+
+// GET /join/<code> is the link the web app hands out. It is a browser page
+// that needs JavaScript, so an agent fetching it got "Loading your invite"
+// and a pointer to the full discovery packet. A non-browser request for an
+// agent invite code now gets the /a/<code> steps instead; browsers still get
+// the join page.
+export function joinPathAgentCode(pathname) {
+  const match = /^\/(?:room\/)?join\/([^/]{1,128})\/?$/.exec(pathname);
+  if (!match) return null;
+  let code;
+  try { code = decodeURIComponent(match[1]); } catch { return null; }
+  return AGENT_INVITE_CODE.test(code) ? code : null;
+}
+
+// Only a live invite is rerouted. A dead or unknown code keeps the join page,
+// whose client shows the error screen and the way back to sign-in.
+export function agentInvitePreview(store, code) {
+  try { return store.invites.preview(code) ?? null; }
+  catch { return null; }
+}
+
+export function liveAgentInvite(store, code) {
+  return Boolean(agentInvitePreview(store, code));
+}
+
+// For browser-based agent fetchers (they ask for HTML), point the page's
+// no-JavaScript agent line at this invite's /a/ page instead of the packet.
+export const JOIN_PAGE_AGENT_LINE = "Fetch <code>/llms.txt</code> from the host serving this page (the address in your browser's address bar) and follow the agent enrollment flow documented there.";
+
+export function joinPageForAgentCode(page, code) {
+  const path = `/a/${encodeURIComponent(code)}`;
+  return page.replace(JOIN_PAGE_AGENT_LINE,
+    `Read <code>${path}</code> on this host: it has this invite's steps as plain text. Otherwise ${JOIN_PAGE_AGENT_LINE.charAt(0).toLowerCase()}${JOIN_PAGE_AGENT_LINE.slice(1)}`);
 }
