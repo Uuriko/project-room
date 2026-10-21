@@ -32,7 +32,7 @@ export const LIMITS = Object.freeze({ ruleMaxChars: 200, noteMaxChars: 1000, glo
   injectRules: 12, injectTokens: 600, onboardingTokens: 400, topK: 5, relevanceFloor: 0.34,
   dormantScopedDays: 30, dormantGlobalDays: 60, flagHarmful: 2 });
 const DAY = 24 * 3600 * 1000;
-export const AGENT_MEMORY_TABLES = Object.freeze(["agent_memories", "agent_rules", "agent_memory_scans"]);
+export const AGENT_MEMORY_TABLES = Object.freeze(["agent_memories", "agent_rules", "agent_memory_scans", "agent_memory_trail", "agent_memory_cleanup_cards"]);
 const TRUST = Object.freeze({ owner: "high", agent: "medium", room: "low", tool: "low", web: "low", email: "low" });
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS agent_memories (
@@ -49,9 +49,35 @@ CREATE TABLE IF NOT EXISTS agent_rules (
   helpful INTEGER NOT NULL DEFAULT 0, harmful INTEGER NOT NULL DEFAULT 0, corrections INTEGER NOT NULL DEFAULT 1,
   last_triggered_at INTEGER, UNIQUE(account_id, request_id));
 CREATE INDEX IF NOT EXISTS agent_rules_account ON agent_rules(account_id, status);
-CREATE TABLE IF NOT EXISTS agent_memory_scans (room_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL)`;
+CREATE TABLE IF NOT EXISTS agent_memory_scans (room_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_memory_trail (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL, room_id TEXT NOT NULL, member_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('injected','used','correction','repeat')), ref TEXT, rule_ids TEXT NOT NULL DEFAULT '', memory_ids TEXT NOT NULL DEFAULT '', at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS agent_memory_trail_member ON agent_memory_trail(room_id, member_id, at);
+CREATE INDEX IF NOT EXISTS agent_memory_trail_account ON agent_memory_trail(account_id, kind, at)`;
 const ready = new WeakSet();
 export function ensureAgentMemory(db) { if (!ready.has(db)) { db.exec(SCHEMA); ready.add(db); } return db; }
+
+// Provenance trail: which rule and memory ids an agent was given or used, stored
+// as comma-joined ids. An unchanged injection is not written again, and each
+// member keeps its newest 200 rows.
+const TRAIL_KEEP = 200;
+export function trail(db, owner, roomId, memberId, kind, { ruleIds = [], memoryIds = [], ref = null } = {}, now = Date.now()) {
+  const rules = ruleIds.join(","), memories = memoryIds.join(",");
+  if (kind === "injected" || kind === "used") {
+    if (!rules && !memories) return;
+    // Rule and memory injections are separate streams; compare with the last of the same stream.
+    const stream = rules ? "rule_ids!=''" : "rule_ids=''";
+    const last = db.prepare(`SELECT seq, rule_ids, memory_ids, ref FROM agent_memory_trail WHERE room_id=? AND member_id=? AND kind=? AND ${stream} ORDER BY seq DESC LIMIT 1`).get(roomId, memberId, kind);
+    if (!ref && last && !last.ref && last.rule_ids === rules && last.memory_ids === memories) {
+      db.prepare("UPDATE agent_memory_trail SET at=? WHERE seq=?").run(now, last.seq);
+      return;
+    }
+  }
+  db.prepare("INSERT INTO agent_memory_trail(account_id,room_id,member_id,kind,ref,rule_ids,memory_ids,at) VALUES(?,?,?,?,?,?,?,?)").run(owner.accountId, roomId, memberId, kind, ref, rules, memories, now);
+  db.prepare(`DELETE FROM agent_memory_trail WHERE room_id=? AND member_id=? AND kind IN ('injected','used') AND seq NOT IN
+    (SELECT seq FROM agent_memory_trail WHERE room_id=? AND member_id=? AND kind IN ('injected','used') ORDER BY seq DESC LIMIT ${TRAIL_KEEP})`).run(roomId, memberId, roomId, memberId);
+}
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const tokens = text => Math.ceil(String(text).length / 4);
@@ -72,7 +98,7 @@ export function relation(newText, oldText) {
   if (sim >= 0.35) return "merge";
   return null;
 }
-const SECRET = /\b(rak_|ghp_|gho_|github_pat_|sk-|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+export const SECRET = /\b(rak_|ghp_|gho_|github_pat_|sk-|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const VAGUE = /^(be (careful|better|smart|good|nice)|do (better|good)|try harder|pay attention|think)\b/i;
 const TRIGGERISH = /\b(when|whenever|before|after|if|during|on|in|for|always|never|every|each|while|unless)\b/i;
 export function vague(text, trigger) {
@@ -155,7 +181,9 @@ export function searchMemory(store, auth, roomId, { query, limit } = {}) {
     const recency = Math.exp(-(now - n.valid_at) / (30 * DAY));
     return { n, relevance, score: 0.6 * relevance + 0.2 * recency + 0.2 * (n.importance / 5) };
   }).filter(x => x.relevance >= LIMITS.relevanceFloor).sort((a, b) => b.score - a.score);
-  return { total: notes.length, memories: scored.slice(0, k).map(x => memoryView(x.n, { relevance: Math.round(x.relevance * 100) / 100 })) };
+  const top = scored.slice(0, k);
+  if (!owner.person) trail(db, owner, roomId, auth.member.id, "injected", { memoryIds: top.map(x => x.n.id) }, now);
+  return { total: notes.length, memories: top.map(x => memoryView(x.n, { relevance: Math.round(x.relevance * 100) / 100 })) };
 }
 
 export function forgetMemory(store, auth, roomId, id) {
@@ -235,6 +263,10 @@ export function proposeRule(store, auth, roomId, data) {
   let decision = { kind: "add" };
   for (const { r } of neighbours) { const rel = relation(text, r.text); if (rel) { decision = { kind: rel, with: r }; break; } }
 
+  // Imports never activate anything: an existing twin is left alone and a
+  // conflict waits for the owner instead of newest-wins.
+  if (data.viaImport === true && decision.kind === "duplicate") return { action: "noop", reason: "exists", rule: ruleView(decision.with, now) };
+  if (data.viaImport !== true) trail(db, owner, roomId, auth.member.id, "correction", {}, now);
   if (decision.kind === "duplicate") {
     const r = decision.with;
     if (r.status === "proposed") {
@@ -244,6 +276,7 @@ export function proposeRule(store, auth, roomId, data) {
     }
     // Re-issued while active: the rule did not stop the mistake.
     db.prepare("UPDATE agent_rules SET harmful=harmful+1, corrections=corrections+1 WHERE id=?").run(r.id);
+    trail(db, owner, roomId, auth.member.id, "repeat", { ruleIds: [r.id] }, now);
     return { action: "noop", reason: "already_active_violation_recorded", rule: ruleView(getRule(db, owner.accountId, r.id), now) };
   }
   const id = `rule_${randomUUID()}`;
@@ -253,7 +286,7 @@ export function proposeRule(store, auth, roomId, data) {
     VALUES(?,?,?,?,?,?,?,'proposed',?,?,?,?,?)`).run(id, owner.accountId, text, trigger, scope, agentKey, data.hard === true ? 1 : 0,
     pending ? JSON.stringify(pending) : null, author, source, requestId, now);
   const row = getRule(db, owner.accountId, id);
-  if (decision.kind === "conflict" && decision.with.author_id === author && decision.with.scope === scope) {
+  if (decision.kind === "conflict" && data.viaImport !== true && decision.with.author_id === author && decision.with.scope === scope) {
     // Newest wins only for the same author and scope; the old rule is invalidated, not deleted.
     db.prepare("UPDATE agent_rules SET pending=NULL WHERE id=?").run(id);
     const wasActive = decision.with.status === "active";
@@ -286,6 +319,7 @@ export function rulesForTurn(store, auth, roomId, { tool = null, paths = [], bud
     if (out.length >= LIMITS.injectRules || used + cost > budget) { omitted++; continue; }
     used += cost; out.push({ id: r.id, text: line, hard: !!r.hard, scope: r.scope });
   }
+  if (!owner.person) trail(db, owner, roomId, auth.member.id, "injected", { ruleIds: out.map(r => r.id) }, now);
   return { heading: "Your owner's standing rules", rules: out, tokens: used, budget, omitted, dormant: pool.length - live.length };
 }
 function globMatch(glob, path) {
@@ -294,8 +328,11 @@ function globMatch(glob, path) {
 }
 
 // The agent reports a turn hit a rule's trigger, and whether the rule helped.
-export function recordRuleUse(store, auth, roomId, { usedIds = [], harmfulIds = [] } = {}) {
+export function recordRuleUse(store, auth, roomId, { usedIds = [], harmfulIds = [], memoryIds = [], ref = null } = {}) {
   const db = ensureAgentMemory(store.db), owner = ownerOf(store, auth, roomId), now = store.now();
+  const ids = list => (Array.isArray(list) ? list : []).filter(id => typeof id === "string" && id.length <= 64).slice(0, 50);
+  trail(db, owner, roomId, auth.member.id, "used", { ruleIds: [...new Set([...ids(usedIds), ...ids(harmfulIds)])], memoryIds: ids(memoryIds),
+    ref: typeof ref === "string" && ref.length <= 128 ? ref : null }, now);
   for (const id of (Array.isArray(usedIds) ? usedIds : []).slice(0, 50)) db.prepare("UPDATE agent_rules SET helpful=helpful+1, last_triggered_at=? WHERE account_id=? AND id=? AND status='active'").run(now, owner.accountId, id);
   for (const id of (Array.isArray(harmfulIds) ? harmfulIds : []).slice(0, 50)) db.prepare("UPDATE agent_rules SET harmful=harmful+1, last_triggered_at=? WHERE account_id=? AND id=? AND status='active'").run(now, owner.accountId, id);
   return { recorded: true };
