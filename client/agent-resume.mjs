@@ -158,7 +158,9 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     } catch (error) { incomplete('openRequests', error); }
     // Observe only runs belonging to current incoming open requests. This is
     // service metadata, not a read of a host's local journal or permission to retry.
-    if (out.observedThroughBySource.openRequests) {
+    if (out.observedThroughBySource.openRequests && out.openRequests.length === 0) {
+      out.pendingReconciliations = { status: 'observed', source: 'open_requests', localJournalRead: false, items: [] };
+    } else if (out.observedThroughBySource.openRequests) {
       try {
         // This endpoint authorizes the read itself; the compact context reads
         // before/after fence identity without downloading the entire room.

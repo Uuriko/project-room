@@ -329,7 +329,16 @@ test('reply-only resume retains old open requests independently of delta observa
   assert.ok(conversation.current.answerBasis);
   await client.replyAction('room_respond_to_request', { requestId: 'formal-answer', responseToRequestId: 'old-open',
     ...conversation.current.answerBasis, responseOutcome: 'answered', toMemberId: owner.identityId, workItemId: null, body: 'Explicit answer' });
-  assert.deepEqual((await resumeAgent(options)).openRequests, []);
+  let idleRunReads = 0;
+  const idle = await resumeAgent({ ...options, fetchImpl: (url, init) => {
+    if (String(url).endsWith('/request-runs')) idleRunReads++;
+    return fetch(url, init);
+  } });
+  assert.deepEqual(idle.openRequests, []);
+  assert.equal(idleRunReads, 0, 'no run metadata can contribute when the incoming open list is empty');
+  assert.deepEqual(idle.pendingReconciliations, { status: 'observed', source: 'open_requests', localJournalRead: false, items: [] });
+  assert.equal(idle.metrics.requests, 4);
+
   // A different current request ensures final revocation discards gathered refs.
   store.command(owner.secret, 'commons', { id: 'another-open', type: 'message.posted', data: {
     messageId: 'another-open', body: 'private-question-two', toMemberId: 'reply-worker', requestKind: 'reply' } });
