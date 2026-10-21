@@ -1599,6 +1599,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // POST /oauth/register — RFC 7591 dynamic client registration for
       // public PKCE clients such as ChatGPT. Reuses the existing provider.
       if (url.pathname === "/oauth/register" && req.method === "POST") {
+        // Each registration is a durable client row: bound it per address.
+        rate(`oauth-register:${remoteAddress}`, 10);
         const outcome = registerDynamicClient(oauthProvider, await body(req), { randomId: () => randomUUID().replaceAll("-", "") });
         return json(res, outcome.status, outcome.body);
       }

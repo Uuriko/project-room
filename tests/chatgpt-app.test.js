@@ -117,3 +117,21 @@ test("HTTP: protected resource metadata, registration endpoint and 401 header", 
   assert.equal(call.status, 401);
   assert.match(call.headers.get("www-authenticate"), /resource_metadata=/);
 });
+
+test("dynamic registration refuses vendor names on foreign callbacks and lookalikes", async () => {
+  const { registerDynamicClient, clientNameProblem } = await import("../server/chatgpt-app.mjs");
+  const registered = [];
+  const provider = { registerClient: client => registered.push(client) };
+  const reg = (client_name, redirect_uris) => registerDynamicClient(provider, { client_name, redirect_uris }, { randomId: () => "x" + registered.length });
+  assert.equal(reg("ChatGPT", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("Chat GPT", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("CHATGPT", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("Cha\u0301tGPT", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("\u13DFhatGPT", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("Claude", ["https://evil.example/cb"]).status, 400);
+  assert.equal(reg("Project Room", ["https://chatgpt.com/cb"]).status, 400);
+  assert.equal(registered.length, 0, "refused names never create a client row");
+  assert.equal(reg("ChatGPT", ["https://chatgpt.com/connector_platform_oauth_redirect"]).status, 201);
+  assert.equal(reg("My notes app", ["https://notes.example/cb"]).status, 201);
+  assert.equal(clientNameProblem("0penAI helper", ["https://evil.example/cb"]) !== null, true);
+});

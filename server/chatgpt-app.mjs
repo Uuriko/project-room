@@ -200,6 +200,33 @@ export function chatgptWwwAuthenticate(origin) {
 
 // RFC 7591 dynamic client registration, as ChatGPT performs on connect.
 // Public clients only (PKCE, token_endpoint_auth_method none).
+// Names a registering client may not claim unless every redirect URI is on
+// that vendor's own host. Without this, anyone could register "ChatGPT"
+// with their own callback and the consent screen would show that name.
+const VENDOR_HOSTS = Object.freeze([
+  [/chat\s*gpt|open\s*ai/, ["chatgpt.com", "chat.openai.com"]],
+  [/claude|anthropic/, ["claude.ai", "claude.com"]],
+  [/grok|\bx\s*ai\b/, ["grok.com", "x.ai"]],
+  [/project\s*room|demigod/, []],
+]);
+
+function hostOf(uri) {
+  try { return new URL(uri).hostname.toLowerCase(); } catch { return null; }
+}
+
+// Returns an error description, or null when the name may be used.
+export function clientNameProblem(name, redirectUris) {
+  if (!/^[\x20-\x7E]+$/.test(name)) return "client_name must be plain printable ASCII.";
+  const folded = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/0/g, "o").replace(/[1l|]/g, "i");
+  const loose = folded.replace(/i/g, "l");
+  for (const [pattern, hosts] of VENDOR_HOSTS) {
+    if (!pattern.test(folded) && !pattern.test(loose) && !pattern.test(folded.replace(/\s+/g, ""))) continue;
+    const onVendor = redirectUris.every(uri => hosts.some(host => { const h = hostOf(uri); return h === host || h?.endsWith("." + host); }));
+    if (!hosts.length || !onVendor) return "client_name names a product this client cannot show it is; choose another name.";
+  }
+  return null;
+}
+
 export function registerDynamicClient(oauthProvider, body, { randomId }) {
   if (!object(body)) return { status: 400, body: { error: "invalid_client_metadata", error_description: "Send a JSON object." } };
   const redirectUris = body.redirect_uris;
@@ -209,6 +236,9 @@ export function registerDynamicClient(oauthProvider, body, { randomId }) {
   const method = body.token_endpoint_auth_method ?? "none";
   if (method !== "none") return { status: 400, body: { error: "invalid_client_metadata", error_description: "Only public clients (token_endpoint_auth_method none) with PKCE are supported." } };
   const name = typeof body.client_name === "string" && body.client_name.trim() ? body.client_name.trim().slice(0, 80) : "MCP client";
+  if (redirectUris.some(uri => typeof uri !== "string")) return { status: 400, body: { error: "invalid_redirect_uri", error_description: "redirect_uris must be strings." } };
+  const problem = clientNameProblem(name, redirectUris);
+  if (problem) return { status: 400, body: { error: "invalid_client_metadata", error_description: problem } };
   const clientId = "dcr_" + randomId();
   try {
     oauthProvider.registerClient({ clientId, name, redirectUris });
