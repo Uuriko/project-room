@@ -146,7 +146,7 @@ test("HTTP connection routes, recorded sync and webhook delivery are account, se
   const secret = "fixture-webhook-secret-0123456789";
   f.apply({ action: "connection.webhook", requestId: "hook", connectionId: f.telegram.connection.id, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(secret) });
   assert.throws(() => f.apply({ action: "connection.webhook", requestId: "hook-2", connectionId: f.telegram.connection.id, expectedRevision: 1, secretHash: "short" }), { code: "invalid_email_import" });
-  const server = createRoomServer({ store: f.store, channelWebhooks: webhooks });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, channelWebhooks: webhooks });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -203,7 +203,7 @@ test("HTTP connection routes, recorded sync and webhook delivery are account, se
   response = await post(syncPath, { requestId: "sync-4", updates: [{ bogus: true }] }); assert.equal(response.status, 422);
   assert.equal(f.list().filter(r => r.adapter === "telegram").length, 4);
   // Remote clients cannot import recordings, even with a valid session.
-  const remote = createRoomServer({ store: f.store, channelWebhooks: webhooks, resolveClientAddress: () => "203.0.113.5" });
+  const remote = createRoomServer({ enableDeferredInbox: true, store: f.store, channelWebhooks: webhooks, resolveClientAddress: () => "203.0.113.5" });
   await new Promise(resolve => remote.listen(0, "127.0.0.1", resolve));
   t.after(async () => { remote.closeStreams(); remote.closeAllConnections(); await new Promise(resolve => remote.close(resolve)); });
   const remoteOrigin = "http://127.0.0.1:" + remote.address().port;
@@ -213,7 +213,7 @@ test("HTTP connection routes, recorded sync and webhook delivery are account, se
   response = await fetch(remoteOrigin + "/api/inbox/connections/" + f.telegram.connection.id, { headers: headers(f.auth) });
   assert.equal((await response.json()).syncAvailable, false);
   // Without a configured webhook inbox the route is inert and sync cannot drain.
-  const plain = createRoomServer({ store: f.store });
+  const plain = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => plain.listen(0, "127.0.0.1", resolve));
   t.after(async () => { plain.closeStreams(); plain.closeAllConnections(); await new Promise(resolve => plain.close(resolve)); });
   const plainOrigin = "http://127.0.0.1:" + plain.address().port;

@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Personal attention surfaces: activity feed, read horizons, saved messages,
 // thread mutes. Write-time fan-out for mention/reply/thread_reply
 // events (per-recipient rows, like mention_states), plus read/unread state per
@@ -89,7 +90,7 @@ export const activitySchema = `
 // A DM message is visible only to its author and its recipient.
 // A message from the projection, else its current record from the messages table
 // (archived messages are no longer in the projection).
-const messageOrArchived = (store, roomId, id) => store.room(roomId).state.messages.find(m => m.id === id) ?? store.archivedMessage(roomId, id);
+const messageOrArchived = (store, roomId, id) => messageRepository(store, roomId).get(id);
 const dmVisible = (message, memberId) =>
   !message?.toMemberId || message.authorId === memberId || message.toMemberId === memberId;
 

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed, generatedAgentPages } from "../scripts/runtime-package.mjs";
+import { createRuntimePackage, verifyRuntimePackage, verifyRuntimeImports, verifyRuntimeSource, publicAssets, allowed, generatedAgentPages } from "../scripts/runtime-package.mjs";
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
@@ -279,4 +279,31 @@ test("Codex host entrypoint and every dependency ship without scratch demo fixtu
   assert.equal(closure.has("client/codex-stdio.mjs"), true);
   assert.equal(closure.has("scripts/room-assistant-scratch.mjs"), false);
   assert.equal(closure.has("scripts/acceptance-fixture.mjs"), false);
+});
+
+test("runtime preflight catches unregistered client imports before cold packaging", () => {
+  const files = new Map([
+    ["client/runner.mjs", Buffer.from('import "./brief.mjs";')],
+    ["client/brief.mjs", Buffer.from('export const version = 1;')]
+  ]);
+  assert.doesNotThrow(() => verifyRuntimeImports(files));
+  files.delete("client/brief.mjs");
+  assert.throws(() => verifyRuntimeImports(files), /client\/runner.mjs imports.*brief.mjs/);
+  files.set("client/runner.mjs", Buffer.from('await import("./brief.mjs");'));
+  assert.throws(() => verifyRuntimeImports(files), /not in the allowlisted runtime package/);
+});
+
+test("runtime preflight checks the working source without making a package", () => {
+  assert.ok(verifyRuntimeSource(repository).files > 100);
+  const directory = mkdtempSync(join(tmpdir(), "room-preflight-missing-"));
+  try { assert.throws(() => verifyRuntimeSource(directory), /required runtime source is missing/); }
+  finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("project preflight composes dependency, coverage and runtime checks", () => {
+  const result = spawnSync(process.execPath, ["scripts/verify-preflight.mjs"], { cwd: repository, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /check-deps: ok/);
+  assert.match(result.stdout, /no new untested modules/);
+  assert.match(result.stdout, /runtime source files checked/);
 });
