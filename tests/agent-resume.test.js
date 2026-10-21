@@ -24,7 +24,11 @@ function transport(fn = () => undefined) {
     calls.push({ url: String(url), options });
     const override = await fn(String(url), options, calls.length);
     if (override instanceof Response) return override;
-    const value = override ?? (String(url).includes('/needs-me') ? page() : context());
+    const value = override ?? (String(url).includes('/needs-me') ? page() : String(url).includes('/reply-requests') ? {
+      contractVersion: 1, roomId: 'commons', viewerId: 'worker', viewerAccountId: null, viewerAuthEpoch: null,
+      evaluatedThrough: 10, scope: { membership: 'room', targetedMessages: 'participants-only', externalExecution: false, acknowledges: false },
+      selection: { direction: 'incoming', status: 'open' }, requests: [],
+    } : context());
     return Response.json(value);
   };
   return { fetchImpl, calls };
@@ -40,8 +44,8 @@ test('resume keeps obligations/own claims and refs, never transcript or effects'
   assert.deepEqual(result.attention.map(({ nextRead, ...ref }) => ref), [{ kind: 'mention', roomId: 'commons', seq: 9, id: 'm' }]);
   assert.deepEqual(result.attention[0].nextRead, { tool: 'room_list_events', arguments: { roomId: 'commons', after: 8, limit: 1 } });
   assert.equal(JSON.stringify(result).includes('SECRET TRANSCRIPT'), false);
-  assert.equal(result.metrics.requests, 3);
-  assert.equal(result.pendingReconciliations.status, 'not_read');
+  assert.equal(result.metrics.requests, 4);
+  assert.equal(result.pendingReconciliations.status, 'observed');
   for (const c of f.calls) {
     assert.equal(c.options.method, 'GET'); assert.equal(c.options.redirect, 'error'); assert.equal(c.options.credentials, 'omit');
     assert.equal(c.options.body, undefined);
@@ -58,11 +62,11 @@ test('pagination retains exact source cursor and exposes capped continuation', a
   assert.deepEqual(result.observedThroughBySource.attention.cursor, opaque);
   assert.ok(result.incompleteSources.some(x => x.code === 'page_limit'));
   assert.ok(result.nextReads.some(x => x.action === 'continue_with_returned_cursor'));
-  assert.equal(result.metrics.requests, 4);
+  assert.equal(result.metrics.requests, 5);
 });
 
 test('last fresh authority denial drops all gathered private content and cursors', async () => {
-  const f = transport((url, options, n) => n === 3 ? Response.json({ error: { message: connection.token } }, { status: 403 }) : undefined);
+  const f = transport(url => url.includes('since_version=') ? Response.json({ error: { message: connection.token } }, { status: 403 }) : undefined);
   const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
   assert.deepEqual(result.obligations, []); assert.deepEqual(result.attention, []); assert.deepEqual(result.ownClaims, []);
   assert.deepEqual(result.observedThroughBySource, {});
@@ -85,7 +89,7 @@ test('partial unavailable attention is explicit and current obligations survive'
 });
 
 test('final changed projection replaces stale obligations', async () => {
-  const f = transport((url, options, n) => n === 3 ? context({ context_version: 'c'.repeat(64), focusWork: [] }) : undefined);
+  const f = transport(url => url.includes('since_version=') ? context({ context_version: 'c'.repeat(64), focusWork: [] }) : undefined);
   const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
   assert.deepEqual(result.obligations, []);
   assert.equal(result.contextVersion, 'c'.repeat(64));
@@ -192,7 +196,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, []);
   assert.ok(first.obligations.some(x => x.id === 'task'));
   assert.equal(JSON.stringify(first).includes('private-body-sentinel'), false);
-  assert.equal(first.metrics.requests, 3);
+  assert.equal(first.metrics.requests, 4);
   const rpc = async (method, params) => {
     const response = await fetch(origin + '/room/mcp?profile=full', { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${worker.secret}` },
@@ -247,6 +251,9 @@ test('reply-only resume retains old open requests independently of delta observa
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const config = { origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'reply-worker', token: worker.secret };
   const initial = await resumeAgent({ connection: config });
+  const unified = await resumeAgent({ connection: config });
+  assert.deepEqual(unified.openRequests?.map(request => request.id), ['old-open'], 'default startup retains outstanding requests');
+  assert.ok(unified.obligations.some(work => work.id === 'reply-work'), 'work remains in the same startup packet');
   const fromBeginning = await resumeAgent({ connection: config, focus: 'replies' });
   assert.deepEqual(fromBeginning.openRequests.map(request => request.id), ['old-open']);
   assert.equal(fromBeginning.optionalConversations.some(item => item.id === 'old-open' || item.kind === 'direct_ask'), false);
