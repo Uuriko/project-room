@@ -1,8 +1,11 @@
 // F9 SEC-2b: the raw HTTP /events page and the SSE /stream frames carry the
 // content-trust stamp at the boundary, like the MCP door always did. The
 // stamp lives on the page and on the {sequence, event} wrapper only — the
-// signed event envelope inside is byte-identical to the store's canonical
-// event (sha256-checked below), never re-serialized with extra fields.
+// signed event envelope inside is byte-identical to the canonical event the
+// read path serves (sha256-checked below), never re-serialized with extra
+// fields. Canonical here means the store page after the pre-existing
+// PRIV-1 read fold (redactEventPage: an edited message's envelopes carry
+// its current body), which is the exact input stampEvents receives.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -13,6 +16,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
+import { redactEventPage } from "../server/redact-read.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
@@ -41,7 +45,16 @@ async function serve(t) {
   const postAs = (key, body) => store.command(key, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: body });
   postAs(ownerKey, { messageId: "other-msg", body: "posted by the owner" });
   postAs(agentKey, { messageId: "own-msg", body: "posted by the viewer" });
-  const canonical = store.eventsAfter(ownerKey, "commons", 0, 100);
+  // CURE-4437-TRUST specimen: the classes #4437 missed. The owner rewrites
+  // the viewer's own message (the wrapper's text is now the EDITOR's, so the
+  // edit event must be marked for the viewer even though the original post
+  // was the viewer's own), the owner edits their own message, and the owner
+  // proposes work whose title/definitionOfDone are member text.
+  const commandAs = (key, type, data) => store.command(key, "commons", { id: randomUUID(), type, data });
+  commandAs(ownerKey, T.MESSAGE_EDITED, { messageId: "own-msg", body: "rewritten by the owner", expectedMessageRevision: 0 });
+  commandAs(ownerKey, T.MESSAGE_EDITED, { messageId: "other-msg", body: "the owner's edited text", expectedMessageRevision: 0 });
+  commandAs(ownerKey, T.WORK_PROPOSED, { workItemId: "work-1", title: "Owner's proposed task", definitionOfDone: "the thing is done", accountableMemberId: "agent" });
+  const canonical = redactEventPage(store.eventsAfter(ownerKey, "commons", 0, 100), store.redactionMessages("commons"));
   const canonicalBySequence = new Map(canonical.events.map(entry => [entry.sequence, entry]));
   return { store, get, origin, agentKey, canonicalBySequence };
 }
@@ -66,7 +79,15 @@ test("http /events page is trust-stamped; envelopes stay byte-identical", async 
   assert.equal(other.untrusted, true, "another member's message wrapper is marked untrusted");
   assert.ok(!("untrusted" in own), "the viewer's own message wrapper stays unmarked");
   const memberAdded = page.events.find(({ event }) => event.type === "member.added");
-  assert.ok(!("untrusted" in memberAdded), "non-message wrappers are not marked");
+  assert.ok(!("untrusted" in memberAdded), "label-only wrappers (member.added displayName) are not marked");
+  const roomCreated = page.events.find(({ event }) => event.type === "room.created");
+  assert.ok(roomCreated && !("untrusted" in roomCreated), "the owner-authored room.created wrapper is not marked");
+  const editedOwn = page.events.find(({ event }) => event.type === "message.edited" && event.data?.messageId === "own-msg");
+  assert.equal(editedOwn.untrusted, true, "the owner's rewrite of the viewer's own message is marked by the editor");
+  const editedOther = page.events.find(({ event }) => event.type === "message.edited" && event.data?.messageId === "other-msg");
+  assert.equal(editedOther.untrusted, true, "another member's edit wrapper is marked untrusted");
+  const proposed = page.events.find(({ event }) => event.type === "work.proposed");
+  assert.equal(proposed.untrusted, true, "another member's work.proposed wrapper is marked untrusted");
   assertEnvelopesByteIdentical(page.events, canonicalBySequence);
 });
 
@@ -76,6 +97,8 @@ test("http /events tail branch is trust-stamped too", async t => {
   assert.equal(page.contentTrust, CONTENT_TRUST, "the tail page carries the contentTrust marker");
   const other = page.events.find(({ event }) => event.data?.messageId === "other-msg");
   assert.equal(other.untrusted, true, "another member's message wrapper is marked untrusted on the tail");
+  const proposed = page.events.find(({ event }) => event.type === "work.proposed");
+  assert.equal(proposed.untrusted, true, "another member's work.proposed wrapper is marked untrusted on the tail");
   assertEnvelopesByteIdentical(page.events, canonicalBySequence);
 });
 
@@ -120,12 +143,18 @@ test("sse /stream frames are trust-stamped; envelopes stay byte-identical", asyn
   assert.equal(response.status, 200);
   const frames = await readFramesUntil(response, list =>
     list.some(frame => frame.event?.data?.messageId === "other-msg")
-    && list.some(frame => frame.event?.data?.messageId === "own-msg"));
+    && list.some(frame => frame.event?.data?.messageId === "own-msg")
+    && list.some(frame => frame.event?.type === "message.edited")
+    && list.some(frame => frame.event?.type === "work.proposed"));
   controller.abort();
   const other = frames.find(frame => frame.event?.data?.messageId === "other-msg");
   const own = frames.find(frame => frame.event?.data?.messageId === "own-msg");
   assert.ok(other, "the owner's message arrived as a stream frame");
   assert.equal(other.untrusted, true, "another member's message frame wrapper is marked untrusted");
   assert.ok(own && !("untrusted" in own), "the viewer's own message frame wrapper stays unmarked");
+  const editedOwn = frames.find(frame => frame.event?.type === "message.edited" && frame.event?.data?.messageId === "own-msg");
+  assert.equal(editedOwn.untrusted, true, "the owner's rewrite frame is marked by the editor");
+  const proposed = frames.find(frame => frame.event?.type === "work.proposed");
+  assert.equal(proposed.untrusted, true, "another member's work.proposed frame wrapper is marked untrusted");
   assertEnvelopesByteIdentical(frames, canonicalBySequence);
 });

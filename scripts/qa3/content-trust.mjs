@@ -3,7 +3,10 @@
 // agent-facing read. Surfaces that already stamp stay required. The event
 // tail and SSE frames are stamped at the HTTP/SSE boundary (F9 SEC-2b fix:
 // stampEvents on the /events page and on each pumped batch; the signed
-// event envelope is never touched). Webhook payloads are fenced (Q3-D). Board
+// event envelope is never touched). CURE-4437-TRUST: the /events and SSE
+// cells assert the stamp PER EVENT (the guest's post and the guest's edit
+// wrappers individually), not on the page/frame blob — a page-level marker
+// alone no longer passes them. Webhook payloads are fenced (Q3-D). Board
 // lists are stamped (SEC-2). A guest cannot add a Board review note, so a
 // review-profile member writes the Board marker.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
@@ -137,13 +140,21 @@ try {
   if (stream.status !== 200) throw new Error(`sse open: HTTP ${stream.status}`);
   const framesPromise = collectSse(stream, {
     timeoutMs: 8_000,
-    until: frames => frames.some(frame => frame.text.includes(marker)),
+    until: frames => frames.some(frame => frame.json?.event?.type === "message.edited" && frame.text.includes(marker)),
   });
 
+  const guestMessageId = randomUUID();
   must(await client.request("POST", `${roomPath}/commands`, {
     token: guest.secret,
-    body: cmd("message.posted", { messageId: randomUUID(), body: `@${ownerName} ${marker}` }),
+    body: cmd("message.posted", { messageId: guestMessageId, body: `@${ownerName} ${marker}` }),
   }), "guest message");
+  // CURE-4437-TRUST: an edit is member text too. The per-event cells below
+  // fail unless this message.edited wrapper itself is stamped — a page-level
+  // marker or a stamp on the original post no longer passes them.
+  must(await client.request("POST", `${roomPath}/commands`, {
+    token: guest.secret,
+    body: cmd("message.edited", { messageId: guestMessageId, body: `@${ownerName} ${marker} EDITED`, expectedMessageRevision: 0 }),
+  }), "guest edit");
   const guestNote = await client.request("POST", `${roomPath}/work-claims/trust-claim/review`, {
     token: guest.secret,
     body: { note: marker },
@@ -163,7 +174,24 @@ try {
 
   const events = await client.request("GET", `${roomPath}/events?limit=100`, { token: owner.secret });
   if (events.status !== 200) throw new Error(`events: HTTP ${events.status}`);
-  judge("http /events", events.text, { payload: true, expectedFail: null });
+  // Per-event, not page-level: every marker-bearing message.posted and
+  // message.edited wrapper must itself carry untrusted:true, and at least
+  // one of each must be present so the cell cannot pass vacuously.
+  const eventEntries = events.json?.events ?? [];
+  const markedCount = type => eventEntries.filter(entry =>
+    entry?.event?.type === type && JSON.stringify(entry.event).includes(marker) && entry.untrusted === true).length;
+  const unmarkedText = eventEntries.filter(entry =>
+    ["message.posted", "message.edited"].includes(entry?.event?.type)
+    && JSON.stringify(entry.event).includes(marker) && entry.untrusted !== true).length;
+  const eventsPerEvent = TRUST.test(events.text) && unmarkedText === 0 && markedCount("message.posted") > 0 && markedCount("message.edited") > 0;
+  report.cell({
+    name: "http /events",
+    matched: eventsPerEvent,
+    expectedFail: null,
+    detail: eventsPerEvent
+      ? "page marker present; every marker-bearing post/edit wrapper stamped per-event"
+      : `per-event stamp missing (unmarked text wrappers: ${unmarkedText}, marked posts: ${markedCount("message.posted")}, marked edits: ${markedCount("message.edited")})`,
+  });
 
   const needs = await client.request("GET", "/api/needs-me", { token: owner.secret });
   if (needs.status !== 200) throw new Error(`needs-me: HTTP ${needs.status}`);
@@ -179,7 +207,20 @@ try {
     if (!payload.includes(marker)) await new Promise(resolve => setTimeout(resolve, 200));
   }
   judge("webhook stored payload", payload, { payload: true, expectedFail: null });
-  judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: null });
+  // Per-frame, not blob-level: the frame carrying the guest's post and the
+  // frame carrying the guest's edit must each be stamped on their own
+  // wrapper; a stamp on any other frame no longer passes this cell.
+  const frameMarked = type => frames.some(frame =>
+    frame.json?.event?.type === type && frame.text.includes(marker) && frame.json?.untrusted === true);
+  const ssePerEvent = frameMarked("message.posted") && frameMarked("message.edited");
+  report.cell({
+    name: "sse frame",
+    matched: ssePerEvent,
+    expectedFail: null,
+    detail: ssePerEvent
+      ? "post and edit frames each stamped per-event"
+      : `per-event frame stamp missing (post stamped: ${frameMarked("message.posted")}, edit stamped: ${frameMarked("message.edited")})`,
+  });
 
   exit(report.finish());
 } catch (error) {

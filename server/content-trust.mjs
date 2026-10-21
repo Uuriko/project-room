@@ -149,13 +149,33 @@ export function stampBoard(board) {
   });
 }
 
+// The event types whose payload carries member-authored text an agent reads
+// as content (CURE-4437-TRUST: the full EVENT_TYPES catalogue classified
+// against reducer/producer payload evidence). The wrapper is marked by the
+// envelope actor — the member whose text the event's payload now carries:
+// for message.edited that is the editor, not the original poster; for work
+// events the proposer/updater. Owner-authored orientation events
+// (room.created, room.charter_updated — the annotateOrientation trust
+// "owner" class), label-only events (member displayName, channel slug
+// names) and text-free lifecycle/config events stay unmarked: their
+// payloads carry no prose. A future text-bearing type must be added here;
+// an undecidable one belongs here too (fail closed).
+const MEMBER_TEXT_EVENT_TYPES = new Set([
+  "message.posted", "message.edited", "dm.posted",
+  "work.proposed", "work.blocked", "work.blocker_resolved", "work.completed",
+  "work.superseded", "work.handoff_recorded", "work.help_updated",
+  "work.help_offer_opened", "work.help_offer_updated",
+  "verification.recorded", "owner.decision_recorded", "decision.recorded",
+  "member.status_updated", "capabilities.advertised"
+]);
+
 // Marks the {sequence, event} wrapper. The canonical event body is unchanged.
 export function stampEvents(page, viewerId) {
   if (!page?.events) return page;
   return withContentTrust({
     ...page,
     events: page.events.map(entry => {
-      if (entry?.event?.type !== "message.posted") return entry;
+      if (!MEMBER_TEXT_EVENT_TYPES.has(entry?.event?.type)) return entry;
       return markIfOther(entry, viewerId, entry.event.actorId);
     })
   });
