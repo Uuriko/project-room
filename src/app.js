@@ -684,6 +684,19 @@ function lazyDisclosure({ panel, load, install, onError }) {
   panel.addEventListener("toggle", () => { void sync(); });
   return {
     sync,
+    // #3892: hand the installed view to a caller that arrives before the
+    // install lands (a cold deep link's reveal). Awaits the one install
+    // flight — starting it when disclosed and none has begun — and resolves
+    // null when that flight fails or is superseded by reset, so the caller
+    // answers honestly instead of hanging on an install that never lands.
+    async ready() {
+      if (view) return view;
+      if (!flight && disclosed()) void sync();
+      if (!flight) return null;
+      const pending = flight;
+      try { await pending; } catch { /* sync()'s continuation reports the load error */ }
+      return view;
+    },
     reset() {
       generation++;
       flight = null;
@@ -7826,12 +7839,22 @@ const ready = (async () => {
       // runtime asset; attach is idempotent and survives board repaints.
       import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
         .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
-      navigationBoardReady = () => controller.whenReady();
-      navigationBoardRevealClaim = id => controller.revealClaim(id);
       return controller;
     },
     // JDOT-COH-NAV end
     onError: () => notice("Could not load the board. Close and reopen to retry.", true) });
+  // #3892: wire the navigation hooks before the board module loads, so a
+  // cold deep link or reload has a defined reveal path from the first
+  // frame. Each hook awaits the pending install through board.ready()
+  // instead of the reveal finding no hook assigned and returning early.
+  navigationBoardReady = async () => {
+    const controller = await board.ready();
+    return controller ? controller.whenReady() : false;
+  };
+  navigationBoardRevealClaim = async id => {
+    const controller = await board.ready();
+    return controller ? controller.revealClaim(id) : false;
+  };
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
