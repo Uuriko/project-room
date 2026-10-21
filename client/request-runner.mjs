@@ -174,9 +174,8 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
   while (!signal?.aborted) {
     let cursor = null;
     try {
-      const { requests, evaluatedThrough } = await client.replyRequests({ direction: "incoming", status: "open", signal });
+      const { requests, evaluatedThrough, runs } = await client.agentWork({ signal });
       cursor = evaluatedThrough;
-      const { runs } = requests.length ? await client.requestRuns(undefined, { signal }) : { runs: {} };
       const owned = request => Object.hasOwn(runs, request.id);
       const eligible = requests.filter(request => isRequestEligible(request, {
         owned: owned(request),

@@ -621,6 +621,44 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");
     return withContentTrust(value);
   }
+  // This response authenticates its own principal; a separate snapshot
+  // preflight would duplicate the read. It is never an execution grant.
+  async agentWork({ signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before reading work");
+    let value;
+    try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work`, undefined, signal); }
+    catch (error) {
+      // Older deployments alone use the existing authorized path. Never hide
+      // authentication failures, throttling, malformed data or service errors.
+      if (error.status !== 404 || error.code !== "not_found") throw error;
+      const listing = await this.replyRequests({ direction: "incoming", status: "open", signal });
+      const { runs } = listing.requests.length ? await this.requestRuns(undefined, { signal }) : { runs: {} };
+      return { ...listing, runs };
+    }
+    const member = value?.member, owner = value?.ownerId === this.#memberId;
+    const integer = n => Number.isSafeInteger(n) && n >= 0;
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId
+      || member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !integer(member.revision) || !Array.isArray(member.permissions)
+      || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || new Set(member.permissions).size !== member.permissions.length || typeof member.delegatedAdmin !== "boolean"
+      || (!owner && !member.delegatedAdmin && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))
+      || !validId(value.ownerId) || value.executionGranted !== false || !integer(value.evaluatedThrough)
+      || !integer(value.observedAt) || !Array.isArray(value.requests) || !value.runs || typeof value.runs !== "object" || Array.isArray(value.runs))
+      throw new RoomClientError(200, "invalid_response", "Invalid work observation for the configured agent");
+    const ids = new Set();
+    for (const request of value.requests) {
+      if (!request || !validId(request.id) || ids.has(request.id) || request.recipientId !== this.#memberId
+        || request.status !== "open" || !integer(request.revision))
+        throw new RoomClientError(200, "invalid_response", "Invalid request identity in work observation");
+      ids.add(request.id);
+    }
+    for (const [id, run] of Object.entries(value.runs)) {
+      if (!ids.has(id) || !run || !["working", "unknown", "result_ready", "needs_attention", "delivered"].includes(run.state)
+        || !integer(run.updatedAt)) throw new RoomClientError(200, "invalid_response", "Invalid run observation");
+    }
+    return value;
+  }
   async requestRuns(input, { signal } = {}) {
     const value = await this.#request("/request-runs", input, signal);
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId)
