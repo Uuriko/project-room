@@ -4,14 +4,14 @@
 // refused their verify. #3887's render half rides along: under
 // self_attested the owner closes a delivered claim by their own verify,
 // but the old approval-only gate could never render it for them.
-// canVerifyClaim is the render-side mirror of canCloseWork.
+// canVerifyFromBoard is the render-side mirror of canCloseWork.
 // #3889: the review submit never named expectedBasis, so an identical
 // re-review after the basis moved (new CI head) silently recorded
 // nothing while the board announced "Reviewed". claimReviewBody now
 // names the basis the reviewer read, from the item the form rendered.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boardHtml, canVerifyClaim, claimReviewBody, claimReviewBasis } from "../src/board-ui.js";
+import { boardHtml, canVerifyFromBoard, claimReviewBody, claimReviewBasis } from "../src/board-ui.js";
 
 const NOW = Date.parse("2026-10-16T12:00:00Z");
 const T0 = "2026-10-16T10:00:00.000Z";
@@ -47,32 +47,32 @@ const claim = (id, extra = {}) => ({
 
 test("#3885: independent_principal offers Verify only to an approver holding the verify permission", () => {
   const byRev1 = claim("wc_a", approvedBy("rev-1", { reviewPolicy: "independent_principal" }));
-  assert.equal(canVerifyClaim(byRev1, asViewer("rev-1"), members), false,
+  assert.equal(canVerifyFromBoard(byRev1, asViewer("rev-1"), members), false,
     "approve + review standing but no verify permission: the kernel would refuse — do not offer");
   const byRev2 = claim("wc_b", approvedBy("rev-2", { reviewPolicy: "independent_principal" }));
-  assert.equal(canVerifyClaim(byRev2, asViewer("rev-2"), members), true,
+  assert.equal(canVerifyFromBoard(byRev2, asViewer("rev-2"), members), true,
     "approve + verify permission: offered");
 });
 
 test("distinct_member keeps offering Verify to a standing approver without the verify permission", () => {
   const item = claim("wc_c", approvedBy("rev-1", { reviewPolicy: "distinct_member" }));
-  assert.equal(canVerifyClaim(item, asViewer("rev-1"), members), true);
+  assert.equal(canVerifyFromBoard(item, asViewer("rev-1"), members), true);
 });
 
 test("#3887: self_attested offers Verify to the owner of a delivered claim (no approval exists or can exist)", () => {
   const item = claim("wc_d", { state: "delivered", delivery: deliveredBundle(), deliveryGeneration: 1, reviewPolicy: "self_attested" });
-  assert.equal(canVerifyClaim(item, asViewer("agent-1"), members), true, "the owner is the kernel's closer");
-  assert.equal(canVerifyClaim(item, asViewer("rev-1"), members), false, "nobody else closes a self-attested claim");
+  assert.equal(canVerifyFromBoard(item, asViewer("agent-1"), members), true, "the owner is the kernel's closer");
+  assert.equal(canVerifyFromBoard(item, asViewer("rev-1"), members), false, "nobody else closes a self-attested claim");
 });
 
 test("verify stays unoffered for owners under reviewed policies, stale approvals, and inactive members", () => {
   const item = claim("wc_e", approvedBy("rev-1", { reviewPolicy: "distinct_member" }));
-  assert.equal(canVerifyClaim(item, asViewer("agent-1"), members), false, "the owner never verifies under a reviewed policy");
+  assert.equal(canVerifyFromBoard(item, asViewer("agent-1"), members), false, "the owner never verifies under a reviewed policy");
   const stale = claim("wc_f", approvedBy("rev-1", { reviewPolicy: "distinct_member", delivery: deliveredBundle("b".repeat(64)), deliveryGeneration: 2 }));
-  assert.equal(canVerifyClaim(stale, asViewer("rev-1"), members), false, "a stale-basis approval does not close");
+  assert.equal(canVerifyFromBoard(stale, asViewer("rev-1"), members), false, "a stale-basis approval does not close");
   const byRev3 = claim("wc_g", approvedBy("rev-3", { reviewPolicy: "independent_principal" }));
-  assert.equal(canVerifyClaim(byRev3, asViewer("rev-3"), members), false, "an inactive member is not a reviewer of record");
-  assert.equal(canVerifyClaim(claim("wc_h", { state: "in_progress" }), asViewer("rev-1"), members), false, "delivered only");
+  assert.equal(canVerifyFromBoard(byRev3, asViewer("rev-3"), members), false, "an inactive member is not a reviewer of record");
+  assert.equal(canVerifyFromBoard(claim("wc_h", { state: "in_progress" }), asViewer("rev-1"), members), false, "delivered only");
 });
 
 test("the card HTML follows the gate: no Verify button for the #3885 approver, one for the #3887 owner", () => {

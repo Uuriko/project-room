@@ -355,7 +355,7 @@ function redactRoomMessages(store, roomId, actorId) {
   // it; its event bodies are cleared above, clear its table row here.
   if (archived.length) {
     const archivedAt = at;
-    const clear = store.db.prepare("UPDATE messages SET body=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
+    const clear = store.db.prepare("UPDATE messages SET body=NULL, reducer_extras_json=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
     for (const row of archived) removed += clear.run(archivedAt, roomId, row.id).changes;
   }
   let files = 0;

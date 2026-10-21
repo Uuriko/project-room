@@ -3,7 +3,7 @@
 // the quarantine browser check; this pins the age buckets the cards display.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { quarantineAge } from "../src/inbox-quarantine-ui.js";
+import { quarantineAge } from "../archive/deferred-email/src/inbox-quarantine-ui.js";
 
 test("quarantineAge renders fresh holds as just now", () => {
   const now = Date.now();

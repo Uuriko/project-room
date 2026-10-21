@@ -108,6 +108,11 @@ const deliveredBundle = (digest = DIGEST) => ({
   digest, deliveredBy: "agent-1", deliveredAt: T0,
 });
 const approvedDelivered = (id, extra = {}) => claim(id, {
+  // A reviewed-policy claim: approval-based verify exists only there —
+  // under self_attested the kernel closes owner-only (B4 #3885/#3887
+  // made the board's verify gate policy-aware; the fixture now names
+  // the policy its scenario always modelled).
+  reviewPolicy: "distinct_member",
   state: "delivered",
   // The reviewed-policy scenario this helper builds: a policy-less claim
   // resolves to the kernel's self_attested default, under which only the

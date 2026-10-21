@@ -36,6 +36,9 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // upgrade integrity sweep.
   const expected = invitationJoinedEvent(record);
   if (joined?.data && !("displayNamePolicyVersion" in joined.data)) delete expected.data.displayNamePolicyVersion;
+  // A joined event stamped with an earlier display-name policy (v1 before r50's
+  // v2) is that era's shape too.
+  else if (joined?.data?.displayNamePolicyVersion === 1) expected.data.displayNamePolicyVersion = 1;
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)
