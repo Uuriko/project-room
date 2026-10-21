@@ -30,6 +30,10 @@
           "isSecret": true
         }
       ]
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://room.trydemigod.com/mcp/chatgpt"
     }
   ]
 }
