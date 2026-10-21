@@ -59,7 +59,10 @@ test("default tools/list is the short core profile and every listed name is lega
     roomId: "ada-den", title: "Ada den", purpose: "Core profile", kind: "personal", displayName: "Ada"
   });
 
-  const listed = await rpc(origin, "tools/list", undefined, ada.secret);
+  const lean = await (await rpc(origin, "tools/list", undefined, ada.secret)).json();
+  assert.equal(lean.result.profile, "lean");
+  assert.ok(namesOf(lean).includes("room_search_actions"));
+  const listed = await rpc(origin, "tools/list", { profile: "core" }, ada.secret);
   const body = await listed.json();
   const names = namesOf(body);
   assert.equal(body.result.profile, "core");
@@ -86,7 +89,7 @@ test("default tools/list is the short core profile and every listed name is lega
   // profile stays small for cold agents, with headroom for one more flag.
   assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
 
-  const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
+  const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "core" }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
@@ -294,7 +297,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   store.command(owner.secret, room.roomId, { id: "core-question", type: "message.posted", data: {
     messageId: "core-question", body: "Which result should we use?", toMemberId: recipient.identityId, requestKind: "reply"
   } });
-  const catalog = await (await rpc(origin, "tools/list", undefined, recipient.secret)).json();
+  const catalog = await (await rpc(origin, "tools/list", { profile: "core" }, recipient.secret)).json();
   const advertised = new Set(namesOf(catalog));
   const invoke = async (name, args) => {
     assert.ok(advertised.has(name), `Fresh client cannot invoke unadvertised tool ${name}`);
@@ -366,7 +369,8 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
   const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   assert.equal(defaultAgain.result.focus, undefined);
-  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.equal(defaultAgain.result.profile, "lean");
+  assert.ok(namesOf(defaultAgain).includes("room_search_actions"));
   const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   assert.equal(full.result.focus, undefined);
   assert.ok(namesOf(full).includes("room_propose_work"));

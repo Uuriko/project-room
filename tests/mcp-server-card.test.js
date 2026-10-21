@@ -103,9 +103,9 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   // card's enrolled tier, which advertises the member catalog: the default
   // core list a member bearer gets, derived from the serving registry (#3769).
   assert.deepEqual(bearerTools, listedMcpTools("core", false, null, "public_work"));
-  assert.deepEqual(card.tools.enrolled, listedMcpTools("core", false, null));
-  assert.equal(card.tools.enrolled.length, CORE_MCP_TOOLS.length + MCP_JOIN_TOOLS.length,
-    "enrolled count derives from the registry: core profile plus the join tools");
+  assert.deepEqual(card.tools.enrolled, listedMcpTools("lean", false, null));
+  assert.ok(card.tools.enrolled.some(tool => tool.name === "room_search_actions"),
+    "enrolled tier is the lean default: front door plus room_search_actions");
   assert.ok(card.tools.enrolled.some(tool => tool.name === "room_post_message"),
     "enrolled tier lists hosted room tools");
   assert.notDeepEqual(card.tools.enrolled, bearerTools,
