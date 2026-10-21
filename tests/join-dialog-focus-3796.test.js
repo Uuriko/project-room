@@ -74,8 +74,8 @@ test("#3796: signing in inside the join dialog announces the name step and lands
     const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, openRoom() {} });
     await ui.open({ token: "n".repeat(43) }, { afterSignIn: true });
     assert.equal(dom.node("#join-link-name").value, "priya", "the name is pre-filled from the account email");
-    assert.match(dom.node("#join-link-status").textContent, /You're signed in\. One more step: confirm the name/,
-      "the step and its completion action are announced, not a silent state change");
+    assert.match(dom.node("#join-link-status").textContent, /Account created — you’re signed in\. Step 2 of 2: confirm the name/,
+      "the step and its completion action are announced, not a silent state change (main's catalog copy, join.stepTwo — TRAIN-W25-E composition)");
     assert.match(dom.node("#join-link-status").textContent, /Join room/);
     assert.equal(dom.focused(), "#join-link-name", "focus lands on the name field, not <body>");
   } finally { dom.uninstall(); }

@@ -681,14 +681,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
       if (afterSignIn && account.authenticated && version === joinVersion) {
-        // #3796: reaching the name step by signing in (or creating an
-        // account) inside this dialog used to be a silent state change —
-        // nothing announced that another step was required, and focus
-        // was dropped to <body> when the account form re-rendered. Name
-        // the step and its completion action, and land focus on the
-        // name field. A status applyAccountDefaults already set (the
-        // email-verification hint) is kept.
-        if (!$("#join-link-status").textContent) joinStatus("You're signed in. One more step: confirm the name to show in this room, then choose “Join room”.");
+        // #3796 (TRAIN-W25-E composition): re-land focus on the name field
+        // after the async account defaults settle — the account form's
+        // re-render dropped focus to <body>. The step announcement itself
+        // is main's catalog copy below (uiText("join.stepTwo"), landed by
+        // the front-door batch #3953, with the !returning guard); this
+        // vehicle's earlier hardcoded announcement duplicated it and
+        // shadowed it, so it is dropped in favour of main's.
         $("#join-link-name").focus();
       }
       if (version !== joinVersion) return;
