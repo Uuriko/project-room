@@ -12,7 +12,10 @@ const SCHEMA = `
     client_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     redirect_uris_json TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    -- CURE-4445-DCR: the scope set stored at dynamic registration
+    -- (nullable: provisioned clients carry no per-client scope set).
+    scopes_json TEXT
   );
   CREATE INDEX IF NOT EXISTS oauth_provider_clients_expires ON oauth_provider_clients(expires_at);
 
@@ -98,6 +101,10 @@ export function ensureOAuthProviderSchema(db) {
     if (!tableColumns.includes("agent_identity_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN agent_identity_id TEXT`);
     if (!tableColumns.includes("principal")) db.exec(`ALTER TABLE ${table} ADD COLUMN principal TEXT`);
   }
+  // CURE-4445-DCR: pre-cure client tables gain the stored-scope column
+  // idempotently; nullable, so provisioned rows stay valid with none.
+  const clientColumns = db.prepare("PRAGMA table_info(oauth_provider_clients)").all().map(column => column.name);
+  if (!clientColumns.includes("scopes_json")) db.exec("ALTER TABLE oauth_provider_clients ADD COLUMN scopes_json TEXT");
   ready.add(db);
 }
 
@@ -139,11 +146,12 @@ const flag = value => value ? 1 : 0;
 export function createOAuthProviderSqlite(db) {
   const touch = () => ensureOAuthProviderSchema(db);
   const saveClient = row => db.prepare(
-    `INSERT INTO oauth_provider_clients(client_id,name,redirect_uris_json,expires_at)
-     VALUES(?,?,?,?)
+    `INSERT INTO oauth_provider_clients(client_id,name,redirect_uris_json,expires_at,scopes_json)
+     VALUES(?,?,?,?,?)
      ON CONFLICT(client_id) DO UPDATE SET
-       name=excluded.name, redirect_uris_json=excluded.redirect_uris_json, expires_at=excluded.expires_at`
-  ).run(row.clientId, row.name, JSON.stringify(row.redirectUris), row.expiresAt);
+       name=excluded.name, redirect_uris_json=excluded.redirect_uris_json, expires_at=excluded.expires_at, scopes_json=excluded.scopes_json`
+  ).run(row.clientId, row.name, JSON.stringify(row.redirectUris), row.expiresAt,
+    Array.isArray(row.scopes) ? JSON.stringify(row.scopes) : null);
   const saveCode = row => db.prepare(
     `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id,agent_identity_id,principal)
      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
@@ -172,7 +180,8 @@ export function createOAuthProviderSqlite(db) {
       const row = db.prepare("SELECT * FROM oauth_provider_clients WHERE client_id=?").get(clientId);
       if (!row) return undefined;
       return watch({
-        clientId: row.client_id, name: row.name, redirectUris: scopesOf(row.redirect_uris_json), expiresAt: row.expires_at
+        clientId: row.client_id, name: row.name, redirectUris: scopesOf(row.redirect_uris_json), expiresAt: row.expires_at,
+        scopes: row.scopes_json == null ? null : scopesOf(row.scopes_json)
       }, saveClient);
     },
     set(_clientId, record) { touch(); saveClient(record); return this; },

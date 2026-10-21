@@ -33,7 +33,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { createOAuthProvider, OAUTH_SCOPES } from "../server/oauth-provider.mjs";
+import { createOAuthProvider, OAuthProviderError, OAUTH_SCOPES } from "../server/oauth-provider.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const challengeFor = (origin) =>
@@ -260,11 +260,17 @@ test("provider: dynamic registration mints dcr_ ids, inherits the 30-day TTL, re
   const minted = provider.registerDynamicClient(metadata);
   assert.match(minted.clientId, /^dcr_[A-Za-z0-9_-]{16,64}$/);
   assert.equal(provider.getClient(minted.clientId).name, "Dyn");
-  // A dynamic registration never hands out a provisioned client's id,
-  // even when the metadata copies it exactly.
-  const copycat = provider.registerDynamicClient({ name: "Muse", redirectUris: ["https://muse.ai/oauth/callback"] });
-  assert.notEqual(copycat.clientId, "muse");
-  assert.match(copycat.clientId, /^dcr_/);
+  // A dynamic registration never hands out a provisioned client's id.
+  // CURE-4445-DCR: it never hands out a provisioned client's NAME either —
+  // the copycat registration is refused outright (before this cure it
+  // minted a distinct dcr_ id under the copied name: the impersonation
+  // vector of room seq 17100).
+  let copycatError = null;
+  try { provider.registerDynamicClient({ name: "Muse", redirectUris: ["https://muse.ai/oauth/callback"] }); }
+  catch (error) { copycatError = error; }
+  assert.ok(copycatError instanceof OAuthProviderError);
+  assert.equal(copycatError.code, "invalid_client_metadata");
+  assert.equal(provider.getClient("muse").name, "Muse");
 
   // TTL: live at 29 days; identical re-registration at day 29 returns
   // the same client and refreshes the TTL, so it is still live at day

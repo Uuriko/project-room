@@ -128,8 +128,11 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // is live — the repeat registration returns the same client instead of
   // minting a duplicate. Validation failures carry the RFC 7591 error
   // names; the HTTP door maps them verbatim.
+  // CURE-4445-DCR: a provisioned client's name is reserved here (the
+  // public door must not mint a look-alike of a connector the operator
+  // provisioned), and the accepted scope set is stored on the record.
   const DYNAMIC_CLIENT_PREFIX = "dcr_";
-  const registerDynamicClient = ({ name, redirectUris } = {}) => {
+  const registerDynamicClient = ({ name, redirectUris, scopes } = {}) => {
     const invalidMetadata = message => fail("invalid_client_metadata", message);
     if (typeof name !== "string" || name.length === 0 || name.length > 80) {
       invalidMetadata("client_name must be a non-empty string up to 80 chars");
@@ -147,39 +150,93 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       }
       if (parsed.hash) fail("invalid_redirect_uri", "redirect_uri must not contain a fragment");
     }
+    // CURE-4445-DCR (P2): the accepted scopes are stored on the client
+    // record — until now the door echoed the requested set in the
+    // registration response while nothing stored it. What is stored (and
+    // reported) is the intersection with the server's requestable set:
+    // unsupported scopes are dropped, and a request carrying nothing
+    // requestable refuses, exactly as the door refused unknown scopes
+    // before. No scopes argument means the full requestable set.
+    let storedScopes;
+    if (scopes === undefined) {
+      storedScopes = [...OAUTH_SCOPES];
+    } else {
+      if (!Array.isArray(scopes) || !scopes.every(s => typeof s === "string")) {
+        invalidMetadata("scope must be an array of scope strings");
+      }
+      storedScopes = [...new Set(scopes.filter(s => OAUTH_SCOPES.includes(s)))];
+      if (storedScopes.length === 0) {
+        invalidMetadata("scope must include at least one scope this server supports");
+      }
+    }
+    // CURE-4445-DCR (P1): a provisioned client's name is reserved at this
+    // public door. The reserved set is derived from the registry itself —
+    // every live-or-dormant record whose id the dynamic door did not mint
+    // (no `dcr_` prefix) is a provisioned client, registered by the
+    // operator through registerClient — so the set can never drift from
+    // the provisioned registry the way a hand-typed list would. Matching
+    // is case-insensitive and ignores surrounding whitespace. The check
+    // runs over the whole registry before any identical-re-registration
+    // is honoured, so a pre-cure copycat record cannot refresh its way
+    // past the reservation.
+    const normalizeName = value => value.trim().toLowerCase();
+    const wantedName = normalizeName(name);
+    let identical = null;
     if (typeof clientStore.values === "function") {
       for (const existing of clientStore.values()) {
         if (!existing || typeof existing.clientId !== "string") continue;
-        if (!existing.clientId.startsWith(DYNAMIC_CLIENT_PREFIX)) continue;
+        if (!existing.clientId.startsWith(DYNAMIC_CLIENT_PREFIX)) {
+          if (typeof existing.name === "string" && normalizeName(existing.name) === wantedName) {
+            invalidMetadata("client_name matches a provisioned client; that name is reserved");
+          }
+          continue;
+        }
         if (isExpired(existing, now)) continue;
         const sameName = existing.name === name;
         const sameUris = existing.redirectUris.length === redirectUris.length
           && existing.redirectUris.every((uri, index) => uri === redirectUris[index]);
-        if (!sameName || !sameUris) continue;
-        const issuedAt = existing.issuedAt ?? (existing.expiresAt - CLIENT_TTL_MS);
-        existing.expiresAt = now() + CLIENT_TTL_MS;
-        clientStore.set(existing.clientId, existing);
-        return Object.freeze({
-          clientId: existing.clientId, name, redirectUris: Object.freeze([...redirectUris]), issuedAt,
-        });
+        if (sameName && sameUris) identical = existing;
       }
+    }
+    if (identical) {
+      const issuedAt = identical.issuedAt ?? (identical.expiresAt - CLIENT_TTL_MS);
+      identical.expiresAt = now() + CLIENT_TTL_MS;
+      // A refresh with an explicit scope set replaces the stored set;
+      // without one the stored set (or the full set, for a pre-cure
+      // record that has none) stands.
+      identical.scopes = scopes === undefined
+        ? (Array.isArray(identical.scopes) ? identical.scopes : [...OAUTH_SCOPES])
+        : [...storedScopes];
+      clientStore.set(identical.clientId, identical);
+      return Object.freeze({
+        clientId: identical.clientId, name, redirectUris: Object.freeze([...redirectUris]), issuedAt,
+        scopes: Object.freeze([...identical.scopes]),
+      });
     }
     let clientId;
     do { clientId = DYNAMIC_CLIENT_PREFIX + newSecret(18); } while (clientStore.get(clientId));
     const issuedAt = now();
     const client = {
       clientId, name, redirectUris: Object.freeze([...redirectUris]),
-      expiresAt: issuedAt + CLIENT_TTL_MS, issuedAt,
+      expiresAt: issuedAt + CLIENT_TTL_MS, issuedAt, scopes: Object.freeze([...storedScopes]),
     };
     clientStore.set(clientId, client);
-    return Object.freeze({ clientId, name, redirectUris: client.redirectUris, issuedAt });
+    return Object.freeze({
+      clientId, name, redirectUris: client.redirectUris, issuedAt,
+      scopes: Object.freeze([...storedScopes]),
+    });
   };
 
   const getClient = clientId => {
     const client = clientStore.get(clientId);
     if (!client) return null;
     if (isExpired(client, now)) { clientStore.delete(clientId); return null; }
-    return Object.freeze({ clientId: client.clientId, name: client.name, redirectUris: Object.freeze([...client.redirectUris]) });
+    return Object.freeze({
+      clientId: client.clientId, name: client.name, redirectUris: Object.freeze([...client.redirectUris]),
+      // The scope set stored at registration (dynamic clients); null for
+      // provisioned clients, which carry no per-client scope set.
+      scopes: Array.isArray(client.scopes) ? Object.freeze([...client.scopes]) : null,
+    });
   };
 
   const validateScopes = scopes => {
