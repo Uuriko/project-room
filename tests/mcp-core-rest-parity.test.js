@@ -32,7 +32,17 @@ export const CORE_REST_TWINS = Object.freeze({
   add_land_item: ["POST /api/rooms/{roomId}/add_land_item"],
   list_land_queue: ["GET /api/rooms/{roomId}/list_land_queue"],
   wake_pause: ["POST /api/rooms/{roomId}/agent-pause"],
-  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"]
+  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"],
+  room_list_work: ["GET /api/rooms/{roomId}/work-claims"],
+  room_acquire_claim: [commands, { event: "claim.acquired" }],
+  room_release_claim: [commands, { event: "claim.released" }],
+  room_search: ["GET /api/rooms/{roomId}/search"],
+  room_who: ["GET /api/rooms/{roomId}/presence"],
+  room_read_work: ["GET /api/rooms/{roomId}/work-context"],
+  room_begin_work: [commands, { event: "work.started" }],
+  room_submit_text_result: [commands, { event: "work.completed" }],
+  room_record_handoff: [commands, { event: "work.handoff_recorded" }],
+  room_propose_work: [commands, { event: "work.proposed" }]
 });
 
 // Static join documents, served as plain files rather than API routes.
@@ -42,6 +52,7 @@ export const CORE_REST_EXEMPT = Object.freeze({
   room_join_prompt: "the one-paste door prompt (/join.txt), a static document",
   room_mcp_snippet: "host config snippets for this MCP URL, a static document",
   room_search_actions: "MCP-only discovery aid; REST discovery is docs/openapi.yaml itself",
+  room_read_many: "MCP-only batch of reads that each have a REST twin (search, files); saves round trips",
   room_run_action: "MCP-only wrapper that re-enters tools/call; every wrapped tool has its own twin"
 });
 

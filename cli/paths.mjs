@@ -1,10 +1,16 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 
 export function homeOf(env = process.env) {
   return env.HOME || homedir();
+}
+
+// Codex reads its config from $CODEX_HOME when set, else ~/.codex.
+export function codexHomeOf(env = process.env) {
+  const custom = typeof env.CODEX_HOME === "string" ? env.CODEX_HOME.trim() : "";
+  return custom && isAbsolute(custom) ? custom : join(homeOf(env), ".codex");
 }
 
 export function connectionsRoot(env = process.env) {
