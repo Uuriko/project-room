@@ -416,7 +416,8 @@ const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
 const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
-const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema });
+const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob });
+const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema, schemaSource: fenceProof(schema, recoveryRevision) });
 
 test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
   const directory = tempDir(t, "recovery-command-");
@@ -448,7 +449,7 @@ process.exit(17);
 test("rollback schema gate rejects lower and unknown schemas without executing old code", async () => {
   for (const previous of [previousWorker(37), previousWorker(null), { ...previousWorker(38), known: false }, { ...previousWorker(38), sourceRevision: "unstamped" }]) {
     let calls = 0;
-    const report = await recoverWorkers({ targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previous, entry: previous }, { prod: true, entry: true }, {
+    const report = await recoverWorkers({ targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, candidateSchemaSource: fenceProof(38), prod: previous, entry: previous }, { prod: true, entry: true }, {
       status: async () => recoveryAllocation(recoveryNew), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("must not read back unattempted rollback"); },
     });
     assert.equal(calls, 0);
@@ -456,12 +457,33 @@ test("rollback schema gate rejects lower and unknown schemas without executing o
     assert.equal(report.workers.prod.rollbackAttempted, false);
     assert.doesNotMatch(recoveryDescription(report), /rolled back|ROLLBACK VERIFIED/);
   }
-  assert.equal(rollbackDecision(previousWorker(38), 38).eligible, true);
-  assert.match(rollbackDecision(previousWorker(38), 38).reason, /compatibility is not established/);
+  assert.equal(rollbackDecision(previousWorker(38), 38, fenceProof(38)).eligible, true);
+  assert.match(rollbackDecision(previousWorker(38), 38, fenceProof(38)).reason, /compatibility is not established/);
+});
+
+test("rollback requires consistent exact source evidence, including same-schema changes", async () => {
+  const previous = previousWorker(42), candidate = fenceProof(42);
+  for (const proof of [undefined, {}, { ...candidate, blob: "invalid" }, { ...candidate, version: 41 },
+    { ...candidate, revision: "unknown" }, { ...candidate, blob: "e".repeat(40) }]) {
+    assert.equal(rollbackDecision(previous, 42, proof).eligible, false);
+  }
+  for (const proof of [undefined, { ...previous.schemaSource, revision: "c".repeat(40) },
+    { ...previous.schemaSource, version: 41 }, { ...previous.schemaSource, blob: "invalid" }]) {
+    assert.equal(rollbackDecision({ ...previous, schemaSource: proof }, 42, candidate).eligible, false);
+  }
+  assert.equal(rollbackDecision(previous, 42, candidate).eligible, true);
+  let calls = 0;
+  const report = await recoverWorkers({ targetSha: "c".repeat(40), candidateCodeSchemaVersion: 42,
+    candidateSchemaSource: candidate, prod: previous, entry: previous }, { prod: true }, {
+    status: async () => recoveryAllocation(recoveryNew), rollback: async () => { calls++; },
+    readVersion: async () => { throw new Error("must not roll back mismatched candidate evidence"); }
+  });
+  assert.equal(calls, 0);
+  assert.equal(report.status, "ROLL FORWARD REQUIRED");
 });
 
 test("recovery distinguishes no upload, verified rollback and failed/unverified commands", async () => {
-  const snapshot = { targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previousWorker(38), entry: previousWorker(37) };
+  const snapshot = { targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, candidateSchemaSource: fenceProof(38), prod: previousWorker(38), entry: previousWorker(37) };
   let calls = 0;
   const noChange = await recoverWorkers(snapshot, { prod: true, entry: false }, {
     status: async () => recoveryAllocation(recoveryOld), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("no upload needs no readback"); },
@@ -518,17 +540,18 @@ test("actual production workflow captures schemas before uploads and uses guarde
 });
 
 import { createServer } from "node:http";
-test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
+for (const [previousVersion, candidateVersion] of [[37, 38], [42, 42]])
+test(`actual recovery CLI refuses ${previousVersion}-to-${candidateVersion} fallback with changed table definitions`, async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
   mkdirSync(join(dir, "server")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
   // The extensionless fake pnpm is CommonJS even under repository-local TMPDIR.
   writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "commonjs" }));
   const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
   await git(["init", "--quiet"]);
-  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 37;\n");
+  writeFileSync(join(dir, "server/writer-fence.mjs"), `export const STORE_SCHEMA_VERSION = ${previousVersion};\n`);
   await git(["add", "."]); await git(["commit", "--quiet", "-m", "previous37"]);
   const oldSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
-  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 38;\n");
+  writeFileSync(join(dir, "server/writer-fence.mjs"), `export const STORE_SCHEMA_VERSION = ${candidateVersion};\nexport const addedTable = "mention_observations";\n`);
   await git(["add", "."]); await git(["commit", "--quiet", "-m", "candidate38"]);
   const targetSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
   writeFileSync(join(dir, "bin/pnpm"), `#!/usr/bin/env node
@@ -548,13 +571,13 @@ const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.en
   delete env.GITHUB_OUTPUT; delete env.GITHUB_STEP_SUMMARY;
   await execFileAsync(process.execPath, [cli, "snapshot", pre], { cwd: dir, env });
   const snapshot = JSON.parse(readFileSync(pre, "utf8"));
-  assert.equal(snapshot.candidateCodeSchemaVersion, 38);
+  assert.equal(snapshot.candidateCodeSchemaVersion, candidateVersion);
   assert.equal(snapshot.prod.versionId, recoveryOld);
   assert.equal(snapshot.prod.sourceRevision, oldSha);
-  assert.equal(snapshot.prod.codeSchemaVersion, 37);
+  assert.equal(snapshot.prod.codeSchemaVersion, previousVersion);
   assert.equal(snapshot.prod.automaticRollback.eligible, false);
   assert.equal(snapshot.entry.sourceRevision, targetSha);
-  assert.equal(snapshot.entry.codeSchemaVersion, 38);
+  assert.equal(snapshot.entry.codeSchemaVersion, candidateVersion);
   assert.ok(snapshot.prod.schemaSource.blob);
   await assert.rejects(execFileAsync(process.execPath, [cli, "recover", pre, recovery], { cwd: dir, env: { ...env, PROD_OUTCOME: "success", ENTRY_OUTCOME: "skipped", STATUS_PHASE: "new" } }), error => error.code === 1);
   const report = JSON.parse(readFileSync(recovery, "utf8"));
