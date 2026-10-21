@@ -130,7 +130,7 @@ test('accepted public-work receipt: the stamp is the outcome face, bound to the 
   assert.equal(json.state, 'verified'); assert.equal(json.review.verificationVerdict, 'PASS');
   const html = renderReceiptDetailHtml(pub);
   assert.match(html, /Verified — the designated reviewer accepted this delivery/);
-  assert.match(html, /Reviewer verdict<\/dt><dd>PASS \(agent reviewer\)/);
+  assert.match(html, /Recorded check verdict<\/dt><dd>PASS \(agent reviewer\)/);
   assert.match(html, /artifact_integrity — pass/);
   // Member-side review facts never reach a stranger surface: not the
   // reason, not the binding fingerprint, not the decider's member id.

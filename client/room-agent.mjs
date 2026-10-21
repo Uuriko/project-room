@@ -15,9 +15,10 @@ import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
-import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../src/service-origin.js";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -620,6 +621,55 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");
     return withContentTrust(value);
   }
+  // This response authenticates its own principal; a separate snapshot
+  // preflight would duplicate the read. It is never an execution grant.
+  async agentWork({ signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before reading work");
+    let value;
+    try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work`, undefined, signal); }
+    catch (error) {
+      // Older deployments alone use the existing authorized path. Never hide
+      // authentication failures, throttling, malformed data or service errors.
+      if (error.status !== 404 || error.code !== "not_found") throw error;
+      const listing = await this.replyRequests({ direction: "incoming", status: "open", signal });
+      const { runs } = listing.requests.length ? await this.requestRuns(undefined, { signal }) : { runs: {} };
+      return { ...listing, runs };
+    }
+    const member = value?.member, owner = value?.ownerId === this.#memberId;
+    const integer = n => Number.isSafeInteger(n) && n >= 0;
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId
+      || member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !integer(member.revision) || !Array.isArray(member.permissions)
+      || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || new Set(member.permissions).size !== member.permissions.length || typeof member.delegatedAdmin !== "boolean"
+      || (!owner && !member.delegatedAdmin && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))
+      || !validId(value.ownerId) || value.executionGranted !== false || !integer(value.evaluatedThrough)
+      || !integer(value.observedAt) || !Array.isArray(value.requests) || !value.runs || typeof value.runs !== "object" || Array.isArray(value.runs))
+      throw new RoomClientError(200, "invalid_response", "Invalid work observation for the configured agent");
+    const ids = new Set();
+    for (const request of value.requests) {
+      if (!request || !validId(request.id) || ids.has(request.id) || request.recipientId !== this.#memberId
+        || request.status !== "open" || !integer(request.revision))
+        throw new RoomClientError(200, "invalid_response", "Invalid request identity in work observation");
+      ids.add(request.id);
+    }
+    // Optional for older servers. Unknown future reasons still mean blocked;
+    // malformed metadata must never silently turn into permission to prepare.
+    if (Object.hasOwn(value, "blockedBy")) {
+      const blockers = value.blockedBy;
+      if (!blockers || typeof blockers !== "object" || Array.isArray(blockers)
+        || Object.entries(blockers).some(([id, reasons]) => !ids.has(id)
+          || !Array.isArray(reasons) || reasons.length === 0
+          || reasons.some(reason => typeof reason !== "string" || !reason.trim())
+          || new Set(reasons).size !== reasons.length))
+        throw new RoomClientError(200, "invalid_response", "Invalid blockers in work observation");
+    }
+    for (const [id, run] of Object.entries(value.runs)) {
+      if (!ids.has(id) || !run || !["working", "unknown", "result_ready", "needs_attention", "delivered"].includes(run.state)
+        || !integer(run.updatedAt)) throw new RoomClientError(200, "invalid_response", "Invalid run observation");
+    }
+    return value;
+  }
   async requestRuns(input, { signal } = {}) {
     const value = await this.#request("/request-runs", input, signal);
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId)
@@ -954,7 +1004,20 @@ export class RoomAgentClient {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
-  activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
+  activationPack({ view = "full", signal } = {}) {
+    if (view !== "full" && view !== "brief") throw new RoomClientError(0, "invalid_view", "Use full or brief activation view");
+    return this.#request(`/activation-pack${view === "brief" ? "?view=brief" : ""}`, undefined, signal);
+  }
+  // One bounded summary read after the existing connection preflight. `next`
+  // is the observed head, not an acknowledgement or a complete event page.
+  async roomDigest({ since = 0, signal } = {}) {
+    if (!Number.isSafeInteger(since) || since < 0) throw new RoomClientError(0, "invalid_cursor", "since must be a nonnegative safe sequence number");
+    const value = await this.#request(`/digest?since=${since}`, undefined, signal);
+    if (!validRoomDigest(value, { roomId: this.#roomId, memberId: this.#memberId, since })) {
+      throw new RoomClientError(200, "invalid_response", "Room digest does not match its identity, coverage or bounded summary contract");
+    }
+    return value;
+  }
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.

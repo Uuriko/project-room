@@ -129,7 +129,7 @@ test("reader uses current disconnected connection state, not the source's histor
 });
 test("HTTP email view is explicit, private, no-store and refuses unknown negotiations", async t => {
   const f = fixture(t); f.configure(); f.apply(f.page());
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -156,7 +156,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 38);
+  assert.equal(auditRecovery(f.store).schemaVersion, 42);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);
