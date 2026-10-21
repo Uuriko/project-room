@@ -102,7 +102,7 @@ for (const [name, fetchImpl] of Object.entries(failedReads)) {
     const status = await readBoardDeployStatus(store, { fetchImpl, token: null, nowMs: 1_750_000_000_000, force: true });
     assert.equal(status.main, SHA_OLD, "the cached main is still reported");
     assert.equal(status.stale, true, "a fallback to the cache is stale");
-    assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Deploy status unknown", "no false mismatch from a stale cache");
+    assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Deploy status unknown — the last check could not complete, so this may be out of date", "no false mismatch from a stale cache");
   });
 }
 
@@ -129,6 +129,6 @@ for (const name of ["403", "thrown fetch", "5xx"]) {
     const second = await readBoardDeployStatus(store, { fetchImpl: failedReads[name], token: null, nowMs: nowMs + 5_000 });
     assert.equal(second.main, SHA_OLD);
     assert.equal(second.stale, true, "the window reuses the failed read, so the cache is still stale");
-    assert.equal(chipFor({ ...second, live: SHA_LIVE }), "Deploy status unknown");
+    assert.equal(chipFor({ ...second, live: SHA_LIVE }), "Deploy status unknown — the last check could not complete, so this may be out of date");
   });
 }

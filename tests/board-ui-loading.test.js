@@ -423,6 +423,16 @@ test("deploy chip: both shas known and different is its own state, not unknown",
 test("deploy chip: a missing sha, no status, or a held (stale) read stays unknown", () => {
   for (const status of [null, {}, { live: SHA_A, main: null, behind: null }, { live: null, main: SHA_B, behind: null },
     { live: "unstamped", main: SHA_B, behind: null }, { live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }]) {
-    assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
+    assert.match(liveChip(status), /^Deploy status unknown/, JSON.stringify(status));
   }
+});
+
+// UT-HUMAN-WEB leg 4: "unknown" alone teaches nothing — the chip names the
+// reason the payload already carries, without ever inventing a mismatch.
+test("deploy chip: unknown names its reason", () => {
+  assert.equal(liveChip(null), "Deploy status unknown — not checked yet");
+  assert.equal(liveChip({ live: SHA_A, main: null, behind: null }), "Deploy status unknown — not checked yet");
+  assert.equal(liveChip({ live: "unstamped", main: SHA_B, behind: null }), "Deploy status unknown — this build is not stamped with a revision");
+  assert.equal(liveChip({ live: SHA_A, main: SHA_B, behind: null, stale: true }), "Deploy status unknown — the last check could not complete, so this may be out of date");
+  assert.equal(liveChip({ live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }), "Deploy status unknown — the check is paused while the GitHub budget is held");
 });

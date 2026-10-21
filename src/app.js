@@ -58,7 +58,7 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
-import { paintClaimChat } from "./board-ui.js";
+import { paintClaimChat, placeClaims } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
@@ -6019,6 +6019,38 @@ const actionSpecs = {
 // stays as a seam for callers: "results" opens Settings at Results.
 // Overview is a read-only projection of the authorized room snapshot. Keep
 // discussion and work canonical: each entry opens the existing source surface.
+// The board the human sees is the work-claims board, a separate store from
+// the snapshot's work items: an overview that counts only work items says
+// "0 of 0" while the board holds active claims (UT-HUMAN-WEB leg 4, the
+// starter claim specimen). The overview therefore reads the board claims
+// for the open room and counts both stores; the read is cached per room
+// and refreshed on each overview opening, never on a render tick.
+let overviewBoard = { roomId: null, claims: null, flight: null, failedRoom: null };
+async function refreshOverviewBoard(roomId) {
+  if (overviewBoard.flight) return overviewBoard.flight;
+  const flight = (async () => {
+    try {
+      const claims = [];
+      let cursor = null;
+      for (let page = 0; page < 20; page += 1) {
+        const query = new URLSearchParams({ limit: "200" });
+        if (cursor) query.set("cursor", cursor);
+        const body = await client.request(client.path(`/work-claims?${query}`));
+        claims.push(...(body.claims ?? []));
+        if (!body.nextCursor) break;
+        cursor = body.nextCursor;
+      }
+      if (state?.room?.id === roomId) overviewBoard = { roomId, claims, flight: null, failedRoom: null };
+    } catch {
+      // A failed board read must not invent a count: the overview falls
+      // back to the work-item count for this opening and retries next time.
+      if (state?.room?.id === roomId) overviewBoard = { roomId: null, claims: null, flight: null, failedRoom: roomId };
+    }
+    if ($("#room-overview-dialog").open) renderRoomOverview();
+  })();
+  overviewBoard.flight = flight;
+  return flight;
+}
 function renderRoomOverview() {
   if (!state || !$("#room-overview-dialog").open) return;
   setText("#room-overview-title", `${state.room.title} · Overview`);
@@ -6029,16 +6061,33 @@ function renderRoomOverview() {
   const decisions = orientation.recentDecisions;
   const results = completedResults(state).slice(0, 3);
   const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
+  // Board claims active on the board (every placed column except Landed),
+  // in board order; the starter claim reads with its real claim state and
+  // claimant, never as generic "work".
+  const roomId = state.room?.id;
+  if (overviewBoard.roomId !== roomId && overviewBoard.failedRoom !== roomId) void refreshOverviewBoard(roomId);
+  const placed = overviewBoard.roomId === roomId && overviewBoard.claims ? placeClaims(overviewBoard.claims, Date.now()) : null;
+  const boardActive = placed ? [...placed.ready, ...placed.claimed, ...placed.blocked, ...placed.review] : [];
+  const boardShown = boardActive.slice(0, 3);
+  const claimStateLabel = item => item.owner
+    ? `${item.state === "in_progress" ? "In progress" : "Claimed"} by ${state.members[item.owner]?.displayName ?? item.owner}`
+    : item.state === "unclaimed" ? "Ready — unclaimed" : item.state.replaceAll("_", " ");
+  const claimUpdated = item => item.history?.at?.(-1)?.at ?? item.updatedAt ?? "";
+  const activeRows = [
+    ...orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`),
+    ...boardShown.map(item => `<li><button type="button" class="text-button" data-open-board-claim="${esc(item.id)}" data-focus-key="overview:claim:${esc(item.id)}">${esc(item.title)}</button><p class="form-hint">Board · ${esc(claimStateLabel(item))}${claimUpdated(item) ? ` · ${esc(time(claimUpdated(item)))}` : ""}</p></li>`)
+  ];
   renderContent("#room-overview-content",
     (orientation.purposeSource.kind === "instructions" ? `<p class="form-hint">Room instructions · version ${orientation.purposeSource.revision} · ${esc(time(orientation.purposeSource.updatedAt))}</p>` : "")
     + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
-    + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
+    + section(`Active work · ${orientation.activeWork.length + boardShown.length} of ${orientation.activeWorkTotal + boardActive.length}`, activeRows, "No active work yet. Start with a conversation.")
     + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
     + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here.")
     + `<section><h3>All results</h3><p><button type="button" class="text-button" data-open-results>Open the room's Results</button></p></section>`);
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
+  overviewBoard.failedRoom = null;
   $("#room-overview-dialog").showModal();
   renderRoomOverview();
 });
@@ -6046,8 +6095,15 @@ $("#room-overview-close").addEventListener("click", () => {
   $("#room-overview-dialog").close();
   $("#room-overview-open").focus({ preventScroll: true });
 });
-$("#room-overview-content").addEventListener("click", event => {
-  if (event.target.closest("[data-open-results]")) { $("#room-overview-dialog").close(); selectWorkView("results"); }
+$("#room-overview-content").addEventListener("click", async event => {
+  if (event.target.closest("[data-open-results]")) { $("#room-overview-dialog").close(); selectWorkView("results"); return; }
+  const claimButton = event.target.closest("[data-open-board-claim]");
+  if (claimButton) {
+    const id = claimButton.dataset.openBoardClaim;
+    $("#room-overview-dialog").close();
+    $("#tasks-board-open").click();
+    if (await navigationBoardReady?.()) await navigationBoardRevealClaim?.(id);
+  }
 });
 $("#room-overview-dialog").addEventListener("click", event => {
   // Close before the existing source-link handler moves focus to the timeline.

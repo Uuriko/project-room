@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createResultsFixture } from './results-fixture.mjs';
+import { createWork, claimWork } from '../server/work-claims.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { signInFixture } from './auth-signin.mjs';
@@ -14,6 +15,11 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   f.send('owner', T.CHANNEL_CREATED, { channelId: 'planning', name: 'planning' });
   f.send('owner', T.MESSAGE_POSTED, { messageId: 'planning-note', channelId: 'planning', body: 'The launch plan.' });
   f.send('owner', T.DECISION_RECORDED, { sourceMessageId: 'planning-note', statement: 'Ship a small, useful first version.' });
+  // UT-HUMAN-WEB leg 4 specimen: the board's starter claim is a work claim,
+  // not a snapshot work item. The overview counter must count it and read
+  // its claim state truthfully instead of saying "0 of 0" beside it.
+  const starterItem = createWork({ id: 'starter', title: 'Post your plan, then close this task' }, { now: f.store.now(), agentId: 'owner' });
+  f.store.workClaims.set('commons', claimWork(starterItem, 'owner', { leaseHours: 2, now: f.store.now() }));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
@@ -38,6 +44,10 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   const section = heading => dialog.locator('section').filter({ has: page.locator('h3', { hasText: heading }) });
   assert.equal(await section('Recent results').locator('[data-open-work="pending-result"]').count(), 0, 'unverified completion is not presented as a finished result');
   assert.equal(await section(/^Active work/).locator('[data-open-work="pending-result"]').count(), 1, 'a result still waiting on review stays visible as active work');
+  await page.waitForFunction(() => document.querySelector('#room-overview-content')?.textContent.includes('Post your plan, then close this task'));
+  assert.match(await section(/^Active work/).locator('h3').textContent(), /Active work · 2 of 2/, 'the counter counts the board claim beside the work item');
+  assert.match(await section(/^Active work/).textContent(), /Board · Claimed by/, 'the starter claim reads with its real claim state and claimant');
+  assert.equal(await section(/^Active work/).locator('[data-open-board-claim="starter"]').count(), 1, 'the starter claim row opens the board claim');
   assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   mkdirSync('test-results/room-overview', { recursive: true });

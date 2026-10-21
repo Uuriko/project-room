@@ -216,7 +216,14 @@ function liveLabel(status) {
   if (status && status.behind === 0) return "Live matches main";
   if (status && typeof status.behind === "number" && status.behind > 0) return "Live is behind main";
   if (status && !status.stale && FULL_SHA.test(status.live ?? "") && FULL_SHA.test(status.main ?? "") && status.live !== status.main) return uiText("board.live.differs");
-  return "Deploy status unknown";
+  // Unknown must say why (UT-HUMAN-WEB leg 4): the status payload already
+  // carries the reason — a held or failed check, an unstamped build, or no
+  // completed check yet. Naming the reason never invents a mismatch: a
+  // stale read still never reads as "differs".
+  if (status?.stale && status.heldUntil) return "Deploy status unknown — the check is paused while the GitHub budget is held";
+  if (status?.stale) return "Deploy status unknown — the last check could not complete, so this may be out of date";
+  if (status && !FULL_SHA.test(status.live ?? "")) return "Deploy status unknown — this build is not stamped with a revision";
+  return "Deploy status unknown — not checked yet";
 }
 
 // room_read_board / room_acquire_claim / room_renew_claim / room_release_claim
