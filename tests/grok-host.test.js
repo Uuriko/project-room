@@ -1041,3 +1041,43 @@ test("successful process exit without a reply never acknowledges a wake", async 
   assert.deepEqual(handlers.acks, []);
   assert.deepEqual(readJournalFile(join(directory, "grok-host-journal.json")).handled, {});
 });
+
+test("pull reads past unacknowledged first wake page without consuming signals", async t => {
+  const directory = fixtureDir();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const requests = [];
+  const fetchImpl = async (url, opts = {}) => {
+    const u = new URL(url);
+    requests.push({ path: u.pathname, cursor: u.searchParams.get('cursor'), method: opts.method || 'GET' });
+    let body = { claims: [], directMentions: [] };
+    if (u.pathname === '/api/agent-heartbeats') body = { host: { hostId: 'grok-build' }, pendingWakes: Array.from({ length: 50 }, (_, i) => ({ signalId: `sig-${i}`, kind: 'mention', roomId: 'den', messageId: `msg-${i}` })), more: true };
+    if (u.pathname === '/api/agent-wakes/poll' && !u.searchParams.has('cursor')) body = { pendingWakes: Array.from({ length: 50 }, (_, i) => ({ signalId: `sig-${i}`, kind: 'mention', roomId: 'den', messageId: `msg-${i}` })), more: true, nextCursor: 'page-two' };
+    if (u.pathname === '/api/agent-wakes/poll' && u.searchParams.has('cursor')) {
+      assert.equal(u.searchParams.get('hostId'), 'grok-build');
+      assert.equal(u.searchParams.get('waitMs'), '0');
+      assert.equal(u.searchParams.get('cursor'), 'page-two');
+      body = { pendingWakes: [{ signalId: 'sig-50', kind: 'mention', roomId: 'den', messageId: 'msg-50' }], more: false, nextCursor: null };
+    }
+    if (u.pathname === '/api/needs-me') body = needsMe([]);
+    return Response.json(body);
+  };
+  const result = await pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl });
+  assert.equal(result.planned.length, 51);
+  assert.equal(result.planned.at(-1).item.id, 'msg-50');
+  assert.equal(result.pendingWakes, 51);
+  assert.equal(requests.some(r => r.path.endsWith('/ack')), false);
+});
+
+test("pull rejects missing or cycling wake cursors before execution", async t => {
+  for (const nextCursor of [null, 'repeated']) {
+    const directory = fixtureDir();
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    let runs = 0;
+    const fetchImpl = async url => {
+      if (new URL(url).pathname === '/api/needs-me') return Response.json(needsMe([]));
+      return Response.json({ host: { hostId: 'grok-build' }, pendingWakes: [{ signalId: 'sig-1', kind: 'mention', roomId: 'den', messageId: 'msg-1' }], more: true, nextCursor });
+    };
+    await assert.rejects(pull({ env: { ROOM_AGENT_CONFIG: directory }, fetchImpl, execute: true, runner: async () => { runs++; return { code: 0 }; } }), error => error.code === 'invalid_wake_cursor');
+    assert.equal(runs, 0);
+  }
+});

@@ -161,13 +161,38 @@ async function readNeedsMe(connection, { fetchImpl = fetch, since } = {}) {
   return parseNeedsMeBody(parsed);
 }
 
-async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env } = {}) {
+async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env, drain = false } = {}) {
   const hostId = hostIdFor(env);
   const parsed = await jsonRequest(connection, "/api/agent-heartbeats", {
     fetchImpl, method: "POST",
     body: { hostId, mode: "pull-only", cadenceSeconds: 60 }
   });
-  const pending = Array.isArray(parsed.pendingWakes) ? parsed.pendingWakes : [];
+  const pending = Array.isArray(parsed.pendingWakes) ? [...parsed.pendingWakes] : [];
+  // Registration observes only the first page. Unacknowledged signals stay
+  // there until actual completion, so reading that page repeatedly can starve
+  // later work. Traverse without ACKing or manufacturing completion.
+  let page = parsed;
+  // Heartbeat HTTP responses historically omit nextCursor. Begin on the
+  // cursor-bearing poll endpoint rather than inferring a cursor from rows.
+  if (drain && parsed.more === true) {
+    page = await jsonRequest(connection,
+      `/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=0`, { fetchImpl });
+    if (!Array.isArray(page.pendingWakes)) fail("invalid_response", "Pending wake page is missing signals");
+    pending.splice(0, pending.length, ...page.pendingWakes);
+  }
+  const cursors = new Set();
+  while (drain && page.more === true) {
+    const cursor = page.nextCursor;
+    if (typeof cursor !== "string" || !cursor || cursor.length > 1024 || cursors.has(cursor)) {
+      fail("invalid_wake_cursor", "Pending wake pagination did not advance");
+    }
+    cursors.add(cursor);
+    page = await jsonRequest(connection,
+      `/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=0&cursor=${encodeURIComponent(cursor)}`,
+      { fetchImpl });
+    if (!Array.isArray(page.pendingWakes)) fail("invalid_response", "Pending wake page is missing signals");
+    pending.push(...page.pendingWakes);
+  }
   return {
     hostId: parsed.host?.hostId ?? hostId,
     pendingWakes: pending,
@@ -298,7 +323,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   const connection = connectionFromEnv(env);
   const filename = journalPathFor(env);
   const journal = readJournalFile(filename);
-  const beat = await beatPullOnly(connection, { fetchImpl, env });
+  const beat = await beatPullOnly(connection, { fetchImpl, env, drain: true });
   const items = [...beat.items];
   let cursor = journal.cursor ?? undefined;
   let identityId = null;
