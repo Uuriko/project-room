@@ -119,6 +119,17 @@ export class AccountClient {
     }
     return session;
   }
+  // QA 2026-10-20: the sign-in endpoints already answer with the full session
+  // view (sessionAccountView). Adopting it skips a second GET /api/account-session
+  // round trip; anything short of a complete view falls back to restore().
+  adopt(view) {
+    if (!view?.authenticated || typeof view.account?.id !== "string" || typeof view.csrf !== "string"
+      || typeof view.sessionBinding !== "string" || !Number.isSafeInteger(view.sessionRevision)
+      || !view.terms || typeof view.terms !== "object") return null;
+    ++this.generation;
+    this.session = view;
+    return view;
+  }
   async restore() {
     const generation = ++this.generation;
     this.session = null;

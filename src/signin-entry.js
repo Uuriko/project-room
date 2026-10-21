@@ -5,6 +5,37 @@ import { rememberAccountHint } from "./browser-session.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { uiText } from "./strings.js";
 
+// QA 2026-10-20: the workspace module graph (src/app.js + src/request-access.js),
+// relative to src/. Preloading it while the person fills the sign-in form
+// removes a four-level module waterfall from the post-login wait.
+// tests/qa-1020-login-latency.test.js keeps this list equal to the real graph.
+export const WORKSPACE_MODULES = Object.freeze([
+  "account-client.js", "account-settings-ui.js", "agent-connections.js", "agent-invite-ui.js", "app.js",
+  "auth-signin-ui.js", "board-mine.js", "board-ui.js", "browser-session.js", "chat-suggestions.js",
+  "client.js", "clipboard.js", "composer-files.js", "conversation-intent.js", "conversation.js",
+  "display-name-guard.js", "dm-consents.js", "error-copy.js", "events.js", "first-room-copy.js",
+  "friend-bond.js", "handoff-envelope-ui.js", "help-offers.js", "human-experience.js", "human-push.js",
+  "invite-context.js", "member-display-names.js", "message-reducers.js", "needs-attention.js",
+  "../strings/en.js", "owner-cockpit.js", "owner-project-offers-ui.js", "polls.js", "portable-work.js",
+  "reminder-time.js", "reminders.js", "reply-requests.js", "request-access.js", "result-availability.js",
+  "result-comparison.js", "result-feedback.js", "result-reader.js", "return-brief.js", "room-charter.js",
+  "room-deep-link.js", "room-instructions.js", "room-layout.js", "room-roster.js", "session-expiry.js",
+  "share-invite-code.js", "share-links.js", "signin-navigation.js", "spend-pricing-ui.js", "strings.js",
+  "updates-ui.js", "work-announcements.js", "work-help.js", "work-item-session.js", "work-loops.js",
+  "work-packet.js", "work-reducers.js", "work-selectors.js", "work-status.js", "workflow.js",
+  "workspace-navigation.js"
+]);
+let workspaceWarm = false;
+export function warmWorkspaceModules(doc = document) {
+  if (workspaceWarm) return;
+  workspaceWarm = true;
+  for (const path of WORKSPACE_MODULES) {
+    const link = doc.createElement("link");
+    link.rel = "modulepreload"; link.href = new URL(path, import.meta.url).href;
+    doc.head.append(link);
+  }
+}
+
 export function mountSigninEntry({ openWorkspace }) {
   const $ = selector => document.querySelector(selector);
   const accountClient = new AccountClient();
@@ -25,8 +56,10 @@ export function mountSigninEntry({ openWorkspace }) {
 
   const restore = () => restoreFlight ??= accountClient.restore().finally(() => { restoreFlight = null; });
   const navigation = createSigninNavigation({ getUI: () => signin, active: () => $("#auth-panel").contains($("#auth-signin-ui")) });
-  const enterAccount = async () => {
-    const session = await restore();
+  const enterAccount = async signedIn => {
+    // The sign-in endpoints answer with the full session view; adopting it
+    // saves a GET /api/account-session round trip (QA 2026-10-20).
+    const session = accountClient.adopt(signedIn) ?? await restore();
     if (!session?.authenticated) throw new Error(uiText("entry.sessionChanged"));
     rememberAccountHint();
     await enterWorkspace({ accountClient, signedIn: !location.search && !location.hash });
@@ -49,6 +82,7 @@ export function mountSigninEntry({ openWorkspace }) {
     onSignedIn: enterAccount,
     onBusyChange: value => {
       if (!active) return;
+      if (value) warmWorkspaceModules();
       $("#auth-panel").inert = value || enteringWorkspace;
       $("#auth-panel").setAttribute("aria-busy", String(value || enteringWorkspace));
       if (!value && active && (location.search || location.hash)) void enterWorkspace().catch(() => {});
@@ -98,6 +132,10 @@ export function mountSigninEntry({ openWorkspace }) {
   $("#refresh-button").textContent = uiText("entry.refresh");
   $("#connection-explanation").textContent = uiText("entry.connection");
   signin.mount($("#auth-signin-ui"));
+  // Warm the workspace modules as soon as someone starts on the form, so the
+  // download overlaps typing instead of following the login response.
+  on($("#auth-signin-ui"), "focusin", () => warmWorkspaceModules());
+  on($("#auth-signin-ui"), "pointerdown", () => warmWorkspaceModules());
   // Integration (CX2-PERF, flagged for Codex on the integration PR): on current
   // main the wall's agent sign-in is the standalone /agent-signin page
   // (decision #37, PR #3445) — #agent-auth-step / #agent-signin-ui are not in
