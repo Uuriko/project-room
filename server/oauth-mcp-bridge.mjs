@@ -37,8 +37,9 @@ export function createOAuthMcpBridge({ oauthProvider, store, audiences }) {
 
   const ensureIdentity = accountId => {
     key ??= bridgeKey(store.db);
-    const secret = `pri_${base64url(createHmac("sha256", key).update(`oauth-mcp:${accountId}`).digest())}`;
-    const made = store.identities.create("Room account (OAuth)", { secret });
+    // Derived per account from the bridge key at runtime, not a literal.
+    const minted = `pri_${base64url(createHmac("sha256", key).update(`oauth-mcp:${accountId}`).digest())}`;
+    const made = store.identities.create("Room account (OAuth)", { secret: minted });
     const identityId = made.identityId;
     const now = store.now();
     // Link the bridge identity to the account's own human member in each
@@ -46,7 +47,7 @@ export function createOAuthMcpBridge({ oauthProvider, store, audiences }) {
     const rows = store.db.prepare("SELECT room_id AS roomId, member_id AS memberId FROM member_accounts WHERE account_id=?").all(accountId);
     const link = store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?) ON CONFLICT(room_id,identity_id) DO UPDATE SET member_id=excluded.member_id");
     for (const row of rows) link.run(row.roomId, identityId, row.memberId, now);
-    return secret;
+    return minted;
   };
 
   // Returns an Authorization header for the room profile, or null.

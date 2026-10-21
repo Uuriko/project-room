@@ -50,3 +50,5 @@ Test prompts (for review):
 
 Privacy policy: https://room.trydemigod.com/privacy
 Support: https://github.com/Uuriko/project-room/issues
+
+Directory listing copy for this app and the other MCP directories is in [mcp-directory-listings.md](mcp-directory-listings.md).
