@@ -11349,11 +11349,15 @@ paths:
             that host is derived and echoed as `hostId` in the response.
             Required when the identity has several registered hosts (the
             422 names them).
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 1024 }
+          description: Opaque nextCursor from the prior page. Bound to identity, room and host; reads never acknowledge. Restart from the first page on reconnect or permission changes.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, hostId, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
