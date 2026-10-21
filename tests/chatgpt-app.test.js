@@ -20,7 +20,8 @@ test("five tools, each linked to a registered widget and an OAuth scheme", () =>
     assert.equal(tool._meta["openai/outputTemplate"], tool._meta.ui.resourceUri);
     assert.equal(tool.securitySchemes[0].type, "oauth2");
     assert.equal(typeof tool.annotations.readOnlyHint, "boolean");
-    assert.equal(tool.annotations.destructiveHint, false);
+    assert.equal(tool.annotations.destructiveHint, tool.name === "room_approve", tool.name);
+    if (!tool.annotations.readOnlyHint) assert.equal(tool.annotations.idempotentHint, false, tool.name);
     assert.ok(tool.description.startsWith("Use this"), tool.name);
     assert.equal("map" in tool, false);
   }
