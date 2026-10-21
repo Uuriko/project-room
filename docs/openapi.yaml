@@ -14137,6 +14137,66 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/team-connections:
+    get:
+      summary: Team connections the caller may use
+      description: The room owner sees every connection with its opaque connectionRef; other members see the ones granted to them, without the reference.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, connections }" }
+    post:
+      summary: Share one service connection with the team
+      x-room-permission: owner
+      description: >-
+        Body: `{ requestId, service, label, connectionRef, scope, members? }`.
+        scope is all, members (with 1 to 50 member ids) or automations.
+        connectionRef is an opaque conn_ reference; Room never stores a
+        token. A repeated requestId returns the same connection.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the connection an earlier identical requestId created }
+        '201': { description: the new connection }
+        '403': { description: owner_required }
+        '422': { description: invalid_team_connection }
+  /api/rooms/{roomId}/team-connections/{connectionId}:
+    put:
+      summary: Change who a team connection is granted to
+      x-room-permission: owner
+      description: "Body: `{ scope, members? }`."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the updated connection }
+        '403': { description: owner_required }
+        '404': { description: team_connection_not_found }
+        '422': { description: invalid_team_connection }
+    delete:
+      summary: Stop sharing a team connection
+      x-room-permission: owner
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, id, deleted }" }
+        '403': { description: owner_required }
+        '404': { description: team_connection_not_found }
+  /api/rooms/{roomId}/team-connections/{connectionId}/access:
+    get:
+      summary: May the caller use this team connection now?
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, id, service, allowed, reason }" }
+        '404': { description: team_connection_not_found }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
