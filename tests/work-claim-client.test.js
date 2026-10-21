@@ -253,6 +253,9 @@ test('SDK state filters retrieve older done claims through explicit and automati
 
 // The published OpenAPI example is client input, not an expected value derived
 // from the implementation. Exercise it against a real capped stored history.
+// A plain read reunites the spilled prefix (W3 claim-history spill), so the
+// SDK sees the full documented history; mutation responses still return the
+// stored 200-stamp window plus the omission counter.
 test('the documented capped-history PR basis succeeds through the SDK', async t => {
   const api = parse(readFileSync(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'));
   const schemas = api.paths['/api/rooms/{roomId}/work-claims/{claimId}/update'].post
@@ -267,8 +270,8 @@ test('the documented capped-history PR basis succeeds through the SDK', async t 
   for (let index = 0; index < additions; index++) item = updateWork(item, 'owner', { note: `Progress ${index}` });
   store.workClaims.set('commons', item);
   const read = await owner.workClaimGet(item.id);
-  assert.equal(read.history.length, 200);
-  assert.equal(read.historyOmitted, 3);
+  assert.equal(read.history.length, 203);
+  assert.equal(read.historyOmitted, undefined);
   const input = { pullRequest: 'https://github.com/Uuriko/project-room/pull/18', expectedClaimedAt: read.claimedAt };
   await assert.rejects(owner.linkWorkItemPullRequest(item.id, { ...input, expectedHistoryLength: 200 }),
     error => error.status === 409 && error.code === 'work_claim_conflict');

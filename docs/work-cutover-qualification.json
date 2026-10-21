@@ -1,0 +1,141 @@
+{
+  "base": "ee32e58fbdbd6504ff4f37bb96e56495377facef",
+  "fullSuite": {
+    "command": "npm test",
+    "tests": 11134,
+    "passed": 11099,
+    "failed": 27,
+    "skipped": 8,
+    "durationMs": 432631.574,
+    "allFailuresReproducedOnBase": true,
+    "failures": [
+      {
+        "file": "tests/coverage-thresholds.test.js",
+        "test": "real V8: split-process coverage equals single-process coverage"
+      },
+      {
+        "file": "tests/herdr-bridge.test.js",
+        "test": "spawn builds argv from kind template; caller argv is ignored"
+      },
+      {
+        "file": "tests/host-context-policy.test.js",
+        "test": "host policy has one explicit no-network, no-secret, no-external-effects profile"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "automatic host cannot read parent secrets or reach the network"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "sandbox refuses executables outside the checkout and system paths"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "configured environment is refused before a host starts"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "default host has isolated HOME so a room path cannot expand to operator HOME"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host process receives JSON and literal arguments without ambient environment"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host malformed output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host nonzero output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host oversized output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host empty output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "timeout and cancellation stop host processes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "different host processes cannot write the same checkout concurrently"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "process adapter accepts optional coding evidence without replacing its bytes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "adapter gets a typed data envelope rather than top-level room instructions"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "adapter runs configured checks and binds observations to exact local patch"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "failed configured check remains a failed observed exit, despite model success claim"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "mismatched patch, untracked files, and wrong repository never start checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "check that edits tracked files cannot produce a current verification receipt"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "committed artifact verification requires exact clean head and valid ancestor"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "checkout stays reserved through verification and cancellation releases it"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "model stdout cannot inject an adapter observation"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "observed result is journaled and redelivered after restart without repeating execution or checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "bounded verification times out without an observation and releases checkout ownership"
+      },
+      {
+        "file": "tests/invariants-ci-parser.test.js",
+        "test": "gate actually runs when the checkout path contains spaces"
+      },
+      {
+        "file": "tests/reply-agent.test.js",
+        "test": "one command drives a separate host process and repeat invocation reuses its result"
+      }
+    ]
+  },
+  "journeys": {
+    "command": "node --test --test-concurrency=1 scripts/board-browser-check.mjs scripts/work-resume-browser-check.mjs cloudflare/message-continuity.check.mjs cloudflare/messages-fidelity.check.mjs",
+    "passed": 14,
+    "failed": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 290
+  },
+  "docs": {
+    "checkedLinks": 579,
+    "broken": 0
+  },
+  "releaseReady": false,
+  "limits": [
+    "Linux isolated-host checks cannot pass on this Mac; host sandbox remains fail-closed.",
+    "Mac temporary-path assumptions fail in coverage/herdr/invariants tests; reproduced on exact baseline.",
+    "No integrated-main, physical Mac sleep/wake, real productivity or production-release qualification."
+  ]
+}

@@ -28,6 +28,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
       import { issueSignedEvidence, contentHashOf } from ${JSON.stringify(join(repository, 'server/signed-evidence.mjs'))};
       import { AgentConnections } from ${JSON.stringify(join(repository, 'server/agent-connections.mjs'))};
       import { DurableDatabase, durableStorage } from ${JSON.stringify(join(repository, 'cloudflare/storage.mjs'))};
+      import { hydrateWorkItems } from ${JSON.stringify(join(repository, 'server/work-repository.mjs'))};
       import { auditRecovery } from ${JSON.stringify(join(repository, 'server/recovery.mjs'))};
       import { prepareInboxResult } from ${JSON.stringify(join(repository, 'scripts/inbox-result-fixture.mjs'))};
       export class UpgradeRoom {
@@ -65,7 +66,9 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             // Phase 2 channels: the upgrade backfills #general into legacy projections.
             // Compare parsed projections (not JSON strings) so key order doesn't matter.
             const normalizeRooms = (dataset) => (dataset.rooms || []).map(row => {
-              const projection = JSON.parse(row.projection);
+              // Schema 42 changes the carrier, not the work payload. Hydration also
+              // verifies each referenced revision/digest and fails on missing rows.
+              const projection = hydrateWorkItems(store.db, row.id, JSON.parse(row.projection));
               if (projection.room && !projection.channels?.general) {
                 projection.channels ??= {};
                 projection.channels.general = {
