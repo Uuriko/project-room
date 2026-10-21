@@ -276,7 +276,8 @@ export async function handleChatgptAppRpc(message, { authorization, origin, dele
     retryable: false, wwwAuthenticate, hint: "Connect Project Room in ChatGPT settings and sign in.",
   });
   if (!presented(authorization)) return authRequired();
-  const roomAuthorization = typeof resolveBearer === "function" ? await resolveBearer(authorization) : authorization;
+  const requiredScopes = BY_NAME.get(params.name).securitySchemes[0].scopes;
+  const roomAuthorization = typeof resolveBearer === "function" ? await resolveBearer(authorization, { requiredScopes }) : authorization;
   if (!roomAuthorization) return authRequired();
 
   const reply = await delegate({ jsonrpc: "2.0", id: message.id, method: "tools/call", params: { name: mapped.name, arguments: mapped.arguments } }, { authorization: roomAuthorization });

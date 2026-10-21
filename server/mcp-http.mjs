@@ -137,10 +137,10 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
     return handleChatgptAppRpc(message, {
       authorization, origin,
       delegate: (inner, extra) => dispatchRoomMcp(inner, { mcpUrl, roomMcp, searchParams: new URLSearchParams(), userAgent, remoteAddress, ...extra }),
-      resolveBearer: async header => {
+      resolveBearer: async (header, scopeOptions) => {
         const token = /^bearer /i.test(header) ? header.slice(7).trim() : "";
         if (token.startsWith("pri_") || token.startsWith(API_KEY_PREFIX)) return header;
-        return typeof resolveOAuthBearer === "function" ? resolveOAuthBearer(token) : null;
+        return typeof resolveOAuthBearer === "function" ? resolveOAuthBearer(token, scopeOptions) : null;
       },
     });
   }

@@ -56,6 +56,7 @@ import { SKILLS_CATALOG_PATH } from "./agent-discovery.mjs";
 const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
+import { createOAuthMcpBridge } from "./oauth-mcp-bridge.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
@@ -511,6 +512,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
   }
+  // ChatGPT app: OAuth access tokens minted for /mcp/chatgpt act as the
+  // signed-in account's own member in its rooms (server/oauth-mcp-bridge.mjs).
+  const resolveOAuthBearer = createOAuthMcpBridge({
+    oauthProvider, store,
+    audiences: () => ["/mcp/chatgpt", "/room/mcp/chatgpt"].map(path => expectedOrigin() + path),
+  });
   // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
   // tombstone at github:<id> / google:<sub>, and its login methods are gone, so
   // a returning person reaches the provision step below. Take the next free
@@ -1179,7 +1186,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, resolveOAuthBearer });
         }
         return writeRoomMcpNode(req, res, url);
       }
@@ -1641,6 +1648,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scopes: (url.searchParams.get("scope") || "").split(" ").filter(Boolean),
             state: url.searchParams.get("state"),
             codeChallenge: url.searchParams.get("code_challenge"),
+            resource: url.searchParams.get("resource") || undefined,
           });
           if (url.searchParams.get("code_challenge_method") !== "S256") {
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
@@ -1670,7 +1678,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const nativeAccountLabel = [nativeAccountName, nativeAccountEmail].filter(Boolean).join(" · ") || "Current signed-in account";
         const nativeConsentWarning = validated.client.clientId === "project-room-macos"
           ? `<p data-native-account>Account: ${esc(nativeAccountLabel)}</p><p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>` : "";
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="resource" value="${esc(validated.resource || "")}"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Referrer-Policy", "same-origin");
         // Browsers apply form-action to every redirect hop of the Allow POST,
@@ -1726,6 +1734,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scopes: String(data.scope || "").split(" ").filter(Boolean),
             state: data.state,
             codeChallenge: data.code_challenge,
+            resource: data.resource || undefined,
           });
           if (data.code_challenge_method !== "S256") {
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
@@ -1752,6 +1761,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           redirectUri: validated.redirectUri,
           scopes: [...validated.scopes],
           codeChallenge: validated.codeChallenge,
+          resource: validated.resource ?? undefined,
         });
         const u = new URL(validated.redirectUri);
         u.searchParams.set("code", code);
