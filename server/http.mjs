@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./email-unsubscribe.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
@@ -81,6 +82,8 @@ import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
+import { createDeviceSigninRoutes } from "./device-signin.mjs"; // No-browser agent sign-in (device code).
+import { createHeldMessagesRoutes } from "./held-messages.mjs"; // Opt-in held messages.
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
@@ -338,6 +341,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
+  unsubscribeSecret = unsubscribeSecretFromEnv(),
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
@@ -658,6 +662,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
   // open path (server/store.mjs), so every RoomStore carries it; http.mjs
   // only owns the service instance.
+  const deviceSigninRoutes = createDeviceSigninRoutes({ store, json, reject, body, rate, cookie, checkOrigin, origin: () => expectedOrigin() });
+  const heldMessagesRoutes = createHeldMessagesRoutes({ store, json, reject, body, rate, roomCredentials, checkOrigin });
   const nextActionsRoutes = createNextActionsRoutes({ store, json, reject, body, rate, roomCredentials, expectedBinding, accountBinding });
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
@@ -1257,6 +1263,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
       })) return;
+      if (handleUnsubscribe(req, res, { url, db: store.db, secret: unsubscribeSecret })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
@@ -3060,6 +3067,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (await operatorRoutes(req, res, { url, remoteAddress, requestId: operationId })) return;
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
+      if (await deviceSigninRoutes(req, res, { url, remoteAddress })) return;
+      if (await heldMessagesRoutes(req, res, { url, remoteAddress })) return;
       // Human room URL (H-S1, human-map §8.2): /rooms/:id is the address
       // people paste to each other, but it used to 404 for everyone — the
       // app lives at /#room/:id and joining at /join. A browser asking for
@@ -4893,7 +4902,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "thread-mutes" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
+        if (!exact(data, Object.hasOwn(data ?? {}, "until") ? ["threadId", "muted", "until"] : ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId, muted and optional until are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
