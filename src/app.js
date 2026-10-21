@@ -1,3 +1,4 @@
+import { createRequestProgress } from "./request-progress.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -345,7 +346,14 @@ let currentThreadId = null, conversation = null, drafts = new ConversationDrafts
 // a thread/channel switch, or a reader scroll (the noteReaderScroll
 // gesture tracker below) — so the late reveal never steals the view.
 let pendingHashReveal = null;
-let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
+const requestProgress = createRequestProgress({
+  context: () => state && session ? {
+    generation: client.generation, roomId: state.room.id, viewerId: session.member.id,
+    openIds: Object.values(state.replyRequests ?? {}).filter(request => request.status === "open").map(request => request.id),
+  } : null,
+  read: () => client.request(client.path("/request-runs")),
+  changed: paintRequestRuns,
+});
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? channelDraftKey(activeChannelId);
@@ -558,7 +566,7 @@ const client = new RoomClient({
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
     }
-    requestRuns = {}; assistantDraft = null; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
+    requestProgress.reset(); assistantDraft = null; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); timelineWindow.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
@@ -2830,33 +2838,23 @@ function restoreComposer(draft) {
   autosizeComposer();
 }
 function requestRunLabel(id) {
-  const run = requestRuns[id];
+  const run = requestProgress.runs[id];
   if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
   const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
   return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
 }
-async function refreshRequestRuns({ force = false } = {}) {
-  if (!state || !session || requestRunsReading || document.hidden) return;
-  const openIds = Object.values(state.replyRequests ?? {}).filter(request => request.status === "open").map(request => request.id).sort();
-  if (!openIds.length) { requestRuns = {}; requestRunsReadKey = ""; return; }
-  const key = JSON.stringify([client.generation, state.room.id, session.member.id, openIds]);
-  if (!force && key === requestRunsReadKey) return;
-  requestRunsReadKey = key;
-  requestRunsReading = true;
-  const generation = client.generation, roomId = state.room.id, viewerId = session.member.id;
-  try {
-    const view = await client.request(client.path("/request-runs"));
-    if (generation !== client.generation || view.roomId !== roomId || view.viewerId !== viewerId) return;
-    requestRuns = view.runs;
-  } catch { /* Last heartbeat still ages into unknown; never claim a new run. */ }
-  finally { requestRunsReading = false; }
-  if (generation !== client.generation) return;
+function paintRequestRuns() {
   for (const node of document.querySelectorAll("[data-request-run]")) node.textContent = requestRunLabel(node.dataset.requestRun);
-  // A request arriving during the read still gets its initial status promptly.
-  void refreshRequestRuns();
 }
-setInterval(() => { void refreshRequestRuns({ force: true }); }, 10000);
+async function refreshRequestRuns(options) {
+  if (document.hidden) return;
+  await requestProgress.refresh(options);
+}
+setInterval(() => {
+  paintRequestRuns();
+  void refreshRequestRuns({ force: true });
+}, 10000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
   if (!request) {
