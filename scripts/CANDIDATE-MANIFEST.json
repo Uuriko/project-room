@@ -132,7 +132,7 @@
     "src/signin-navigation.js": "sha256:bf9d8f72b1c9a1014309b137690d611581f2376db2566ae9b088b87dfbe3a226",
     "src/spend-pricing-ui.js": "sha256:96906eb2bd688a37a9eda1f4744c722c3100d160278f1d4df791d987725617fd",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:6bbff80d81c9bcc2476697b792fa4c910848bef44e645efd60a992b04e6b53c0",
+    "src/styles.css": "sha256:cd7e1aa1c2652ffe8407f9662361d536f3ffe5e4362be8e3fd81efbd6a972bf4",
     "src/updates-ui.js": "sha256:cc614d1a76799f35ac563c2f4cf3176019b932d47b9591ce9e574a86b50be28b",
     "src/work-announcements.js": "sha256:18fe08703df19663b853712933eb64fd448cc2905b0cb9154d015b27ddf51633",
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
