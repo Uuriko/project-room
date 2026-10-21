@@ -54,7 +54,7 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // legitimate rejoin shape; leaving the field out of the expected event
   // makes the canonical comparison refuse it instead of blessing it.
   if (typeof joined?.data?.rejoinOfMemberId === "string") {
-    const superseded = room?.state?.members?.[joined.data.rejoinOfMemberId];
+    const superseded = ownMember(room?.state?.members, joined.data.rejoinOfMemberId);
     if (superseded && superseded.id !== record.intended_member_id && superseded.active === false) {
       expected.data.rejoinOfMemberId = joined.data.rejoinOfMemberId;
     }
