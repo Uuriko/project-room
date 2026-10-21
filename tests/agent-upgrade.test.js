@@ -8,6 +8,7 @@ import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline, v24ReplyResolutionBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { v26IdentitiesBaseline, v27LifecycleBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { hydrateWorkItems } from "../server/work-repository.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { AgentConnections } from "../server/agent-connections.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
@@ -68,9 +69,9 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
     assert.equal(row.id, original.id);
     assert.equal(row.sequence, original.sequence, "an upgrade never moves a room's sequence");
     assert.deepEqual(
-      JSON.parse(projectionWithoutAddedChannel(row.projection, original.projection)),
+      hydrateWorkItems(current.db, row.id, JSON.parse(projectionWithoutAddedChannel(row.projection, original.projection))),
       JSON.parse(original.projection),
-      `${row.id}: nothing but the default channel may change in a stored projection`);
+      `${row.id}: hydrated state is unchanged apart from the default channel`);
   });
   assert.deepEqual(current.db.prepare("SELECT id FROM rooms WHERE archived_at IS NOT NULL").all(), []);
   // accounts gained display_name, avatar_url and onboarded, so its digest
@@ -149,11 +150,11 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v38|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v42|unsupported database writer/);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
   current.createAccount("after-v36-upgrade");
   assert.equal(current.account("after-v36-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 38);
+  assert.equal(auditRecovery(current).schemaVersion, 42);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];
