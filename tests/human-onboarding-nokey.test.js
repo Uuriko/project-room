@@ -64,7 +64,7 @@ test("human guide documents the no-key 'Use my AI → Paste AI draft' path first
 test("human guide keeps a live agent seat honest and one line", () => {
   const connect = section(onboarding, /Connect your AI/i);
   assert.ok(/invite/i.test(connect), "says a live seat needs an invite from the owner");
-  assert.ok(connect.includes("CONNECT-AGENT-QUICKSTART.md"),
+  assert.ok(connect.includes("CONNECT.md"),
     "points the technical setup at the quickstart doc, not at JOINING.md");
 });
 

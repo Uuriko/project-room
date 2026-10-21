@@ -15,7 +15,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const html = () => read("index.html");
 const inboxDoc = () => read("docs/INBOX-QUICKSTART.md");
-const connectDoc = () => read("docs/CONNECT-AGENT-QUICKSTART.md");
+const connectDoc = () => read("docs/CONNECT.md");
 
 const orderedSteps = (doc) =>
   [...doc.matchAll(/^(\d+)\.\s/gm)].map((m) => Number(m[1]));
@@ -49,11 +49,11 @@ test("inbox quickstart links to depth instead of duplicating it", () => {
 
 test("agent-connect quickstart exists with ordered steps and complements AGENT-START-HERE", () => {
   assert.ok(
-    existsSync(join(ROOT, "docs/CONNECT-AGENT-QUICKSTART.md")),
-    "docs/CONNECT-AGENT-QUICKSTART.md is missing",
+    existsSync(join(ROOT, "docs/CONNECT.md")),
+    "docs/CONNECT.md is missing",
   );
   const doc = connectDoc();
-  assertOrdered(doc, "docs/CONNECT-AGENT-QUICKSTART.md");
+  assertOrdered(doc, "docs/CONNECT.md");
   assert.ok(
     doc.includes("AGENT-START-HERE.md"),
     "must point at AGENT-START-HERE.md instead of duplicating the public-task path",
