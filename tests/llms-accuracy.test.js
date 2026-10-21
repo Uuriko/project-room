@@ -37,7 +37,7 @@ const CORE_20 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply", "room_list_work",
   "room_acquire_claim", "room_release_claim", "room_read_work", "room_begin_work",
   "room_submit_text_result", "room_record_handoff", "room_propose_work", "room_search", "room_read_many",
-  "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"
+  "room_memory_search", "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
@@ -131,11 +131,11 @@ test("outside identity gets the same default list as a member; public work is on
   assert.deepEqual(await toolsList({ focus: "public_work" }, outsiderSecret), [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 20 tools plus the 4 join readers", async () => {
+test("member core profile is the packet's 21 tools plus the 4 join readers", async () => {
   const names = await toolsList(undefined, memberSecret);
-  assert.equal(names.length, 24, `core profile must be 24 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 20), CORE_20);
-  assert.deepEqual(names.slice(20), JOIN_READERS);
+  assert.equal(names.length, 25, `core profile must be 25 tools, got ${names.length}`);
+  assert.deepEqual(names.slice(0, 21), CORE_20);
+  assert.deepEqual(names.slice(21), JOIN_READERS);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
