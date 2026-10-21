@@ -844,10 +844,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // the HTTP receiving path can hold exclusive queue ownership with a
     // fencing token (see ackHeartbeats). Scoped credentials (room key, or
     // a rak_ key bound to one room) run the room-scoped listener contract.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease"];
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease", "context"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId"))
-      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes and listenerLease are optional");
+      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes, listenerLease and context are optional");
     // listenerLease: true leases the credential's own scope (the bound
     // room for scoped credentials, the roomless identity queue otherwise);
     // { roomId } names the room queue to lease — the form the standard
