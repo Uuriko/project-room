@@ -4,7 +4,20 @@
 // A presented proof is accepted before the anonymous free-mint quota, and a
 // 429 is retried from Retry-After so a later script on the same server can
 // still mint after the per-address minute cap.
+// Wire log (opt-in): QA_WIRE_LOG=<path> appends one JSON line per wire
+// request — the exact serialized request bytes plus the response status —
+// so an argument-shape claim from a QA run carries its own capture.
+// Unset or empty: nothing is written and behaviour is unchanged.
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
+
+const WIRE_LOG = process.env.QA_WIRE_LOG || "";
+function logWire(body, status) {
+  if (!WIRE_LOG) return;
+  try {
+    appendFileSync(WIRE_LOG, `${JSON.stringify({ status, body: body ?? null })}\n`);
+  } catch { /* the wire log must never break a request */ }
+}
 
 const POW_BITS = 12;
 const POW_WINDOW_MS = 10 * 60 * 1000;
@@ -61,11 +74,9 @@ export function createQaClient({ origin, userAgent }) {
           headers.origin = origin;
         }
         if (token) headers.authorization = `Bearer ${token}`;
-        const response = await fetch(url, {
-          method,
-          headers,
-          body: payload === undefined ? undefined : JSON.stringify(payload),
-        });
+        const wireBody = payload === undefined ? undefined : JSON.stringify(payload);
+        const response = await fetch(url, { method, headers, body: wireBody });
+        logWire(wireBody, response.status);
         if (response.status === 429 && attempt < 5) {
           rateLimited += 1;
           const retryAfter = Number(response.headers.get("retry-after"));
