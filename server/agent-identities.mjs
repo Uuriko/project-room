@@ -204,7 +204,10 @@ function expandIPv6(ip) {
 }
 
 export function mintNetworkPrefix(address) {
-  const ip = normalizeMintAddress(address);
+  // cloudflare/room.mjs and the trusted local proxy hand IPv6 visitors over as
+  // URL hostnames ("[2001:db8::1]"). Read the address inside the brackets, or
+  // every IPv6 caller lands in one shared "unknown" network bucket (r176).
+  const ip = normalizeMintAddress(address).replace(/^\[([^\]]*)\]$/, "$1");
   if (ip === "unknown") return "unknown";
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
     const parts = ip.split(".");
