@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // B4: per-member notification feed, derived at read time from the event tail
 // after the member's own room cursor. Read model only: it writes nothing,
 // enqueues no wake. Human browser push is a separate path
@@ -8,7 +9,7 @@ import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
-import { indexMessages, rowInHistory } from "./history-visibility.mjs";
+import { rowInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -38,9 +39,9 @@ const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field 
 // and deletions are honoured without a second store. `mutedThreadIds` is the
 // member's muted thread-root ids (a Set); items from muted threads are
 // skipped at read time, so unmuting restores them on the next read.
-export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map() }) {
+export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map(), messageRecords = null }) {
   const preferences = { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) };
-  const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
+  const messages = messageRecords ?? new Map((state.messages ?? []).map(message => [message.id, message]));
   const muted = mutedThreadIds instanceof Set ? mutedThreadIds : new Set();
   // A message's thread root: itself when top-level. Walk the reply chain so
   // a mute on the thread hides every reply in it, not just the root.
@@ -238,9 +239,9 @@ export class Notifications {
       // nextBefore still names the oldest scanned row so a hidden row cannot
       // stall the older-page walk.
       const floor = this.store.historyFloor(roomId, auth.member.id, room.sequence);
-      const floorMessages = floor ? indexMessages(room.state.messages) : null;
+      const floorMessages = floor ? messageRepository(this.store, roomId, room.state) : null;
       const visibleRows = rows.filter(row => rowInHistory(row, floor, floorMessages));
-      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows) });
+      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows), messageRecords: messageRepository(this.store, roomId, room.state) });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       // Tag acknowledgment (2026-09-23): per-member mention ack rate over the

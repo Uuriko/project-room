@@ -28,6 +28,7 @@ export const DARK = Object.freeze({
   "--card": "#191a20",
   "--border": "#393b45",
   "--shadow": "0 20px 70px rgb(0 0 0 / 32%)",
+  "--control-min-target-coarse": "2.75rem",
   "--radius-sm": ".35rem",
   "--radius-md": ".45rem",
   "--radius-lg": ".85rem",

@@ -1,0 +1,315 @@
+{
+  "date": "2026-10-18",
+  "baselineCommit": "6780b79d",
+  "candidateSchema": 41,
+  "note": "Synthetic local runs; variable contention, not production SLO evidence. Snapshot-split run predates isolated publication. Setup excluded from edit timings.",
+  "runs": {
+    "schema40_100k": {
+      "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+      "runtime": "v24.19.0",
+      "platform": "darwin",
+      "results": [
+        {
+          "messages": 100000,
+          "workingSet": 8,
+          "projectionBytes": 6340,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 45.54191599995829,
+              "p95Ms": 78.72837500000605,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 16039,
+                "resultBytes": 4582,
+                "resultRows": 19,
+                "projectionBytes": 7165
+              }
+            },
+            "references": {
+              "medianMs": 44.77912500000093,
+              "p95Ms": 190.9700839999714,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9847,
+                "resultBytes": 4804,
+                "resultRows": 28,
+                "projectionBytes": 1050
+              }
+            }
+          }
+        }
+      ]
+    },
+    "snapshot_split": {
+      "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+      "runtime": "v24.19.0",
+      "platform": "darwin",
+      "results": [
+        {
+          "messages": 1000,
+          "workingSet": 8,
+          "projectionBytes": 6304,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 1.5658750000000055,
+              "p95Ms": 9.684540999999854,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 15929,
+                "resultBytes": 4544,
+                "resultRows": 19,
+                "projectionBytes": 7129
+              }
+            },
+            "references": {
+              "medianMs": 1.7890830000001188,
+              "p95Ms": 9.172207999999955,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9737,
+                "resultBytes": 4750,
+                "resultRows": 28,
+                "projectionBytes": 1030
+              }
+            }
+          }
+        },
+        {
+          "messages": 10000,
+          "workingSet": 8,
+          "projectionBytes": 6322,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 2.018791999998939,
+              "p95Ms": 3.731999999999971,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 15984,
+                "resultBytes": 4563,
+                "resultRows": 19,
+                "projectionBytes": 7147
+              }
+            },
+            "references": {
+              "medianMs": 1.5286249999990105,
+              "p95Ms": 9.306667000000743,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9792,
+                "resultBytes": 4777,
+                "resultRows": 28,
+                "projectionBytes": 1040
+              }
+            }
+          }
+        },
+        {
+          "messages": 100000,
+          "workingSet": 8,
+          "projectionBytes": 6340,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 0.7404579999856651,
+              "p95Ms": 1.2862090000417084,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 16039,
+                "resultBytes": 4582,
+                "resultRows": 19,
+                "projectionBytes": 7165
+              }
+            },
+            "references": {
+              "medianMs": 0.7624579999828711,
+              "p95Ms": 1.4809580000583082,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9847,
+                "resultBytes": 4804,
+                "resultRows": 28,
+                "projectionBytes": 1050
+              }
+            }
+          }
+        }
+      ]
+    },
+    "isolated_replay": {
+      "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+      "runtime": "v24.19.0",
+      "platform": "darwin",
+      "results": [
+        {
+          "messages": 1000,
+          "workingSet": 8,
+          "projectionBytes": 6304,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 0.6498339999999985,
+              "p95Ms": 1.150416000000007,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 15929,
+                "resultBytes": 4544,
+                "resultRows": 19,
+                "projectionBytes": 7129
+              }
+            },
+            "references": {
+              "medianMs": 0.6413749999999823,
+              "p95Ms": 1.090249999999969,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9737,
+                "resultBytes": 4750,
+                "resultRows": 28,
+                "projectionBytes": 1030
+              }
+            }
+          }
+        },
+        {
+          "messages": 10000,
+          "workingSet": 8,
+          "projectionBytes": 6322,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 1.072291000000405,
+              "p95Ms": 1.5758749999995416,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 15984,
+                "resultBytes": 4563,
+                "resultRows": 19,
+                "projectionBytes": 7147
+              }
+            },
+            "references": {
+              "medianMs": 1.1590839999998934,
+              "p95Ms": 1.9253340000004755,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9792,
+                "resultBytes": 4777,
+                "resultRows": 28,
+                "projectionBytes": 1040
+              }
+            }
+          }
+        }
+      ]
+    },
+    "isolated_replay_wal": {
+      "workload": "committed recent edits; equal revisions in separate databases, alternating modes, two warmups; WAL truncated outside timed command; synchronous FULL",
+      "runtime": "v24.19.0",
+      "platform": "darwin",
+      "results": [
+        {
+          "messages": 1000,
+          "modes": {
+            "inline": {
+              "samples": 12,
+              "medianMs": 0.7712910000000193,
+              "p95Ms": 2.144416999999976,
+              "medianWalBytes": 74192,
+              "maxWalBytes": 115392,
+              "finalProjectionBytes": 14440
+            },
+            "references": {
+              "samples": 12,
+              "medianMs": 0.7646670000000313,
+              "p95Ms": 0.9818339999999353,
+              "medianWalBytes": 65952,
+              "maxWalBytes": 103032,
+              "finalProjectionBytes": 1000
+            }
+          }
+        },
+        {
+          "messages": 10000,
+          "modes": {
+            "inline": {
+              "samples": 12,
+              "medianMs": 0.9444579999999405,
+              "p95Ms": 1.2102500000000873,
+              "medianWalBytes": 74192,
+              "maxWalBytes": 111272,
+              "finalProjectionBytes": 14458
+            },
+            "references": {
+              "samples": 12,
+              "medianMs": 0.8501670000005106,
+              "p95Ms": 1.2622080000001006,
+              "medianWalBytes": 65952,
+              "maxWalBytes": 98912,
+              "finalProjectionBytes": 1010
+            }
+          }
+        }
+      ]
+    },
+    "finalIsolation100k": {
+      "workload": "one archived edit at a fixed head, alternating modes, two warmups each; rollback cost excluded",
+      "runtime": "v24.19.0",
+      "platform": "darwin",
+      "results": [
+        {
+          "messages": 100000,
+          "setupTimings": {
+            "initializeMs": 133526.477167,
+            "replayMs": 286444.541042,
+            "parityMs": 1126.4079999999958,
+            "archiveMs": 693.7822079999605
+          },
+          "workingSet": 8,
+          "projectionBytes": 6340,
+          "samples": 12,
+          "modes": {
+            "entity": {
+              "medianMs": 0.408832999994047,
+              "p95Ms": 0.5848329999716952,
+              "maxPreparedStatements": 21,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 16039,
+                "resultBytes": 4582,
+                "resultRows": 19,
+                "projectionBytes": 7165
+              }
+            },
+            "references": {
+              "medianMs": 0.408832999994047,
+              "p95Ms": 0.576375000004191,
+              "maxPreparedStatements": 22,
+              "maxRoomReplays": 0,
+              "profile": {
+                "boundBytes": 9847,
+                "resultBytes": 4804,
+                "resultRows": 28,
+                "projectionBytes": 1050
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

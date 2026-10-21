@@ -4,6 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -30,12 +31,19 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
 .receipt-next p{margin:0}
+.share{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.share h2{font-size:1.1rem;margin:0 0 .5rem}
+.share code{overflow-wrap:anywhere;word-break:break-word}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -46,12 +54,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -80,7 +88,7 @@ export function renderReceiptsHtml(page) {
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
-</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
+</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
@@ -92,6 +100,23 @@ ${next}
 </main>
 <footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
+}
+
+// The share block. The pre-filled text is shown verbatim — what gets
+// posted is exactly what the page says — and the share targets are plain
+// anchors, because these pages are script-free. The badge embed is the
+// worker's copy-paste path into READMEs and portfolios. This renders only
+// for a receipt that already resolved as public through receipts-live.
+function shareSection(receipt) {
+  const links = receiptShareLinks(receipt);
+  return `<section class="share" aria-label="Share this receipt">
+<h2>Share this receipt</h2>
+<p class="meta">${escapeHtml(links.text)}</p>
+<p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
+<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
+<p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
+<p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
+</section>`;
 }
 
 // The verdict block (charter Workstream B, P2): one graded verdict with
@@ -133,7 +158,7 @@ export function renderVerificationBlock(receipt, verification) {
   if (!verification) {
     return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
-<p><strong>Not yet verified.</strong> This page shows the record as stored; nothing on it has been re-checked at read time.</p>
+<p><strong>Record not rechecked.</strong> This page shows the saved outcome and checks. They have not been independently rechecked for this view; a recorded check passing does not mean the delivery was accepted.</p>
 <p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
 </section>`;
   }
@@ -155,7 +180,8 @@ export function renderVerificationBlock(receipt, verification) {
 }
 
 export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
-  const description = `${receipt.title}. A public receipt from Project Room.`;
+  const verdictLine = verdictLineOf(receipt);
+  const description = `${receipt.title} — ${verdictLine}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
     : receipt.room?.id
@@ -194,7 +220,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       submitted: "Submitted — no reviewer decision is recorded yet.",
     }[receipt.state] ?? `Recorded state: ${receipt.state}.`;
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
-    if (review.verificationVerdict) rows.push(`<div><dt>Reviewer verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""}</dd></div>`);
+    if (review.verificationVerdict) rows.push(`<div><dt>Recorded check verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""} — this check does not override the delivery outcome above.</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
     if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
     else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
@@ -278,17 +304,24 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const provenNote = verification
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
     : receipt.source === "bounty-lot"
-    ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.source === "public-work" && receipt.review?.decidedAt
-    ? "What this record proves: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: human verdict. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
-    ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: bytes re-verified. What was checked: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.verification?.state === "verified"
-    ? "What this record proves: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: human verdict (member-verified). What was checked: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.verification?.state === "self_attested"
-    ? "What this record proves: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
-    : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
-  return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
+    ? "Verification tier: bundle unaltered (self-asserted). What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : "Verification tier: bundle unaltered (self-asserted). What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
+  return `${head({
+    title: receipt.title,
+    description,
+    path: `/receipts/${receipt.id}`,
+    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
+    ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
+    ogAlt: verdictLine,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
@@ -301,6 +334,7 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+${shareSection(receipt)}
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>

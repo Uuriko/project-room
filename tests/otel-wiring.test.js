@@ -112,7 +112,7 @@ test("store.command emits no spans when telemetry is off", t => {
 
 async function httpSetup(t, serverOptions = {}) {
   const f = roomSetup(t);
-  const server = createRoomServer({ store: f.store, ...serverOptions });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, ...serverOptions });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return { ...f, origin: `http://127.0.0.1:${server.address().port}` };
@@ -203,7 +203,7 @@ test("direct channel send emits delivery.bridge_send and delivery.receipt when t
   const f = transportSetup(t); t.after(telemetry(true));
   const stubFetch = async () => ({ ok: true, status: 200,
     json: async () => ({ ok: true, result: { message_id: 42 } }) });
-  const server = createRoomServer({ store: f.store, directSendFetch: stubFetch,
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, directSendFetch: stubFetch,
     telegram: telegramConfig({ TELEGRAM_BOT_TOKEN: "123456789:abcdefghijklmnopqrstuvwxyzABCDE12", TELEGRAM_WEBHOOK_SECRET: "fake-webhook-secret-1234" }) });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
