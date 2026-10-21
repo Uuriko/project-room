@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { isAbsolute, dirname, sep } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 
@@ -11,12 +11,36 @@ export const validHostCommand = config => config && isAbsolute(config.command ??
 // The automated host is untrusted code. A missing sandbox must fail before
 // spawning it, rather than silently degrading to an ordinary local process.
 const BWRAP = "/usr/bin/bwrap";
+// Probe the same isolation launcher before a caller accepts Room work. The
+// probe runs only a system no-op, never the configured untrusted executable.
+export function hostExecutionReadiness(config, { platform = process.platform, exists = existsSync,
+  build = isolatedHostCommand, launch = spawnSync } = {}) {
+  const base = { version: 1, backend: "linux-bwrap", platform, ready: false };
+  const refused = (code, message) => ({ ...base, code, message });
+  if (platform !== "linux") return refused("unsupported_platform", "The generic command host requires Linux. Use a qualified native Codex host or an explicitly selected Linux worker.");
+  if (!exists(BWRAP)) return refused("sandbox_missing", "Install Linux bubblewrap before accepting generic host work.");
+  if (!validHostCommand(config) || !isAbsolute(config.cwd ?? "")) return refused("configuration_invalid", "Host executable, arguments, timeout and absolute workspace must be configured.");
+  let target;
+  try { target = build(config, config.cwd); }
+  catch { return refused("configuration_invalid", "Host configuration does not satisfy the isolated workspace and executable policy."); }
+  const separator = target.args.indexOf("--");
+  if (separator < 0) return refused("configuration_invalid", "Sandbox launcher has no command boundary.");
+  let result;
+  try { result = launch(target.command, [...target.args.slice(0, separator + 1), "/usr/bin/true"],
+    { cwd: config.cwd, env: {}, shell: false, stdio: "ignore", timeout: 3000, killSignal: "SIGKILL" }); }
+  catch { return refused("sandbox_probe_failed", "The sandbox could not start. Check Linux namespace support and launcher permissions."); }
+  if (result.error || result.signal || result.status !== 0)
+    return refused("sandbox_probe_failed", "The sandbox could not complete its startup probe. Check Linux namespace support and launcher permissions.");
+  return { ...base, ready: true, code: "ready", message: "Linux sandbox startup probe passed.",
+    guarantees: { workspaceWrite: true, network: "none", ambientSecrets: "none" },
+    modelExecuted: false };
+}
+
 export function isolatedHostCommand(config, cwd) {
-  if (!existsSync(BWRAP)) throw Object.assign(new Error("Host isolation is unavailable"), { code: "host_isolation_unavailable" });
-  if (!isAbsolute(cwd ?? "")) throw new Error("Host isolation requires an absolute checkout");
-  const root = realpathSync(cwd), executable = realpathSync(config.command);
   if (config.env && Object.keys(config.env).length)
     throw new Error("Automatic host policy refuses configured environment variables; use a brokered, reviewed tool path");
+  if (!existsSync(BWRAP) || !isAbsolute(cwd ?? "")) throw new Error("Host isolation is unavailable");
+  const root = realpathSync(cwd), executable = realpathSync(config.command);
   if (root === "/" || root === "/usr" || root.startsWith("/usr/") || !root.startsWith("/home/") && !root.startsWith("/tmp/"))
     throw new Error("Host checkout must be a private workspace under /home or /tmp");
   const runnerNode = executable.startsWith("/opt/hostedtoolcache/node/")

@@ -5,19 +5,22 @@
 .human-experience:not(.human-advanced) .work-begin-limit,
 .human-experience:not(.human-advanced) .member-avatar.agent ~ div .member-status,
 .human-experience:not(.human-advanced) #invite-agents-button { display: none; }
-.human-experience:not(.human-advanced) .presence-member:has(.member-avatar.agent) { display: none; }
 .human-single-conversation:not(.human-advanced) #room-sidebar nav[aria-label="Channels"] { display: none; }
 .human-composer-actions { display: contents; }
-.human-experience .human-composer-actions { display: flex; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
-#ask-room { font-size: var(--text-sm); white-space: nowrap; }
-#room-assistant { margin: .5rem 1rem; padding: .6rem .9rem; border-radius: .8rem; border: 1px solid var(--border); }
+.human-experience .human-composer-actions { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
+#assistant-context { font-size: var(--text-sm); white-space: nowrap; }
+#room-assistant { margin: .25rem 1rem; padding: .25rem 0; }
+#assistant-error:empty { display: none; }
+.human-composer-actions #composer-attach span { display: none; }
+.human-composer-actions #composer-attach { min-width: 44px; min-height: 44px; }
 .assistant-heading { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
 #room-assistant-status { flex: 1; font-size: var(--text-sm); color: var(--muted); }
-#assistant-activity { margin-top: .5rem; }
+#assistant-activity { padding: 0 1rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#assistant-activity > summary { min-height: 32px; align-content: center; cursor: pointer; color: var(--muted); font-size: var(--text-sm); }
 #assistant-runs { max-height: 25vh; overflow: auto; }
 .assistant-run { padding: .5rem 0; }
 .assistant-run + .assistant-run { border-top: 1px solid var(--border); }
-.assistant-run summary { display: flex; align-items: baseline; gap: .6rem; cursor: pointer; overflow: hidden; }
+.assistant-run summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; cursor: pointer; }
 .assistant-run summary > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-run-status { flex: 0 0 auto; color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
 .assistant-run-resultline { flex: 2 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-sm); }
@@ -27,11 +30,10 @@
 .assistant-run-detail > .text-button { margin-right: .6rem; margin-block: .2rem; }
 .assistant-run-result { border-left: 2px solid var(--border); padding-left: .6rem; color: var(--text); }
 .assistant-run-result strong { margin-right: .4rem; }
-#ask-room[aria-pressed="true"] { outline: 2px solid var(--blue); }
 .human-project-item { display: flex; text-align: left; width: 100%; justify-content: space-between; gap: 1rem; padding: .8rem; margin: .4rem 0; }
 #room-assistant-setup, #human-project-dialog { max-width: min(38rem, calc(100vw - 2rem)); }
 #room-assistant-setup select { width: 100%; }
-@media(max-width: 600px) { #ask-room { padding: .4rem; font-size: var(--text-sm); } #room-assistant { margin: .4rem; } }
+@media(max-width: 600px) { #assistant-context { padding: .4rem; font-size: var(--text-sm); } #room-assistant { margin: .4rem; } }
 
 .assistant-run > .text-button { margin-right: .6rem; margin-block: .2rem; }
 
@@ -45,30 +47,15 @@
 .assistant-face-status[data-face-status="not_picked_up"], .assistant-face-status[data-face-status="host_paused"], .assistant-face-status[data-face-status="stalled"] { color: var(--amber); }
 #assistant-face .assistant-face-actions > .text-button { margin-right: .6rem; margin-block: .2rem; }
 
-/* Keep idle setup reachable without a second card above the phone composer.
-   Active work and errors retain their full presentation. */
 @media (max-width: 600px) {
-  #room-assistant.assistant-idle {
-    margin: 0 .4rem;
-    padding: 0 .5rem;
-    border: 0;
-    border-radius: 0;
-  }
-  #room-assistant.assistant-idle .assistant-heading {
-    gap: .4rem;
-    min-height: 44px;
-  }
-  #room-assistant.assistant-idle .assistant-heading button { min-height: 44px; }
-  #room-assistant.assistant-idle #assistant-error:empty { margin: 0; }
-  #request-mode-bar { flex-direction: row; align-items: center; gap: .5rem; padding: .4rem .75rem; }
-  #request-mode-label { flex: 1 1 8rem; min-width: 0; }
-  #request-mode-bar button { flex: 0 0 auto; width: auto; min-height: 44px; }
+  .human-experience .human-composer-actions { order: 1; flex: 1 1 0; }
+  .human-experience .composer-row > button[type="submit"] { order: 2; }
 }
 
-/* An addressed request has its own send/retry action. Keep the public
-   assistant action out of that mode without changing message routing. */
-#message-form:has(#request-mode-bar:not([hidden])) #ask-room { display: none; }
-@media (max-width: 600px) {
-  /* Keep the status in the button's accessible name without occupying a row. */
-  #catchup-count[data-quiet="true"] { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-}
+.assistant-face-progress { color: var(--text); font-size: var(--text-sm); max-width: 65ch; overflow-wrap: anywhere; }
+.work-accountable { color: var(--muted); font-size: var(--text-sm); margin: var(--space-1) 0; }
+.message > #assistant-face { grid-column: 2 / -1; min-width: 0; margin-top: 0; }
+.assistant-face-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+#assistant-face .assistant-face-actions > .text-button { margin: 0; min-height: 24px; }
+.human-experience #also-send-label:not([hidden]) { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; }
+.human-experience #also-send-to-channel { width: auto; margin: 0; flex: 0 0 auto; }

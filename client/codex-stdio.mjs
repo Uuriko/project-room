@@ -136,6 +136,8 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   });
   return {
     request(method, params = {}) {
+      // A successful handshake belongs only to this live process generation.
+      if (closed) return Promise.reject(new Error("Runtime disconnected; reconcile original attempt"));
       if (method === "initialize" && initialization) return initialization;
       if (!(authenticationOnly ? authMethods : METHODS).has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
       if (method === "account/read" && (params.refreshToken !== false || Object.keys(params).some(key => key !== "refreshToken")))

@@ -163,7 +163,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     }
     const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token };
     const client = new RoomAgentClient({ ...config, fetchImpl });
-    const access = await client.checkConnection(), orientation = await client.activationPack();
+    const access = await client.checkConnection(), orientation = await client.activationPack({ view: "brief" });
     try {
       const existing = readAgentConnection(configDirectory);
       if (JSON.stringify(existing) !== JSON.stringify(config)) throw new Error("Existing connection differs; nothing was replaced");

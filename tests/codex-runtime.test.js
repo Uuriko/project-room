@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 const binding = { origin: "http://room", roomId: "commons", memberId: "producer", requestMessageId: "question",
   requestId: "host-question", attemptId: "attempt-one", roomCreatedEventId: "room-created", openingEventId: "question-opened" };
@@ -57,6 +58,23 @@ test("exact thread/turn events complete despite notification preceding start res
   await assert.rejects(host(input, { binding }), /already exists/);
   assert.deepEqual(await host.reconcile(binding), { status: "completed", body: "Reviewed result" });
   assert.equal(rpc.calls.filter(x => x.method === "turn/start").length, 1);
+});
+test("runtime records the exact input digest and brief version before execution without retaining prompt text", async t => {
+  const { host, rpc, db } = setup(t);
+  const workBrief = { version: 'a'.repeat(64) };
+  await host({ ...input, preparation: { workBrief, note: 'Private context marker' } }, { binding });
+  const prompt = rpc.calls.find(call => call.method === 'turn/start').params.input[0].text;
+  const observation = await host.contextObservation(binding);
+  assert.equal(observation.inputDigest, createHash('sha256').update(prompt).digest('hex'));
+  assert.equal(observation.inputBytes, Buffer.byteLength(prompt));
+  assert.equal(observation.workBriefVersion, workBrief.version);
+  assert.equal(observation.authorityGranted, false);
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM codex_runtime_contexts').all()).includes('Private context marker'), false);
+  const reopened = createCodexRuntimeHost({ db, rpc, scope: binding, cwd: '/tmp/project',
+    policy: { approvalPolicy: 'never', sandbox: 'read-only' }, authorize: async () => {} });
+  assert.deepEqual(await reopened.contextObservation(binding), observation);
+  await assert.rejects(reopened({ ...input, preparation: {} }, { binding }), /already exists/);
+  assert.equal(rpc.calls.filter(call => call.method === 'turn/start').length, 1);
 });
 test("lost steering response is uncertain and never automatically sent twice", async t => {
   const { host, rpc, events } = setup(t, { complete: false, loseSteer: true });
@@ -109,7 +127,7 @@ test("authenticated Room runner uses the adapter, persists result and retries de
   f.store.dmConsents.decide("commons", "owner", "producer", "approve");
   const requestMessageId = "question-runtime";
   f.store.command(f.keys.owner, "commons", { id: "ask-runtime", type: "message.posted", data: { messageId: requestMessageId,
-    requestKind: "reply", toMemberId: "producer", body: "Review this plan" } });
+    requestKind: "reply", toMemberId: "producer", body: "Review this plan", workItemId: "test-handoff" } });
   const connection = { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "producer", token: f.keys.producer };
   const rpc = transport(), execute = roomCodexHost({ connection, db, rpc, cwd: f.directory, policy: { approvalPolicy: "never", sandbox: "read-only" } });
   const result = await runRequestOnce({ connection, requestMessageId, db, execute });
@@ -118,6 +136,9 @@ test("authenticated Room runner uses the adapter, persists result and retries de
   const mapping = JSON.parse(saved.binding);
   assert.equal(mapping.attemptId, db.prepare("SELECT attempt_id FROM request_runs").get().attempt_id);
   assert.equal(mapping.memberId, "producer"); assert.equal(saved.turn_id, "turn-one");
+  const prompt = JSON.parse(rpc.calls.find(call => call.method === "turn/start").params.input[0].text);
+  assert.equal(prompt.context.preparation.workBrief.scope.workItemId, "test-handoff");
+  assert.equal((await execute.contextObservation(mapping)).workBriefVersion, prompt.context.preparation.workBrief.version);
   assert.equal(JSON.stringify(rpc.calls).includes(f.keys.producer), false);
   const retry = await runRequestOnce({ connection, requestMessageId, db, execute });
   assert.equal(retry.hostExecuted, false);

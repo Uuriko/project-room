@@ -32,7 +32,7 @@ async function serve(t, f, { budgetEnv } = {}) {
     telegramCalls.push({ url, init });
     return Response.json({ ok: true, result: { message_id: 4242 } });
   };
-  const server = createRoomServer({ store: f.store,
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store,
     telegram: telegramConfig({ TELEGRAM_BOT_TOKEN: FAKE_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET }),
     directSendFetch: fetchImpl,
     sendBudgetEnv: budgetEnv ?? { TELEGRAM_SEND_BUDGET_PER_MIN: "1", TELEGRAM_SEND_BUDGET_BURST: "1" } });

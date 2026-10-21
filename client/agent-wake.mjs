@@ -117,7 +117,7 @@ export class AgentWakeClient {
     return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: listener && !listenerInfo.acquired ? [] : signals(value.pendingWakes),
       ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
-  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion }) {
+  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null }) {
     hostOptions(hostId, cadenceSeconds);
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
     const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
@@ -130,9 +130,10 @@ export class AgentWakeClient {
     const registered = await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!registered.listener.acquired) return contended();
     const receivingToken = this.#fencingToken;
-    const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs, undefined, waitMs + 10000);
+    const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs + (cursor === null ? '' : '&cursor=' + encodeURIComponent(cursor)), undefined, waitMs + 10000);
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
+    if (value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
     const after = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
       attentionCursor: before.observedThroughBySource.attention?.cursor });
     requireConnection(after);
@@ -141,7 +142,7 @@ export class AgentWakeClient {
     // Even an empty page can trigger startup attention from its observations.
     const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
-    return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes,
+    return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes, more: value.more === true, nextCursor: value.nextCursor ?? null,
       timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' };
   }

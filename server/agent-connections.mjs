@@ -360,6 +360,25 @@ export class AgentConnections {
         const room = this.store.room(row.room_id).state, sponsor = ownMember(room.members, state.sponsor_member_id);
         const account = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(state.sponsor_account_id);
         const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, state.sponsor_member_id);
+        // The member↔account binding is a current-state record, not an
+        // at-the-time fact: apply() authenticated the sponsor's account
+        // session (and the operation row's actor_account_id, checked
+        // above against state.sponsor_account_id, is that account), but
+        // two supported flows dissolve the binding afterwards — account
+        // deletion (server/account-deletion.mjs deletes every
+        // member_accounts row for the account and deactivates it, while
+        // the connection journal is retained by policy) and a self-left
+        // member's account rejoining under a new member id (store.mjs
+        // acceptInvitation deletes the left member's binding). Demanding
+        // the binding still exist today makes those rooms' journals
+        // fail integrity forever, the same defect class #3945 fixed for
+        // the room owner. A missing binding is explained only by a
+        // terminal fact — the sponsor account deactivated or the
+        // sponsor member inactive; a binding naming a different
+        // account, and a missing binding with both parties still
+        // active, remain corrupt.
+        const bindingOk = binding ? binding.account_id === state.sponsor_account_id
+          : !account || account.active !== 1 || sponsor?.active === false;
         if (Object.keys(state).sort().join() !== Object.keys(row).sort().join()
           // RC-2026-09-24-201: atomic enrollment receipts may carry the
           // optional identityId echo; the key set is exact either way.
@@ -370,7 +389,7 @@ export class AgentConnections {
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
           || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
           || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
-          || !account || account.auth_epoch < state.sponsor_auth_epoch || binding?.account_id !== state.sponsor_account_id) invalid();
+          || !account || account.auth_epoch < state.sponsor_auth_epoch || !bindingOk) invalid();
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
           || credential.parent_hash !== null || credential.account_id !== null || credential.account_auth_epoch !== null || credential.expires_at !== state.expires_at
