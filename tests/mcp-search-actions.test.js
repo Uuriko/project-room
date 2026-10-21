@@ -47,8 +47,8 @@ const size = tools => JSON.stringify(tools).length;
 
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 24, "default core is the lean v2 list: 20 room tools plus 4 join readers");
-  assert.equal(full.length, 121, "full adds room_search, room_read_many, room_who and room_ask_user");
+  assert.equal(core.length, 25, "default core is the lean v2 list: 21 room tools plus 4 join readers");
+  assert.equal(full.length, 125, "full adds room_search, room_read_many, room_who, room_ask_user and the four memory tools");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
