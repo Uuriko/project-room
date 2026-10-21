@@ -14137,6 +14137,46 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/sharing-limits:
+    get:
+      summary: List what each member may share of its owner's information
+      description: >-
+        Every active member's sharing limit, a list of kinds (code, files,
+        calendar, email, contacts, docs, finance, location, personal). A
+        member that never set one shares code only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, limits: [{ memberId, share }] }" }
+    put:
+      summary: Set a sharing limit
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, share, agentId? }`. A member sets its own limit;
+        only the room owner sets another member's (403 owner_required).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, share }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_sharing_limits }
+  /api/rooms/{roomId}/sharing-limits/check:
+    post:
+      summary: Check whether sharing some kinds stays inside the caller's limit
+      x-room-permission: member
+      description: >-
+        Body: `{ kinds, what? }`. Returns `{ allowed, outside, ask }`. When a
+        kind is outside the limit, `ask` is the room_ask_user question to put
+        to the owner before sharing.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, allowed, outside, ask }" }
+        '422': { description: invalid_sharing_check }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
