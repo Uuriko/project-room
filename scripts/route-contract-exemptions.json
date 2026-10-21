@@ -32,6 +32,11 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
+      "template": "/.well-known/oauth-protected-resource",
+      "class": "discovery-doc",
+      "reason": "RFC 9728 OAuth protected-resource metadata document — the resource_metadata target named by the doors' 401 challenges; a discovery document on the well-known plane, not a REST operation."
+    },
+    {
       "template": "/.well-known/security.txt",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
@@ -170,6 +175,11 @@
       "template": "/oauth/authorize",
       "class": "protocol",
       "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
+    },
+    {
+      "template": "/oauth/register",
+      "class": "protocol",
+      "reason": "OAuth 2.0 server endpoint (dynamic client registration); the contract is RFC 7591 plus the /.well-known/oauth-authorization-server metadata document."
     },
     {
       "template": "/oauth/revoke",
