@@ -344,11 +344,17 @@ export const JOBS = Object.freeze([
       // Without the store the caller cannot see an open item, so the tick
       // still runs. With the store, an empty queue has nothing to poll.
       if (!store) return true;
-      return landDueAt(store, Date.now()) != null;
+      return landDueAt(store, Date.now()) != null || mergeTrainBusy(store);
     },
     disabledReason: () => "No open pull request is waiting",
-    nextDueAt: (store, now) => landDueAt(store, now),
+    nextDueAt: (store, now) => (mergeTrainBusy(store) ? now : landDueAt(store, now)),
     async run(store, ctx) {
+      // The merge train (server/merge-train.mjs) steps on the same tick.
+      const train = store.mergeTrain;
+      if (train && mergeTrainBusy(store)) {
+        train.configure({ env: ctx.env });
+        await train.tickAll().catch(error => console.error("merge train tick failed:", error?.code ?? "error"));
+      }
       if (ctx.room?.refreshLandQueue) return ctx.room.refreshLandQueue();
       store.landQueue.configure({ env: ctx.env });
       return store.landQueue.refreshDue({ deadline: ctx.deadline, now: ctx.now?.() });
@@ -904,4 +910,10 @@ export function wireNodeJobs(store, options = {}) {
   scheduler.start();
   wiredScheduler = scheduler;
   return scheduler;
+}
+
+function mergeTrainBusy(store) {
+  try {
+    return Boolean(store.db.prepare("SELECT 1 FROM merge_train_entries WHERE state IN ('queued','in_batch','landed') LIMIT 1").get());
+  } catch { return false; }
 }

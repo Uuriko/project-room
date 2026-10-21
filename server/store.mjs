@@ -162,6 +162,7 @@ import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } fr
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
+import { MergeTrain, mergeTrainSchema, migrateMergeTrainColumns } from "./merge-train.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
@@ -1134,7 +1135,7 @@ function roomSchemaStamp() {
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
-    landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
+    landQueueSchema, mergeTrainSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
@@ -1465,6 +1466,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.workWakes = new WorkWakes(this); // Opt-in pointer-only work delivery on heartbeat reads.
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
     this.landQueue = new LandQueue(this);
+    this.mergeTrain = new MergeTrain(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
     this.projectOffers = new ProjectOffers(this);
     this.demigodOffers = new DemigodOffers(this);
@@ -1779,6 +1781,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // are thin wake receipts and do not copy the row into the projection.
       this.db.exec(landQueueSchema);
       migrateLandQueueColumns(this.db);
+      // Merge train: additive, outside the writer fence, like the land queue.
+      this.db.exec(mergeTrainSchema);
+      migrateMergeTrainColumns(this.db);
       // Identity-scoped inbox attachment bytes: purely additive, no schema
       // version bump, outside the writer fence. Account-session descriptor
       // routes are unchanged and still do not retain provider bytes.
