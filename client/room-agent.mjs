@@ -15,9 +15,10 @@ import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
-import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../src/service-origin.js";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -954,7 +955,20 @@ export class RoomAgentClient {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
-  activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
+  activationPack({ view = "full", signal } = {}) {
+    if (view !== "full" && view !== "brief") throw new RoomClientError(0, "invalid_view", "Use full or brief activation view");
+    return this.#request(`/activation-pack${view === "brief" ? "?view=brief" : ""}`, undefined, signal);
+  }
+  // One bounded summary read after the existing connection preflight. `next`
+  // is the observed head, not an acknowledgement or a complete event page.
+  async roomDigest({ since = 0, signal } = {}) {
+    if (!Number.isSafeInteger(since) || since < 0) throw new RoomClientError(0, "invalid_cursor", "since must be a nonnegative safe sequence number");
+    const value = await this.#request(`/digest?since=${since}`, undefined, signal);
+    if (!validRoomDigest(value, { roomId: this.#roomId, memberId: this.#memberId, since })) {
+      throw new RoomClientError(200, "invalid_response", "Room digest does not match its identity, coverage or bounded summary contract");
+    }
+    return value;
+  }
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.

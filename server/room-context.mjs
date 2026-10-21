@@ -4,7 +4,8 @@
 // have their own reads. context_version hashes this projection so an unchanged
 // room answers { not_modified: true } instead of another copy.
 import { createHash } from "node:crypto";
-import { roomPolicy, roomPacingPolicy } from "../src/events.js";
+import { roomPolicy } from "../src/events.js";
+import { roomPacingPolicy } from "../src/message-reducers.js";
 import { activeClaim, nextWorkStep } from "../src/workflow.js";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
 

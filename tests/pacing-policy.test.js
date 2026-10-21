@@ -13,9 +13,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  EVENT_TYPES as T, applyEvent, replay, roomPacingPolicy, pacingBroadcastOrder,
-  PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES
+  EVENT_TYPES as T, applyEvent, replay
 } from "../src/events.js";
+import {
+  roomPacingPolicy, pacingBroadcastOrder,
+  PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES
+} from "../src/message-reducers.js";
 import { seedEvents } from "../src/seed.js";
 import { RoomStore, validateCommand } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";

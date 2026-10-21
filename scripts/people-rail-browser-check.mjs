@@ -82,6 +82,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await ensurePeopleOpen(page);
+  assert.equal(await page.locator('[data-member-record-id="codex"]').isVisible(), true,
+    "ordinary human People list must show agent availability");
   await enableHumanAdvanced(page);
   if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();

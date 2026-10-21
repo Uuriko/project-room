@@ -17,7 +17,7 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t) {
   const f = createAcceptanceFixture();
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams(); server.closeAllConnections();

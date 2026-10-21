@@ -6,6 +6,34 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Share layer
+
+`/receipts/<id>/og.png` is the receipt's share card: the title, the graded verdict line, and a footer
+stating that hashes are stored values, not re-verified — rendered at request time from the same public
+record as the page and named by the page's `og:image`. It exists only while the receipt is public: the
+read re-checks the owner toggle and operator unpublish on every request. Unlike the pages (`no-store`),
+the card is cacheable for five minutes so link unfurlers can fetch it — the one deliberate exception,
+bounded by that TTL.
+
+The detail page embeds JSON-LD (`CreativeWork`) mirroring the visible record: title, verdict level,
+pull request, hash evidence (labelled as stored, not re-verified), and the proven note as its
+description. Names are omitted — the page qualifies them as room-recorded, not identity-verified, and
+the structured vocabulary cannot carry that qualifier. There is no rating or review markup: a receipt
+is a record, not a review.
+
+The detail page also carries a share block: the pre-filled share text
+("<title> — <verdict line>") shown verbatim on the page,
+one-tap share links (X, LinkedIn, email — plain anchors; these pages are
+script-free), and the badge embed below.
+
+`/receipts/<id>/badge.svg` is the embeddable badge for READMEs and
+portfolios: the surface name and the receipt's graded verdict in words —
+never a bare checkmark, which readers take as a blanket quality verdict.
+It resolves through the same public read as the page, so it exists only
+while the receipt is public, and it is cacheable under the same
+five-minute exception as the OG card. The snippet the page offers wraps
+the badge in the receipt link with the verdict line as its alt text.
+
 ## Per-room proof page
 
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
@@ -24,8 +52,17 @@ carries:
   (`hash_only`): not an acceptance, not a payment.
 
 Every entry links to its `/receipts/<id>` record. No payment is proved on
-the proof page: bounty credit movements are proved by signed lot receipts,
-which have a public page of their own (`/receipts/<lotId>`, below).
+the proof page: bounty credit movements are recorded by lot receipts,
+which never appear as proof-page entries. A lot receipt's own detail page
+is public only under the same owner receipts setting as every other
+receipt, and its share surfaces follow that same gate.
+
+The proof page carries the same share layer as a receipt: JSON-LD
+(`CollectionPage` with an `ItemList` mirroring the visible entries and
+their level notes) and a per-room share card at
+`/r/<slug>/proof/og.png` — the room's counts and the stored-hashes
+footer — gated by the same view and cacheable under the same five-minute
+exception as the receipt card.
 
 ## What is public
 
@@ -44,12 +81,13 @@ which have a public page of their own (`/receipts/<lotId>`, below).
   hash, and settlement outcome. Before settlement, and for journal
   lots that are not bounty movements, the id is a 404. The record is
   composed from the credit ledger at read time, not stored as a copy.
-  Unlike the claim and work-item shapes, a lot does not wait for the
-  owner's public-receipts opt-in: it is public once settled. What hides
-  it is the owner's recorded opt-out (the room's own public-receipts
-  setting recorded off), the room's directory receipts switch turned
-  off, or operator unpublish — the same switches that hide the other
-  shapes.
+  Like the claim and work-item shapes, a lot waits for the owner's
+  public-receipts opt-in (#3594): a settled lot is public only while
+  the room's own public-receipts setting is recorded on. Never
+  recording the setting keeps the lot private, exactly like recording
+  it off; the room's directory receipts switch turned off and
+  operator unpublish hide it too — the same switches that hide the
+  other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has

@@ -76,6 +76,7 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   await page.locator('#message-search').fill('telescope');
   const hit = page.locator(`#search-list [data-open-work="${sourceId}"]`);
   await hit.focus(); await hit.press('Enter');
+  await page.locator(`[data-work-record-id="${sourceId}"] .work-details > summary`).click();
   await page.locator(`[data-reuse-work="${sourceId}"]`).click();
   const form = page.locator('#new-work-form'); await form.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#work-title-input').inputValue(), original.title);
