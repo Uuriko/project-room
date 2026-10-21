@@ -5,13 +5,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { connectFields, UNAVAILABLE } from "../server/routes/agent-connect.mjs";
+import { connectFields, renderAgentConnectMarkdown, UNAVAILABLE } from "../server/routes/agent-connect.mjs";
+
+test("large multilingual invite context never truncates mandatory enrollment commands", () => {
+  const origin = "https://room.example.test";
+  const text = renderAgentConnectMarkdown({ origin, code: "RM-SYNTHETIC", roomId: "test-room",
+    title: "漢".repeat(120), purpose: "漢".repeat(400), profile: "contribute", permissions: [],
+    expiresAt: Date.now() + 1800000,
+    claims: [{ id: "starter", title: "漢".repeat(120), assigned: true }] });
+  assert.ok(Buffer.byteLength(text) <= 3072);
+  assert.equal(text.includes("\ufffd"), false);
+  assert.match(text, /identitySecret/);
+  assert.match(text, /requestId/);
+  assert.ok(text.includes(`curl -sS -X POST '${origin}/api/agent-invites/redeem'`));
+  assert.ok(text.includes(`curl -sS '${origin}/api/rooms/test-room/activation-pack?view=brief'`), "first read must survive optional context shedding with a shell-quoted query URL");
+  assert.ok(text.includes('HTTP: Authorization: Bearer $PROJECT_ROOM_SECRET'));
+});
+
+test("long self-hosted invite pages retain a complete bounded HTTP and MCP path", () => {
+  const origin = `https://${Array(3).fill("a".repeat(63)).join(".")}.example.test`;
+  const text = renderAgentConnectMarkdown({ origin, code: "RM-" + "a".repeat(100), roomId: "r".repeat(128),
+    title: "漢".repeat(120), purpose: "漢".repeat(400), profile: "contribute", permissions: [],
+    expiresAt: Date.now() + 1800000, claims: [] });
+  assert.ok(Buffer.byteLength(text) <= 3072);
+  assert.ok(text.includes("room_identity_mint"));
+  assert.ok(text.includes("room_join"));
+  assert.ok(text.includes("activation-pack?view=brief'"));
+  assert.ok(text.endsWith("\n"));
+});
+
+for (const shell of ["/bin/sh", "/bin/zsh"].filter(existsSync)) test(`printed first read executes with intact URL and header in ${shell}`, () => {
+  const text = renderAgentConnectMarkdown({ origin: "https://room.example.test", code: "RM-SYNTHETIC", roomId: "test-room",
+    title: "Test", purpose: "Test", profile: "contribute", permissions: [], expiresAt: Date.now() + 1800000, claims: [] });
+  const command = text.split("\n").find(line => line.startsWith("curl ") && line.includes("/activation-pack"));
+  assert.ok(command);
+  const args = execFileSync(shell, ["-c", 'PROJECT_ROOM_SECRET=synthetic; curl() { printf "%s\\n" "$@"; }; ' + command], { encoding: "utf8", timeout: 5000 }).split("\n");
+  assert.ok(args.includes("https://room.example.test/api/rooms/test-room/activation-pack?view=brief"));
+  assert.ok(args.includes("authorization: Bearer synthetic"));
+});
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-connect-"));
@@ -163,15 +201,16 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   calls += 1;
   assert.equal(listed.status, 200, listed.text);
   assert.ok(Array.isArray(listed.json.result?.tools) && listed.json.result.tools.length > 0);
-  const packCurl = steps.find(step => step.url.endsWith("/activation-pack"));
+  const packCurl = steps.find(step => step.url.endsWith("/activation-pack?view=brief"));
   const packed = await fetch(packCurl.url, {
     headers: { authorization: packCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
   });
   calls += 1;
   assert.equal(packed.status, 200);
-  const orient = (await packed.json()).orient;
-  assert.equal(orient.member.handle, "Probe Agent");
-  assert.ok(orient.work.some(item => item.title === "Starter task"));
+  const brief = await packed.json();
+  assert.equal(brief.view, "brief");
+  assert.equal(brief.you.handle, "Probe Agent");
+  assert.ok(brief.pickUp.some(item => item.title === "Starter task"));
   const board = steps.filter(step => step.url.includes("/work-claims/starter/"));
   assert.equal(board.length, 3, page.text);
   let done = null;

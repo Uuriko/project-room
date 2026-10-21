@@ -92,12 +92,12 @@ function permissionLine(profile, permissions) {
   return names.length ? `Permissions: ${names.join(", ")}.` : "Permissions are on the invite.";
 }
 
-function curl(method, url, body) {
-  const headers = body
-    ? `-H "authorization: Bearer $PROJECT_ROOM_SECRET" -H 'content-type: application/json' -d '${body}'`
-    : `-H "authorization: Bearer $PROJECT_ROOM_SECRET"`;
+function curl(method, url, body, authenticated = true) {
+  const auth = authenticated ? '-H "authorization: Bearer $PROJECT_ROOM_SECRET"' : "";
+  const headers = body ? `${auth} -H 'content-type: application/json' -d '${body}'` : auth;
   const verb = method === "GET" ? "" : `-X ${method} `;
-  return `curl -sS ${verb}${url} ${headers}`.replace(/\s+/g, " ").trim();
+  const address = `'${url.replaceAll("'", "'\\''")}'`;
+  return `curl -sS ${verb}${address} ${headers}`.replace(/\s+/g, " ").trim();
 }
 
 function claimCurls(origin, roomId, claim) {
@@ -127,7 +127,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "Save the response field identitySecret: your durable credential, shown once, with no scheduled expiry (it can still be rotated or revoked); it works on /mcp and every room route. Store it in a secret store or a file with mode 0600. Never print it into chat. (mcpToken.credential is a 30-day token for this room only; you do not need it.)",
     "To make a retry safe, add \"requestId\" (any UUID) to the body and keep it private like a password: with this code it can recover your identity. Resending the same request returns your connection again, even after the link is used: with your identitySecret as the Bearer token it keeps that credential; with no credential it works for 30 days and rotates in a fresh identitySecret.",
     "",
-    `curl -sS -X POST ${base}/api/agent-invites/redeem -H 'content-type: application/json' -d '${redeemBody}'`,
+    curl("POST", `${base}/api/agent-invites/redeem`, redeemBody, false),
     "",
     `MCP only, no HTTP client: connect to ${connect.mcpUrl} with no credential, call room_identity_mint, save structuredContent.secret as PROJECT_ROOM_SECRET, reconnect with it as the Bearer token, then call room_join with {"inviteCode":"${code}"}. If your host only calls listed tools and room_join is missing, connect once to ${connect.mcpUrl}?profile=full to join, then reconnect without it.`,
     "",
@@ -143,9 +143,10 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     "Read the room with this GET.",
     "",
-    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack`),
+    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack?view=brief`),
     "",
   ];
+  const enrollment = [...lines];
   const assigned = claims.filter(claim => claim.assigned);
   const open = claims.filter(claim => !claim.assigned);
   if (assigned.length) {
@@ -173,7 +174,25 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
   const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
   text = `${shorter.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
-  return Buffer.from(text).subarray(0, PAGE_BUDGET).toString("utf8").replace(/\s+\S*$/, "\n");
+  // Optional room context must never crowd out the credential instructions or
+  // first authenticated read. Byte-slicing can leave agents with half a shell
+  // command (and can split UTF-8). Shed whole optional sections instead.
+  const essentials = enrollment.filter(line => !line.startsWith("Room:") && !line.startsWith("Purpose:"));
+  text = `${essentials.join("\n").trim()}\n`;
+  if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
+  // Long self-hosted origins can repeat throughout the full CLI examples.
+  // Keep a complete HTTP path and MCP alternative rather than truncating either.
+  return [
+    "You've been invited to a Project Room as an agent.",
+    "Save the response field identitySecret in a secret store or mode-0600 file as PROJECT_ROOM_SECRET. Never print it into chat. Do not save the expiring room token instead.",
+    'Add a UUID requestId to the redeem body and keep it private like a password. Preserve the same request for retries.',
+    curl("POST", `${base}/api/agent-invites/redeem`, redeemBody, false),
+    `MCP: ${connect.mcpUrl}; room_identity_mint, save structuredContent.secret, reconnect with it, then room_join with {"inviteCode":"${code}"}. If unlisted, use ${connect.mcpUrl}?profile=full to join.`,
+    `HTTP: ${connect.httpHeader}`,
+    curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/activation-pack?view=brief`),
+    "Read the room before choosing work. A connection does not start a listener.",
+    "",
+  ].join("\n");
 }
 
 function escapeHtml(value) {
