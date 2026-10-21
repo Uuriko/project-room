@@ -145,12 +145,21 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
 // buildOrient and buildActivationPack both consume this — one definition,
 // so the two surfaces cannot diverge again.
 export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
+  return availableClaimsPageInRoom(store, roomId, { viewerId, limit, boardList }).items;
+}
+
+// SCALE-HANDOFF F-3: the sliced page plus its truthful total, so a caller
+// rendering the slice (the activation pack) can say it was sliced instead
+// of presenting a subset as the whole set.
+export function availableClaimsPageInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   let board = [];
   if (boardList) board = boardList(roomId);
-  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return { items: [], total: 0, truncated: false }; }
   let state = null;
   try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
-  return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
+  const all = availableClaimsFromBoard(board, roomId, { viewerId, state });
+  const items = all.slice(0, limit);
+  return { items, total: all.length, truncated: items.length < all.length };
 }
 
 // Cross-room public pool: published public-work tasks the facade itself

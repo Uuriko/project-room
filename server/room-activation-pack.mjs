@@ -12,7 +12,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
-import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
+import { availableClaimsPageInRoom, memoizeBoardList } from "./available-work.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -56,8 +56,8 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *     }
  *   ],
  *   openClaims: [              // AvailableWork projection, board source (#3020):
- *     {                        // claims this viewer may pick up right now
- *       id: string,
+ *     {                        // claims this viewer may pick up right now,
+ *       id: string,            // sliced at 50 — see the two fields below
  *       title: string,
  *       source: "board",
  *       roomId: string,
@@ -68,6 +68,8 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       claimAction: { method: "POST", endpoint: string, params: object }
  *     }
  *   ],
+ *   openClaimsTotal: number,   // full claimable count before the slice
+ *   openClaimsTruncated: boolean, // true when openClaims is a slice of the total
  *   pinnedResources: [         // pinned messages, pin order
  *     {
  *       messageId: string,
@@ -174,6 +176,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
   const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
+  const openClaimsPage = availableClaimsPageInRoom(store, roomSlug, { viewerId, boardList });
   const pack = withContentTrust({
     room: {
       slug: state.room.id,
@@ -185,7 +188,9 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    openClaims: availableClaimsInRoom(store, roomSlug, { viewerId, boardList }),
+    openClaims: openClaimsPage.items,
+    openClaimsTotal: openClaimsPage.total,
+    openClaimsTruncated: openClaimsPage.truncated,
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
     // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
     // messageVisibleToViewer predicate also enforces the history floor, and

@@ -177,6 +177,18 @@ const parentClaimIdOf = (value, selfId) => {
   check(value !== selfId, "a claim cannot be its own parent");
   return value;
 };
+// SCALE-HANDOFF F-2: the progress-message pointer. A holder names the room
+// message carrying their working context (noteMessageId on update/release,
+// after the route has validated it names their own public message in this
+// room); the claim projects it as progressMessageId. Unlike the round's
+// reviews/files/delivery, the pointer SURVIVES release — it exists so the
+// next holder can find the context, so clearing it at release would defeat
+// it. An explicit null clears it.
+const progressMessageIdOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && value.length <= 128, "progressMessageId must be a message id of at most 128 characters");
+  return value;
+};
 const MAX_EVIDENCE_REFS = 16;
 const evidenceRefsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -629,8 +641,8 @@ const canonicalPayload = value => {
 // The digest binding a requestId to the update it carried: every field
 // updateWork can apply, and nothing else (now/requestId itself excluded —
 // a retry is stamped later and re-uses the id by definition).
-export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery } = {}) =>
-  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }), "utf8").digest("hex");
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId } = {}) =>
+  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId }), "utf8").digest("hex");
 // The bundle digest frozen at finish: sha256 over exactly the bundle's
 // content fields, so the verify step can prove the bundle it checks is the
 // bundle that was delivered (any later mutation of the stored row fails
@@ -896,6 +908,7 @@ export const workOf = value => {
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
+    progressMessageId: progressMessageIdOf(value.progressMessageId),
     acceptanceCriteria, delivery, verification,
     // #3684: how many deliveries this claim round has frozen (0 = none
     // yet). In-flight approvals (basis generation 0) cover only the
@@ -1222,8 +1235,11 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false, noteMessageId, progressMessageId } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // noteMessageId is the write-side alias for the same pointer.
+  const pointerInput = progressMessageId !== undefined ? progressMessageId : noteMessageId;
+  const pointer = pointerInput === undefined ? undefined : progressMessageIdOf(pointerInput);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1231,7 +1247,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // carrying a different update is refused, never silently swallowed.
   const key = requestId === undefined ? undefined : requestIdOf(requestId);
   const digest = key === undefined ? undefined
-    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId: pointer });
   if (key !== undefined) {
     const verdict = requestReplayVerdict(item.requestOutcomes, key, digest, item.claimRound);
     if (verdict === "replay") return item;
@@ -1357,7 +1373,10 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = null;
   }
   if (released) verification = null;
-  const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
+  const next = state === undefined ? { ...item, ...withProvenance, ...(pointer !== undefined ? { progressMessageId: pointer } : {}) } : { ...item, state,
+    // The progress pointer survives release (see progressMessageIdOf):
+    // a release that names one sets it, a plain release keeps the old one.
+    ...(pointer !== undefined ? { progressMessageId: pointer } : {}),
     owner: released ? null : item.owner,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
@@ -1402,7 +1421,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
 // re-claims, which keep the previous round's claimedAt. Claims held
 // in_progress/blocked are routed through the internal pause transition
 // first (W2); both steps are stamped in history.
-export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, noteMessageId, progressMessageId } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
   check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
@@ -1413,7 +1432,7 @@ export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryL
   if (current.state === "in_progress" || current.state === "blocked") {
     current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
   }
-  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority, noteMessageId, progressMessageId });
 }
 // Retire open work without delivering it. close: the room's claim managers
 // (authority) or the current holder. cancel: whoever opened the item while

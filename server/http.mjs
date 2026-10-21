@@ -764,8 +764,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const stride = Math.max(1, Math.floor(maximum / 4));
       if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+    if (entry.n > maximum) {
+      // SCALE-HANDOFF F-2 (UT-BIGROOM): the refusal must name its scope and
+      // retry terms in the BODY, not only in headers — a burst client that
+      // logs bodies (the UT driver did) otherwise learns nothing about
+      // which bucket refused it or when to retry. Scope is the bucket
+      // family (for room writes, "write": 60 mutations/minute per
+      // credential); retry terms are computed from the live window, so
+      // every field is truthful at emit time.
+      const retryAfterSeconds = Math.max(1, Math.ceil((entry.until - now) / 1000));
+      const error = new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+        { "Retry-After": String(retryAfterSeconds), "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+      error.detail = { rateLimit: { scope: family, limit: maximum, windowSeconds: 60, remaining: 0, retryAfterSeconds, resetAt: new Date(entry.until).toISOString() } };
+      throw error;
+    }
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);

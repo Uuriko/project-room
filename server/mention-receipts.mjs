@@ -17,7 +17,8 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
     store.flipExpiredMentions(roomId);
     const rows = store.db.prepare(
       `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
-              m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+              m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt,
+              json_extract(e.body, '$.data.messageId') AS messageId
        FROM mention_states m
        JOIN events e ON e.room_id = m.room_id AND e.id = m.message_event_id
        WHERE m.room_id = ? AND json_extract(e.body, '$.actorId') = ?
@@ -29,6 +30,7 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
       roomId,
       senderId: auth.member.id,
       receipts: rows.map(row => ({
+        messageId: row.messageId ?? row.messageEventId,
         messageEventId: row.messageEventId,
         memberId: row.memberId,
         displayName: members[row.memberId]?.displayName ?? row.memberId,

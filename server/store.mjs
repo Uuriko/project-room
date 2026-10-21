@@ -6709,7 +6709,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.flipExpiredMentions(roomId);
       const rows = this.db.prepare(
         `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
-                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt,
+                json_extract(e.body,'$.data.messageId') AS messageId
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=?
            AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
@@ -6723,6 +6724,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return {
         roomId, memberId: target,
         mentions: rows.map(r => ({
+          // SCALE-HANDOFF F-1: messageId is the id needs-me/wake key a
+          // mention by (data.messageId, falling back to the event id —
+          // the same fallback needs-me uses), so a woken consumer can
+          // join this row to the signal that woke it.
+          messageId: r.messageId ?? r.messageEventId,
           messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
           displayName: members[r.memberId]?.displayName ?? r.memberId,
           createdAt: new Date(r.createdAt).toISOString(),
@@ -6740,9 +6746,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
     ).get(roomId, messageEventId, memberId);
     if (!row) return null;
+    const eventRow = this.db.prepare(
+      "SELECT json_extract(body,'$.data.messageId') AS messageId FROM events WHERE room_id=? AND id=?"
+    ).get(roomId, messageEventId);
     const members = this.room(roomId).state.members ?? {};
     return {
-      roomId, messageEventId, memberId, state: row.state,
+      roomId, messageId: eventRow?.messageId ?? messageEventId, messageEventId, memberId, state: row.state,
       displayName: members[memberId]?.displayName ?? memberId,
       createdAt: new Date(row.createdAt).toISOString(),
       timeoutAt: new Date(row.timeoutAt).toISOString(),

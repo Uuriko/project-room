@@ -5831,6 +5831,14 @@ paths:
                       maxLength: 128
                       pattern: "^[A-Za-z0-9_-]{1,128}$"
                       description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
+                    noteMessageId:
+                      type: string
+                      maxLength: 128
+                      description: Id of the holder's own public room message carrying the working context; projected on the claim as progressMessageId. Null clears the pointer.
+                    progressMessageId:
+                      type: string
+                      maxLength: 128
+                      description: Alias for noteMessageId on update.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -6075,6 +6083,8 @@ paths:
                   description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
+                noteMessageId: { type: string, maxLength: 128, description: Id of the holder's own public room message carrying the working context; projected on the claim as progressMessageId and kept across the release. }
+                progressMessageId: { type: string, maxLength: 128, description: Alias for noteMessageId on release. }
       responses:
         '200':
           description: The released item
@@ -17694,6 +17704,9 @@ components:
         parentClaimId:
           type: [string, 'null']
           description: Claim this work builds on (its output or premise). The provenance walk follows these edges downstream; the done transition freezes it onto the receipt.
+        progressMessageId:
+          type: [string, 'null']
+          description: Id of the holder's public room message carrying the working context. Set via noteMessageId/progressMessageId on update or release; survives release so the next holder can find the context.
         evidenceRefs:
           type: array
           items: { type: string }
