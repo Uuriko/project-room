@@ -424,7 +424,7 @@ export class AgentInvites {
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -507,7 +507,7 @@ export class AgentInvites {
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
@@ -606,6 +606,8 @@ const DEFAULT_INVITE_NAME = "Invited agent";
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const steps = [
+    Object.freeze({ action: "orient", method: "GET", path: `${room}/activation-pack?view=brief`,
+      description: "Start here: who is around, what you may do, and up to three things to pick up, in one small read. Drop ?view=brief for the full pack." }),
     Object.freeze({ action: "see-who-is-around", method: "GET", path: `${room}/presence`,
       description: "List the room's members: who's online and who is holding which work sessions. Read this before you grab work." }),
     Object.freeze({ action: "post-first-message", method: "POST", path: `${room}/commands`,
@@ -614,7 +616,7 @@ const redeemNext = (roomId, displayName) => {
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
       description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
-    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   ];
   if (displayName === DEFAULT_INVITE_NAME) {

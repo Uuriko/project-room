@@ -9,6 +9,15 @@ import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNext
 
 export const HEARTBEAT_STORAGE_KEY = 'cron:job-heartbeats:v1';
 export const STALE_PERIODS = 3;
+// Guardian census F1 (2026-10-18): a job summary can carry work its own
+// pass left unactioned (escrow-epochs' `overdue`). One tick's count can
+// be a clock race — a bounty that came due mid-pass is next tick's work.
+// Sustained across OVERDUE_DEGRADE_TICKS consecutive observed ticks,
+// each a full pass that still could not act, it is a stall: the health
+// view grades the job degraded (reason 'escrow_overdue') and exposes the
+// streak + its start so the stall has an age on the surface instead of
+// riding invisibly inside a numeric summary on an 'ok' job.
+export const OVERDUE_DEGRADE_TICKS = 3;
 // A cron RPC shares the request Durable Object. Each job gets this long,
 // then it stops at the next item so a slow tick cannot pin the input gate.
 // One budget for both runtimes (#3767): the value lives in the registry
@@ -174,13 +183,31 @@ export function applyOutcomes(previous, outcomes) {
     // (runCronJobs records null); then the prior summary stands, still
     // labelled by its own lastSummaryAt.
     const failureSummary = outcome.ok ? null : compactSummary(outcome.summary);
-    next[outcome.job] = outcome.ok
+    const record = outcome.ok
       ? outcome.unobserved
         ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
         : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
         lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure),
         ...(failureSummary ? { lastSummary: failureSummary, lastSummaryAt: at } : {}) };
+    // Overdue streak (guardian census F1): track consecutive observed
+    // ticks whose summary reports overdue work, and when the current
+    // streak began. Only a tick that actually carried a summary speaks:
+    // a thrown tick (summary null) neither extends nor clears the
+    // streak, and a job whose summary has no `overdue` field at all
+    // (every job but escrow-epochs today) never gains one. A summary
+    // with overdue: 0 closes the streak.
+    const summary = outcome.ok ? record.lastSummary : failureSummary;
+    if (summary && Number.isFinite(summary.overdue)) {
+      if (summary.overdue > 0) {
+        record.overdueStreak = (prior.overdueStreak ?? 0) + 1;
+        record.overdueSinceAt = Number.isFinite(prior.overdueSinceAt) && (prior.overdueStreak ?? 0) > 0 ? prior.overdueSinceAt : at;
+      } else {
+        record.overdueStreak = 0;
+        record.overdueSinceAt = null;
+      }
+    }
+    next[outcome.job] = record;
   }
   return next;
 }
@@ -207,11 +234,18 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
-    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true
-      ? 'github_rate_limited'
-      : enabled && !stale && !failing && record.lastSummary?.unreachable > 0
-        ? 'escrow_unreachable'
-        : null;
+    // Escrow overdue (guardian census F1): the keeper's own pass left due
+    // bounties unactioned for OVERDUE_DEGRADE_TICKS consecutive ticks.
+    // That is a stall, not a wait — degrade so the surface (and anything
+    // polling it) can see it; still not a 503: no tick has failed, the
+    // work is late, and the streak fields below carry its age.
+    // Escrow unreachable (#4128): the keeper's stuck-state census found
+    // bounties no due branch can ever reach, in the last summary. An
+    // independent condition on a different summary field than the overdue
+    // streak; the two rules compose in either order (overdue first here).
+    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
+      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue'
+      : enabled && !stale && !failing && record.lastSummary?.unreachable > 0 ? 'escrow_unreachable' : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -235,6 +269,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
       lastSummaryAt: iso(record.lastSummaryAt),
+      overdueStreak: Number.isFinite(record.overdueStreak) ? record.overdueStreak : null,
+      overdueSinceAt: iso(record.overdueSinceAt ?? null),
       required: job.required === true,
       stale,
       degraded,

@@ -85,7 +85,7 @@ test("shared tokens, focus, and settings sections render together", { timeout: 6
     await dialog.locator(".settings-group-title", { hasText: title }).waitFor();
   }
   const resultsParent = await page.locator("#results-panel").evaluate(node => node.parentElement.id);
-  assert.equal(resultsParent, "settings-dialog");
+  assert.equal(resultsParent, "search-results", "completed work belongs in search, not Settings");
   await dialog.screenshot({ path: `${shots}/after-settings.png` });
 
   await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });

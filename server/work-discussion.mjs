@@ -74,8 +74,9 @@ const pick = (value, keys) => Object.fromEntries(keys.split(" ").filter(key => O
 
 // Metadata contains only immutable message-post IDs/sequences through the frozen
 // horizon. Bodies come from the canonical projection; mutable reactions are omitted.
-export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null, floor = null, scope = null }) {
-  const item = state.workItems[workItemId], byId = new Map(state.messages.map(message => [message.id, message]));
+export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null, floor = null, scope = null, messageRecords = null }) {
+  const item = state.workItems[workItemId], byId = messageRecords?.getMany ? messageRecords.getMany(metadata.map(post => post.message_id || post.id))
+    : messageRecords ?? new Map(state.messages.map(message => [message.id, message]));
   const included = new Set(), selected = [];
   for (const post of metadata) {
     const message = byId.get(post.message_id || post.id);

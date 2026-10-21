@@ -291,3 +291,38 @@ test("a store that has never run escrow reads as empty, never as an error", () =
   assert.deepEqual(progressEscrowEpochs({}, { now: nowMs }), EMPTY);
   assert.deepEqual(progressEscrowEpochs(null, { now: nowMs }), EMPTY);
 });
+
+test("a submitted bounty past its deadline settles through the keeper (guardian census F1)", () => {
+  // The live stall: the keeper's due-scan counts a submitted bounty past
+  // its deadline as due, but closeEpoch's snapshot never selected the
+  // 'submitted' state, so no keeper action could ever touch it — every
+  // tick reported due + overdue with zero actions and zero failures.
+  // finalizeBounty (id-addressed) always worked, which masked it.
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = escrow.postBounty(room,
+    { poster: JILL, title: "S", criteria: "C", amount: 10, deadline: isoFuture(3600_000) }).bounty;
+  escrow.fundBounty(room, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(room, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(room, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "submitted");
+  tick(2 * 3600_000); // deadline passes with no verification verdict
+
+  const first = keeper(world);
+  assert.equal(first.due, 1);
+  assert.equal(first.refunded, 1, "the free-miss refund runs through closeEpoch, not only finalizeBounty");
+  assert.equal(first.failed, 0);
+  assert.equal(first.overdue, 0, "nothing stays overdue once the keeper can see the row");
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "refunded");
+  // Free-miss terms: the poster is made whole, the claim bond comes home,
+  // the worker settles 0.
+  assert.equal(bal(escrow, room, JILL).payable, 100);
+  assert.equal(bal(escrow, room, GROK).payable, 100);
+  assert.equal(bal(escrow, room, GROK).attributed, 0);
+  expectConserved(escrow, room);
+
+  const second = keeper(world);
+  assert.deepEqual(second, { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+});
