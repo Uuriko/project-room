@@ -2,7 +2,7 @@ import { openRequestJournal, runRequestOnce, runRequestQueue } from "../client/r
 import test from "node:test";
 import { createServer } from "node:http";
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -316,14 +316,40 @@ test("closed and unaddressed requests never execute the configured host", async 
 test("one command drives a separate host process and repeat invocation reuses its result", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   const f = await fixture(t), q = f.open("process-host"), counter = join(f.directory, "executions"), hostFile = join(f.directory, "host.json");
   const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.context.preparation.room.id||!v.context.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
-  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000, policy: { version: 1, checkout: f.directory, filesystem: "checkout-write", network: "none", ambientSecrets: "none", externalEffects: "none" } }));
+  const checkout = realpathSync(f.directory);
+  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: checkout, timeoutMs: 5000, policy: { version: 1, checkout, filesystem: "checkout-write", network: "none", ambientSecrets: "none", externalEffects: "none" } }));
   const invoke = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["scripts/run-room-request.mjs", q.command.data.messageId, join(f.directory, "process.sqlite"), hostFile],
       { env: { ROOM_AGENT_CONFIG: f.configDirectory }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = ""; child.stdout.on("data", c => out += c); child.stderr.on("data", c => err += c);
     child.on("error", reject); child.on("exit", code => resolve({ code, out, err }));
   });
-  const first = await invoke(); assert.equal(first.code, 0, first.err);
+  const first = await invoke();
+  if (!existsSync("/usr/bin/bwrap")) {
+    assert.equal(first.code, 1);
+    assert.match(first.err, /Linux.*bubblewrap/);
+    const empty = openRequestJournal(join(f.directory, "process.sqlite"));
+    assert.equal(empty.prepare("SELECT count(*) AS n FROM request_runs").get().n, 0, "preflight must not record an uncertain attempt");
+    empty.close();
+    assert.equal(existsSync(counter), false);
+    assert.equal((await f.client.requestRuns()).runs[q.command.data.messageId], undefined);
+    const db = openRequestJournal(join(f.directory, "process.sqlite"));
+    try {
+      const connection = { ...f.config, fetchImpl: async (url, options) => {
+        if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("delivery offline");
+        return fetch(url, options);
+      } };
+      await assert.rejects(runRequestOnce({ connection, db, requestMessageId: q.command.data.messageId,
+        execute: async () => ({ body: "Result saved before the execution environment became unavailable" }) }));
+    } finally { db.close(); }
+    const recovered = await invoke();
+    assert.equal(recovered.code, 0, recovered.err);
+    assert.equal(JSON.parse(recovered.out).hostExecuted, false);
+    assert.equal(existsSync(counter), false, "delivery recovery must not start a host");
+    assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+    return;
+  }
+  assert.equal(first.code, 0, first.err);
   assert.equal(JSON.parse(first.out).hostExecuted, true);
   const second = await invoke(); assert.equal(second.code, 0, second.err);
   assert.equal(JSON.parse(second.out).hostExecuted, false);
@@ -917,4 +943,71 @@ test("a reply refused because its channel is archived names channel_archived ins
   assert.equal(refused.outcome, "this_attempt_refused");
   assert.doesNotMatch(refused.hint, /unknown error/i);
   assert.match(refused.hint, /archived/i);
+});
+
+for (const status of [null, 503, 408, 429]) test(`saved answer is delivered despite transient result status failure ${status}`, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open().command.data.messageId;
+  let reports = 0, executions = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")
+      && JSON.parse(options.body).action === "result_ready") {
+      reports++;
+      if (status === null) throw new TypeError("simulated offline status report");
+      return new Response(JSON.stringify({ error: { code: "unavailable", message: "Try later" } }), { status });
+    }
+    return fetch(url, options);
+  } };
+  const execute = async () => { executions++; return { body: "Saved answer reaches the conversation" }; };
+  await runRequestOnce({ ...a, connection, requestMessageId, execute });
+  assert.equal(reports, 1);
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "delivered");
+  await runRequestOnce({ ...a, requestMessageId, execute });
+  assert.equal(executions, 1);
+});
+
+test("a definite result status refusal never falls through to answer delivery", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open().command.data.messageId;
+  let deliveries = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) deliveries++;
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")
+      && JSON.parse(options.body).action === "result_ready")
+      return new Response(JSON.stringify({ error: { code: "request_run_owned", message: "Another host owns this request" } }), { status: 409 });
+    return fetch(url, options);
+  } };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute: async () => ({ body: "Saved" }) }), { status: 409 });
+  assert.equal(deliveries, 0);
+  assert.ok(a.db.prepare("SELECT response FROM request_runs").get().response);
+});
+
+test("execution preflight precedes reservation and saved-result recovery bypasses it", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open().command.data.messageId;
+  let executions = 0, preflights = 0;
+  const execute = async () => { executions++; return { body: "Saved before tools became unavailable" }; };
+  const preflight = () => { preflights++; throw new Error("tools unavailable"); };
+  await assert.rejects(runRequestOnce({ ...a, requestMessageId, execute, preflight }), /tools unavailable/);
+  assert.equal(executions, 0);
+  assert.equal(a.db.prepare("SELECT count(*) AS n FROM request_runs").get().n, 0);
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId], undefined);
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("delivery offline");
+    return fetch(url, options);
+  } };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute }), /offline/);
+  await runRequestOnce({ ...a, requestMessageId, execute, preflight });
+  assert.equal(preflights, 1);
+  assert.equal(executions, 1);
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
+
+test("automatic pickup surfaces unavailable isolation without reserving work or polling forever", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open().command.data.messageId;
+  const notices = [];
+  await assert.rejects(runRequestQueue({ ...a, signal: AbortSignal.timeout(3000), emit: notice => notices.push(notice),
+    preflight: () => { throw Object.assign(new Error("isolation unavailable"), { code: "host_isolation_unavailable" }); },
+    execute: () => { assert.fail("unavailable host must not execute"); }
+  }), { code: "host_isolation_unavailable" });
+  assert.deepEqual(notices, []);
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId], undefined);
 });
