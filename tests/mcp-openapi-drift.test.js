@@ -182,6 +182,7 @@ const ALLOW = {
     },
     narrowed: {
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set ('Optional workWakes opts this host into pull-only work signals'); this fixed-mode registration body omits it, and the route retains the current setting when it is omitted.",
+      context: "Presence context is owned by heartbeat_set; this fixed-mode body omits it, and the route keeps the stored context when it is omitted.",
     },
   },
   wake_clear: {
@@ -193,6 +194,7 @@ const ALLOW = {
       cadenceSeconds: "'Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — the tool exposes no cadenceSeconds field; it hardcodes the clear.'",
       pushNotification: "'An existing push subscription row is left in place' — the tool never sends one.",
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set; this fixed pull-only body omits it, and the route retains the current setting when it is omitted.",
+      context: "Presence context is owned by heartbeat_set; this fixed-mode body omits it, and the route keeps the stored context when it is omitted.",
     },
   },
   wake_pause: {

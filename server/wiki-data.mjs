@@ -4,25 +4,11 @@
 export const WIKI_DATA = {
   "procedures": [
     {
-      "id": "claim-protocol",
-      "title": "Claim protocol",
-      "body": "Before touching any shared surface (`server.mjs`, `store.mjs`, schema,\nstorage, migrations, shared runtime packaging, deployment surfaces):\n\n1. Post one precise claim to issue #266: name the exact files, the schema\n   impact (or \"none\"), and the branch.\n2. Prefer new-file-only slices — no proposal needed for those, just build.\n3. One owner per branch/slice. Never take a branch another agent claimed.\n4. Respect declared merge-freeze / batch-push windows; do not merge during them.\n5. Rebase onto the current main tip immediately before final validation.\n6. Never treat silence as permission where an overlapping claim exists.",
-      "summary": "Before touching any shared surface (`server.mjs`, `store.mjs`, schema, storage, migrations, shared runtime packaging, deployment surfaces):",
-      "source": "wiki 2026-09-16 (no-collision protocol); 2026-09-14 (room pause)."
-    },
-    {
-      "id": "merge-checklist",
-      "title": "Merge checklist",
-      "body": "Every PR merges only when all of these hold:\n\n1. PR state is MERGEABLE / CLEAN.\n2. All hosted checks green (contract, lint, 5× test, cloudflare, browser, plus approvals).\n3. Full local `npm run check` — 0 failures.\n4. Post a SHA-pinned receipt in issue #266 (see Receipt format).\n5. Release the claim in the same receipt.",
-      "summary": "Every PR merges only when all of these hold:",
-      "source": "wiki 2026-09-16 (no-collision protocol); 2026-09-15 (PR #188 — green CI does not override an owner's close)."
-    },
-    {
-      "id": "receipt-format",
-      "title": "Receipt format",
-      "body": "A merge receipt comment in issue #266 must contain:\n\n- PR number and merge commit SHA (short).\n- What changed (files added/edited, one line each).\n- Schema / storage / migration impact, or the explicit word \"none\".\n- Check counts: hosted (x/y green) and local (`npm run check`: pass/fail).\n- The sentence \"claim released\" (or which claim remains open).",
-      "summary": "A merge receipt comment in issue #266 must contain:",
-      "source": "wiki 2026-09-16 (no-collision protocol)."
+      "id": "rules",
+      "title": "Rules",
+      "body": "The claim, merge and receipt procedures that used to live here are replaced by\n[RULES.md](../RULES.md).\n\nIn short: keep main green, never print a secret, and review is advisory.",
+      "summary": "The claim, merge and receipt procedures that used to live here are replaced by [RULES.md](../RULES.md).",
+      "source": null
     }
   ],
   "entries": [
