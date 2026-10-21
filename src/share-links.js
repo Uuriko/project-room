@@ -154,7 +154,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   let joined = null, previewRoomId = null, previewRoomTitle = null;
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
-  let kitOnly = false;
+  let kitOnly = false, kitLoadVersion = 0;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -352,39 +352,52 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function renderKit(data) {
     const invite = data?.invite;
-    const url = invite?.token ? humanJoinShareUrl(invite.token) : "";
+    const url = invite?.token && (!invite.status || invite.status === "active") ? humanJoinShareUrl(invite.token) : "";
     const message = invite?.message && url ? String(invite.message).replaceAll("{url}", url) : "";
     const urlField = $("#growth-invite-url");
     if (urlField) urlField.value = url;
     const messageField = $("#growth-invite-message");
     if (messageField) messageField.value = message;
     const rewardEl = $("#growth-reward");
-    if (rewardEl) rewardEl.textContent = rewardLine(data?.reward);
+    if (rewardEl) { rewardEl.textContent = ""; rewardEl.hidden = true; }
     const copyLink = $("#growth-copy-link");
     const copyMessage = $("#growth-copy-message");
     if (copyLink) copyLink.disabled = !url;
+    const copyAgent = $("#growth-copy-agent");
+    if (copyAgent) copyAgent.disabled = !url;
     if (copyMessage) copyMessage.disabled = !message;
     const kitStatus = $("#growth-kit-status");
-    if (kitStatus && data?.inviteBlocked === "email_unverified") kitStatus.textContent = "Verify your email to invite people. Open Sign-in & security from the account menu.";
-    else if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
-    else if (kitStatus && !kitStatus.textContent) kitStatus.textContent = "";
+    if (kitStatus) setShareLinkStatus(kitStatus, data?.inviteBlocked === "email_unverified"
+      ? uiText("entry.invite.verify")
+      : invite?.status && invite.status !== "active" ? uiText("entry.invite.expired")
+      : !url ? uiText(kitOnly ? "entry.invite.unavailable" : "entry.invite.createFirst") : "");
   }
   async function loadKit() {
-    const roomId = getSession()?.roomId || getState()?.room?.id;
+    const owned = getSession(), generation = client.generation, version = ++kitLoadVersion;
+    const roomId = owned?.roomId || getState()?.room?.id;
     if (!roomId || typeof client?.request !== "function" || typeof client?.path !== "function") return;
+    const current = () => version === kitLoadVersion && getSession() === owned && client.generation === generation && manager.open;
+    renderKit(null);
+    setShareLinkStatus($("#growth-kit-status"), uiText("entry.invite.loading"));
+    const retry = $("#growth-kit-retry");
+    if (retry) retry.hidden = true;
     try {
       const data = await client.request(client.path("/referrals"), { method: "GET" });
-      renderKit(data);
-    } catch { /* The invite dialog still opens. */ }
+      if (current()) renderKit(data);
+    } catch {
+      if (!current()) return;
+      setShareLinkStatus($("#growth-kit-status"), uiText("entry.invite.failed"));
+      if (retry) retry.hidden = false;
+    }
   }
   async function copyGrowth(value, done) {
     const kitStatus = $("#growth-kit-status");
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      if (kitStatus) kitStatus.textContent = done;
+      if (kitStatus) setShareLinkStatus(kitStatus, done);
     } catch {
-      if (kitStatus) kitStatus.textContent = "Select and copy.";
+      if (kitStatus) setShareLinkStatus(kitStatus, "Select and copy.");
     }
   }
   function ensureGrowthChrome() {
@@ -397,19 +410,16 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const section = document.createElement("section");
       section.id = "growth-kit";
       section.className = "growth-kit";
-      section.innerHTML = `<p id="growth-reward" class="growth-reward"></p>
-        <label for="growth-invite-url">Your invite link</label>
-        <input id="growth-invite-url" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="growth-copy-link" class="button primary" type="button">Copy link</button>
-        <label for="growth-invite-message">Message</label>
-        <textarea id="growth-invite-message" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
-        <button id="growth-copy-message" class="button" type="button">Copy message</button>
-        <button id="growth-agent-code" class="button ghost" type="button" hidden>One-time agent code</button>
-        <p id="growth-kit-status" class="form-status" role="status" aria-live="polite"></p>`;
+      section.innerHTML = uiText("entry.invite.kitHtml");
       if (intro?.after) intro.after(section);
       else $("#share-link-dialog").append(section);
       $("#growth-copy-link")?.addEventListener("click", () => copyGrowth($("#growth-invite-url")?.value, "Link copied."));
       $("#growth-copy-message")?.addEventListener("click", () => copyGrowth($("#growth-invite-message")?.value, "Message copied."));
+      $("#growth-copy-agent")?.addEventListener("click", () => {
+        const url = $("#growth-invite-url")?.value;
+        if (url) void copyGrowth(uiText("entry.invite.agentInstructions", { url }), uiText("entry.invite.agentCopied"));
+      });
+      $("#growth-kit-retry")?.addEventListener("click", () => loadKit());
       $("#growth-agent-code")?.addEventListener("click", () => $("#invite-agents-button")?.click());
     }
     if (!$("#join-inviter-line") && $("#join-link-scope")) {
@@ -432,7 +442,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (joinDialog.open) updateSwitchWarning();
   }
   function resetManagement() {
-    managementVersion++; listVersion++; pendingCreate = null;
+    kitLoadVersion++; managementVersion++; listVersion++; pendingCreate = null;
     managementSession = null; managementGeneration = null; clearResult();
     $("#share-settings").open = false; $("#share-management").open = false;
     $("#share-link-list").replaceChildren(); status(""); listStatus("");
@@ -634,7 +644,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (resume) redemptionId = resume.redemptionId;
     onAccountSignin(null); mirrorJoin();
     $("#join-account-choices").hidden = true; $("#join-account-auth").hidden = true;
+    const typedName = afterSignIn ? $("#join-link-name").value : "";
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
+    if (typedName.trim()) $("#join-link-name").value = typedName;
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-link-retry").textContent = "Retry";
