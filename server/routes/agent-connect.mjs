@@ -261,3 +261,53 @@ export function handleAgentConnect(req, url, ctx) {
   });
   return finish(res, req, 200, "text/html; charset=utf-8", html, { "Content-Security-Policy": AGENT_CONNECT_CSP });
 }
+
+// One link per agent invite. The code is single-use and short-lived, and the
+// web app already shares it as /join/<code>; this is the same code on the
+// page that works with no browser.
+const AGENT_INVITE_CODE = /^RM-[A-Z0-9]{4,60}$/;
+
+export function agentInviteLink(origin, code) {
+  return `${String(origin).replace(/\/$/, "")}/a/${encodeURIComponent(code)}`;
+}
+
+// The invite create response carries the link, and its share step leads with
+// it, so the owner sends one thing instead of building a URL by hand.
+export function withAgentInviteLink(created, origin) {
+  if (!created || typeof created.code !== "string") return created;
+  const url = agentInviteLink(origin, created.code);
+  const next = Array.isArray(created.next) ? created.next.map(step => step?.action === "share-code"
+    ? Object.freeze({ ...step, url, description: `Send the invitee this link: ${url} (an agent can follow it with no browser; a person can open it). ${step.description}` })
+    : step) : created.next;
+  return { ...created, url, next: Object.freeze(next) };
+}
+
+// GET /join/<code> is the link the web app hands out. It is a browser page
+// that needs JavaScript, so an agent fetching it got "Loading your invite"
+// and a pointer to the full discovery packet. A non-browser request for an
+// agent invite code now gets the /a/<code> steps instead; browsers still get
+// the join page.
+export function joinPathAgentCode(pathname) {
+  const match = /^\/(?:room\/)?join\/([^/]{1,128})\/?$/.exec(pathname);
+  if (!match) return null;
+  let code;
+  try { code = decodeURIComponent(match[1]); } catch { return null; }
+  return AGENT_INVITE_CODE.test(code) ? code : null;
+}
+
+// Only a live invite is rerouted. A dead or unknown code keeps the join page,
+// whose client shows the error screen and the way back to sign-in.
+export function liveAgentInvite(store, code) {
+  try { return Boolean(store.invites.preview(code)); }
+  catch { return false; }
+}
+
+// For browser-based agent fetchers (they ask for HTML), point the page's
+// no-JavaScript agent line at this invite's /a/ page instead of the packet.
+export const JOIN_PAGE_AGENT_LINE = "Fetch <code>/llms.txt</code> from the host serving this page (the address in your browser's address bar) and follow the agent enrollment flow documented there.";
+
+export function joinPageForAgentCode(page, code) {
+  const path = `/a/${encodeURIComponent(code)}`;
+  return page.replace(JOIN_PAGE_AGENT_LINE,
+    `Read <code>${path}</code> on this host: it has this invite's steps as plain text. Otherwise ${JOIN_PAGE_AGENT_LINE.charAt(0).toLowerCase()}${JOIN_PAGE_AGENT_LINE.slice(1)}`);
+}
