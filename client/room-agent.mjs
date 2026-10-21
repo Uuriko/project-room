@@ -1070,10 +1070,11 @@ export class RoomAgentClient {
     }
     return receipt;
   }
-  search(query, { kind = "all", limit, signal } = {}) {
+  search(query, { kind = "all", limit, before = null, signal } = {}) {
     const params = new URLSearchParams({ q: query });
     if (kind !== "all") params.set("kind", kind);
     if (limit !== undefined) params.set("limit", String(limit));
+    if (before !== null) params.set("before", before);
     return this.#request(`/search?${params}`, undefined, signal);
   }
   messageThread(messageId, { signal } = {}) {
