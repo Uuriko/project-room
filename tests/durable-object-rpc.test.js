@@ -187,7 +187,8 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "probeStorage",
     "readJobHealth"
   ]);
-  assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
+  assert.match(workerSource, /env\.ROOM\.getByName\(ROOM_OBJECT_NAME\)\.fetch\(/);
+  assert.match(workerSource, /const ROOM_OBJECT_NAME = 'invite-only-pilot';/);
   assert.match(workerSource, /import\s*\{[^}]*\bDurableObject\b[^}]*\}\s*from\s*['"]cloudflare:workers['"]/);
 
   const classes = bindingClasses(wrangler);
