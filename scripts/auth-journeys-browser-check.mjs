@@ -227,8 +227,8 @@ test("on a phone, a wrong password says so and the right one signs in", { timeou
   assert.equal((await f.session(fresh)).authenticated, true);
 });
 
-// Still broken on main (auth audit 2026-10-09). Flip to a plain test with its fix.
-test("TODO: a reused magic link's refusal is shown once, not twice", { todo: "auth-signin-ui shows it in two alerts (Codex)" }, async t => {
+// Refusal must remain singular across the outer panel and mounted sign-in form.
+test("a reused magic link's refusal is shown once, not twice", async t => {
   const again = await magicLinkReuse(t);
   assert.equal(await visibleCount(again, "not valid"), 1);
 });
