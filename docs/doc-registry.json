@@ -3,7 +3,7 @@
  "corpus": "repo",
  "repo": "Uuriko/project-room",
  "registry_path_in_repo": "docs/doc-registry.json",
- "reconciled_at_base": "6d84149b558e003fef1d880f7194f75c788dff5e",
+ "reconciled_at_base": "cc0527a9e19eaea3e92672ca2c1f4e21dc90e162",
  "seeded_at": "2026-10-19",
  "seeded_by": "DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18)",
  "seed_sources": [
@@ -6401,6 +6401,1338 @@
    "census_disposition": "RULING-31-ADD",
    "census_size": 12088,
    "last_change": "2026-10-20"
+  }
+ },
+ {
+  "path": "docs/ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 13738,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/ADOPTION.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-02",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2882,
+   "last_change": "2026-10-02"
+  }
+ },
+ {
+  "path": "docs/AGENT-QUICKSTART.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-17",
+  "size_cap_bytes": 51200,
+  "budget_bytes": 51200,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 48241,
+   "last_change": "2026-10-17"
+  }
+ },
+ {
+  "path": "docs/AGENT-SEO.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2797,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/AGENT-WAKE-SETUP.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/CONNECT-WAKE.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 15488,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/ARCHITECTURE-EXECUTION-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 14859,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 17454,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/BROWSER-SANDBOX.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 1726,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "docs/BUILD-TO-COMPLETION-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 17613,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/CODE-DROPS.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 3682,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/CODEX-EVIDENCE-CONTRACT.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-10",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 7622,
+   "last_change": "2026-10-10"
+  }
+ },
+ {
+  "path": "docs/CONNECT-AGENT-QUICKSTART.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 3512,
+   "last_change": "2026-10-07"
+  }
+ },
+ {
+  "path": "docs/CONNECT-WAKE.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class KEEP (grade B) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "B",
+   "census_disposition": "KEEP",
+   "census_size": 4357,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/ENTITY-PROJECTION-CHECKPOINT.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 5334,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/EXECUTION-PORTABILITY-PLAN-20261018.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. Post-census doc (2026-10-18); no DS-1 census class.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/FRONTIER-INFRA-RESEARCH-2026-10-18.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 19439,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/I18N-HARNESS.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/HOW-TO-TEST.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 4214,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "docs/JOIN-ANY-AGENT.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 3252,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/LISTINGS.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/SERVICE.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 4700,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/MACHINES.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-02",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 1690,
+   "last_change": "2026-10-02"
+  }
+ },
+ {
+  "path": "docs/MESSAGE-DOMAIN-CHECKPOINT.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 5285,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/MESSAGE-REPLAY-ISOLATION-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 7306,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/NORMALIZED-MESSAGE-SLICE.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 11039,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/OPENAPI-CONTRACT.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 3394,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "docs/PUSH-VAPID-KEYS.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 3933,
+   "last_change": "2026-10-07"
+  }
+ },
+ {
+  "path": "docs/QUALITY-AND-PRODUCTIVITY-SCORECARD.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 10176,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/ROOM-ASSISTANT-SCRATCH.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-10",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 3941,
+   "last_change": "2026-10-10"
+  }
+ },
+ {
+  "path": "docs/SOAK-TEST.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/QA-SYSTEM.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 4871,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/SPEC-v0.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class KEEP-WITH-REASON (grade D) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "D",
+   "census_disposition": "KEEP-WITH-REASON",
+   "census_size": 7194,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/SQUADS.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "human-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2890,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 19475,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/SWARM-PLUG-IN.md",
+  "kind": "file",
+  "type": "CANONICAL",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 180,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 122880,
+  "budget_bytes": 122880,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md (task material splits to skills/project-room/references/).",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 122134,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/WIKI-API.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-13",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2810,
+   "last_change": "2026-10-13"
+  }
+ },
+ {
+  "path": "docs/WORK-CLAIMS-READ.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "code",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/WORK-CLAIMS.md.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO",
+   "census_size": 5634,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/WORKITEMS-BOARD-STEP0.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 25600,
+  "budget_bytes": 25600,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "ARCHIVE-OUT-OF-REPO",
+   "census_size": 20969,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/lesson-scorer.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2803,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/weekly-learnings-cron.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut.",
+  "seed_rule": "DOCS-RECONCILE R4 (2026-10-20) — reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": "C",
+   "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
+   "census_size": 2764,
+   "last_change": "2026-10-06"
   }
  }
  ],
