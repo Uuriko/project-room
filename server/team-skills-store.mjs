@@ -63,6 +63,13 @@ export class TeamSkillsStore {
   confirm(roomId, ref, correctionId, { by }) {
     return this.#tx(() => { const r = this.#registry(roomId); const id = this.#resolve(r, ref); const s = r.confirm(id, correctionId, { by }); this.#write(roomId, r, id); return s; });
   }
+  delete(roomId, ref, { by }) {
+    return this.#tx(() => {
+      const r = this.#registry(roomId); const id = this.#resolve(r, ref); const out = r.remove(id, { by });
+      this.db.prepare("DELETE FROM room_team_skills WHERE room_id=? AND skill_id=?").run(roomId, id);
+      return out;
+    });
+  }
   retire(roomId, ref, correctionId, { by }) {
     return this.#tx(() => { const r = this.#registry(roomId); const id = this.#resolve(r, ref); const s = r.retire(id, correctionId, { by }); this.#write(roomId, r, id); return s; });
   }

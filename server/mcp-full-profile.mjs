@@ -30,7 +30,7 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
-import { skillTools, isSkillTool, validSkillToolArguments } from "../client/skill-tools.mjs";
+import { skillTools, isSkillTool, skillToolIsWrite, validSkillToolArguments } from "../client/skill-tools.mjs";
 import { callSkillTool } from "./skill-tool-dispatch.mjs";
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
@@ -178,21 +178,21 @@ const HOSTED_STDIO_WRITE_TOOLS = new Set([
 const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
   "bounty_list", "bounty_read_balances", "bounty_read_history",
 ]);
-function hostedStdioWriteTool(name) {
+function hostedStdioWriteTool(name, args = {}) {
   if (HOSTED_STDIO_WRITE_TOOLS.has(name)) return true;
   if (isHelpTool(name)) return true;
   if (isWorkTool(name)) return true;
   if (isReplyTool(name)) return !replyRoute(name); // routed reply tools are reads
   if (isBountyTool(name)) return !HOSTED_STDIO_READ_BOUNTY_TOOLS.has(name);
   if (isTrustTool(name)) return false;
-  if (isSkillTool(name)) return true; // list included: the name alone cannot tell the action
+  if (isSkillTool(name)) return skillToolIsWrite(name, args); // list is a read
   return false;
 }
-function enforceHostedStdioApiKeyScope(store, secret, name) {
+function enforceHostedStdioApiKeyScope(store, secret, name, args = {}) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) throw new ServiceError(401, "unauthenticated", "Unknown, revoked, or expired API key");
-  const required = hostedStdioWriteTool(name) ? "rooms:write" : "rooms:read";
+  const required = hostedStdioWriteTool(name, args) ? "rooms:write" : "rooms:read";
   const granted = (record.scopes ?? []).some(scope =>
     scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
   if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
@@ -217,7 +217,7 @@ export async function callHostedStdioTool(store, secret, name, args) {
   {
     const { roomId } = args;
     const auth = store.authenticate(secret, roomId);
-    enforceHostedStdioApiKeyScope(store, secret, name);
+    enforceHostedStdioApiKeyScope(store, secret, name, args);
     enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
     // Denial hierarchy: autonomy outranks spend. t1_readonly and guest
     // agents keep their established denials (agent_readonly /
@@ -389,6 +389,12 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
   if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
   if (isSkillTool(name)) {
+    if (skillToolIsWrite(name, rest)) {
+      if (isGuestAgentMemberId(auth.member.id))
+        throw new ServiceError(403, "guest_scope_denied", "Guest agents cannot change team skills");
+      if ((getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER) === "t1_readonly")
+        throw new ServiceError(403, "agent_readonly", "Read-only agents can list team skills but not change them");
+    }
     const actor = { kind: "agent", id: auth.member.id, label: auth.member.displayName ?? auth.member.id };
     return { value: callSkillTool(store, roomId, actor, name, rest), isError: false };
   }

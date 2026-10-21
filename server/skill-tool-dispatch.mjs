@@ -17,6 +17,7 @@ export function callSkillTool(store, roomId, actor, name, args = {}) {
       case "list": return { roomId, skills: skills.list(roomId).map(s => ({ skillId: s.skillId, name: s.name, label: s.label, runCount: s.runCount, author: s.author.label })) };
       case "save": return { roomId, skill: skills.save(roomId, { name: args.name, instructions: args.instructions, author: actor }) };
       case "run": { const { skill, brief } = skills.run(roomId, args.skill, { by: actor }); return { roomId, skillId: skill.skillId, label: skill.label, brief: brief.text, rules: brief.rules }; }
+      case "delete": return { roomId, ...skills.delete(roomId, args.skill, { by: actor }) };
       default: {
         const s = skills.correct(roomId, args.skill, { text: args.text, by: actor, source: args.source ?? null });
         const wanted = args.text.trim().toLowerCase();
