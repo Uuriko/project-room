@@ -6,8 +6,9 @@
 //
 // Lean by design (same limits as the memory spec): at most 4 active
 // corrections per skill, vague corrections rejected, new corrections start
-// as proposals and activate when the skill author confirms or the same
-// correction is repeated. Nothing is deleted automatically.
+// as proposals and activate when the skill author confirms or another person
+// repeats the same correction. An agent may relay a correction, but it stays
+// a proposal until a person confirms it. Nothing is deleted automatically.
 //
 // Pure, in-memory, deterministic; clock and ids injected.
 import { randomUUID } from "node:crypto";
@@ -36,8 +37,9 @@ const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const tokens = s => Math.ceil(s.length / 4);
 const slug = s => norm(s).replace(/ /g, "-").slice(0, 60);
 
-export function createSkillRegistry({ clock = () => Date.now(), id = () => randomUUID() } = {}) {
+export function createSkillRegistry({ clock = () => Date.now(), id = () => randomUUID(), initial = [] } = {}) {
   const skills = new Map();
+  for (const row of initial) skills.set(row.skillId, structuredClone({ ...row, label: undefined }));
   const iso = () => new Date(clock()).toISOString();
   const get = skillId => { const s = skills.get(skillId); if (!s) fail("skill_not_found", "No such skill."); return s; };
   const view = s => Object.freeze({ ...s, corrections: Object.freeze(s.corrections.map(c => Object.freeze({ ...c }))),
@@ -84,17 +86,16 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
     const body = text(t, 280, "text");
     check(!VAGUE.test(body) && body.split(/\s+/).length >= 3, "correction_vague", "Say what to do differently, specifically.");
     const author = who(by, "by");
-    check(author.kind === "human", "correction_not_human", "Only people can correct a skill.");
     const existing = s.corrections.find(c => norm(c.text) === norm(body) && c.status !== "retired");
     if (existing) {
-      const confirms = existing.by !== author.id || author.id === s.author.id;
+      const confirms = author.kind === "human" && (existing.by !== author.id || author.id === s.author.id);
       if (existing.status === "proposed" && confirms) return activate(s, existing);
       existing.repeats += 1;
       return view(s);
     }
-    const c = { correctionId: id(), text: body, by: author.id, source, status: "proposed", repeats: 0, createdAt: iso() };
+    const c = { correctionId: id(), text: body, by: author.id, byKind: author.kind, source, status: "proposed", repeats: 0, createdAt: iso() };
     s.corrections.push(c);
-    if (author.id === s.author.id) return activate(s, c);
+    if (author.kind === "human" && author.id === s.author.id) return activate(s, c);
     return view(s);
   }
 
@@ -108,7 +109,8 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
 
   function confirm(skillId, correctionId, { by }) {
     const s = get(skillId);
-    check(who(by, "by").id === s.author.id, "skill_forbidden", "Only the skill author confirms corrections.");
+    const confirmer = who(by, "by");
+    check(confirmer.kind === "human" && confirmer.id === s.author.id, "skill_forbidden", "Only the skill author confirms corrections.");
     const c = s.corrections.find(x => x.correctionId === correctionId);
     check(c && c.status === "proposed", "correction_not_found", "No such proposed correction.");
     return activate(s, c);
@@ -128,5 +130,8 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
     return Object.freeze([...skills.values()].sort((a, b) => b.runCount - a.runCount || a.name.localeCompare(b.name)).map(view));
   }
 
-  return Object.freeze({ save, find, run, brief, correct, confirm, retire, list, get: id_ => view(get(id_)) });
+  // Plain rows for persistence; feed back through { initial }.
+  function snapshot() { return [...skills.values()].map(s => structuredClone(s)); }
+
+  return Object.freeze({ save, find, run, brief, correct, confirm, retire, list, snapshot, get: id_ => view(get(id_)) });
 }

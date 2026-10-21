@@ -52,14 +52,18 @@ test("non-author corrections start proposed; repeat or author confirm activates"
   assert.equal(r.confirm(s.skillId, p.correctionId, { by: douglas }).corrections[1].status, "active");
 });
 
-test("vague, agent and over-cap corrections are refused; retire frees a slot", () => {
+test("vague and over-cap corrections are refused, agent relays stay proposed; retire frees a slot", () => {
   const r = reg();
   const s = r.save({ name: "S", instructions: "Do it.", author: douglas });
   code(() => r.correct(s.skillId, { text: "be better", by: douglas }), "correction_vague");
-  code(() => r.correct(s.skillId, { text: "Always add a summary line", by: bot }), "correction_not_human");
+  const relayed = r.correct(s.skillId, { text: "Always add a summary line", by: bot });
+  assert.equal(relayed.corrections.at(-1).status, "proposed");
+  r.correct(s.skillId, { text: "Always add a summary line", by: bot });
+  assert.equal(r.get(s.skillId).corrections.at(-1).status, "proposed");
+  r.retire(s.skillId, relayed.corrections.at(-1).correctionId, { by: douglas });
   for (let i = 0; i < MAX_ACTIVE_CORRECTIONS; i++) r.correct(s.skillId, { text: `Rule number ${i} applies here`, by: douglas });
   code(() => r.correct(s.skillId, { text: "One rule too many here", by: douglas }), "correction_limit");
-  const first = r.get(s.skillId).corrections[0];
+  const first = r.get(s.skillId).corrections.find(c => c.status === "active");
   r.retire(s.skillId, first.correctionId, { by: douglas });
   r.correct(s.skillId, { text: "One rule too many here", by: douglas });
   assert.equal(r.brief(s.skillId).rules.length, MAX_ACTIVE_CORRECTIONS);
@@ -69,4 +73,14 @@ test("brief stays under the token cap", () => {
   const r = reg();
   const s = r.save({ name: "Long", instructions: "word ".repeat(800).trim(), author: douglas });
   assert.ok(r.brief(s.skillId).tokens <= BRIEF_TOKEN_CAP);
+});
+
+test("snapshot round-trips through initial", () => {
+  const r = reg();
+  const s = r.save({ name: "S", instructions: "Do it.", author: douglas });
+  r.run(s.skillId, { by: becky });
+  r.correct(s.skillId, { text: "Always cite the source doc", by: douglas });
+  const r2 = createSkillRegistry({ initial: r.snapshot() });
+  assert.equal(r2.get(s.skillId).runCount, 1);
+  assert.deepEqual([...r2.brief(s.skillId).rules], ["Always cite the source doc"]);
 });
