@@ -728,6 +728,7 @@ const shapes = {
   [T.MEMBER_PUBLIC_NAME_SET]: "enabled",
   [T.WORK_PUBLIC_SET]: "workItemId enabled",
   // --- end GR2 ---
+  [T.ROOM_TITLE_SET]: "title",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy joinedVia",

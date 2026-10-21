@@ -32,6 +32,8 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_PUBLIC_NAME_SET: "member.public_name_set",
   WORK_PUBLIC_SET: "work.public_set",
   // --- end GR2 ---
+  // Owner rename (QA 2026-10-20). Replaces room.title; the log keeps the history.
+  ROOM_TITLE_SET: "room.title_set",
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
@@ -658,6 +660,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.MEMBER_PUBLIC_NAME_SET]: setPublicName,
     [EVENT_TYPES.WORK_PUBLIC_SET]: setPublicTask,
     // --- end GR2 ---
+    [EVENT_TYPES.ROOM_TITLE_SET]: setRoomTitle,
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
@@ -953,6 +956,21 @@ function setPublicTask(state, incoming) {
   item.publicTask = writeOptIn(item.publicTask ?? null, incoming);
 }
 // --- end GR2 ---
+
+export const MAX_ROOM_TITLE_CHARS = 120;
+export function normalizeRoomTitle(value) {
+  if (typeof value !== "string") return null;
+  const title = value.trim();
+  return title && title.length <= MAX_ROOM_TITLE_CHARS && !/[\u0000-\u001f\u007f]/.test(title) ? title : null;
+}
+function setRoomTitle(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  // Room-scoped owner power, like room instructions: ownership, not humanity.
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may rename the room");
+  const title = normalizeRoomTitle(incoming.data.title);
+  if (!title) throw new Error(`Room name must be 1 to ${MAX_ROOM_TITLE_CHARS} characters with no control characters`);
+  state.room.title = title;
+}
 
 function archiveRoom(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
