@@ -30,6 +30,8 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
+import { skillTools, isSkillTool, validSkillToolArguments } from "../client/skill-tools.mjs";
+import { callSkillTool } from "./skill-tool-dispatch.mjs";
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
@@ -57,11 +59,11 @@ function withRoomId(entry) {
 export function hostedStdioToolDefinitions() {
   // The bounty tools are hosted-only: the escrow lives in RoomStore, so there
   // is no stdio equivalent to filter against.
-  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools].map(withRoomId);
+  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools, ...skillTools].map(withRoomId);
 }
 
 export function isHostedStdioTool(name) {
-  if (isBountyTool(name) || isTrustTool(name)) return true;
+  if (isBountyTool(name) || isTrustTool(name) || isSkillTool(name)) return true;
   return typeof name === "string" && !ALREADY_HOSTED.has(name) && roomTools.some(entry => entry.name === name);
 }
 
@@ -71,6 +73,7 @@ export function validHostedStdioArgs(name, args) {
   const { roomId, ...rest } = args;
   if (isBountyTool(name)) return validBountyToolArguments(name, rest);
   if (isTrustTool(name)) return validTrustToolArguments(name, rest);
+  if (isSkillTool(name)) return validSkillToolArguments(name, rest);
   return validRoomToolArguments(name, rest);
 }
 
@@ -182,6 +185,7 @@ function hostedStdioWriteTool(name) {
   if (isReplyTool(name)) return !replyRoute(name); // routed reply tools are reads
   if (isBountyTool(name)) return !HOSTED_STDIO_READ_BOUNTY_TOOLS.has(name);
   if (isTrustTool(name)) return false;
+  if (isSkillTool(name)) return true; // list included: the name alone cannot tell the action
   return false;
 }
 function enforceHostedStdioApiKeyScope(store, secret, name) {
@@ -384,6 +388,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_read_messages") return { value: await roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
   if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
+  if (isSkillTool(name)) {
+    const actor = { kind: "agent", id: auth.member.id, label: auth.member.displayName ?? auth.member.id };
+    return { value: callSkillTool(store, roomId, actor, name, rest), isError: false };
+  }
   if (name !== "room_post_draft") {
     const error = new Error(`Hosted room tool ${name} is listed but has no dispatcher`);
     error.status = 500;
