@@ -236,7 +236,10 @@ const check = condition => { if (!condition) throw new Error("Reply request hist
 const messageFields = ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt"];
 const exactMessage = message => Object.fromEntries(messageFields.map(key => [key, message[key]]));
 function readMessage(message) {
-  return { ...exactMessage(message), ...(message.proposal ? { proposal: Object.fromEntries(
+  return { ...exactMessage(message),
+    ...(message.editedAt != null ? { editedAt: message.editedAt } : {}),
+    ...(typeof message.editedBy === "string" ? { editedBy: message.editedBy } : {}),
+    ...(message.proposal ? { proposal: Object.fromEntries(
     ["packetId", "basisRevision", "submittedAtRevision", "attribution"].map(key => [key, message.proposal[key]])) } : {}) };
 }
 function compare(actual, expected) {

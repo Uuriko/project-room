@@ -823,7 +823,11 @@ export class RoomAgentClient {
         || (row.relation === "reply" && (!message.replyToId || message.workItemId !== null))
         || (proposal && (!validId(proposal.packetId) || !integer(proposal.basisRevision) || !integer(proposal.submittedAtRevision)
           || proposal.basisRevision > proposal.submittedAtRevision || proposal.attribution !== "manual-unverified"))) invalid();
-      if (message.authorId !== result.viewerId) {
+      // The stamp keys on the author of the served text: the last editor
+      // when the message was edited (editedBy), failing closed — marked
+      // for everyone — when an edit predates editedBy (editedAt only).
+      const textAuthor = typeof message.editedBy === "string" ? message.editedBy : message.editedAt != null ? null : message.authorId;
+      if (textAuthor !== result.viewerId) {
         if (message.untrusted !== true) invalid();
       } else if (Object.hasOwn(message, "untrusted")) invalid();
       const { untrusted, ...bare } = message;

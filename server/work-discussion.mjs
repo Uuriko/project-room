@@ -114,7 +114,7 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
   for (const row of selected) {
     if (row.sequence <= window.after) continue;
     const result = { sequence: row.sequence, eventId: row.eventId, relation: row.relation,
-      message: pick(row.message, "id authorId body createdAt replyToId toMemberId workItemId") };
+      message: pick(row.message, "id authorId body createdAt replyToId toMemberId workItemId editedAt editedBy") };
     if (row.message.proposal) result.message.proposal = pick(row.message.proposal, "packetId basisRevision submittedAtRevision attribution");
     const size = Buffer.byteLength(JSON.stringify(result));
     if (items.length === window.limit || bytes + size > DISCUSSION_BYTE_LIMIT) {

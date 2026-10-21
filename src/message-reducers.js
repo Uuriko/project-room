@@ -197,6 +197,10 @@ export function createMessageReducers({ requireMember, knownMember, requireField
     message.body = incoming.data.body;
     message.revision = (message.revision ?? 0) + 1;
     message.editedAt = incoming.at;
+    // The last editor, recorded like deletedBy below: the read fold serves
+    // this editor's text on every envelope of the message, so the trust
+    // stamp keys on the editor, not the original poster (CURE-4437-2).
+    message.editedBy = incoming.actorId;
   }
 
   function deleteMessage(state, incoming) {
