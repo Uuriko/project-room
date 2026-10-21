@@ -63,7 +63,10 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const { readFileSync } = await import('node:fs');
-  const { journal } = fixture(t), store = new RoomStore(':memory:');
+  // Exercise tied timestamps explicitly: the queue breaks ties by signalId,
+  // not insertion order. Both signals must still dispatch exactly once.
+  const now = Date.now();
+  const { journal } = fixture(t), store = new RoomStore(':memory:', { now: () => now });
   store.initialize(initialRoom('commons'));
   const owner = store.issueAccessKey('commons', 'owner');
   const server = createRoomServer({ store });
@@ -74,7 +77,8 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   const setup = await connectRoom({ origin, directory: join(journal, 'identity'), name: 'Probe', accept: true, target: invite.code });
   const connection = readAgentConnection(setup.configDirectory);
   const signal = store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'probe-message' }).signal;
-  store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'second-message' });
+  const nextSignal = store.agentHeartbeats.enqueueWake({ agentId: setup.identityId, kind: 'mention', roomId: 'commons', messageId: 'second-message' }).signal;
+  const signalIds = [signal.signalId, nextSignal.signalId].sort();
   const log = join(journal, 'calls');
   writeFileSync(join(journal, 'codex'), '#!/bin/sh\nprintf x >> "$ROOM_TEST_QUEUE_LOG"\n', { mode: 0o700 });
   const args = ['scripts/codex-queue-pointer.mjs', '--thread', binding.threadId, '--journal', join(journal, 'receipts'), '--host', 'queue-probe'];
@@ -86,7 +90,7 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   const output = (await execute()).stdout;
   const first = JSON.parse(output.trim());
   assert.equal(polls, 2, 'initial read and one pre-dispatch fenced read');
-  assert.equal(first.status, 'accepted'); assert.equal(first.signalId, signal.signalId);
+  assert.equal(first.status, 'accepted'); assert.equal(first.signalId, signalIds[0]);
   assert.equal(store.agentHeartbeats.pendingWakes(setup.identityId, { roomId: 'commons' }).length, 2, 'transport success never handles Room wakes');
   const second = (await execute()).stdout.trim().split('\n').map(JSON.parse);
   assert.equal(polls, 4, 'accepted duplicates do not spend extra poll requests');
@@ -94,7 +98,7 @@ test('foreground driver uses scoped Room wakes, retains ACK and stops after revo
   assert.equal(second.length, 2, 'accepted first signal must not starve the next');
   assert.equal(second[1].duplicate, false);
   assert.equal(second[1].status, 'accepted');
-  assert.notEqual(second[1].signalId, first.signalId);
+  assert.equal(second[1].signalId, signalIds[1]);
   assert.equal(readFileSync(log, 'utf8'), 'xx', 'restart only delivers the next signal');
   assert.ok((await execute()).stdout.trim().split('\n').map(JSON.parse).every(row => row.duplicate));
   assert.equal(readFileSync(log, 'utf8'), 'xx', 'neither signal is redelivered');
