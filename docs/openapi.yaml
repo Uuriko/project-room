@@ -14137,6 +14137,23 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/spend-preview:
+    post:
+      summary: Preview what a priced action will cost before it runs
+      x-room-permission: member
+      description: >-
+        Body: `{ tool }`. Returns the price, the caller's own cap and the
+        shared room budget before and after, and whether the charge gate
+        would refuse it (reason no_spend_grant, tool_not_allowlisted,
+        over_per_call_cap, member_cap_reached or room_budget_reached).
+        Nothing is reserved or charged. Unpriced tools and the room owner
+        preview as free.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, tool, priceCents, label, wouldRefuse, reason, member, room }" }
+        '422': { description: invalid_spend_preview }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
