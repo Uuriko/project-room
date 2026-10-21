@@ -5,8 +5,9 @@
 // Authoring gate:
 // 1. Contract: GET /api/rooms/{id}/agent-card respects room visibility
 //    EXACTLY (invisible == nonexistent, same status/code/message/body);
-//    GET /api/agent-directory/cards?skill=&capability= filters the signed
-//    directory; every card surface carries live sourceRevision/buildId.
+//    GET /api/agent-directory/cards filters the signed directory by its
+//    skill and capability query params; every card surface carries live
+//    sourceRevision/buildId.
 // 2. Credible regression: a refactor leaks a private room's existence or
 //    title, lets a query surface unpublished cards, or hardcodes a
 //    revision string that drifts from server/version.mjs.

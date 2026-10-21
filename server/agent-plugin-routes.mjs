@@ -417,8 +417,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       serviceOrigin: serviceOrigin(req),
       query: url.searchParams.get("q") ?? "",
       capability: url.searchParams.get("capability"),
-      // #650 item 3: registry query by advertised skill, e.g.
-      // GET /api/agent-directory/cards?skill=verification&capability=webhooks
+      // #650 item 3: registry query by advertised skill — the skill and
+      // capability query params on GET /api/agent-directory/cards filter
+      // by exact match (for example skill=verification, capability=webhooks).
       skill: url.searchParams.get("skill"),
     };
     const doc = member
