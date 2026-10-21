@@ -4,7 +4,7 @@
 // Later auth changes belong in this file.
 import { roomMcpUrlForHost } from "../src/room-mcp-join.js";
 import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
-import { keychainLookup, keychainStore } from "./keychain.mjs";
+import { keychainDelete, keychainLookup, keychainStore } from "./keychain.mjs";
 
 export function bearerHeader(secret) {
   if (typeof secret !== "string" || secret.length === 0) throw new Error("Missing identity secret");
@@ -19,12 +19,16 @@ export function readyUrl(origin) {
   return origin.replace(/\/$/, "") + edgeDoorApiPath(origin, "/api/ready");
 }
 
-export async function rememberSecret(account, secret, env = process.env) {
-  return keychainStore(account, secret, env);
+// loadSecret prefers the keychain, so a failed store must not leave an older
+// secret there: it would shadow the fresh one in the connection file.
+export async function rememberSecret(account, secret, env = process.env, options = {}) {
+  if (await keychainStore(account, secret, env, options)) return true;
+  await keychainDelete(account, env, options);
+  return false;
 }
 
-export async function loadSecret(account, fileSecret, env = process.env) {
-  const stored = await keychainLookup(account, env);
+export async function loadSecret(account, fileSecret, env = process.env, options = {}) {
+  const stored = await keychainLookup(account, env, options);
   if (typeof stored === "string" && stored.length > 0) return stored;
   if (typeof fileSecret !== "string" || fileSecret.length === 0) throw new Error("Saved connection has no identity secret");
   return fileSecret;
@@ -60,7 +64,26 @@ export async function checkAccess({ origin, secret, fetchImpl = globalThis.fetch
   if (!result || result.isError) return { ok: false, down: false, status: response.status };
   const status = result.structuredContent?.status;
   if (status && status !== "credential_accepted") return { ok: false, down: false, status: response.status };
-  return { ok: true, down: false, status: response.status };
+  return { ok: true, down: false, status: response.status, check: result.structuredContent ?? {} };
+}
+
+// One hosted tool call or tools/list for room doctor. Returns the JSON-RPC
+// result, or null when the call failed. Never returns the secret.
+export async function mcpRequest({ origin, secret, method, params = {}, fetchImpl = globalThis.fetch }) {
+  try {
+    const response = await fetchImpl(mcpUrl(origin), {
+      method: "POST", redirect: "error",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: bearerHeader(secret) },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "room-doctor", method, params }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) return null;
+    const body = await response.json().catch(() => null);
+    if (!body || body.error || !body.result || body.result.isError) return null;
+    return body.result;
+  } catch {
+    return null;
+  }
 }
 
 export async function checkReady({ origin, fetchImpl = globalThis.fetch }) {
