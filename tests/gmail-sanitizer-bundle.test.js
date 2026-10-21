@@ -35,3 +35,16 @@ test('Room HTML policy removes active elements and keeps safe links protected', 
   assert.match(value, /rel="noopener noreferrer"/);
   assert.match(value, /href="https:\/\/example.test\/"/);
 });
+
+// The advisory concerns namespace-prefixed tags, not only bare <animate>.
+test('vendored sanitizer blocks namespace-prefixed SMIL URL retargeting', () => {
+  for (const tag of ['animate', 'animateColor', 'animateMotion', 'animateTransform', 'set']) {
+    for (const prefix of ['svg', 'xlink', 'xml']) {
+      const input = `<svg><a href="#safe"><${prefix}:${tag} attributeName="href" values="#safe;javascript:alert(1)" dur=".01s" fill="freeze"/><text>Click</text></a></svg>`;
+      const options = { allowedTags: false, allowedAttributes: false, allowedSchemes: ['http', 'https'], allowVulnerableTags: true };
+      const result = bundled(input, options);
+      assert.equal(result, installed(input, options));
+      assert.doesNotMatch(result, /javascript:/i, `${prefix}:${tag}`);
+    }
+  }
+});
