@@ -6228,11 +6228,12 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   }
   if (action === "help") {
     const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
-    $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
+    $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><details id="help-timing"><summary></summary><label>Available for<select name="duration" required>'
       + (keep ? '<option value="keep">Keep current end time</option>' : "")
-      + '<option value="3600000">1 hour</option><option value="86400000"' + (keep ? "" : " selected") + '>1 day</option><option value="604800000">7 days</option></select></label><p class="form-hint">Visible to this room. You stay accountable; no work starts automatically.</p><p id="help-current" class="form-hint" hidden></p>';
+      + '<option value="3600000">1 hour</option><option value="86400000"' + (keep ? "" : " selected") + '>1 day</option><option value="604800000">7 days</option></select></label></details><p class="form-hint">Visible to this room. You stay accountable; no work starts automatically.</p><p id="help-current" class="form-hint" hidden></p>';
     $("#action-fields [name=scope]").value = item.helpWanted?.scope ?? "";
     pendingAction.helpExpiresAt = keep ? item.helpWanted.expiresAt : null;
+    syncHelpTiming();
   }
   if (action === "end-help") $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="help-current" class="definition"></p>');
   if (isOfferAction(action)) {
@@ -6387,7 +6388,18 @@ function resumeAction() {
   syncActionForm(); $("#action-form button[type='submit']").focus();
 }
 $("#resume-action").addEventListener("click", resumeAction);
-$("#action-fields").addEventListener("change", event => { if (event.target.name === "producerId") syncActionForm(); });
+function syncHelpTiming() {
+  const details = $("#action-fields").querySelector("#help-timing"), duration = details?.querySelector("select");
+  if (!duration) return;
+  details.querySelector("summary").textContent = duration.value === "keep" ? uiText("human.helpTimingKeep")
+    : duration.value ? uiText("human.helpTimingDuration", { duration: duration.selectedOptions[0].textContent })
+      : uiText("human.helpTimingChoose");
+  if (!duration.value) details.open = true;
+}
+$("#action-fields").addEventListener("change", event => {
+  if (event.target.name === "producerId") syncActionForm();
+  if (event.target.name === "duration") syncHelpTiming();
+});
 $("#refresh-action").addEventListener("click", () => {
   const entry = pendingAction;
   if (!entry || !state || busy || entry.uncertain) return;
@@ -6425,6 +6437,7 @@ $("#refresh-action").addEventListener("click", () => {
         currentHelp().textContent = item.helpWanted ? `Latest: ${item.helpWanted.scope} · ${helpView(item).status} · ends ${new Date(item.helpWanted.expiresAt).toLocaleString()}` : "No current request.";
         const keep = $("#action-fields option[value=keep]");
         if (keep) { keep.disabled = true; $("#action-fields [name=duration]").value = ""; }
+        syncHelpTiming();
         entry.helpExpiresAt = null;
       }
     }
@@ -6484,7 +6497,7 @@ $("#action-form").addEventListener("submit", e => {
         if (fields.duration !== "keep" && ![3600000, 86400000, 604800000].includes(duration)) return;
         data.expiresAt = fields.duration === "keep" ? entry.helpExpiresAt : new Date(Date.now() + duration).toISOString();
         delete data.duration;
-        if (Date.parse(data.expiresAt) <= Date.now()) { entry.error = "End time passed. Choose a new duration."; syncActionForm(); return; }
+        if (Date.parse(data.expiresAt) <= Date.now()) { $("#action-fields").querySelector("#help-timing").open = true; entry.error = "End time passed. Choose a new duration."; syncActionForm(); return; }
       }
       try { validateHelpData(data); } catch { entry.error = "Add a short scope and choose an end time."; syncActionForm(); return; }
     }
