@@ -35,24 +35,10 @@ test("inbox quickstart exists with ordered numbered steps", () => {
   assertOrdered(inboxDoc(), "docs/INBOX-QUICKSTART.md");
 });
 
-test("inbox quickstart cites only real UI surface", () => {
-  const doc = inboxDoc();
-  const page = html();
-  for (const ui of ["Continue with Google", "Connect Gmail", "Personalize setup"]) {
-    assert.ok(doc.includes(ui), `doc cites "${ui}" but never names it`);
-    assert.ok(page.includes(ui), `"${ui}" is cited in the doc but not found in index.html`);
-  }
-  assert.ok(page.includes('id="nav-inbox"'), "Inbox nav button is missing from index.html");
-  assert.ok(doc.includes("Inbox"), "doc never names the Inbox nav button");
-  assert.ok(
-    page.includes("imports up to 25 recent inbox messages"),
-    "the 25-message import-limit copy is missing from index.html",
-  );
-  assert.ok(doc.includes("25"), "doc never states the 25-message import limit");
-  assert.ok(
-    page.includes("stays private until you choose to share it"),
-    "the inbox privacy copy is missing from index.html",
-  );
+test("former inbox quickstart explains v1 deferral and points to room conversation", () => {
+  assert.match(inboxDoc(), /not available in v1/);
+  assert.match(inboxDoc(), /room conversation/);
+  assert.doesNotMatch(html(), /id="nav-inbox"|id="inbox-panel"/);
 });
 
 test("inbox quickstart links to depth instead of duplicating it", () => {

@@ -10,6 +10,8 @@ import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { createDurableWorkClaimRegistry } from "../server/work-claim-sqlite.mjs";
 import { claimHistoryLength, deliveryDigest, workOf } from "../server/work-claims.mjs";
 
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+
 const SHA = "a".repeat(64);
 const bundle = { artifact: { kind: "text", ref: "room://artifacts/1", sha256: SHA },
   checks: [{ name: "unit", result: "pass" }], criteria: [] };
@@ -431,3 +433,32 @@ for (const exit of reviewerExits) {
     assert.deepEqual(effects(r, id), before);
   });
 }
+
+
+test("item-backed acceptance has one authority through delivery, approval and restartable reads", async t => {
+  const r = await room(t);
+  const send = (id, type, data) => r.store.command(r.ownerKey, "commons", { id, type, data });
+  const item = () => r.store.room("commons").state.workItems.canonical;
+  const mutate = (id, type, data = {}) => send(id, type, { workItemId: "canonical", expectedRevision: item().revision, ...data });
+  send("propose-canonical", "work.proposed", { workItemId: "canonical", title: "Canonical result", definitionOfDone: "Reviewed exact evidence", accountableMemberId: "owner", humanDecisionMakerId: "owner", ownerDecisionRequired: true, mode: "read" });
+  mutate("accept-canonical", "work.accepted");
+  mutate("start-canonical", "work.started");
+  const before = structuredClone(item());
+  for (const [route, data] of [["update", { state: "done", delivery: bundle }], ["update", { state: "delivered", delivery: bundle }], ["review", { verdict: "approve", summary: "Skip evidence" }]]) {
+    const result = await r.call(route, "canonical", data);
+    assert.equal(result.status, 409);
+    assert.equal(result.value.next[0].path, "/api/rooms/commons/work-context?workItemId=canonical");
+    assert.deepEqual(item(), before);
+  }
+  mutate("complete-canonical", "work.completed", { summary: "Result", producerId: "owner", evidenceVersion: "v1", evidenceUrl: "https://example.com/result", nextAction: "Review", signedEvidence: makeTestSigner(r.store)() });
+  assert.equal(r.get("canonical").state, "delivered");
+  assert.equal(r.get("canonical").history.some(stamp => stamp.action === "state:done"), false);
+  const receipt = item().receipt;
+  send("rationale-canonical", "message.posted", { messageId: "rationale-canonical", body: "Checked and accepted this result." });
+  const decision = { decision: "approved", completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, reason: "Checked", sourceMessageId: "rationale-canonical" };
+  assert.throws(() => mutate("stale-canonical", "owner.decision_recorded", { ...decision, expectedRevision: item().revision - 1 }), /revision/i);
+  mutate("decision-canonical", "owner.decision_recorded", decision);
+  assert.equal(r.get("canonical").state, "done");
+  assert.equal(r.get("canonical").history.at(-1).action, "state:done");
+  assert.equal(r.get("canonical").history.at(-1).agentId, "owner");
+});

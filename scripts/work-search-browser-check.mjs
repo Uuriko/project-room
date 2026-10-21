@@ -57,7 +57,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await target.getAttribute('href'), canonicalHash);
   await target.focus(); await page.keyboard.press('Enter');
   const card = page.locator('[data-work-record-id]').filter({ has: page.locator('h3', { hasText: 'Orbit <b>agenda</b>' }) });
-  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent thought.');
   assert.equal(auditRecovery(f.store).dataSha256, before, 'search/navigation do not change any Room table');
@@ -72,7 +72,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent thought.');
   await page.goForward();
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
-  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   await page.goBack();
   await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
   await target.press('Enter');
@@ -105,6 +105,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.match(await hits.locator('small').textContent(), /Completed/);
   await hits.locator('a').click();
   assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), 'finished');
+  await page.locator('[data-work-record-id="finished"] .work-details > summary').click();
   await hits.locator('a').focus();
   mutate('work.blocked', { reason: 'Revise the stored finding.', nextAction: 'Prepare corrected text.' });
   mutate('work.blocker_resolved', { resolution: 'Corrected wording prepared.' });
@@ -149,7 +150,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.locator('#thread-bar').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#conversation-title').textContent(), '# general');
   assert.equal(new URL(page.url()).hash, canonicalHash);
-  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(await page.locator('#request-mode-bar').isVisible(), false);
   const assertThreadOrigin = async () => {
@@ -171,7 +172,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
   assert.equal(await page.locator('#conversation-title').textContent(), '# general');
   assert.equal(await page.locator('#thread-bar').isVisible(), false);
-  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   await page.goBack();
   await assertThreadOrigin();
   assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation, 'channel/thread return and history neither submit the draft nor mutate Room data');
@@ -249,7 +250,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await fresh.goto(direct);
   await signInFixture(fresh, f.keys.owner, { returnTo: direct });
   const directCard = fresh.locator('[data-work-record-id="search:same-id"]');
-  await fresh.waitForFunction(() => document.querySelector('[data-work-record-id="search:same-id"] .work-details')?.open);
+  await fresh.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'search:same-id');
   assert.equal(await directCard.locator('.mode').textContent(), `read · revision ${f.store.room('commons').state.workItems[pair].revision}`);
   assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room');
   await fresh.locator('#work-navigation-return').press('Enter');
@@ -259,7 +260,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await fresh.locator('#search-list [data-open-work="search:same-id"]').press('Enter');
   assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to conversation');
   await fresh.reload();
-  await fresh.waitForFunction(() => document.querySelector('[data-work-record-id="search:same-id"] .work-details')?.open);
+  await fresh.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'search:same-id');
   assert.equal(await fresh.locator('#work-navigation-return').textContent(), 'Back to room', 'a reload loses the private origin ticket safely');
   await fresh.locator('#work-navigation-return').press('Enter');
   await fresh.goto(`${new URL(direct).origin}/?room=commons#pr-record/work/missing-task`);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseJoinCode,
   parseInviteCodeInput,
+  inviteEntryPath,
   joinCodeFromLocation,
   joinCodePath,
   joinRoomHint,
@@ -20,6 +21,16 @@ import {
   apiFetch,
   API_TIMEOUT_MS,
 } from "../src/join.js";
+
+test("pasted invitations use the existing local consent flows and preserve purpose", () => {
+  const token = "a".repeat(43);
+  assert.equal(inviteEntryPath(`https://example.test/#join/${token}/work/work-7`, "/room/join"), `/room/#join/${token}/work/work-7`);
+  assert.equal(inviteEntryPath("https://example.test/#agent-invite/RM-ABC"), "/join/RM-ABC");
+  assert.equal(inviteEntryPath("ABC-DEF-GHJ"), "/#code/ABC-DEF-GHJ");
+  assert.equal(inviteEntryPath(`https://example.test/#join/${token}extra`), null);
+  assert.equal(inviteEntryPath(`javascript:alert(1)#join/${token}`), null);
+  assert.equal(inviteEntryPath("not an invitation"), null);
+});
 
 test("parse join code from the path, rejecting lookalikes", () => {
   assert.equal(parseJoinCode("/join/RM-ABC123"), "RM-ABC123");
