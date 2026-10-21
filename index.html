@@ -185,7 +185,7 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
-          <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
+
         </aside>
 
       <dialog id="board-dialog" aria-labelledby="board-title">
@@ -232,6 +232,7 @@
           <section id="search-results" class="search-results" aria-label="Search results" hidden>
             <p id="search-count" role="status"></p>
             <ol id="search-list"></ol>
+            <div id="results-panel" hidden><ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol></div>
           </section>
           <div id="thread-bar" class="thread-bar" hidden>
             <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
@@ -402,10 +403,7 @@
             </div>
             <p id="room-about-status" class="status form-status" role="status"></p>
           </details>
-          <details id="results-panel" class="panel">
-            <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
-            <ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol>
-          </details>
+
           <details id="record-panel" class="panel record-panel">
             <summary class="panel-header section-summary"><span class="section-label"><strong id="record-title">History</strong></span><span id="event-count" class="count-chip"></span></summary>
             <details id="decision-section">
@@ -578,7 +576,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><h2 id="result-title" tabindex="-1">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><p id="result-use-status" class="form-hint" role="status"></p><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-discuss" type="button" class="button" hidden></button><button id="result-copy-text" type="button" class="button secondary" hidden></button><button id="result-download" type="button" class="button secondary" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></section>
+    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><div id="result-resize" role="separator" aria-orientation="vertical" aria-controls="result-dialog" tabindex="0"></div><header class="result-header"><h2 id="result-title" tabindex="-1">Result</h2><details id="result-options" class="result-options"><summary aria-label="Preview actions">⋯</summary><div><button id="result-copy-text" type="button" class="button ghost" hidden></button><button id="result-download" type="button" class="button ghost" hidden></button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></details><button id="close-result" type="button" class="button ghost"></button></header><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><p id="result-use-status" class="form-hint" role="status"></p><div class="portable-actions"><button id="result-discuss" type="button" class="button" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button></div></section>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>

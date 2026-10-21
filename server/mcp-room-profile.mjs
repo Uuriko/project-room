@@ -409,6 +409,20 @@ function listWork(store, secret, args) {
 // for agents with no memberships yet. The check lives in the handlers,
 // not the router; per-room checks below stay authoritative for the target
 // room ("usable somewhere = listed" is a superset, never a substitute).
+// Credentials a tool returns ride in structuredContent only, never in the
+// text block hosts log and show (issue #3750): a minted invite code, and the
+// identity secret or room token that room_join and room_create hand back.
+function credentialRedactions(name, value) {
+  if (name === "room_create_agent_invite") return [mcpRedaction(value?.code, "structuredContent.code")];
+  if (name !== "room_join" && name !== "room_create") return [];
+  return [
+    mcpRedaction(value?.mcpToken?.credential, "structuredContent.mcpToken.credential"),
+    mcpRedaction(value?.roomToken, "structuredContent.roomToken"),
+    mcpRedaction(value?.identitySecret, "structuredContent.identitySecret"),
+    mcpRedaction(value?.secret, "structuredContent.secret"),
+  ];
+}
+
 function enforceMcpCallVisibility(store, identity, toolName) {
   const def = HOSTED_TOOLS.find(entry => entry.name === toolName);
   if (!def) return; // unknown tool: the tools/call router already rejects it
@@ -944,8 +958,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       // structuredContent only, never in the text block hosts log
       // verbatim (issue #3750). room_run_action recurses into this same
       // handler with the inner tool name, so it is covered here too.
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
-        name === "room_create_agent_invite" ? [mcpRedaction(value?.code, "structuredContent.code")] : []) };
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };

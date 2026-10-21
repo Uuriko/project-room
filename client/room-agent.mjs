@@ -955,7 +955,10 @@ export class RoomAgentClient {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
-  activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
+  activationPack({ view = "full", signal } = {}) {
+    if (view !== "full" && view !== "brief") throw new RoomClientError(0, "invalid_view", "Use full or brief activation view");
+    return this.#request(`/activation-pack${view === "brief" ? "?view=brief" : ""}`, undefined, signal);
+  }
   // One bounded summary read after the existing connection preflight. `next`
   // is the observed head, not an acknowledgement or a complete event page.
   async roomDigest({ since = 0, signal } = {}) {

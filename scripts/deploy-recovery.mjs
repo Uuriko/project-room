@@ -54,6 +54,22 @@ export function rollbackDecision(previous, candidateSchema) {
   if (previous.codeSchemaVersion < candidateSchema) return { eligible: false, reason: `previous code schema ${previous.codeSchemaVersion} cannot read candidate schema ${candidateSchema}` };
   return { eligible: true, reason: 'schema floor satisfied; same-schema data compatibility is not established by this check' };
 }
+// Manual rollback separately qualifies the exact source/allocation pair. The
+// automatic failure handler has no such qualification, so it needs this gate.
+export function automaticRollbackDecision(previous, candidateSchema, candidateSource) {
+  const floor = rollbackDecision(previous, candidateSchema);
+  if (!floor.eligible) return floor;
+  // Equal schema numbers can still introduce tables unknown to the old
+  // recovery/export code. Compare exact Git definitions, never just integers.
+  const prior = previous.schemaSource;
+  if (!shaPattern.test(candidateSource?.blob ?? '') || candidateSource?.version !== candidateSchema
+    || !shaPattern.test(candidateSource?.revision ?? '') || !shaPattern.test(prior?.blob ?? '')
+    || prior?.version !== previous.codeSchemaVersion || prior?.revision !== previous.sourceRevision)
+    return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
+  if (prior.blob !== candidateSource.blob)
+    return { eligible: false, reason: 'writer-fence definitions changed; prior recovery may reject new tables' };
+  return { eligible: true, reason: 'schema floor and exact writer-fence definition match; row/runtime compatibility is not established by this check' };
+}
 export async function observeWorker({ status, readVersion, schema = schemaAt }) {
   const before = allocation(await status());
   let signal = null, error = null;
@@ -73,7 +89,7 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
     try {
       result.observedBefore = allocation(await status(name));
       if (result.observedBefore.known && result.observedBefore.versionId === previous?.versionId) continue;
-      const decision = rollbackDecision(previous, snapshot.candidateCodeSchemaVersion);
+      const decision = automaticRollbackDecision(previous, snapshot.candidateCodeSchemaVersion, snapshot.candidateSchemaSource?.revision === snapshot.targetSha ? snapshot.candidateSchemaSource : null);
       result.reason = decision.reason;
       if (!decision.eligible) { result.disposition = 'roll_forward_required'; continue; }
       result.rollbackAttempted = true;
@@ -89,7 +105,7 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
   }
   const rows = Object.values(workers);
   const statusValue = rows.some(row => row.disposition === 'roll_forward_required') ? 'ROLL FORWARD REQUIRED' : rows.some(row => row.disposition === 'rollback_unverified') ? 'ROLLBACK NOT VERIFIED' : rows.some(row => row.disposition === 'rollback_verified') ? 'ROLLBACK VERIFIED' : 'NO DEPLOYMENT CHANGE OBSERVED';
-  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor only; this does not prove prior code understands new rows, semantics or retained runtime.', recordedAt: new Date().toISOString(), workers };
+  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor and exact writer-fence definition only; this does not prove prior code understands new rows, semantics or retained runtime.', recordedAt: new Date().toISOString(), workers };
 }
 export function recoveryDescription(report) {
   if (!report) return 'Recovery not attempted or report unavailable; no rollback is claimed.';
@@ -166,7 +182,7 @@ async function main() {
     const report = { targetSha: revision, candidateCodeSchemaVersion: proof.version, candidateSchemaSource: proof, recordedAt: new Date().toISOString() };
     for (const name of ['prod', 'entry']) {
       report[name] = await observeWorker({ status: () => deploymentStatus(name), readVersion: () => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN) });
-      report[name].automaticRollback = rollbackDecision(report[name], proof.version);
+      report[name].automaticRollback = automaticRollbackDecision(report[name], proof.version, proof);
     }
     report.run = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null;
     // A split/unknown allocation has no exact rollback target; refuse before upload.
