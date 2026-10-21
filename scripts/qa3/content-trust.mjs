@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // A guest payload must carry untrusted:true or contentTrust on every
-// agent-facing read. Surfaces that already stamp stay required. Surfaces
-// that still omit the marker are expectedFail until their fix merges: the
-// event tail and SSE frames (SEC-2b). Webhook payloads are fenced (Q3-D). Board
+// agent-facing read. Surfaces that already stamp stay required. The event
+// tail and SSE frames are stamped at the HTTP/SSE boundary (F9 SEC-2b fix:
+// stampEvents on the /events page and on each pumped batch; the signed
+// event envelope is never touched). Webhook payloads are fenced (Q3-D). Board
 // lists are stamped (SEC-2). A guest cannot add a Board review note, so a
 // review-profile member writes the Board marker.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
@@ -162,7 +163,7 @@ try {
 
   const events = await client.request("GET", `${roomPath}/events?limit=100`, { token: owner.secret });
   if (events.status !== 200) throw new Error(`events: HTTP ${events.status}`);
-  judge("http /events", events.text, { payload: true, expectedFail: "F9 SEC-2b" });
+  judge("http /events", events.text, { payload: true, expectedFail: null });
 
   const needs = await client.request("GET", "/api/needs-me", { token: owner.secret });
   if (needs.status !== 200) throw new Error(`needs-me: HTTP ${needs.status}`);
@@ -178,7 +179,7 @@ try {
     if (!payload.includes(marker)) await new Promise(resolve => setTimeout(resolve, 200));
   }
   judge("webhook stored payload", payload, { payload: true, expectedFail: null });
-  judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: "F9 SEC-2b" });
+  judge("sse frame", frames.map(frame => frame.text).join("\n"), { payload: true, expectedFail: null });
 
   exit(report.finish());
 } catch (error) {
