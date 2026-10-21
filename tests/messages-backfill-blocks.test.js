@@ -161,8 +161,9 @@ test("a cooperative interruption still propagates and never parks the room", t =
     /interrupted/
   );
   assert.deepEqual(blocks(store), [], "an operational throw is not a data block");
-  const cursor = store.db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id='live'").get();
-  assert.ok(cursor.applied_seq > 0, "the committed prefix survives the interruption, as before");
+  const cursor = store.db.prepare("SELECT applied_seq,state_seq FROM messages_backfill_cursor WHERE room_id='live'").get();
+  assert.equal(cursor.applied_seq,0);
+  assert.ok(cursor.state_seq > 0, "the staged replay prefix survives interruption");
   const result = store.backfillMessages({ limit: 1000 });
   assert.equal(result.done, true);
   assert.equal(rows(store, "live").length, 30);

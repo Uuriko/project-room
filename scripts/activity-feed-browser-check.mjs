@@ -36,42 +36,14 @@ for (const mobile of [false, true]) {
     await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
-    // Secondary navigation stays collapsed while chat is immediately usable.
-    assert.equal(await page.locator("#room-more").evaluate(node => node.open), false);
-    assert.equal(await page.locator("#topbar-activity").isVisible(), false);
-    await page.locator("#room-more > summary").focus();
-    await page.keyboard.press("Enter");
-    await page.locator("#topbar-activity").waitFor({ state: "visible" });
-    await page.keyboard.press("Escape");
-    assert.equal(await page.locator("#room-more > summary").evaluate(node => node === document.activeElement), true);
-    await page.locator("#room-more > summary").click();
-    // The Activity badge counts the two unread items.
-    const activityBadge = page.locator("#activity-count");
-    await activityBadge.waitFor({ state: "visible" });
-    assert.equal(await activityBadge.textContent(), "2");
-
-    // The dialog lists both items; the Mentions filter narrows to one.
-    await clickChrome(page, "#topbar-activity");
-    const dialog = page.locator("#activity-dialog");
-    await dialog.waitFor({ state: "visible" });
-    await page.locator("#activity-list .activity-item").first().waitFor();
-    assert.equal(await page.locator("#activity-list .activity-item").count(), 2);
-    await page.locator('#activity-filters [data-activity-filter="mention"]').click();
-    await page.waitForFunction(() => document.querySelectorAll("#activity-list .activity-item").length === 1);
-    assert.match(await page.locator("#activity-list .activity-item").first().textContent(), /mentioned you/);
-    await page.locator('#activity-filters [data-activity-filter=""]').click();
-    await page.waitForFunction(() => document.querySelectorAll("#activity-list .activity-item").length === 2);
-
-    // Opening an item jumps to the message and marks that item read.
-    await page.locator('#activity-list .activity-item a[data-open-message="mention-owner"]').click();
+    assert.equal(await page.locator("#topbar-activity, #activity-preview, #activity-dialog").count(), 0);
+    await page.locator("#topbar-updates").click();
+    await page.locator('[data-update-filter="mentions"]').click();
+    await page.getByRole('button', { name: /Open .*confirm the agenda/ }).first().click();
     await page.waitForFunction(() => location.hash.startsWith("#pr-record/message/mention-owner"));
-    await dialog.waitFor({ state: "hidden" });
-    // Mark all read clears the badge.
-    await clickChrome(page, "#topbar-activity");
-    await dialog.waitFor({ state: "visible" });
-    await page.locator("#activity-read-all").click();
-    await page.waitForFunction(() => document.querySelector("#activity-count").hidden);
-    await page.keyboard.press("Escape");
+    await page.locator("#updates-dialog").waitFor({ state: "hidden" });
+    await page.locator("#work-navigation-return").click();
+    await page.locator("#updates-close").click();
     await capture("read");
 
     // Save from the message overflow menu; Later badge counts it.
@@ -115,17 +87,11 @@ for (const mobile of [false, true]) {
 
     // Scrolling to the bottom advances the horizon (debounced): the divider
     // clears because everything in view now counts as read. Only a reader's
-    // scroll counts, so a real wheel comes first; synthetic scroll events then
-    // cover viewports where the list has no scrollable overflow.
+    // scroll counts. A short desktop list must also recognize the wheel
+    // gesture without requiring a synthetic scroll event.
     const listBox = await page.locator("#message-list").boundingBox();
     await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + Math.min(listBox.height, page.viewportSize().height - listBox.y) / 2);
     await page.mouse.wheel(0, 100000);
-    await page.evaluate(() => {
-      const list = document.querySelector("#message-list");
-      if (list) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event("scroll")); }
-      window.scrollTo(0, document.body.scrollHeight);
-      window.dispatchEvent(new Event("scroll"));
-    });
     await page.waitForFunction(() => !document.querySelector(".chat-divider.unread"), undefined, { timeout: 15000 });
     await capture("read-again");
 
@@ -158,9 +124,9 @@ for (const mobile of [false, true]) {
     await page.locator("#message-list").click();
     await page.keyboard.press("g");
     await page.keyboard.press("a");
-    const dialog = page.locator("#activity-dialog");
+    const dialog = page.locator("#updates-dialog");
     await dialog.waitFor({ state: "visible" });
-    await page.locator("#activity-list .activity-item").first().waitFor();
+    await page.locator(".updates-row").first().waitFor();
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
 

@@ -253,11 +253,45 @@ test('reply-only resume retains old open requests independently of delta observa
   assert.equal(fromBeginning.nextReads.filter(read => read.arguments?.requestMessageId === 'old-open').length, 1);
   assert.equal(fromBeginning.nextReads.some(read => read.source === 'attention'), false);
   const options = { connection: config, focus: 'replies', sinceVersion: initial.contextVersion, attentionCursor: initial.observedThroughBySource.attention.cursor };
+  const runner = new RoomAgentClient(config);
+  const basis = (await runner.replyContext('old-open')).current.answerBasis;
+  await runner.requestRuns({ requestMessageId: 'old-open', attemptId: 'resume-attempt', action: 'claim', expectedRequestRevision: basis.expectedRequestRevision, contextEventId: basis.contextEventId });
+  await runner.requestRuns({ requestMessageId: 'old-open', attemptId: 'resume-attempt', action: 'needs_attention' });
   const resumed = await resumeAgent(options);
+  assert.equal(resumed.pendingReconciliations.status, 'observed');
+  assert.deepEqual(resumed.pendingReconciliations.items.map(item => [item.requestMessageId, item.state]), [['old-open', 'needs_attention']]);
+  assert.equal(resumed.pendingReconciliations.items[0].action, 'inspect_original_attempt_before_retry');
+  assert.equal((await runner.requestRuns()).runs['old-open'].state, 'needs_attention', 'resume does not mutate the attempt');
+  for (const state of ['working', 'delivered', 'unknown', 'result_ready']) {
+    const snapshot = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
+      assert.equal(init.method, 'GET', 'recovery is read-only');
+      assert.notEqual(new URL(url).pathname, '/api/rooms/commons', 'resume never downloads the full room snapshot');
+      const response = await fetch(url, init);
+      if (!String(url).endsWith('/request-runs')) return response;
+      const value = await response.json(); value.runs['old-open'].state = state;
+      value.runs['unrelated-request'] = { state: 'needs_attention', updatedAt: 1 };
+      return Response.json(value);
+    } });
+    assert.deepEqual(snapshot.pendingReconciliations.items.map(item => item.requestMessageId),
+      ['unknown', 'result_ready'].includes(state) ? ['old-open'] : []);
+  }
+  for (const failure of ['unavailable', 'wrong-viewer', 'malformed']) {
+    const snapshot = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
+      if (!String(url).endsWith('/request-runs')) return fetch(url, init);
+      if (failure === 'unavailable') return Response.json({}, { status: 503 });
+      const value = await (await fetch(url, init)).json();
+      if (failure === 'wrong-viewer') value.viewerId = owner.identityId;
+      else value.runs['old-open'].updatedAt = 'invalid';
+      return Response.json(value);
+    } });
+    assert.equal(snapshot.connection.status, 'credential_accepted');
+    assert.deepEqual(snapshot.pendingReconciliations, { status: 'unavailable' });
+    assert.ok(snapshot.incompleteSources.some(source => source.source === 'pendingReconciliations'));
+  }
   assert.deepEqual((resumed.openRequests ?? []).map(request => request.id), ['old-open']);
   assert.equal(resumed.attention.some(item => item.id === 'old-open'), false);
   assert.deepEqual(resumed.incompleteSources, []);
-  assert.equal(resumed.metrics.requests, 4);
+  assert.equal(resumed.metrics.requests, 5);
   assert.deepEqual(resumed.obligations, []); assert.deepEqual(resumed.ownClaims, []);
   assert.equal(Object.hasOwn(resumed.openRequests[0], 'answerBasis'), false);
   assert.equal(JSON.stringify(resumed).includes('private-question-sentinel'), false);
@@ -295,7 +329,16 @@ test('reply-only resume retains old open requests independently of delta observa
   assert.ok(conversation.current.answerBasis);
   await client.replyAction('room_respond_to_request', { requestId: 'formal-answer', responseToRequestId: 'old-open',
     ...conversation.current.answerBasis, responseOutcome: 'answered', toMemberId: owner.identityId, workItemId: null, body: 'Explicit answer' });
-  assert.deepEqual((await resumeAgent(options)).openRequests, []);
+  let idleRunReads = 0;
+  const idle = await resumeAgent({ ...options, fetchImpl: (url, init) => {
+    if (String(url).endsWith('/request-runs')) idleRunReads++;
+    return fetch(url, init);
+  } });
+  assert.deepEqual(idle.openRequests, []);
+  assert.equal(idleRunReads, 0, 'no run metadata can contribute when the incoming open list is empty');
+  assert.deepEqual(idle.pendingReconciliations, { status: 'observed', source: 'open_requests', localJournalRead: false, items: [] });
+  assert.equal(idle.metrics.requests, 4);
+
   // A different current request ensures final revocation discards gathered refs.
   store.command(owner.secret, 'commons', { id: 'another-open', type: 'message.posted', data: {
     messageId: 'another-open', body: 'private-question-two', toMemberId: 'reply-worker', requestKind: 'reply' } });
@@ -309,5 +352,6 @@ test('reply-only resume retains old open requests independently of delta observa
   } });
   assert.equal(ended.connection.status, 'unconfirmed');
   assert.deepEqual(ended.openRequests, []); assert.deepEqual(ended.optionalConversations, []);
+  assert.deepEqual(ended.pendingReconciliations, { status: 'not_read' });
   assert.deepEqual(ended.nextReads, []); assert.deepEqual(ended.observedThroughBySource, {});
 });

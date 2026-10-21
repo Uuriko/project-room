@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 import { randomUUID } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
@@ -98,7 +99,9 @@ export class ReplyRequests {
         const saved = decode(checkpoint, "checkpoint", binding);
         verifyAnchor(saved.throughSequence, saved.throughEventId); afterSequence = saved.throughSequence;
       }
-      const byMessage = new Map(state.messages.map(message => [message.id, message])), owners = replyContextOwners(state);
+      const records = messageRepository(this.store, roomId, state);
+      const byMessage = records.getMany ? records.getMany(rows.filter(row => row.type === 'message.posted').map(row => row.message_id || row.id)) : records;
+      const owners = replyContextOwners({ ...state, messages: records.records() });
       const byEvent = new Map(rows.map(row => [row.id, row])), terminals = new Map(), openings = new Map();
       for (const request of Object.values(requests)) {
         if (requestMessageId !== null ? request.id !== requestMessageId : !directionMatches(request, auth.member.id, direction)) continue;

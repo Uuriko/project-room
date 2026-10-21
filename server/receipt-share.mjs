@@ -94,9 +94,12 @@ const cleanText = (value, limit) => {
 
 // The pre-filled share text. The verdict line rides in the same string so
 // the grade and its scope survive forwarding; the page shows this exact
-// text visibly, so nothing is shared that the page does not say.
+// text visibly, so nothing is shared that the page does not say. There is
+// deliberately no "verified" headline: most receipts are not verified, and
+// the graded verdict line is the state claim — it says what was checked
+// and what was not, per level.
 export function shareTextOf(receipt) {
-  return `Work, verified: ${cleanText(receipt.title, 110)} — ${verdictLineOf(receipt)}`;
+  return `${cleanText(receipt.title, 110)} — ${verdictLineOf(receipt)}`;
 }
 
 export const receiptCanonical = receipt => `${ROOM_ORIGIN}/receipts/${receipt.id}`;
