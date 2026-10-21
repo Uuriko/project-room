@@ -3992,8 +3992,13 @@ const replyToSharedResult = createResultFeedback({
     revealMessage(message.id);
     switchThread(destination, true);
   },
-  setReply(messageId) {
+  setReply(messageId, quote) {
     replyToId = messageId;
+    if (quote) {
+      const input = $("#message-input");
+      if (!input.value.startsWith(quote)) input.value = quote + input.value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     updateReply(); saveComposer(); persistDrafts();
     $("#message-input").focus();
   }
@@ -6158,7 +6163,7 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
   memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) { return replyToSharedResult(message.id); },
+  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onOriginal(messageId) {
     searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);

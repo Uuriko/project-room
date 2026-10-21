@@ -478,6 +478,31 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
   assert.equal(await f.page.locator("#message-input").inputValue(), "Keep this draft while reviewing.");
 });
 
+for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "mobile" : "desktop"} preserves drafts and exact reply`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, body: previewBody }); f.complete();
+  await messageAction(f.page, "native-draft", "reply");
+  await f.page.locator("#message-input").fill("Please clarify this.");
+  await f.page.locator("#thread-back").click();
+  await f.page.locator("#message-input").fill("Keep the room draft");
+  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
+  await f.page.locator("#result-body").evaluate(body => {
+    const range = document.createRange(); range.setStart(body.firstChild, 2); range.setEnd(body.firstChild, 14);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator("#message-input").inputValue(), "> A quiet room\n\nPlease clarify this.");
+  assert.equal(await f.page.locator("#message-input").evaluate(el => el === document.activeElement), true);
+  await f.capture(`selected-feedback-${mobile ? "mobile" : "desktop"}`);
+  await f.page.locator("#message-form button[type=submit]").click();
+  await f.page.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const posted = f.store.room("commons").state.messages.find(message => message.body === "> A quiet room\n\nPlease clarify this.");
+  assert.equal(posted?.replyToId, "native-draft", "posted feedback references the exact inspected source message");
+  if (!mobile) await f.page.locator("#close-result").click();
+  await f.page.locator("#thread-back").click();
+  assert.equal(await f.page.locator("#message-input").inputValue(), "Keep the room draft");
+});
+
 test("result reply refusal keeps the reader and private destination draft intact", { timeout: 30000 }, async t => {
   const f = await setup(t, { body: previewBody }); f.complete();
   await messageAction(f.page, "native-draft", "reply");
