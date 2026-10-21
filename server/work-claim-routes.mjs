@@ -60,7 +60,7 @@ import {
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
-import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -478,8 +478,16 @@ const receiptOf = item => {
 // fields are null, stating plainly that this receipt has no public page.
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
-  const publicId = publicWorkClaimReceiptId(roomId, item.id);
-  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  // A board work item's completion projects at the work-item source: the
+  // claim the board sync mirrors it into carries the same id, but its
+  // public twin is the wir_ receipt, not a wcr_ one (the projection
+  // deliberately emits one receipt per completion). Resolve either twin
+  // id — claim first, then work-item — so the member is handed the link
+  // that is actually live (F-3). Neither resolving: nulls, never a dead
+  // link.
+  const publicId = [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]
+    .find(id => publicReceiptById(store, id)) ?? null;
+  if (!publicId) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
   return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
 };
 

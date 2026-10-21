@@ -32,11 +32,11 @@ test("B-6: Overview recent decisions include owner decisions on work results (#3
 test("B-4: receipt page states a named verification tier, not the self-disclaimer", () => {
   const base = { id: "wcr_x", title: "T", at: "2026-10-15T00:00:00.000Z", agents: [], humans: [], startHref: "/" };
   const merged = renderReceiptDetailHtml({ ...base, mergedAt: "2026-10-15T00:00:00.000Z", pullRequest: "https://github.com/Uuriko/project-room/pull/1" });
-  assert.match(merged, /Verification tier: bytes re-verified/);
+  assert.match(merged, /Verification tier: Server-verified merge/);
   const selfAttested = renderReceiptDetailHtml({ ...base, verification: { state: "self_attested" } });
-  assert.match(selfAttested, /Verification tier: bundle unaltered \(self-asserted\)/);
+  assert.match(selfAttested, /Verification tier: Self-attested completion/);
   const memberVerified = renderReceiptDetailHtml({ ...base, verification: { state: "verified" } });
-  assert.match(memberVerified, /Verification tier: human verdict \(member-verified\)/);
+  assert.match(memberVerified, /Verification tier: Member-verified completion/);
   for (const html of [merged, selfAttested, memberVerified]) {
     // The tier leads; the factual caveats (stored hashes, unsigned
     // envelope) follow it instead of standing as the whole statement.

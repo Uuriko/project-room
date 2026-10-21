@@ -4,7 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { PROOF_LEVELS, jsonLdScriptTag, proofLabelOf, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -301,19 +301,24 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
+  // One tier vocabulary (F-4): the tier phrase in this note is the proof
+  // level's own label from the single source (receipt-share PROOF_LEVELS —
+  // the same words the share blurb, badge, JSON-LD and proof page use),
+  // never a second wording invented for this paragraph. The branch still
+  // decides WHICH level applies; only the naming is single-sourced.
   const provenNote = verification
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
     : receipt.source === "bounty-lot"
-    ? "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? `Verification tier: ${proofLabelOf(receipt)}. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`
     : receipt.source === "public-work" && receipt.review?.decidedAt
-    ? "Verification tier: human verdict. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? `Verification tier: ${PROOF_LEVELS["artifact-hash-recorded"].label}. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`
     : receipt.mergedAt && receipt.pullRequest
-    ? "Verification tier: bytes re-verified. What was checked: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? `Verification tier: ${PROOF_LEVELS["server-verified-merge"].label}. What was checked: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`
     : receipt.verification?.state === "verified"
-    ? "Verification tier: human verdict (member-verified). What was checked: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? `Verification tier: ${PROOF_LEVELS["member-verified-completion"].label}. What was checked: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`
     : receipt.verification?.state === "self_attested"
-    ? "Verification tier: bundle unaltered (self-asserted). What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
-    : "Verification tier: bundle unaltered (self-asserted). What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
+    ? `Verification tier: ${PROOF_LEVELS["self-attested-completion"].label}. What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`
+    : `Verification tier: ${proofLabelOf(receipt)}. What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.`;
   return `${head({
     title: receipt.title,
     description,
@@ -334,12 +339,32 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+${deliveredSection(receipt)}
 ${shareSection(receipt)}
-<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
+<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Join Project Room</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
 <footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
+}
+
+// What was delivered (F-2): the completion's own summary and the checks
+// its producer claimed, projected by the read model for work-item and
+// work-claim receipts. Both are producer-reported — the label says so on
+// the section, because a claimed check is not a passed check. Absent
+// fields render no section: a receipt that recorded neither stays as it
+// was, with no empty frame.
+function deliveredSection(receipt) {
+  const summary = typeof receipt.summary === "string" && receipt.summary ? receipt.summary : null;
+  const checks = Array.isArray(receipt.checksClaimed) ? receipt.checksClaimed.filter(entry => typeof entry === "string" && entry) : [];
+  if (!summary && !checks.length) return "";
+  return `<section class="delivered" aria-label="What was delivered">
+<h2>What was delivered</h2>
+${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+${checks.length ? `<p class="meta">Checks the producer reported:</p>
+<ul>${checks.map(entry => `<li>${escapeHtml(entry)}</li>`).join("")}</ul>` : ""}
+<p class="meta">Summary and checks are as the producer reported them when the work was completed; they are not independently verified.</p>
+</section>`;
 }
 
 const publicJson = receipt => ({
@@ -353,6 +378,8 @@ const publicJson = receipt => ({
   pullRequest: receipt.pullRequest,
   mergedAt: receipt.mergedAt,
   ...(receipt.verification ? { verification: receipt.verification } : {}),
+  ...(receipt.summary ? { summary: receipt.summary } : {}),
+  ...(receipt.checksClaimed?.length ? { checksClaimed: receipt.checksClaimed } : {}),
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.state ? { state: receipt.state } : {}),
