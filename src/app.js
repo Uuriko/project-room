@@ -1224,8 +1224,29 @@ function syncRoomLifecycle() {
   $("#main").classList.toggle("room-archived", archived); // The composer and New work follow in syncRequestComposer and render.
   const owner = Boolean(viewer) && viewer.kind === "human" && viewer.id === room?.ownerId;
   $("#room-archive-button").hidden = !viewer || archived || !owner;
+  // QA 2026-10-20: owners rename from Settings (room.title_set); live events refresh the header.
+  const roomOwner = Boolean(viewer) && viewer.id === room?.ownerId;
+  $("#room-rename-form").hidden = !roomOwner || archived;
+  const renameInput = $("#room-rename-input");
+  if (room?.title && document.activeElement !== renameInput) renameInput.value = room.title;
+  if (room?.title) { $("#room-title").textContent = room.title; $("#mobile-room-name").textContent = room.title; }
   $("#room-leave-button").hidden = !viewer || archived || owner || viewer.kind !== "human";
 }
+$("#room-rename-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!state || !session || busy) return;
+  const title = $("#room-rename-input").value.trim();
+  if (!title || title === state.room?.title) return;
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id, button = $("#room-rename-save");
+  button.disabled = true; setFormStatus($("#room-about-status"), "");
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_TITLE_SET, data: { title } });
+    if (sameSession(generation, roomId, memberId)) setFormStatus($("#room-about-status"), "Room renamed.");
+  } catch (error) {
+    if (!sameSession(generation, roomId, memberId)) return;
+    dialogNotice("#room-about-status", error.code === "room_archived" ? "This room is archived." : "Couldn’t rename the room. Use 1 to 120 characters and try again.", true);
+  } finally { button.disabled = false; }
+});
 $("#room-archive-button").addEventListener("click", async () => {
   if (!state || !session || busy) return;
   if (!window.confirm("Archive this room? Everyone keeps reading and export; nothing new can be recorded, and this cannot be undone here.")) return;

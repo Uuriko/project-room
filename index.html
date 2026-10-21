@@ -396,6 +396,11 @@
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
             <p class="room-purpose"></p>
+            <form id="room-rename-form" class="room-rename-form" hidden>
+              <label for="room-rename-input">Room name</label>
+              <input id="room-rename-input" name="title" type="text" maxlength="120" required autocomplete="off">
+              <button id="room-rename-save" class="button ghost" type="submit">Rename</button>
+            </form>
             <div class="room-about-actions">
               <button id="room-instructions-open" class="button ghost" type="button">Room instructions</button>
               <button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button>

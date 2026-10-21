@@ -1813,3 +1813,5 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 .result-options > div > button { display: block; width: 100%; text-align: left; }
 .result-options > div > button[hidden] { display: none; }
 @media (pointer: coarse) { .result-options > summary { min-width: 44px; min-height: 44px; } }
+.room-rename-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0; }
+.room-rename-form input { flex: 1 1 12rem; min-width: 0; }
