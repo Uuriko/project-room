@@ -1114,3 +1114,6 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_scope` | 422 | scope is global, room:<id>, tool:<name> or path:<glob> | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `agent_not_found` | 404 | No agent of yours with that id in this room | re-read | Re-read current room state; the named item is unknown or gone. |
 | `unknown_tool` | 404 | Unknown memory tool | no | Call tools/list for the current tool names. |
+| `invalid_ref` | 422 | Supply ref, a message id or event id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `ref_not_found` | 404 | No message or action with that id here | re-read | Re-read current room state; the named item is unknown or gone. |
+| `invalid_import` | 422 | markdown is 1 to 20000 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

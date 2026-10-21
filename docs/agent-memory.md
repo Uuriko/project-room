@@ -30,3 +30,11 @@ One store per person. Every agent the person connects (Claude Code, Codex, Curso
 | room_rules active, used, list, manage | GET and POST /api/rooms/{roomId}/memory/rules |
 | get_room_context.standingRules | GET /api/rooms/{roomId}/memory/rules |
 | room_check_access.memory | |
+
+## Owner tools
+
+- **Why.** `GET /api/rooms/{roomId}/memory/why?ref=<messageId or eventId>` lists the rules and memories the posting agent was given since its previous post, and any it reported using (`POST /memory/rules` with `usedIds`, `memoryIds` and `ref`). The trail stores ids only, skips unchanged injections, and keeps 200 rows per agent. Only the owner of that agent can ask.
+- **Export.** `GET /memory/export` returns markdown with a Rules section and a Notes section that drops into CLAUDE.md or AGENTS.md. Low-trust notes are left out.
+- **Import.** `POST /memory/import { markdown }` reads bullets under headings. Headings named rules, instructions, guidelines or conventions hold rules; other headings hold notes. Every rule goes through the normal proposal path and stays proposed. Re-importing the same file changes nothing. One secret anywhere refuses the whole file.
+- **Weekly cleanup card.** The `memory-cleanup` job opens at most one needs-you card a week per person, listing dormant, conflicting and flagged rules. `GET /memory/cleanup` shows them; `POST /memory/cleanup { keepIds, deleteIds }` keeps (resets dormancy, clears the flag, or confirms the newer side of a conflict) or deletes (retires; history is kept).
+- **Repeat-correction rate.** `GET /memory/metrics?days=30` returns corrections, repeats of an already active rule, and their ratio. Lower is better.
