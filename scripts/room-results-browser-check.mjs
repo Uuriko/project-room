@@ -1,5 +1,5 @@
 import { openComposerOptions } from "./room-chrome.mjs";
-import { clickChrome, ensureSidebarOpen, messageAction } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarClosed, messageAction } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -55,7 +55,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
-  const open = async () => { await clickChrome(p, "#topbar-settings"); await p.locator("#results-panel > summary").click(); };
+  const open = async () => { await ensureSidebarClosed(p); if (await p.locator("#search-form").isHidden()) await p.locator("#topbar-search-toggle").click(); await p.locator("#message-search").fill("has:result"); };
   const read = () => row(privateResult ? "private-result" : "native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {
@@ -68,9 +68,12 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
 for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"}: find, read and return without losing conversation`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.p;
   await p.locator("#message-input").fill("Keep my next thought.");
-  const scroll = await p.locator("#message-list").evaluate(node => { node.scrollTop = 0; return node.scrollTop; });
+  await p.locator("#message-list").hover();
+  await p.mouse.wheel(0, -10000);
+  await p.waitForFunction(() => document.querySelector("#message-list").scrollTop === 0);
+  const scroll = 0;
   await f.open();
-  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await p.locator("#room-results-list .result-row").count(), 2);
   assert.match(await f.row("native-result").textContent(), /Completed/);
   assert.match(await f.row("approved-result").textContent(), /Approved.*External evidence/);
@@ -81,13 +84,13 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await f.capture(mobile ? "touch-list" : "desktop-list");
   await f.read(); await f.ready();
-  assert.equal(await f.row("native-result").locator("#result-dialog").count(), 1, "exact result expands inside its selected row");
+  assert.equal(await p.locator("#main > #result-dialog").count(), 1, "preview is a workspace surface");
   assert.equal(await p.locator("#result-dialog").getAttribute("role"), "region");
-  assert.equal(await p.locator("dialog:modal").count(), 1, "reading adds no second modal over Results");
+  assert.equal(await p.locator("dialog:modal").count(), 0, "reading never opens a modal");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
-  assert.equal(await p.locator("#close-result").textContent(), "Back to results");
+  assert.equal(await p.locator("#close-result").getAttribute("aria-label"), mobile ? "Back to conversation" : "Close preview");
   assert.equal(await p.locator("#result-discuss").textContent(), "Reply");
-  assert.equal(await f.row("approved-result").isVisible(), false, "reading focuses on the selected result");
+  assert.equal(await f.row("approved-result").isVisible(), !mobile, "desktop search remains available while previewing");
   await f.capture(mobile ? "touch-reader" : "desktop-reader");
   await p.keyboard.press("Escape");
   assert.equal(await f.row("approved-result").isVisible(), true, "Back restores the result list");
@@ -98,8 +101,8 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), false);
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
-  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
-  assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
+  assert.equal(await p.locator("#results-panel").isVisible(), true);
 });
 
 test("results update after review and reopening; a pinned open reader becomes earlier, not a replacement", { timeout: 30000 }, async t => {
@@ -244,7 +247,7 @@ test("returning from a result preserves an uncertain send's exact target and ret
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready();
   assert.equal(await p.locator("#result-discuss").isDisabled(), true, "an uncertain send owns the existing reply target");
-  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
+  await p.locator("#close-result").click(); await p.locator("#clear-search").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
   await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
   assert.equal(attempts.length, 2);
@@ -303,25 +306,17 @@ test("creating work without choosing a verifier responds instead of silently doi
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up without a verifier" && item.state === "proposed"));
 });
 
-for (const mobile of [false, true]) test(`automatic Results shortcut ${mobile ? "phone" : "desktop"}: appears for useful results and preserves settings`, { timeout: 30000 }, async t => {
+for (const mobile of [false, true]) test(`result search ${mobile ? "phone" : "desktop"}: no popup or sidebar destination`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.p;
   await p.locator("#message-input").fill("My unfinished thought");
-  await ensureSidebarOpen(p);
-  await p.locator("#room-results-open").click();
-  assert.equal(await p.locator("#results-panel").isVisible(), true);
-  assert.equal(await p.locator("#room-about").isVisible(), false);
-  await f.capture(mobile ? "direct-phone" : "direct-desktop");
-  await f.read(); await f.ready();
-  await p.keyboard.press("Escape");
-  await p.keyboard.press("Escape");
-  assert.equal(await p.evaluate(() => document.activeElement.id), "room-results-open");
+  assert.equal(await p.locator("#room-results-open").count(), 0);
+  await f.open(); await f.read(); await f.ready();
+  assert.equal(await p.locator("dialog:modal").count(), 0);
+  await p.locator("#close-result").click();
   assert.equal(await p.locator("#message-input").inputValue(), "My unfinished thought");
   await clickChrome(p, "#topbar-settings");
   assert.equal(await p.locator("#room-about").isVisible(), true);
-  assert.equal(await p.locator("#settings-title").textContent(), "Settings");
-  await p.locator("#settings-close").click();
-  f.reopen("native-result"); f.reopen("approved-result");
-  await p.locator("#room-results-open").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#settings-dialog #results-panel").count(), 0);
 });
 
 for (const guest of [false, true]) test(`private result continuation keeps its audience: ${guest ? "recipient phone light" : "author desktop dark"}`, { timeout: 30000 }, async t => {
@@ -350,7 +345,7 @@ for (const mobile of [false, true]) test(`public result preserves an authored pr
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   assert.equal(await p.locator("#result-dialog").isVisible(), true, "protected destination draft refuses the handoff");
-  await p.locator("#close-result").click(); await p.locator("#settings-close").click();
+  await p.locator("#close-result").click(); await p.locator("#clear-search").click();
   await p.locator(`[data-message-record-id="${resultId}"] [data-message-action="thread"]`).click();
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
@@ -362,15 +357,16 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   const card = p.locator('[data-work-record-id="native-result"]');
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "ordinary task navigation stays focused");
   await card.locator(".work-details > summary").click();
+  if (mobile) await p.locator("#message-input").fill("My next thought while reading");
   await card.locator("[data-read-result]").click(); await f.ready();
-  assert.equal(await (mobile ? card.locator("#result-dialog") : p.locator("#main > #result-dialog.result-docked")).count(), 1, "reader uses the available screen space");
+  assert.equal(await (mobile ? p.locator("#main > #result-dialog.result-mobile") : p.locator("#main > #result-dialog.result-docked")).count(), 1, "reader uses the available screen space");
   assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   assert.equal(await p.locator("dialog:modal").count(), 0);
   assert.equal(await p.locator("#result-title").evaluate(node => { const box = node.getBoundingClientRect(); return node === document.activeElement && box.top >= 0 && box.bottom <= innerHeight; }), true, "opening starts at the result heading");
   await f.capture(mobile ? "inline-result-initial-phone-light" : "inline-result-initial-desktop-dark");
-  await p.locator("#message-input").fill("My next thought while reading");
+  if (!mobile) await p.locator("#message-input").fill("My next thought while reading");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   const receipt = structuredClone(f.state().workItems["native-result"].receipt);
   await p.locator("#close-result").focus();
@@ -478,7 +474,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   let context = await call(first, "room_read_work", { workItemId: task.id });
   await call(first, "room_accept_work", { requestId: "transport-accept", workItemId: task.id, expectedRevision: context.work.revision });
   context = await call(first, "room_read_work", { workItemId: task.id });
-  const body = `Deterministic transport result: ${context.work.definitionOfDone}`;
+  const body = `Deterministic transport result: ${context.work.definitionOfDone}\n${"Supporting transport findings and continuation instructions.\n".repeat(30)}`;
   const draftArgs = { requestId: "transport-result", workItemId: task.id, packetId: "transport-packet", basisRevision: context.work.revision, body };
   const draft = await call(first, "room_post_draft", draftArgs);
   const completion = { requestId: "transport-complete", workItemId: task.id, expectedRevision: context.work.revision,
@@ -535,6 +531,7 @@ for (const mobile of [false, true]) test(`older result resolves its reply conver
   await f.open(); await f.read(); await f.ready();
   await p.locator("#result-discuss").click();
   await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  await p.waitForFunction(() => document.querySelector("#message-input") === document.activeElement);
   assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
   assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
 });
@@ -548,6 +545,7 @@ test("stalled clipboard preserves download and fences copies across collaboratio
       return new Promise(resolve => { window.finishCopy = resolve; });
     } } });
   });
+  await p.locator("#result-options > summary").click();
   await p.locator("#result-copy-text").click();
   await p.locator("#result-use-status").filter({ hasText: "Clipboard is still busy" }).waitFor();
   assert.equal(await p.locator("#result-copy-text").isDisabled(), true);
@@ -589,7 +587,7 @@ for (const delayed of [false, true]) test(`withdrawing prior version clears comp
   const previous = structuredClone(f.state().workItems["native-result"].receipt);
   f.reopen("native-result");
   f.change("native-result", T.WORK_STARTED, { resolvedBlocker: "Ready to revise" });
-  const body = "Replacement result without the old note.";
+  const body = "Replacement result without the old note.\n".repeat(40);
   const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "replacement-audit", workItemId: "native-result", body });
   f.change("native-result", T.WORK_COMPLETED, { summary: "Replacement", nextAction: "Read", producerId: "producer", evidenceKind: "room_text",
     previousCompletionEventId: previous.eventId, evidenceMessageId: "replacement-audit", evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
@@ -614,6 +612,7 @@ for (const delayed of [false, true]) test(`withdrawing prior version clears comp
 
 test("withdrawal keeps keyboard focus inside the reader", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.p; await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-options > summary").click();
   await p.locator("#result-copy-text").focus();
   const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
   f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
@@ -629,6 +628,7 @@ for (const mobile of [false, true]) test(`connected result feedback keeps exact 
   await f.open(); await f.read(); await f.ready();
   await p.locator("#result-discuss").click();
   await p.locator("#settings-dialog").waitFor({ state: "hidden" });
+  await p.waitForFunction(() => document.querySelector("#message-input") === document.activeElement);
   assert.equal(await p.locator("#message-input").evaluate(node => node === document.activeElement), true);
   assert.match(await p.locator("#reply-context").textContent(), /Café|One useful result/);
   await p.locator("#message-input").fill("Keep this exact revision and change the introduction.");
@@ -727,4 +727,48 @@ test("blocked selection storage does not prevent reading or feedback", { timeout
   await p.locator("#message-input").fill("Feedback still works without selection persistence.");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+});
+
+test('preview divider: pointer, keyboard, persistence and narrow Back preserve the draft', { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await p.locator('#message-input').fill('Keep my draft while resizing.');
+  await f.open(); await f.read(); await f.ready();
+  const pane = p.locator('#result-dialog'), divider = p.locator('#result-resize');
+  assert.ok(Math.abs((await pane.boundingBox()).width - 340) < 2);
+  const box = await divider.boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + 80); await p.mouse.down();
+  await p.mouse.move(box.x - 150, box.y + 80, { steps: 8 }); await p.mouse.up();
+  assert.ok((await pane.boundingBox()).width > 470);
+  const pointerWidth = Number(await divider.getAttribute('aria-valuenow'));
+  await divider.focus(); await divider.press('ArrowRight');
+  assert.equal(Number(await divider.getAttribute('aria-valuenow')), pointerWidth - 20);
+  const savedWidth = Number(await divider.getAttribute('aria-valuenow'));
+  await p.reload(); await f.ready();
+  assert.equal(Number(await divider.getAttribute('aria-valuenow')), savedWidth);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep my draft while resizing.');
+  await p.setViewportSize({width:390,height:844});
+  await p.waitForFunction(() => document.querySelector('#result-dialog').classList.contains('result-mobile'));
+  assert.equal(await divider.isVisible(), false);
+  assert.equal(await p.locator('#message-input').isVisible(), false);
+  assert.equal(await pane.isVisible(), true);
+  await p.getByRole('button',{name:'Back to conversation',exact:true}).click();
+  assert.equal(await p.locator('#message-input').isVisible(), true);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep my draft while resizing.');
+  await f.capture('resizable-preview-phone-return');
+});
+
+test('short result opens the original conversation without a preview or changing its text', { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  f.send('owner', T.WORK_PROPOSED, {workItemId:'short-answer',title:'Short answer',definitionOfDone:'One sentence',accountableMemberId:'producer',independentVerificationRequired:false,ownerDecisionRequired:false,mode:'read'});
+  f.change('short-answer',T.WORK_ACCEPTED);
+  const body='A useful short answer belongs in chat.';
+  const posted=f.send('producer',T.MESSAGE_POSTED,{messageId:'short-answer-text',workItemId:'short-answer',body});
+  f.change('short-answer',T.WORK_COMPLETED,{summary:'Short answer',nextAction:'Read',producerId:'producer',evidenceKind:'room_text',evidenceMessageId:'short-answer-text',evidenceMessageEventId:posted.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null});
+  await p.locator('#message-input').fill('Keep my unrelated draft.');
+  await f.open(); await f.row('short-answer').locator('[data-read-result]').click();
+  await p.waitForFunction(() => document.activeElement?.dataset.messageRecordId === 'short-answer-text');
+  assert.equal(await p.locator('#result-dialog').isVisible(),false);
+  assert.equal(await p.locator('dialog:modal').count(),0);
+  assert.equal(await p.locator('#message-input').inputValue(),'Keep my unrelated draft.');
+  assert.equal(f.state().messages.find(message=>message.id==='short-answer-text').body,body);
 });
