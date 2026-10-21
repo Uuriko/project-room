@@ -487,6 +487,8 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 .section-summary::before { content: ""; flex: none; width: .5rem; height: .5rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s ease; }
 details[open] > .section-summary::before { transform: rotate(45deg); }
 .section-summary .count-chip, .section-summary .summary-note { margin-left: auto; }
+/* QA 2026-10-20: with an empty (hidden) chip, .panel-header's space-between pushed the label to the far right of the chevron. The chip keeps its own margin-left:auto. */
+.panel-header.section-summary { justify-content: flex-start; }
 .summary-note { color: var(--muted); font-size: .72rem; text-align: right; }
 .section-summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 .record-panel > summary > span:first-child { display: grid; gap: .18rem; }

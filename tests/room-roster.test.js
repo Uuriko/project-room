@@ -206,7 +206,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.doesNotMatch(html, /id="people-wake-hint"/);
   assert.doesNotMatch(html, /id="room-tools"/);
   assert.match(html, /id="invite-agents-button"/);
-  assert.match(html, /id="create-room-details"/);
+  // QA 2026-10-20: room Settings no longer carries the signed-out Create Room note.
+  assert.doesNotMatch(html, /id="create-room-details"/);
   assert.match(html, /id="agent-invite-dialog"/);
   // UI calming: the sidebar Create Room block was de-jargoned — the one-shot
   // CLI / HTTP route disclosure (bootstrap-agent-room) no longer ships in the UI,
