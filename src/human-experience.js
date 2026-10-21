@@ -232,6 +232,11 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       panel.innerHTML = runsHtml; panel._html = runsHtml; panel.scrollTop = scroll;
       if (focused) { const replacement = [...panel.querySelectorAll('button')].find(b => b.closest('[data-assistant-run]').dataset.assistantRun === runId && b.textContent === label); (replacement || $('#assistant-activity summary')).focus({preventScroll:true}); }
     }
+    // Operation ownership changes independently of the cached run/card content.
+    for (const control of [faceActions, $('#assistant-runs')].flatMap(host => [...host.querySelectorAll('[data-pause-run]')])) {
+      if (operation) control.setAttribute('aria-disabled', 'true');
+      else control.removeAttribute('aria-disabled');
+    }
     $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
   }
   function syncContribution() {
@@ -263,7 +268,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (value.receipt) { try { await client.refresh(value.receipt); } catch { /* durable receipt already received */ } }
       await refresh(); return value;
     }
-    catch (failure) { if (stamp === key()) {
+    catch (failure) { if (stamp === key() && operation === owned) {
       const rejected = failure.status >= 400 && failure.status < 500;
       error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
       if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
