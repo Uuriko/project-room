@@ -10,8 +10,10 @@
 //                        list: step trail, waiting on the owner, "Nothing
 //                        sent yet".
 //
-// Reads only; no writes, no network.
-import { buildResultCard, feedbackForAgent } from "./result-card.mjs";
+// Reads only; no writes, no network. Served by GET
+// /api/rooms/{roomId}/collab/approvals?view=feedback (agents) and
+// ?view=needs-you (people), server/inbox-collab-routes.mjs.
+import { feedbackForAgent, resultCardForProposal } from "./result-card.mjs";
 
 const VERDICTS = new Set(["approved", "rejected", "changes_requested"]);
 const MAX_ITEMS = 50;
@@ -30,19 +32,6 @@ export function agentFeedbackFeed(store, roomId, agentId, { since = null, limit 
     proposalId: p.proposalId, threadId: p.threadId, version: p.version, at: p.updatedAt, ...feedbackForAgent(p),
   }));
   return Object.freeze({ items: Object.freeze(items), cursor: items.length ? items[items.length - 1].at : since });
-}
-
-export function resultCardForProposal(proposal) {
-  const steps = [{ label: `Drafted by ${proposal.byAgent?.label ?? proposal.byAgent?.id ?? "agent"}${proposal.version > 1 ? ` (v${proposal.version})` : ""}` }];
-  if (proposal.status === "pending") steps.push({ label: "Approve", status: "waiting", waitingOn: "owner" });
-  else if (proposal.status === "changes_requested") steps.push({ label: "Revise", status: "waiting", waitingOn: "agent" });
-  else steps.push({ label: proposal.status === "approved" ? "Approved" : "Rejected", status: proposal.status === "approved" ? "done" : "failed" });
-  const card = buildResultCard({
-    title: proposal.draft?.subject || `Draft for ${proposal.channel}`,
-    summary: proposal.draft?.body ? proposal.draft.body.slice(0, 600) : null,
-    steps, approval: proposal,
-  });
-  return Object.freeze({ proposalId: proposal.proposalId, threadId: proposal.threadId, card });
 }
 
 export function needsYouResultCards(store, roomId) {

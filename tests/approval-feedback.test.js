@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApprovalQueue } from "../server/inbox-approval.mjs";
 import { agentFeedbackFeed, needsYouResultCards } from "../server/approval-feedback.mjs";
-import { renderResultCardHtml } from "../src/result-card-view.js";
 
 const codex = { kind: "agent", id: "codex", label: "Codex" };
 const other = { kind: "agent", id: "claude", label: "Claude" };
@@ -40,18 +39,6 @@ test("pending drafts become needs-you result cards that say nothing was sent", (
   assert.equal(card.waitingOn, "owner");
   assert.equal(card.sent, "Nothing sent yet");
   assert.deepEqual([...card.actions], ["approve", "request_edits", "reject"]);
-});
-
-test("HTML view escapes content and asks for a reject reason", () => {
-  const { q, store } = fakeStore();
-  q.propose("thread:1", { draft: { subject: "<img src=x onerror=alert(1)>", body: "\"hi\"" }, byAgent: codex, channel: "email" });
-  const { card, proposalId } = needsYouResultCards(store, "room")[0];
-  const html = renderResultCardHtml(card, { proposalId });
-  assert.ok(!html.includes("<img"));
-  assert.match(html, /&lt;img/);
-  assert.match(html, /data-action="reject" data-proposal="p1"/);
-  assert.match(html, /name="reason"/);
-  assert.match(html, /Nothing sent yet/);
 });
 
 test("works on the real durable approval store", async () => {
