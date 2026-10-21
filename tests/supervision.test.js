@@ -442,7 +442,7 @@ const newCard = (over = {}) => Object.freeze({
 });
 const suggestions2 = [
   { id: "s1", index: 1, kind: "post_approve", title: "a", reason: "r", gate: "retractable", api: { method: "POST", path: "/x", body: {} }, deepLink: null, draft: null, badge: "↩ retractable" },
-  { id: "s2", index: 2, kind: "hand_review", title: "b", reason: "r", gate: "confirm", api: { method: "POST", path: "/y", body: {} }, deepLink: null, draft: null, badge: "⚠ confirm" },
+  { id: "s2", index: 2, kind: "hand_review", title: "b", reason: "r", gate: "confirm", api: { method: "POST", path: "/y", body: {} }, deepLink: null, draft: null, badge: "Confirm" },
 ];
 
 test("focus moves new → seen", () => {
