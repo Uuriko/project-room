@@ -255,7 +255,10 @@ test("approvals: propose, human decide, agent self-approval refused", async t =>
   const rejected = await post(f, `${base}/approvals/${second.proposal.proposalId}/decide`, f.humanKey,
     { decision: "reject", note: "not this time" });
   assert.equal(rejected.status, 200);
-  assert.equal((await rejected.json()).proposal.status, "rejected");
+  const rejectedBody = await rejected.json();
+  assert.equal(rejectedBody.proposal.status, "rejected");
+  assert.equal(rejectedBody.feedback.kind, "rejected");
+  assert.equal(rejectedBody.feedback.reason, "not this time");
   // Unknown proposals and bad decisions.
   const unknown = await post(f, `${base}/approvals/nope/decide`, f.humanKey, { decision: "approve" });
   assert.equal(unknown.status, 404);
@@ -265,6 +268,8 @@ test("approvals: propose, human decide, agent self-approval refused", async t =>
   // List with a status filter; unknown statuses are 422.
   const pending = await (await get(f, `${base}/approvals?status=pending`, f.humanKey)).json();
   assert.ok(pending.proposals.every(p => p.status === "pending"));
+  assert.equal(pending.cards.length, pending.proposals.length);
+  assert.ok(pending.cards.every(c => c.card.waitingOn === "owner" && c.card.sent === "Nothing sent yet"));
   const badStatus = await get(f, `${base}/approvals?status=napping`, f.humanKey);
   assert.equal(badStatus.status, 422);
   assert.equal(await codeOf(badStatus), "approval_invalid");
