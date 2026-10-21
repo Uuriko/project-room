@@ -104,14 +104,23 @@ test("projection is deterministic: replaying the event stream changes nothing", 
   assert.equal(second.signals.length, first.signals.length);
 });
 
-test("failed retries never double-count: rejected transitions emit no events", () => {
+test("failed retries never double-count: rejected transitions emit no transition events or signals", () => {
   const { escrow } = makeEscrow();
   const bounty = post(escrow);
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   const before = escrow.listEvents(ROOM).length;
   expectCode(() => escrow.claimBounty(ROOM, bounty.bountyId, { claimant: CODEX }), "already_claimed");
-  assert.equal(escrow.listEvents(ROOM).length, before);
+  // Pin updated for MONEY-2 F-2 (SMALL-FIXES): a refused claim now writes
+  // exactly one bounty.claim_refused record — the refused claimant's
+  // durable trace — where it used to leave none. The record is not a
+  // transition and flows no reputation signal, so this test's subject
+  // (no double-counting from failed retries) is unchanged, as the
+  // projection and score assertions below still pin.
+  const events = escrow.listEvents(ROOM);
+  assert.equal(events.length, before + 1);
+  assert.equal(events.at(-1).type, "bounty.claim_refused");
+  assert.equal(events.at(-1).data.code, "already_claimed");
   const a = projectBountyReputation(escrow, ROOM, { nowMs });
   const b = projectBountyReputation(escrow, ROOM, { nowMs });
   assert.deepEqual(a.signals.length, b.signals.length);
