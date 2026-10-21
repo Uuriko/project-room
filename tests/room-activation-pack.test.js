@@ -13,6 +13,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { buildActivationPack, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
+import { buildOrient } from "../server/orient.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
@@ -159,11 +160,42 @@ test("pack surfaces unclaimed board claims as openClaims (#3020)", async t => {
       claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/board-open-1/claim`,
         params: { requestId: "<uuid>" } } }
   ]);
-  // The embedded orient agrees: the same claims are the worker's
-  // available work, while its own-claims list stays scoped to the viewer
-  // (the seeded board claim plus the fixture's pack-work-1 claim).
-  assert.deepEqual(pack.orient.availableClaims, pack.openClaims);
+  // The embedded orient agrees by reference (PACK-DEDUP): its
+  // availableClaims is the id list in openClaims order, pointing at
+  // openClaims, which carries the full entries once. Its own-claims
+  // list stays scoped to the viewer (the seeded board claim plus the
+  // fixture's pack-work-1 claim).
+  assert.deepEqual(pack.orient.availableClaims, pack.openClaims.map(claim => claim.id));
+  assert.equal(pack.orient.availableClaimsRef, "openClaims");
   assert.deepEqual(pack.orient.claims.map(claim => claim.id).sort(), ["board-taken-1", "pack-work-1"]);
+});
+
+test("pack carries the available-claim set once at scale (PACK-DEDUP, UT-BIGROOM F-1)", t => {
+  const f = fixture(t);
+  // The UT-BIGROOM scale point: 24 available claims on the board.
+  for (let i = 1; i <= 24; i++) {
+    f.store.workClaims.set(ROOM, {
+      id: `scale-claim-${String(i).padStart(2, "0")}`,
+      title: `Synthetic scale claim number ${i} for the pack`,
+      state: "unclaimed", owner: null, history: []
+    });
+  }
+  const pack = buildActivationPack(f.store, ROOM, "worker");
+  assert.equal(pack.openClaims.length, 25); // 24 scale claims + the fixture's 1 (pack-work-2)
+  // Embedded orient: ids only, same order, with the pointer at openClaims.
+  assert.deepEqual(pack.orient.availableClaims, pack.openClaims.map(claim => claim.id));
+  assert.equal(pack.orient.availableClaimsRef, "openClaims");
+  assert.ok(pack.orient.availableClaims.every(id => typeof id === "string"));
+  // The duplicated full entries are gone: the embedded copy is a small
+  // fraction of the one full copy the pack still carries.
+  const bytesOf = value => Buffer.byteLength(JSON.stringify(value));
+  assert.ok(bytesOf(pack.orient.availableClaims) < bytesOf(pack.openClaims) / 4,
+    `embedded ${bytesOf(pack.orient.availableClaims)} vs openClaims ${bytesOf(pack.openClaims)}`);
+  // Standalone orient (the context surfaces' carrier) is unchanged: full
+  // entries, no reference pointer — there it is the only copy.
+  const standalone = buildOrient(f.store, ROOM, "worker", { text: false });
+  assert.deepEqual(standalone.availableClaims, pack.openClaims);
+  assert.equal("availableClaimsRef" in standalone, false);
 });
 
 test("unknown room answers 404 room_not_found", () => {

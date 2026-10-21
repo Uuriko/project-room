@@ -153,10 +153,14 @@ test("activation pack decodes the board exactly once, shared with its embedded o
   const pack = buildActivationPack(f.store, ROOM, "worker");
   assert.equal(counter.calls, 1);
   assert.equal(counter.rows, boardRows);
-  // Behaviour preservation: the pack's openClaims and embedded orient are
-  // byte-identical to the standalone builders over the same board.
+  // Behaviour preservation, with the one chartered exception: the pack's
+  // embedded orient takes the reference availableClaims view (PACK-DEDUP,
+  // UT-BIGROOM F-1), so it is byte-identical to a standalone orient built
+  // with that view, while the pack's openClaims still byte-equals the
+  // standalone (default, full-view) orient's availableClaims.
   const standaloneOrient = buildOrient(f.store, ROOM, "worker", { text: false });
-  assert.equal(bytesOf(pack.orient), bytesOf(standaloneOrient));
+  const refOrient = buildOrient(f.store, ROOM, "worker", { text: false, availableClaimsView: "ref" });
+  assert.equal(bytesOf(pack.orient), bytesOf(refOrient));
   assert.equal(bytesOf(pack.openClaims), bytesOf(standaloneOrient.availableClaims));
   assert.deepEqual(pack.openClaims.map(item => item.id), ["bl-work-1", "board-open-1"]);
 });

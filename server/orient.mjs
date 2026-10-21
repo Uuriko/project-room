@@ -136,6 +136,16 @@ function fleetSelfOrNull(store, roomSlug, room, viewerId, boardList = null) {
 // availability definition every discovery surface consumes, so orient and
 // the activation pack cannot diverge. The `claims` list below stays the
 // viewer's own claims; `work`/`openWork` still derive from Work Items.
+//
+// PACK-DEDUP (UT-BIGROOM F-1, #3020 reversal): the full claim entries are
+// carried ONCE per response. A caller that already places the full entries
+// beside this payload — the activation pack, whose top-level `openClaims`
+// is the same projection over the same board — passes
+// `availableClaimsView: "ref"`, and this payload's `availableClaims`
+// becomes the claim ids in the same order plus an `availableClaimsRef:
+// "openClaims"` pointer. Standalone orient carriers (the context
+// responses) keep the default full view: there the entries are the only
+// copy of the set in the response.
 
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
@@ -215,7 +225,10 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
     focus: query.focus,
     updates,
     claims,
-    availableClaims,
+    availableClaims: options.availableClaimsView === "ref"
+      ? availableClaims.map(item => item.id)
+      : availableClaims,
+    ...(options.availableClaimsView === "ref" ? { availableClaimsRef: "openClaims" } : {}),
     workItems: openWork.filter(item => item.accountableMemberId === viewerId || item.claim?.holderId === viewerId || item.verifierMemberId === viewerId)
       .slice(0, MAX_WORK).map(item => workOf(item, now)),
     uncertain: sections.uncertain,

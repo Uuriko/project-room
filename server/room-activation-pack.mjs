@@ -68,6 +68,12 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       claimAction: { method: "POST", endpoint: string, params: object }
  *     }
  *   ],
+ *   orient: object,            // embedded buildOrient payload (member
+ *                              // viewers only). Its availableClaims is the
+ *                              // id list in openClaims order plus
+ *                              // availableClaimsRef: "openClaims" — the full
+ *                              // entries live in openClaims, carried once
+ *                              // (PACK-DEDUP, UT-BIGROOM F-1).
  *   pinnedResources: [         // pinned messages, pin order
  *     {
  *       messageId: string,
@@ -198,7 +204,12 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
-    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
+    // PACK-DEDUP (UT-BIGROOM F-1): the pack's openClaims above already
+    // carries the full available-claim entries, so the embedded orient
+    // takes the reference view — availableClaims as ids in the same
+    // order, pointing at openClaims — instead of a second byte-identical
+    // copy (39.2% of the pack at 24 available claims).
+    pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList, availableClaimsView: "ref" });
   }
   return pack;
 }
