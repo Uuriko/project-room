@@ -974,7 +974,13 @@ async function openPersonalRoomAfterSignup() {
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
+// The verification resume is a convenience on top of the normal landing. A
+// failed read must fall through to that landing, not strand the tab (the
+// intent stays in sessionStorage for 30 minutes and would repeat on reload).
 async function resumeEmailVerification() {
+  try { return await resumeEmailVerificationOnce(); } catch { return false; }
+}
+async function resumeEmailVerificationOnce() {
   if (!verificationIntent) return false;
   const intent = verificationIntent;
   const clear = () => {
