@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-919 rows (878 distinct codes).
+959 rows (918 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -1063,3 +1063,43 @@ response's own `hint`/`next` when it names something more specific.
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |
 | `wrong_link_kind` | 422 | Human invitation links are not agent credentials. | follow hint | Follow this error's hint and next steps. |
+| `invalid_name` | 422 | name must be 1 to 80 printable characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `device_code_not_found` | 404 | That code is unknown or expired | re-read | Re-read current room state; the named item is unknown or gone. |
+| `device_code_used` | 409 | That code was already approved | re-read | Re-read the current state, then decide again from it. |
+| `invalid_device_code` | 422 | deviceCode is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_note` | 422 | text is 1 to ${MAX_NOTE_CHARS} characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `notes_full` | 409 | At most ${MAX_NOTES} notes; edit or delete one first | re-read | Re-read the current state, then decide again from it. |
+| `invalid_approval` | 422 | Supply requestId and a summary of at most 500 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_approval_state` | 422 | state is one of ${APPROVAL_STATES.join(",  | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_decision` | 422 | Decision is uphold or overturn | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `approval_already_decided` | 409 | This card is already ${row.state} | re-read | Re-read the current state, then decide again from it. |
+| `invalid_approval_result` | 422 | Supply ok (true or false) and an optional result of at most 2000 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `executor_required` | 403 | Only the agent named on the card reports its result | no | Only the member named in the message may do this. Do not retry as yourself. |
+| `approval_not_approved` | 409 | This card is ${row.state}, not approved | re-read | Re-read the current state, then decide again from it. |
+| `invalid_briefing` | 422 | Supply enabled (true or false) and an optional hour 0-23 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_review` | 422 | Supply requestId and a draft of at most 20000 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_reviewers` | 422 | reviewers is ["*"] or 1 to ${MAX_REVIEWERS} other active member ids | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_review_filter` | 422 | mine is asked or authored | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `reviewer_required` | 403 | Only a named reviewer answers this review | no | Only the member named in the message may do this. Do not retry as yourself. |
+| `invalid_objections` | 422 | Supply objections (1 to ${MAX_OBJECTIONS}, each at most 1000 characters) or none: true | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `draft_not_found` | 404 | No such draft in this room | re-read | Re-read current room state; the named item is unknown or gone. |
+| `invalid_outbound_policy` | 422 | Supply requestId, agentId and allowSend | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_outbound` | 422 | Supply requestId, channel (${OUTBOUND_CHANNELS.join(",  | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_draft_state` | 422 | state is one of ${STATES.join(",  | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `draft_already_decided` | 409 | This draft is already ${row.state} | re-read | Re-read the current state, then decide again from it. |
+| `author_required` | 403 | Only the draft's author records it sent | no | Only the member named in the message may do this. Do not retry as yourself. |
+| `draft_not_approved` | 409 | This draft is ${row.state}; the owner approves it first | re-read | Re-read the current state, then decide again from it. |
+| `invalid_permission_mode` | 422 | Supply requestId, agentId and mode (ask, safe or all) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_action` | 422 | action is a short lowercase name such as post_message or merge_pr | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `playbook_version_not_found` | 404 | No such playbook version | re-read | Re-read current room state; the named item is unknown or gone. |
+| `invalid_playbook` | 422 | Supply requestId, body (at most ${PLAYBOOK_MAX_CHARS} characters), a one-line note (at most 200) and baseVersion | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `playbook_version_conflict` | 409 | The playbook is at version ${current}; reload it and edit from there | re-read | Re-read the current state, then decide again from it. |
+| `invalid_routine` | 422 | name (at most 80), schedule (daily 09:00, weekdays 08:30, weekly mon 09:00, every 2h) and steps (at most 4000) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `routine_not_found` | 404 | No such routine blueprint in this room | re-read | Re-read current room state; the named item is unknown or gone. |
+| `invalid_install` | 422 | as is me or room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_self_wake` | 422 | Supply requestId, in (for example 15m) and optional note | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_sharing_limits` | 422 | Supply requestId and share, a list of kinds such as code, calendar, email | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_sharing_check` | 422 | kinds must be a non-empty list of known kinds | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_spend_preview` | 422 | tool is a tool name such as room_put_file | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_team_connection` | 422 | scope is all, members or automations | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `team_connection_not_found` | 404 | No such team connection in this room | re-read | Re-read current room state; the named item is unknown or gone. |
