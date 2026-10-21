@@ -51,6 +51,10 @@ export const KEEP = [
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
   "server/push-notifications-supported.mjs",
+  // Pure helpers from the 1020 combined landing (#4386); runtime wiring into
+  // claim and land-queue responses is a follow-up.
+  "server/check-card.mjs",
+  "server/collision-warnings.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);

@@ -69,7 +69,7 @@ test('actual Worker MCP outside contribution persists across disposal through bo
       const recommendation = await value(await call(path, 'public_work_recommend', { skills: ['JavaScript'] }));
       assert.equal(recommendation.claim, null); assert.equal(recommendation.recommendations[0].task.taskId, task.taskId);
       assert.deepEqual(await value(await call(path, 'public_work_read_task', { taskId: task.taskId })), task);
-      const outside = await json(await rpc(path, { method: 'tools/list' }, identity.secret));
+      const outside = await json(await rpc(path, { method: 'tools/list', params: { focus: 'public_work' } }, identity.secret));
       assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name => outside.result.tools.some(tool => tool.name === name)));
       assert.equal(outside.result.tools.find(tool => tool.name === 'public_work_claim')._meta.authorization, 'saved-identity-secret');
       const unknown = await json(await call(path, 'public_work_read_task', { taskId: task.taskId }, 'pri_not_a_real_identity'), 401);
