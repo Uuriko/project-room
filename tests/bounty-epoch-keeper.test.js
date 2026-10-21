@@ -324,5 +324,5 @@ test("a submitted bounty past its deadline settles through the keeper (guardian 
 
   const second = keeper(world);
   assert.deepEqual(second, { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 });
 });
