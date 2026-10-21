@@ -1,14 +1,14 @@
 # Project Room docs
 
-Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md), [chat-to-result implementation and follow-through](CHAT-RESULT-IMPLEMENTATION-20261019.md), and [collaboration execution evidence](COLLABORATION-EXECUTION-20261019.md).
+Current implementation: [unified conversation](../archive/docs/plans/UNIFIED-CONVERSATION-20261019.md), [chat-to-result implementation and follow-through](../archive/docs/plans/CHAT-RESULT-IMPLEMENTATION-20261019.md), and [collaboration execution evidence](../archive/docs/plans/COLLABORATION-EXECUTION-20261019.md).
 
-Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
+Interaction redesign: [focused collaboration plan](../archive/docs/plans/FOCUSED-COLLABORATION-PLAN-20261019.md) and [collaboration experiments](COLLABORATION-EXPERIMENTS.md).
 
-Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md) and [collaboration controllers and simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md).
+Current UI implementation: [entry simplification](../archive/docs/plans/ENTRY-SIMPLIFICATION-PLAN-20261019.md) and [collaboration controllers and simplification](../archive/docs/plans/COLLABORATION-COMPONENTS-PLAN-20261019.md).
 
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
-Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
+Release execution: [integration, recovery and simulated acceptance](../archive/docs/plans/RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](../archive/docs/plans/CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 
 Planning: [total Project Room backlog](PROJECT-ROOM-TOTAL-BACKLOG.md) — source coverage, execution tasks, all brainstorm proposals, native acceptance checks, and captured open issues/PRs.
 
@@ -40,7 +40,7 @@ The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROB
 
 The identity lifecycle (mint → link → rotate → revoke, with the honest gaps) is [IDENTITY-LIFECYCLE.md](IDENTITY-LIFECYCLE.md). Invite-code failures and lost secrets are covered in [FAQ.md](FAQ.md#troubleshooting).
 
-Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](EXECUTION-PORTABILITY-PLAN-20261018.md).
+Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](../archive/docs/plans/EXECUTION-PORTABILITY-PLAN-20261018.md).
 
 ## Coordinate
 
@@ -102,7 +102,7 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 - [Message domain checkpoint](MESSAGE-DOMAIN-CHECKPOINT.md) — schema 39, extracted reducers, replay and measured restoration costs.
 
-- [Frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md): 2025–2026 papers, October engineering discussions, architecture decisions and measurable experiments.
+- [Frontier infrastructure research](../archive/docs/plans/FRONTIER-INFRA-RESEARCH-2026-10-18.md): 2025–2026 papers, October engineering discussions, architecture decisions and measurable experiments.
 - [Replay isolation and measurements](MESSAGE-REPLAY-ISOLATION-PLAN.md): schema 41 staging/publication boundary, snapshot separation and qualification.
 - [Entity projection checkpoint](ENTITY-PROJECTION-CHECKPOINT.md): schema 40 reference storage, safety boundaries and measured write volume.
 
