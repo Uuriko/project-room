@@ -258,7 +258,14 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   await form.waitFor({ state: "visible" });
   assert.equal(await form.locator('[name="email"]').inputValue(), "entry-draft@example.invalid");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  assert.equal(requests.includes("/src/app.js"), false, "account and agent controls do not import workspace code");
+  // QA 2026-10-20: using the form preloads the workspace graph (modulepreload
+  // fetches without executing) so the post-login wait skips the module
+  // waterfall. The workspace itself must still not start here.
+  if (requests.includes("/src/app.js")) {
+    assert.equal(await page.locator('link[rel="modulepreload"][href$="/src/app.js"]').count(), 1, "app.js arrives only as a preload");
+  }
+  assert.equal(await page.locator("#main").isVisible(), false, "account and agent controls do not start the workspace");
+  assert.equal(await form.isVisible(), true);
   await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
 });
 

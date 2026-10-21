@@ -827,8 +827,9 @@ const signinUI = createAuthSigninUI({
     setFormStatus($("#auth-link-error"),
       `${message} Request a new link or continue with Google.`, true);
   },
-  onSignedIn: async () => {
-    const restoration = accountClient.restore();
+  onSignedIn: async signedIn => {
+    const adopted = accountClient.adopt(signedIn);
+    const restoration = adopted ? Promise.resolve(adopted) : accountClient.restore();
     const restoreGeneration = accountClient.generation;
     try {
       const restored = await restoration;
@@ -1171,7 +1172,8 @@ async function ensureDefaultRoom() {
       const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
       if (accountClient.session !== owned) return null;
       // Refresh the list to show the new room (or the existing one).
-      if (body?.room?.id) await loadAccountRooms();
+      // Not awaited: opening the room must not wait on the list refresh (QA 2026-10-20).
+      if (body?.room?.id) loadAccountRooms().catch(() => {});
       // { room: null } is the server's deliberate no-resurrect answer for an
       // account that left every room (R266-1 / #3508): put back the empty
       // state the room list showed, never the setup-failure copy.
