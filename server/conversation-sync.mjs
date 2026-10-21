@@ -6,7 +6,7 @@ import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 import { archiveMarker } from "./messages-store.mjs";
-import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { identityNamesForRoom, repoNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { squadMentionTargets } from "./squads.mjs";
 
 const keys = new WeakMap();
@@ -164,7 +164,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     if (addressing && typeof messages[0]?.body === "string" && messages[0].body.includes("@")) {
       const message = messages[0], members = store.room(roomId).state.members;
       addressing.explicitlyMentioned = ((!message.toMemberId || message.toMemberId === auth.member.id)
-        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id))
+        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId, { repos: repoNamesForRoom(store.db, roomId) }).includes(auth.member.id))
         || squadMentionTargets(store.db, roomId, message.body, message.authorId, members, message.toMemberId).includes(auth.member.id);
     }
     const nextCursor = rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,
