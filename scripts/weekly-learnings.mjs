@@ -265,7 +265,7 @@ export function renderDigest({ weekLabel, prs, totalPrs, done, bugs, lessons }) 
   const shippedTotal = Number.isFinite(totalPrs) ? totalPrs : prs.length;
 
   const sections = [];
-  sections.push(`🪔 Weekly learnings — ${weekLabel}`);
+  sections.push(`Weekly learnings — ${weekLabel}`);
 
   const shipped = prs.map((pr) => {
     const title = oneLine(pr.title);

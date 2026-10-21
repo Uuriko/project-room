@@ -35,6 +35,7 @@
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 
 class NextActionsError extends Error {
   constructor(code, message) { super(message); this.name = "NextActionsError"; this.code = code; }
@@ -339,6 +340,7 @@ export class NextActions {
   dismiss(token, roomId, actionId, { expiresInDays = null, forever = false, reason = null, binding = null } = {}) {
     return this.store.transaction(() => {
       const auth = this._auth(token, roomId, binding);
+      refuseArchivedWrite(this.store.room(roomId).state);
       if (typeof actionId !== "string" || actionId.length === 0 || actionId.length > 128) throw new ServiceError(422, "invalid_input", "actionId must be 1..128 characters");
       if (forever !== true && forever !== false) throw new ServiceError(422, "invalid_input", "forever must be a boolean");
       if (expiresInDays !== null && !(Number.isFinite(expiresInDays) && expiresInDays > 0 && expiresInDays <= 365)) throw new ServiceError(422, "invalid_input", "expiresInDays must be 1..365");
@@ -384,6 +386,7 @@ export class NextActions {
   putSuppressions(token, roomId, { suppressions = [], binding = null } = {}) {
     return this.store.transaction(() => {
       const auth = this._auth(token, roomId, binding);
+      refuseArchivedWrite(this.store.room(roomId).state);
       if (!Array.isArray(suppressions)) throw new ServiceError(422, "invalid_input", "suppressions must be a list");
       for (const s of suppressions) {
         if (!s || typeof s.kind !== "string" || s.kind.length === 0 || s.kind.length > 64) throw new ServiceError(422, "invalid_input", "suppression kind must be 1..64 characters");
