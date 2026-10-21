@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { docsMarkdown } from "../server/landing-stories.mjs";
 import { connectSnippets, HOSTED_MCP_URL, WORK_LOOP, renderedSnippet } from "../server/connect-snippets.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -188,6 +189,8 @@ export function agentPages(dir = join(root, "docs", "agents")) {
     body: indexBody,
     steps: [{ title: "Pick a tool", text: connectSnippets.map(tool => tool.label).join(", ") }, ...WORK_LOOP.map((text, index) => ({ title: "Work loop " + (index + 1), text }))],
   }));
+  // Agent-readable docs.md: the landing stories and ask-your-agent prompts.
+  pages.set("docs/docs.md", docsMarkdown());
   return pages;
 }
 
