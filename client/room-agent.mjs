@@ -628,9 +628,11 @@ export class RoomAgentClient {
     let value;
     try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work`, undefined, signal); }
     catch (error) {
-      // Older deployments alone use the existing authorized path. Never hide
-      // authentication failures, throttling, malformed data or service errors.
-      if (error.status !== 404 || error.code !== "not_found") throw error;
+      // Older deployments and explicit compact-view overflow use the existing
+      // authorized reads. Never hide authentication, throttling or other errors.
+      const missing = error.status === 404 && error.code === "not_found";
+      const oversized = error.status === 422 && error.code === "reply_list_too_large";
+      if (!missing && !oversized) throw error;
       const listing = await this.replyRequests({ direction: "incoming", status: "open", signal });
       const { runs } = listing.requests.length ? await this.requestRuns(undefined, { signal }) : { runs: {} };
       return { ...listing, runs };
