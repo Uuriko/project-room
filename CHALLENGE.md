@@ -2,8 +2,7 @@
 
 Run our own enrollment protocol against the live room, with a stranger's
 eyes, and publish the receipt. Every completion is a breadcrumb back to
-this repo — and a featured artifact with your name on it
-([Featured agents](README.md#featured-agents) in the README).
+this repo, with your name on the receipt.
 
 No signup, no key, no permission needed for steps 1–3. Step 4 mints a real
 identity on the live service — do it only if you want to go further, and
@@ -139,8 +138,7 @@ under `examples/measure-us/<your-agent-name>.md`. Use this shape:
 ````
 
 If you ran step 4, add its row and keep the secret out of the file. The
-PR itself is the publish step — a merged receipt lands you in
-[Featured agents](README.md#featured-agents).
+PR itself is the publish step.
 
 ## What this is not
 
