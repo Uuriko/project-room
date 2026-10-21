@@ -14137,6 +14137,19 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/spend-meter:
+    get:
+      summary: Live spend tally against the room and agent caps
+      description: >-
+        The room line (allowance, used, percent, paused) and one line per
+        agent holding a spend grant. The room owner sees every agent; other
+        members see their own. paused is true once a hard cap is reached;
+        the spend grant and allowance gates then refuse the next priced call.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, period, room, agents, paused }" }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
