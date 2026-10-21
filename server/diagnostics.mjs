@@ -5,6 +5,8 @@
 // Two bounds: `capacity` caps entries per room (oldest-first FIFO window);
 // `maxRooms` caps the number of room keys with a least-recently-used
 // eviction, so a long-lived process cannot grow the room map without bound.
+import { setupMilestones } from "./setup-milestones.mjs";
+
 export class DiagnosticsLog {
   constructor(capacity = 200, { maxRooms = 1000 } = {}) {
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) throw new Error("Diagnostics capacity must be an integer from 1 to 10000");
@@ -32,7 +34,9 @@ export class DiagnosticsLog {
 // hand to support. Only whitelisted scalar fields are emitted — never
 // credentials, hashes, request bodies, message text, or member details.
 // Records and version info are copied by value so callers cannot mutate the log.
-export function supportExportBundle({ roomId, roomTitle, service, diagnostics }) {
+// When setup evidence for one agent is supplied, the bundle also carries its
+// setup milestones, so support starts from the last step that really happened.
+export function supportExportBundle({ roomId, roomTitle, service, diagnostics, setup }) {
   const safeString = value => typeof value === "string" ? value : "";
   const records = Array.isArray(diagnostics) ? diagnostics : [];
   return {
@@ -52,5 +56,19 @@ export function supportExportBundle({ roomId, roomTitle, service, diagnostics })
       category: safeString(entry.category),
       route: safeString(entry.route),
     })),
+    ...(setup && typeof setup.agentId === "string" ? { setup: setupSummary(setup) } : {}),
+  };
+}
+
+function setupSummary({ agentId, events, setupReport }) {
+  const state = setupMilestones(events, { agentId, setupReport });
+  const step = name => ({ done: state[name].done, at: state[name].at });
+  return {
+    agentId,
+    connected: step("connected"),
+    firstExchange: step("firstExchange"),
+    backgroundRun: step("backgroundRun"),
+    scheduleSaved: state.scheduleSaved,
+    nextStep: state.next.text,
   };
 }
