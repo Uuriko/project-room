@@ -991,6 +991,24 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         next: [command("Resend dm.posted with data { to, body, messageId? }")]
       };
     }
+    // Batch C (5): a state refusal names no field, so the generic
+    // "correct the named fields" prescription fits nothing and teaches the
+    // caller to resend an identical request. State refusals get a
+    // state-appropriate recovery instead.
+    if (reasonCode === "invalid_state") {
+      return {
+        status: "action_required", reason: "invalid_state",
+        hint: "No field was refused: the resource is in the wrong state for this action. The message names its current state and the state it needs.",
+        next: [command("Re-read the resource; retry only once it reaches the state the message names. Do not resend the same request unchanged.")]
+      };
+    }
+    if (reasonCode === "dispute_unavailable") {
+      return {
+        status: "action_required", reason: "dispute_unavailable",
+        hint: "No field was refused: this bounty cannot seat a dispute — it was posted without a designated decider. Resending cannot change that.",
+        next: [command("Do not resend. A dispute opens only on a bounty whose poster named a dispute decider (or verifier) at posting.")]
+      };
+    }
     const workRead = httpStatus !== 422 && ["invalid_work_action", "work_action_too_large", "work_input_refused"].includes(reasonCode);
     return {
       status: "action_required", reason: "input_refused",
@@ -1158,11 +1176,11 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     return {
       status: "action_required", reason: "file_lease_conflict",
       hint: holder
-        ? `Files you need are leased to ${holder} until ${expiry}. Wait for release or lease expiry, coordinate with the holder, or work on other files.`
-        : "Files you need are leased to another claim. Read the current claims to see the holder and lease expiry, then wait, coordinate, or work on other files.",
+        ? `Files you need are leased to ${holder} until ${expiry}. Wait or coordinate, or claim anyway with advisory: true.`
+        : "Files you need are leased to another claim. Wait or coordinate with the holder, or claim anyway with advisory: true.",
       next: [path(claimsPath), command(holder
-        ? `Wait for ${holder} to release the files or for the lease to expire at ${expiry}, or coordinate with them; do not force the overlapping claim.`
-        : "Read the current claims for the holder and lease expiry, then wait, coordinate, or work on other files.")]
+        ? `Wait for ${holder} to release the files or for the lease to expire at ${expiry}, or coordinate with them; or resend the claim with advisory: true to proceed anyway — the claim succeeds soft-claimed and the response's fileWarnings name the overlap.`
+        : "Read the current claims for the holder and lease expiry, then wait, coordinate, or work on other files; or resend the claim with advisory: true to proceed anyway with fileWarnings naming the overlap.")]
     };
   }
   // #3055: named recoveries, then family patterns, for the rest of the long

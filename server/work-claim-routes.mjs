@@ -1061,7 +1061,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (unmet.length) {
         const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
         reject(409, "work_claim_dependencies_unmet",
-          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first.`);
       }
     }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));

@@ -1706,6 +1706,42 @@ export class BountyEscrow {
   claimBounty(roomId, bountyId, { claimant, actor } = {}) {
     this._ensure();
     const lane = this._requireLane(roomId, claimant, "claimant");
+    try {
+      return this._claimBountyAttempt(roomId, bountyId, { actor, lane });
+    } catch (error) {
+      // MONEY-2 F-2: a refused claim used to leave no durable trace — the
+      // refusal existed only as the synchronous response, so a worker
+      // auditing their history later could not see that they tried to
+      // claim, or why they were refused. Journal the refusal (in its own
+      // transaction, so the record survives the claim's rollback). No
+      // money moves: the record is an event, never a journal movement.
+      this._journalClaimRefusal(roomId, bountyId, lane, actor, error);
+      throw error;
+    }
+  }
+
+  // The refusal record for a claim attempt: one bounty_events row per
+  // refused attempt, actor-attributed to the refused claimant, carrying the
+  // refusal code and message. Written in its own transaction for the same
+  // reason the reputation packet is (see _claimBountyAttempt): the claim's
+  // write transaction has already rolled back when this runs. Internal
+  // errors are not claim refusals and are not journaled. A journaling
+  // failure is swallowed — the record must never mask the refusal itself.
+  _journalClaimRefusal(roomId, bountyId, lane, actor, error) {
+    if (!(error instanceof EscrowError) || error.code === "internal") return;
+    try {
+      this.store.transaction(() => {
+        this._ensure();
+        let act;
+        try { act = this._actorFor(roomId, actor, lane); }
+        catch { act = Object.freeze({ kind: lane.startsWith("id:agent/") ? "agent" : "human", id: lane }); }
+        this._event(roomId, "bounty.claim_refused",
+          { bountyId, actor: act, data: { claimant: lane, code: error.code, reason: error.message } });
+      });
+    } catch { /* the refusal record never masks the refusal */ }
+  }
+
+  _claimBountyAttempt(roomId, bountyId, { actor, lane }) {
     // Slice 4: the reputation claim gate runs BEFORE the write transaction.
     // The denial is the room's one automated adverse move, so it produces a
     // review packet for humans/arbiters — written in its own transaction so

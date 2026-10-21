@@ -369,7 +369,11 @@ export class WebResearch {
       });
     }
     if (req.sources.includes("docs")) {
-      const docsAvailable = !isWorkersRuntime();
+      // Availability is the corpus actually resolving, not the runtime's
+      // name: in a bundled build import.meta.url resolves no filesystem
+      // path, defaultCorpusRoots() returns null, and the leg used to be
+      // planned here and then silently return nothing at search time.
+      const docsAvailable = !isWorkersRuntime() && this._corpusRoots() !== null;
       plan.push({
         source: "docs",
         status: docsAvailable ? "planned" : "skipped",
@@ -474,11 +478,25 @@ export class WebResearch {
 
   }
 
+  // The docs corpus roots for this instance. An explicit docsRoot of null
+  // is the "no corpus in this runtime" contract; an absent one resolves
+  // the on-disk default, which is null exactly when import.meta.url does
+  // not resolve to a filesystem path (the bundled/worker env split).
+  _corpusRoots() {
+    return this.opts.docsRoot !== undefined ? this.opts.docsRoot : defaultCorpusRoots();
+  }
+
   // -- docs leg: local markdown corpus (Node only).
   searchDocs(req, keywords, requestId, now) {
     if (isWorkersRuntime()) return [];
-    const roots = this.opts.docsRoot ?? defaultCorpusRoots();
-    if (!roots) return [];
+    const roots = this._corpusRoots();
+    // Loud, never a silent empty leg: a caller who asked for the docs
+    // corpus and got nothing back must be able to tell "no corpus in this
+    // runtime" from "the corpus has no match". research() surfaces this in
+    // the result's fetch_errors; the plan leg reports the same fact as a
+    // skipped leg with this reason.
+    if (!roots) fail(500, "docs_corpus_unavailable",
+      "docs corpus unavailable in this runtime: import.meta.url does not resolve to a filesystem path here, so the local docs corpus (docs/, README.md, CHANGELOG.md) cannot be read");
     const files = this.opts.docsFiles ?? listDocsFilesCached(roots, now);
     const scored = [];
     let bytesRead = 0;
