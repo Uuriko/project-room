@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 test("the inbox empty state names Connect Gmail only while that button can show (antislop #11)", () => {
-  const source = readFileSync(new URL("../src/inbox-ui.js", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../archive/deferred-email/src/inbox-ui.js", import.meta.url), "utf8");
   assert.match(source, /gmailUnavailable \? INBOX_EMPTY_PLAIN : INBOX_EMPTY_GMAIL/);
   assert.match(source, /gmailUnavailable = unavailable;/);
 });

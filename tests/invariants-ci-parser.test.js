@@ -2,11 +2,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  isMainModule,
   invariantName,
   isFileLevelTest,
   parseTap,
@@ -179,4 +180,15 @@ test("renderMarkdown renders the table with the gate marker", () => {
   assert.match(md, /<!-- invariants-ci -->/);
   assert.match(md, /\| `smoke-link` \| ✅ pass \| 10ms \|/);
   assert.match(md, /## Invariant harness — PASS/);
+});
+
+
+test("main-module detection follows a real symlink without treating a different file as main", () => {
+  const root = mkdtempSync(join(tmpdir(), "invariant-main-link-"));
+  try {
+    const actual = join(root, "actual.mjs"), alias = join(root, "alias.mjs"), other = join(root, "other.mjs");
+    writeFileSync(actual, ""); writeFileSync(other, ""); symlinkSync(actual, alias);
+    assert.equal(isMainModule(alias, pathToFileURL(actual).href), true);
+    assert.equal(isMainModule(other, pathToFileURL(actual).href), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

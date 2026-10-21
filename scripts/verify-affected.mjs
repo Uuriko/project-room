@@ -260,6 +260,10 @@ async function main() {
   }
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const started = Date.now();
+  if (!opts.list) {
+    const preflight = spawnSync(process.execPath, [join(root, "scripts/verify-preflight.mjs")], { cwd: root, stdio: "inherit" });
+    if (preflight.status !== 0) return preflight.status ?? 1;
+  }
   const changed = changedFiles(opts.base, root);
   const { discoverUnitTests } = await import("./unit-shards.mjs");
   const tests = discoverUnitTests(".").filter((f) => !f.includes("node_modules"));

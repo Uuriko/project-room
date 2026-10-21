@@ -104,6 +104,9 @@ h1 {
 .intro {
   padding-bottom:48px
 }
+.settlement { max-width: 44rem; margin: 0 0 2rem; color: var(--muted); }
+.settlement h2 { color: var(--ink); font-size: var(--text-lg); margin: 0 0 .5rem; }
+.settlement p { margin: 0; line-height: 1.6; }
 .workspace {
   display:grid;
   grid-template-columns:minmax(280px,.8fr) minmax(0,1.5fr);
