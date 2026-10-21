@@ -50,6 +50,10 @@
 @media (max-width: 600px) {
   .human-experience .human-composer-actions { order: 1; flex: 1 1 0; }
   .human-experience .composer-row > button[type="submit"] { order: 2; }
+  /* f83817356's compact phone request bar, lost when #4407 merged over #4260 (research r176). */
+  #request-mode-bar { flex-direction: row; align-items: center; gap: .5rem; padding: .4rem .75rem; }
+  #request-mode-label { flex: 1 1 8rem; min-width: 0; }
+  #request-mode-bar button { flex: 0 0 auto; width: auto; min-height: 44px; }
 }
 
 .assistant-face-progress { color: var(--text); font-size: var(--text-sm); max-width: 65ch; overflow-wrap: anywhere; }
