@@ -5,7 +5,7 @@ import { uiText } from "./strings.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
-import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
+import { installRoomLayout, syncSidebarSections, connectionStatusState } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
@@ -1351,8 +1351,7 @@ function setConnectionStatus(text) {
   const status = $("#connection-status");
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
-  status.dataset.state = connected ? "connected"
-    : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
+  status.dataset.state = connectionStatusState(normalized, connected);
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
 }
@@ -7712,16 +7711,21 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation()) {
+    // QA 2026-10-20: a signed-in account user has no room cookie, so the
+    // probe 401'd on every room load. Probe only without an account session,
+    // or after the account path is refused.
+    const probeRoomCookie = async () => {
       try {
         const joined = await client.restore();
-        if (joined?.roomId === requestedRoom) return;
+        if (joined?.roomId === requestedRoom) return true;
         client.endAccess();
       } catch (error) {
         if (![401, 403].includes(error.status)) throw error;
       }
-    }
+      return false;
+    };
     const account = await ensureAccountSession();
+    if (requestedRoom && !accountHomeFromLocation() && !account?.authenticated && await probeRoomCookie()) return;
     if (!account?.authenticated) {
       if (initialDesktopProvider && !initialGoogleFailed && !initialGitHubFailed) {
         const provider = initialDesktopProvider;
@@ -7746,6 +7750,7 @@ const ready = (async () => {
       try { await client.restore(requestedRoom); }
       catch (error) {
         if (![401, 403].includes(error.status)) throw error;
+        if (!accountHomeFromLocation() && await probeRoomCookie()) return;
         showAccountWorkspace();
         showRoomAccessNotice();
       }

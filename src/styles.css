@@ -591,7 +591,13 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .auth-kind .button.suggested { box-shadow: inset 0 0 0 1px var(--amber); }
 .key-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; align-items: center; width: 100%; min-width: 0; }
 .app-shell:has(#auth-panel:not([hidden])) #identity-label,
-.app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
+.app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]),
+.app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="pending"]),
+.app-shell:has(#invitation-dialog[open]) .connection-bar:has([data-state="pending"]),
+body:has(#join-link-dialog[open]) .connection-bar:has([data-state="pending"]) { display: none; }
+/* QA 2026-10-20: a normal connect finishes before this, so "Connecting…" never flashes. */
+.connection-bar:has(#connection-status[data-state="pending"]) { animation: connection-pending-reveal 0s linear 1.5s both; }
+@keyframes connection-pending-reveal { from { visibility: hidden; } to { visibility: visible; } }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; }
 /* RC-2026-09-30-3650 (human-door P0-1): the logged-out hero. A raised card
