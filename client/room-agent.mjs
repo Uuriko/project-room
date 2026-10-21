@@ -653,6 +653,17 @@ export class RoomAgentClient {
         throw new RoomClientError(200, "invalid_response", "Invalid request identity in work observation");
       ids.add(request.id);
     }
+    // Optional for older servers. Unknown future reasons still mean blocked;
+    // malformed metadata must never silently turn into permission to prepare.
+    if (Object.hasOwn(value, "blockedBy")) {
+      const blockers = value.blockedBy;
+      if (!blockers || typeof blockers !== "object" || Array.isArray(blockers)
+        || Object.entries(blockers).some(([id, reasons]) => !ids.has(id)
+          || !Array.isArray(reasons) || reasons.length === 0
+          || reasons.some(reason => typeof reason !== "string" || !reason.trim())
+          || new Set(reasons).size !== reasons.length))
+        throw new RoomClientError(200, "invalid_response", "Invalid blockers in work observation");
+    }
     for (const [id, run] of Object.entries(value.runs)) {
       if (!ids.has(id) || !run || !["working", "unknown", "result_ready", "needs_attention", "delivered"].includes(run.state)
         || !integer(run.updatedAt)) throw new RoomClientError(200, "invalid_response", "Invalid run observation");
