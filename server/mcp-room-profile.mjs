@@ -1040,25 +1040,29 @@ function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !s
 }
 
 // ---------------------------------------------------------------------------
-// AGENT-DOOR-AUTH stage 1: OAuth grants at the MCP door (coordinator ruling,
-// option (c) — the profile-layer-bindable subset).
+// AGENT-DOOR-AUTH at the MCP door (stage 1: coordinator ruling, option
+// (c) — the profile-layer-bindable subset; stage 2: the principal swap).
 //
-// A verified oat_ grant binds to the consenting account's human room member
-// via store.authenticateOAuthAccount — the provider proves the grant, the
-// store proves membership, exactly as on the REST door. Only the tools below
-// can be served from that binding at this layer: their handlers authenticate
-// at the profile layer and never pass a secret deeper (contrast the rest of
-// the profile, whose handlers thread the raw secret into store methods that
-// re-authenticate it — serving those to OAuth grants would need grant-bound
-// store variants, a separate program; store.authenticate is NOT taught oat_).
-// EVERY other tool answers an OAuth grant with 403 insufficient_scope naming
-// the exclusion: all chat post/read tools, all work-lifecycle tools, the
-// full-profile (stdio) tools, inbox/wake tools, the meta tools, and the
-// charter-excluded families (money/bond/escrow/dispute, room_create,
-// admin/owner, credential-minting). Scopes only ever restrict what the
-// account's member could already do; membership loss or account
+// A verified oat_ grant binds per room to the principal stamped on it at
+// approval time — for connector clients, the AGENT member the consenting
+// account owns (store.authenticateOAuthAgent); for the first-party
+// account-principal client, the account's human member (stage 1's
+// binding). The provider proves the grant, the store proves the binding
+// and the owner's membership, exactly as on the REST door. Only the tools
+// below can be served from that binding at this layer: their handlers
+// authenticate at the profile layer and never pass a secret deeper
+// (contrast the rest of the profile, whose handlers thread the raw secret
+// into store methods that re-authenticate it — serving those to OAuth
+// grants would need grant-bound store variants, a separate program;
+// store.authenticate is NOT taught oat_). EVERY other tool answers an
+// OAuth grant with 403 insufficient_scope naming the exclusion: all chat
+// post/read tools, all work-lifecycle tools, the full-profile (stdio)
+// tools, inbox/wake tools, the meta tools, and the charter-excluded
+// families (money/bond/escrow/dispute, room_create, admin/owner,
+// credential-minting). Scopes only ever restrict what the bound member
+// could already do; owner membership loss, agent removal, or account
 // deactivation cuts OAuth access at the binding, on the next call.
-const OAUTH_INSTRUCTIONS = "OAuth grant accepted. This grant acts as the consenting account's human room member. Stage 1 serves only a profile-layer subset of room tools over OAuth: room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item and report_tip, each gated by the scopes on the grant (rooms:read, chat:read, work:read, work:write). tools/list shows exactly the tools this grant can call. Every other hosted tool answers 403 insufficient_scope for OAuth grants in stage 1, including chat posting and reads, the work lifecycle, inbox and wake tools, and all money, admin and credential-minting tools. Names are snake_case.";
+const OAUTH_INSTRUCTIONS = "OAuth grant accepted. This grant acts as a separate agent member owned by the consenting account — never as the human themselves. Actions taken with this grant are recorded under that agent member, and its access ends if the agent is removed, without affecting the owner's account. Only a profile-layer subset of room tools is served over OAuth: room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item and report_tip, each gated by the scopes on the grant (rooms:read, chat:read, work:read, work:write). tools/list shows exactly the tools this grant can call. Every other hosted tool answers 403 insufficient_scope for OAuth grants, including chat posting and reads, the work lifecycle, inbox and wake tools, and all money, admin and credential-minting tools. Names are snake_case.";
 
 const MCP_OAUTH_TOOL_SCOPES = Object.freeze({
   room_check_access: Object.freeze(["rooms:read"]),
@@ -1082,17 +1086,29 @@ function oauthGrantHasScope(grant, required) {
 
 function oauthExcludedError(name) {
   return new ServiceError(403, "insufficient_scope",
-    `Tool ${name} is not available to OAuth grants in stage 1: an OAuth credential can only call the profile-layer room subset (room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item, report_tip)`);
+    `Tool ${name} is not available to OAuth grants: an OAuth credential can only call the profile-layer room subset (room_check_access, room_member_card, room_activation_pack, room_work_claim_provenance, list_land_queue, add_land_item, remove_land_item, report_tip)`);
 }
 
 // Wrap the store binding in the oauth auth shape (the same shape the REST
 // door builds in roomAuth): kind "oauth", no session binding, no CSRF.
+// AGENT-DOOR-AUTH stage 2 (REV-4092-S1 note N1, seam 3 of 3): the grant's
+// principal decides the binding — agent member for connector grants,
+// human member for the account-principal client; an unstamped legacy
+// grant fails closed and never falls back to acting as the human.
 function bindOAuthGrant(store, grant, roomId) {
-  const bound = store.authenticateOAuthAccount(grant.userId, roomId);
+  let bound;
+  if (grant.principal === "agent" && grant.agentIdentityId) {
+    bound = store.authenticateOAuthAgent(grant, roomId);
+  } else if (grant.principal === "account") {
+    bound = store.authenticateOAuthAccount(grant.userId, roomId);
+  } else {
+    throw new ServiceError(401, "unauthenticated", "Session or key expired or revoked");
+  }
   return {
     account: bound.account, member: bound.member, roomId: bound.roomId,
     credentialScope: "oauth", kind: "oauth",
     oauthClientId: grant.clientId, oauthScopes: [...grant.scopes],
+    oauthAgentIdentityId: grant.agentIdentityId ?? null,
   };
 }
 
@@ -1100,15 +1116,16 @@ async function dispatchOAuthRoomToolCall(store, grant, name, args) {
   const roomId = args.roomId;
   if (name === "room_check_access") {
     // Only the roomId form is bindable: the identity-wide form resolves an
-    // agent identity's rooms, and an OAuth grant has no agent identity.
+    // agent identity's rooms from an identity credential, and an OAuth
+    // grant binds per room even though it carries an agent identity.
     if (roomId === undefined) {
       throw new ServiceError(403, "insufficient_scope",
-        "room_check_access without a roomId is the identity-wide form, which is not available to OAuth grants in stage 1: an OAuth grant binds per room");
+        "room_check_access without a roomId is the identity-wide form, which is not available to OAuth grants: an OAuth grant binds per room");
     }
     const auth = bindOAuthGrant(store, grant, roomId);
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
-      roomId, memberId: auth.member.id, identityId: null,
+      roomId, memberId: auth.member.id, identityId: grant.agentIdentityId ?? null,
       kind: auth.member.kind, permissions: [...auth.member.permissions],
       checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
     };
@@ -1119,8 +1136,8 @@ async function dispatchOAuthRoomToolCall(store, grant, name, args) {
   }
   if (name === "room_member_card") {
     bindOAuthGrant(store, grant, roomId);
-    // viewerIdentityId null on purpose: the OAuth caller is the account's
-    // human member, not an agent identity, so private directory cards stay
+    // viewerIdentityId null on purpose: the caller here is the grant, not
+    // the agent identity's own credential, so private directory cards stay
     // hidden (cardForMember returns them only to the owning identity) —
     // the same fail-closed answer a non-owner identity viewer gets.
     const doc = store.agentPlugin.cardForMember({
@@ -1142,9 +1159,10 @@ async function dispatchOAuthRoomToolCall(store, grant, name, args) {
     }
   }
   // The land-queue tools share callLandTool's member-bound tail. No
-  // withSpendCharge here: the charge keys on identity secrets and is a
-  // no-op for human members (chargeSpendBeforeCall returns null unless the
-  // bound member is an agent), and the OAuth actor IS the human member.
+  // withSpendCharge here: the charge keys on identity secrets
+  // (chargeSpendBeforeCall needs the caller's secret), and an OAuth grant
+  // carries no identity secret — a grant never spends, whichever member
+  // it binds to.
   const auth = bindOAuthGrant(store, grant, roomId);
   return callLandToolAsMember(store, auth, name, args);
 }

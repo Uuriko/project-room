@@ -1107,6 +1107,19 @@ const ROWS = [
     }
   },
   {
+    "table": "oauth_grant_agents",
+    "key": "account_id",
+    "action": "delete",
+    "match": {
+      "account": [
+        "account_id"
+      ],
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
     "table": "peer_dm_messages",
     "key": "room_id",
     "action": "delete",

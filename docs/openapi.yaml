@@ -10432,6 +10432,13 @@ paths:
         IP/User-Agent seen at issuance. Families whose tokens are all revoked
         or expired drop out on their own. A caller only ever sees their own
         sessions.
+        AGENT-DOOR-AUTH stage 2: a connector family acts as a separate agent
+        member the account owns, never as the account — agent-principal
+        families carry an `agent` object naming that member (identityId,
+        displayName) and its receiving status: listening (a live listener
+        lease), connected (a fresh wakeable host observation), or pull-only
+        (capability only). Account-principal families (the first-party Mac
+        app sign-in) carry no `agent` object.
       security:
         - accountSession: []
       responses:
@@ -10457,6 +10464,16 @@ paths:
                         userAgent: { type: [string, "null"], description: "User-Agent seen at issuance, when recorded" }
                         accessTokens: { type: integer, description: "Live access tokens in the family" }
                         refreshTokens: { type: integer, description: "Live refresh tokens in the family" }
+                        principal: { type: [string, "null"], description: "\"agent\" for connector grants, \"account\" for first-party account sign-in clients, null for legacy families" }
+                        agentIdentityId: { type: [string, "null"], description: "The owned agent identity an agent-principal family acts as" }
+                        agent:
+                          type: object
+                          description: "Agent-principal families only: the owned agent member this family acts as"
+                          required: [identityId, displayName, receiving]
+                          properties:
+                            identityId: { type: string }
+                            displayName: { type: [string, "null"] }
+                            receiving: { type: string, enum: [listening, connected, pull-only], description: "listening = live listener lease; connected = fresh wakeable host observation; pull-only = capability only" }
         '401': { description: unauthenticated }
         '422': { description: session_binding_required }
         '429': { description: rate_limited }

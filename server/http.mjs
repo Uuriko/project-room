@@ -116,6 +116,7 @@ import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { createGrantAgentResolver } from "./oauth-grant-agents.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
@@ -572,6 +573,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return store.db.prepare("SELECT active FROM accounts WHERE id=?").get(userId)?.active === 1;
       } catch { return false; }
     },
+    // AGENT-DOOR-AUTH stage 2: at approval time a connector grant is bound
+    // to an agent identity the approving account owns (minted on first
+    // approval, re-bound after); the first-party Mac app client stays an
+    // account sign-in. The binding swap and this enrollment wiring ship
+    // together — no client can obtain a token before the doors bind the
+    // agent principal (REV-4092-S1 note N1).
+    resolveGrantAgent: createGrantAgentResolver(store),
   });
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
@@ -879,9 +887,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // token — an OAuth grant is not a session.
       const grant = selected.oauthGrant ?? oauthProvider.verifyAccessToken(selected.token);
       if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
-      const bound = store.authenticateOAuthAccount(grant.userId, roomId);
+      // AGENT-DOOR-AUTH stage 2 (REV-4092-S1 note N1, seam 2 of 3): the
+      // grant's principal decides the binding. Connector grants bind to
+      // the owned AGENT member; account-principal grants (the first-party
+      // Mac app sign-in) keep the stage-1 human binding; an unstamped
+      // legacy grant fails closed with the same 401 shape as any bad
+      // credential — it never falls back to acting as the human.
+      let bound;
+      if (grant.principal === "agent" && grant.agentIdentityId) {
+        bound = store.authenticateOAuthAgent(grant, roomId);
+      } else if (grant.principal === "account") {
+        bound = store.authenticateOAuthAccount(grant.userId, roomId);
+      } else {
+        reject(401, "unauthenticated", "Session or key expired or revoked");
+      }
       return { ...bound, credentialHash: rateHash(selected.token), credentialScope: "oauth", kind: "oauth",
-        oauthClientId: grant.clientId, oauthScopes: grant.scopes, expiresAt: null, csrf: null, sessionBinding: null };
+        oauthClientId: grant.clientId, oauthScopes: grant.scopes,
+        oauthAgentIdentityId: grant.agentIdentityId ?? null,
+        expiresAt: null, csrf: null, sessionBinding: null };
     }
     return store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
   }
@@ -1742,7 +1765,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
         const revocationHelp = validated.client.clientId === "project-room-macos"
           ? "Sign out from Account in the Mac app to end its session. Signing out of this browser leaves the Mac app signed in."
-          : "Revoke access with the /api/oauth/sessions endpoints or POST /oauth/revoke.";
+          : "Revoke access with the /api/oauth/sessions endpoints or POST /oauth/revoke, or remove the agent to end its access everywhere.";
+        // AGENT-DOOR-AUTH stage 2: consent tells the truth about the
+        // principal — a connector grant acts as a separate agent member
+        // the approver owns (named here exactly as it will be minted),
+        // never as the approver. The Mac app is an account sign-in and
+        // keeps its own copy above.
+        const agentOwnerName = validated.client.clientId === "project-room-macos"
+          ? null : store.accountProfile(auth.account.id).displayName;
+        const agentDisplayName = agentOwnerName ? `${agentOwnerName}'s ${validated.client.name}` : validated.client.name;
+        const agentConsentNote = validated.client.clientId === "project-room-macos"
+          ? ""
+          : `<p>It will act as a separate agent member you own — <strong>${esc(agentDisplayName)}</strong> — not as you. Its actions are recorded under that agent member. Removing the agent ends its access and never affects your account.</p>`;
         const nativeAccountName = validated.client.clientId === "project-room-macos"
           ? store.accountProfile(auth.account.id).displayName : null;
         const nativeAccountEmail = validated.client.clientId === "project-room-macos"
@@ -1750,7 +1784,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const nativeAccountLabel = [nativeAccountName, nativeAccountEmail].filter(Boolean).join(" · ") || "Current signed-in account";
         const nativeConsentWarning = validated.client.clientId === "project-room-macos"
           ? `<p data-native-account>Account: ${esc(nativeAccountLabel)}</p><p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>` : "";
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul>${agentConsentNote}<p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Referrer-Policy", "same-origin");
         // Browsers apply form-action to every redirect hop of the Allow POST,
@@ -1903,7 +1937,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
         const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
-        return json(res, 200, { sessions: oauthProvider.listSessions({ userId: auth.account.id }) });
+        // AGENT-DOOR-AUTH stage 2: agent-principal families name the owned
+        // agent member they act as, with its receiving status — listening
+        // (live listener lease) vs connected (fresh wakeable host) vs
+        // pull-only (capability only). Account-principal families (the
+        // Mac app) carry no agent field: they act as the account itself.
+        const sessions = oauthProvider.listSessions({ userId: auth.account.id }).map(family => {
+          if (family.principal !== "agent" || !family.agentIdentityId) return family;
+          const binding = store.oauthGrantAgents.binding({ accountId: auth.account.id, clientId: family.clientId });
+          return {
+            ...family,
+            agent: {
+              identityId: family.agentIdentityId,
+              displayName: binding?.displayName ?? null,
+              receiving: store.oauthGrantAgents.receivingStatus(family.agentIdentityId),
+            },
+          };
+        });
+        return json(res, 200, { sessions });
       }
       // POST /api/oauth/sessions/revoke-all — kill every OAuth session for
       // the signed-in account (F-02): all refresh families and access tokens

@@ -2,19 +2,21 @@
 //
 // A server-recognized `oat_` access token now authenticates at the hosted
 // MCP door through the provider instance server/http.mjs injects into
-// createHostedRoomMcp (verifyOAuthToken). The grant binds per room to the
-// consenting account's human member via store.authenticateOAuthAccount —
-// the provider proves the grant, the store proves membership — and only
-// the profile-layer-bindable subset is callable (coordinator ruling,
-// option (c)): the tools whose handlers authenticate at the profile layer
-// and never pass a secret deeper.
+// createHostedRoomMcp (verifyOAuthToken). The grant binds per room to its
+// stamped principal — for connector clients, the agent member the
+// consenting account owns via store.authenticateOAuthAgent (stage 1 bound
+// the account's human member; AGENT-DOOR-AUTH stage 2 swapped the
+// binding) — the provider proves the grant, the store proves the binding
+// and membership — and only the profile-layer-bindable subset is callable
+// (coordinator ruling, option (c)): the tools whose handlers authenticate
+// at the profile layer and never pass a secret deeper.
 //
 // Pins here:
 // - tools/list for an OAuth principal shows exactly the subset ∩ the
 //   grant's scopes (catalog honesty); anonymous and identity-secret
 //   catalogs are unchanged (Lane A pins);
 // - each of the 8 subset tools succeeds under its scope(s), acting as the
-//   bound human member (land items record addedByMemberId = the member);
+//   bound agent member (land items record addedByMemberId = the member);
 // - room_activation_pack requires rooms:read + chat:read + work:read
 //   together (inseparable bundle, mirroring the REST ruling);
 // - room_member_card runs with viewerIdentityId null: private directory
@@ -38,6 +40,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createOAuthProvider } from "../server/oauth-provider.mjs";
+import { createGrantAgentResolver } from "../server/oauth-grant-agents.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { createWork } from "../server/work-claims.mjs";
@@ -124,7 +127,10 @@ async function serve(t) {
   const call = (name, args, token) => rpc("tools/call", { name, arguments: args }, token);
   // Mint tokens the SERVER's provider verifies: a second provider instance
   // over the same database (the Lane B pattern).
-  const provider = createOAuthProvider({ db: store.db, clock: () => store.now() });
+  const provider = createOAuthProvider({
+    db: store.db, clock: () => store.now(),
+    resolveGrantAgent: createGrantAgentResolver(store),
+  });
   provider.registerClient({
     clientId: "muse", name: "Muse", redirectUris: ["https://muse.ai/oauth/callback"],
   });
@@ -178,18 +184,22 @@ test("oauth catalog: tools/list shows exactly the callable subset narrowed by th
     ["list_land_queue", "room_work_claim_provenance"]);
 });
 
-test("oauth subset: each of the 8 tools succeeds under its scope(s), as the bound human member", async t => {
+test("oauth subset: each of the 8 tools succeeds under its scope(s), as the bound agent member", async t => {
   const f = await serve(t);
   const all = f.mint("account-owner", ALL_SCOPES);
+  // AGENT-DOOR-AUTH stage 2: the grant binds to the agent member the
+  // account owns (stage 1 bound the human member); every attribution
+  // below names that agent member / identity.
+  const grant = f.provider.verifyAccessToken(all);
 
   const access = await f.call("room_check_access", { roomId: "commons" }, f.mint("account-owner", ["rooms:read"]));
   assert.equal(access.status, 200);
   assert.equal(access.body.result.isError, undefined);
   assert.equal(access.body.result.structuredContent.status, "credential_accepted");
-  assert.equal(access.body.result.structuredContent.memberId, "owner");
-  assert.equal(access.body.result.structuredContent.kind, "human");
-  // Attribution: no agent identity and no session is stamped for the caller.
-  assert.equal(access.body.result.structuredContent.identityId, null);
+  assert.equal(access.body.result.structuredContent.memberId, grant.agentIdentityId);
+  assert.equal(access.body.result.structuredContent.kind, "agent");
+  // Attribution: the caller's agent identity is stamped; no session exists.
+  assert.equal(access.body.result.structuredContent.identityId, grant.agentIdentityId);
 
   const card = await f.call("room_member_card", { roomId: "commons", memberId: "agent" }, f.mint("account-owner", ["rooms:read"]));
   assert.equal(card.body.result.isError, undefined);
@@ -215,14 +225,14 @@ test("oauth subset: each of the 8 tools succeeds under its scope(s), as the boun
   assert.equal(added.body.result.isError, undefined);
   assert.equal(added.body.result.structuredContent.item.repo, "Uuriko/project-room");
   assert.equal(added.body.result.structuredContent.item.prNumber, 4055);
-  // The land item records the bound human member as its actor.
-  assert.equal(added.body.result.structuredContent.item.addedByMemberId, "owner");
+  // The land item records the bound agent member as its actor.
+  assert.equal(added.body.result.structuredContent.item.addedByMemberId, grant.agentIdentityId);
   const itemId = added.body.result.structuredContent.item.itemId;
   assert.equal(typeof itemId, "string");
 
   const listed = await f.call("list_land_queue", { roomId: "commons" }, all);
   assert.equal(listed.body.result.structuredContent.items.length, 1);
-  assert.equal(listed.body.result.structuredContent.items[0].addedByMemberId, "owner");
+  assert.equal(listed.body.result.structuredContent.items[0].addedByMemberId, grant.agentIdentityId);
 
   const tipped = await f.call("report_tip", { roomId: "commons", itemId, sourceRevision: "deadbeefcafe" },
     f.mint("account-owner", ["work:write"]));

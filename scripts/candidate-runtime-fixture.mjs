@@ -182,6 +182,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
   paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); paths.add('server/routes/auth.mjs'); paths.add('server/routes/work-claims.mjs'); // batch RT: route table (imported by server/http.mjs)
   paths.add('server/oauth-provider-store.mjs'); // durable OAuth grants (imported by cloudflare/room.mjs and server/writer-fence.mjs)
+  paths.add('server/oauth-grant-agents.mjs'); // AGENT-DOOR-AUTH stage 2: owned-agent bindings for OAuth grants (imported by server/store.mjs and server/http.mjs)
   paths.add('server/redact-read.mjs'); // read-time message tombstone (imported by server/http.mjs)
   paths.add('server/message-redaction.mjs'); // PRIV-1: rewrite deleted message text (imported by server/store.mjs and server/account-deletion.mjs)
   paths.add('server/history-visibility.mjs'); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)

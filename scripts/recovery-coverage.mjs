@@ -405,6 +405,12 @@ export async function seedRecoveryCoverage(f) {
     (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
     VALUES ('recovery-redeem-req', ?, ?, 'commons', 'owner', 'Recovery', '[]', ?)`)
     .run("c".repeat(64), identityId, f.now());
+  // oauth_grant_agents (AGENT-DOOR-AUTH stage 2): one live owned-agent
+  // binding so the capture covers the table.
+  f.store.db.prepare(`INSERT INTO oauth_grant_agents
+    (account_id, client_id, identity_id, display_name, created_at, revoked_at)
+    VALUES ('recovery-account', 'recovery-connector', ?, 'Recovery Agent', ?, NULL)`)
+    .run(identityId, f.now());
   // telegram_live_status (durable Telegram live-delivery/send facts, task 10).
   // Synthetic data only: the recovery account received 3 updates and its last
   // send succeeded, so the capture covers the new table.

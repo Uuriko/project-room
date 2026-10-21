@@ -54,7 +54,7 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -67,6 +67,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     "onSecurityEvent must be a function if given");
   check(isAccountActive === undefined || typeof isAccountActive === "function",
     "isAccountActive must be a function if given");
+  check(resolveGrantAgent === undefined || typeof resolveGrantAgent === "function",
+    "resolveGrantAgent must be a function if given");
 
   const sqlite = db ? createOAuthProviderSqlite(db) : null;
   const clientStore = clients ?? sqlite?.clients ?? new Map();
@@ -151,6 +153,29 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(typeof userId === "string" && userId.length > 0 && userId.length <= 128,
       "userId must be a non-empty string up to 128 chars");
     const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge });
+    // AGENT-DOOR-AUTH stage 2: the grant's principal is decided at approval
+    // time by the injected resolver. A connector grant acts as a separate
+    // agent member the approving human owns (the resolver returns its
+    // identity id); a resolver may instead mark a first-party client as
+    // account-principal. With no resolver wired the stamp stays null —
+    // legacy grants the resource doors fail closed rather than letting
+    // them act as the human. A wired resolver that cannot bind fails the
+    // approval itself.
+    let agentIdentityId = null;
+    let principal = null;
+    if (typeof resolveGrantAgent === "function") {
+      const resolved = resolveGrantAgent({
+        userId, clientId: validated.client.clientId, clientName: validated.client.name,
+      });
+      if (resolved?.accountPrincipal === true) {
+        principal = "account";
+      } else if (typeof resolved?.agentIdentityId === "string" && resolved.agentIdentityId.length > 0) {
+        principal = "agent";
+        agentIdentityId = resolved.agentIdentityId;
+      } else {
+        fail("invalid_request", "grant could not be bound to a principal");
+      }
+    }
     const code = `oac_${newSecret(24)}`;
     const record = {
       codeHash: sha256(code),
@@ -162,6 +187,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       createdAt: now(),
       expiresAt: now() + AUTH_CODE_TTL_MS,
       used: false,
+      agentIdentityId,
+      principal,
       // O1 (issue #941): the family minted from this code, recorded at
       // exchange so a replayed code revokes its tokens (RFC 6749 §10.5).
       familyId: null,
@@ -213,7 +240,10 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     record.familyId = familyId;
     record.used = true;
 
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session });
+    return issueTokenPair({
+      clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session,
+      agentIdentityId: record.agentIdentityId ?? null, principal: record.principal ?? null,
+    });
   };
 
   // Session metadata attached at issuance (F-02): the IP and User-Agent
@@ -231,7 +261,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // Every access+refresh pair minted from one grant shares a familyId.
   // Rotation carries the familyId forward; reuse of a rotated refresh token
   // (record.rotatedBy set) then revokes the whole family (F-01).
-  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session } = {}) => {
+  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session, agentIdentityId = null, principal = null } = {}) => {
     const validScopes = validateScopes(scopes);
     const accessToken = `oat_${newSecret()}`;
     const refreshToken = `oar_${newSecret()}`;
@@ -242,6 +272,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       clientId, userId, scopes: validScopes, familyId,
       createdAt: at, expiresAt: at + ACCESS_TOKEN_TTL_MS, revoked: false,
       ip: meta.ip, userAgent: meta.userAgent,
+      agentIdentityId, principal,
     });
     refreshStore.set(sha256(refreshToken), {
       tokenHash: sha256(refreshToken),
@@ -249,6 +280,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       createdAt: at, expiresAt: at + REFRESH_TOKEN_TTL_MS, revoked: false,
       rotatedBy: null, // hash of the refresh token that superseded this one
       ip: meta.ip, userAgent: meta.userAgent,
+      agentIdentityId, principal,
     });
     return Object.freeze({
       accessToken, refreshToken,
@@ -305,9 +337,30 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     // first is safe: those throws happen before issueTokenPair writes any
     // new record, and this function is synchronous, so nothing can observe
     // both refresh tokens live in between.
+    // Stage 2: the family's principal carries forward across rotation. A
+    // pre-stage-2 family (principal stamp null) is bound once here through
+    // the wired resolver — the migration path for grants approved before
+    // stage 2 shipped; an unwired provider leaves it null and the doors
+    // keep failing it closed.
+    let agentIdentityId = record.agentIdentityId ?? null;
+    let principal = record.principal ?? null;
+    if (principal === null && typeof resolveGrantAgent === "function") {
+      const resolved = resolveGrantAgent({
+        userId: record.userId, clientId: record.clientId,
+        clientName: getClient(record.clientId)?.name ?? record.clientId,
+      });
+      if (resolved?.accountPrincipal === true) {
+        principal = "account";
+        agentIdentityId = null;
+      } else if (typeof resolved?.agentIdentityId === "string" && resolved.agentIdentityId.length > 0) {
+        principal = "agent";
+        agentIdentityId = resolved.agentIdentityId;
+      }
+    }
     const next = issueTokenPair({
       clientId: record.clientId, userId: record.userId,
       scopes: [...record.scopes], familyId: record.familyId, session,
+      agentIdentityId, principal,
     });
     record.revoked = true; // rotation: old refresh token is single-use
     record.rotatedBy = sha256(next.refreshToken);
@@ -329,6 +382,11 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       userId: record.userId,
       clientId: record.clientId,
       scopes: Object.freeze([...record.scopes]),
+      // Stage 2 principal stamp: "agent" + agentIdentityId for connector
+      // grants, "account" for first-party account sign-in clients, null
+      // for legacy/unbound grants (doors fail those closed).
+      agentIdentityId: record.agentIdentityId ?? null,
+      principal: record.principal ?? null,
     });
   };
 
@@ -381,7 +439,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       let agg = families.get(record.familyId);
       if (!agg) {
         agg = { id: record.familyId, clientId: record.clientId, issuedAt: record.createdAt,
-          scopes: [], ip: null, userAgent: null, newestAt: -1, accessTokens: 0, refreshTokens: 0 };
+          scopes: [], ip: null, userAgent: null, newestAt: -1, accessTokens: 0, refreshTokens: 0,
+          agentIdentityId: null, principal: null };
         families.set(record.familyId, agg);
       }
       if (record.createdAt < agg.issuedAt) agg.issuedAt = record.createdAt;
@@ -389,6 +448,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
         agg.newestAt = record.createdAt;
         agg.ip = record.ip ?? null;
         agg.userAgent = record.userAgent ?? null;
+        agg.agentIdentityId = record.agentIdentityId ?? null;
+        agg.principal = record.principal ?? null;
       }
       for (const scope of record.scopes) if (!agg.scopes.includes(scope)) agg.scopes.push(scope);
       if (kind === "access") agg.accessTokens++; else agg.refreshTokens++;
