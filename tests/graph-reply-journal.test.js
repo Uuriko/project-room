@@ -69,7 +69,7 @@ function setup(t) {
 
 test("negotiated private review projection strips provider internals; HTTP accepts only exact human acknowledgment", async t => {
   const f = setup(t); f.created(); f.observe();
-  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port, session = f.store.authenticateAccountSession(f.token, null, f.binding);
   const headers = { Cookie: "account_session=" + f.token, "X-Session-Binding": f.binding, "X-CSRF-Token": session.csrf,

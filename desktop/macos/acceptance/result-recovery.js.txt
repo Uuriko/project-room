@@ -1,0 +1,26 @@
+const wait = async (predicate, label) => {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
+  throw new Error('Timed out: ' + label);
+};
+const check = (value, label) => { if (!value) throw new Error(label); };
+const fill = (selector, value) => { const node = document.querySelector(selector); node.value = value; node.dispatchEvent(new Event('input', {bubbles:true})); };
+await wait(() => document.querySelector('#join-link-name')?.getClientRects().length, 'join form');
+fill('#join-link-name', 'Native result acceptance');
+document.querySelector('#join-link-submit').click();
+await wait(() => document.querySelector('#main')?.hidden === false, 'joined room');
+document.querySelector('#topbar-search-toggle').click();
+fill('#message-search', 'has:result');
+await wait(() => document.querySelector('[data-result-work-id="native-result"] [data-read-result]'), 'result row');
+document.querySelector('[data-result-work-id="native-result"] [data-read-result]').click();
+await wait(() => document.querySelector('#result-body')?.textContent.includes('Café notes'), 'original result');
+document.querySelector('#result-discuss').click();
+fill('#message-input', 'Preserve this native feedback for the original result.');
+await wait(() => localStorage.getItem('project-room:drafts:v3')?.includes('Preserve this native feedback'), 'durable feedback');
+const saved = JSON.parse(localStorage.getItem('project-room:result-selection:v1'));
+check(saved?.workItemId === 'native-result', 'native selection persisted');
+check(!JSON.stringify(saved).includes('Café'), 'no cached result body');
+const revision = await fetch('/native-acceptance-advance', {method:'POST'});
+check(revision.ok, 'newer result posted by fixture');
+// The native runner reloads the actual WKWebView after this script returns.
+return JSON.stringify({selectedOriginal:true, durableFeedback:true, newerResultPublished:true});

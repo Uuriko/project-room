@@ -126,8 +126,7 @@ test("a corrupted projection row is DETECTED by the parity comparison (fail-firs
   driveClaimLifecycle(f);
   // Operator-level damage in this isolated fixture only: flip the claim
   // status in the stored projection row without touching the event log.
-  const row = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
-  const tampered = JSON.parse(row);
+  const tampered = structuredClone(f.store.room("commons").state);
   tampered.workItems.w1.claim.status = "released";
   f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(tampered));
   // Fresh store: no projection cache, so room() reads the tampered row.

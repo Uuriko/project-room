@@ -4,7 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptJsonLd, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -31,6 +31,9 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
 .receipt-next p{margin:0}
+.share{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.share h2{font-size:1.1rem;margin:0 0 .5rem}
+.share code{overflow-wrap:anywhere;word-break:break-word}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}
@@ -99,6 +102,23 @@ ${next}
 </body></html>`;
 }
 
+// The share block. The pre-filled text is shown verbatim — what gets
+// posted is exactly what the page says — and the share targets are plain
+// anchors, because these pages are script-free. The badge embed is the
+// worker's copy-paste path into READMEs and portfolios. This renders only
+// for a receipt that already resolved as public through receipts-live.
+function shareSection(receipt) {
+  const links = receiptShareLinks(receipt);
+  return `<section class="share" aria-label="Share this receipt">
+<h2>Share this receipt</h2>
+<p class="meta">${escapeHtml(links.text)}</p>
+<p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
+<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
+<p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
+<p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
+</section>`;
+}
+
 // The verdict block (charter Workstream B, P2): one graded verdict with
 // its scope in the same first-screen block — what was checked, what was
 // not, by whom, and when. Verification comes from server/receipt-verify.mjs
@@ -138,7 +158,7 @@ export function renderVerificationBlock(receipt, verification) {
   if (!verification) {
     return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
-<p><strong>Not yet verified.</strong> This page shows the record as stored; nothing on it has been re-checked at read time.</p>
+<p><strong>Record not rechecked.</strong> This page shows the saved outcome and checks. They have not been independently rechecked for this view; a recorded check passing does not mean the delivery was accepted.</p>
 <p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
 </section>`;
   }
@@ -200,7 +220,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       submitted: "Submitted — no reviewer decision is recorded yet.",
     }[receipt.state] ?? `Recorded state: ${receipt.state}.`;
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
-    if (review.verificationVerdict) rows.push(`<div><dt>Reviewer verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""}</dd></div>`);
+    if (review.verificationVerdict) rows.push(`<div><dt>Recorded check verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""} — this check does not override the delivery outcome above.</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
     if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
     else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
@@ -314,6 +334,7 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+${shareSection(receipt)}
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>

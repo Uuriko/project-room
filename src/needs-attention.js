@@ -29,7 +29,7 @@ export function createNeedsAttentionCard(options) {
   const range = section.querySelector("#attention-range");
   const previous = section.querySelector("#attention-previous");
   const next = section.querySelector("#attention-next");
-  let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null;
+  let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null, resync = false;
   function viewer() {
     const state = typeof getState === "function" ? getState() : null, session = client.session;
     const member = hasRoomState ? (state?.room?.id === session?.roomId ? state?.members?.[session?.member?.id] : null) : session?.member;
@@ -49,7 +49,7 @@ export function createNeedsAttentionCard(options) {
     const path = client.path(`/access-requests/${encodeURIComponent(request.requestId)}/decide`);
     return { kind: "access_request", id: request.requestId, severity: "action", requestKind: request.kind,
       title: request.kind === "permissions" ? `${request.displayName} wants more permissions` : `${request.displayName} asks to join`,
-      detail: `Requested: ${request.requestedPermissions.join(", ") || "read and chat"}${request.kind === "permissions" ? ". Approval adds permissions and keeps existing access." : ""}`,
+      detail: `Requested: ${request.requestedPermissions.map(permissionLabel).join(", ") || "read and chat"}${request.kind === "permissions" ? ". Approval adds permissions and keeps existing access." : ""}`,
       requestedPermissions: request.requestedPermissions,
       actions: [{ action: "approve", method: "POST", path, body: { decision: "approve", permissions: request.requestedPermissions, note: null } },
         { action: "deny", method: "POST", path, body: { decision: "deny", permissions: [], note: null } }] };
@@ -89,7 +89,7 @@ export function createNeedsAttentionCard(options) {
   function hide() {
     epoch++;
     clearRetry();
-    currentReport = null; partial = null; observed = null; activeScope = null; authority = null;
+    currentReport = null; partial = null; observed = null; activeScope = null; authority = null; resync = false;
     section.hidden = true;
     list.innerHTML = "";
     count.textContent = "";
@@ -118,9 +118,10 @@ export function createNeedsAttentionCard(options) {
     const permissions = item.requestedPermissions ?? [];
     if (item.kind !== "access_request" || !permissions.length) return controls;
     const unavailable = permissions.filter(permission => !canGrant(permission));
-    const hint = unavailable.length ? `<p class="form-hint">You cannot grant: ${esc(unavailable.join(", "))}. A room owner or admin who holds them must review those permissions.</p>` : "";
+    const hint = unavailable.length ? `<p class="form-hint">You cannot grant: ${esc(unavailable.map(permissionLabel).join(", "))}. A room owner or admin who holds them must review those permissions.</p>` : "";
+    if (permissions.length === 1) return controls + hint;
     const choose = partial?.id === item.id;
-    const partialControls = choose ? `<fieldset data-permission-selection><legend>Choose permissions to approve</legend>${permissions.map(permission => `<label><input type="checkbox" data-permission-choice value="${esc(permission)}"${partial.selected.has(permission) ? " checked" : ""}${canGrant(permission) ? "" : " disabled"}> ${esc(permission)}</label>`).join("")}
+    const partialControls = choose ? `<fieldset data-permission-selection><legend>Choose permissions to approve</legend>${permissions.map(permission => `<label><input type="checkbox" data-permission-choice value="${esc(permission)}"${partial.selected.has(permission) ? " checked" : ""}${canGrant(permission) ? "" : " disabled"}> ${esc(permissionLabel(permission))}</label>`).join("")}
       <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
       <button type="button" class="button ghost attention-cancel">Cancel</button></fieldset>`
       : `<button type="button" class="button ghost attention-partial">Approve partial</button>`;
@@ -194,6 +195,7 @@ export function createNeedsAttentionCard(options) {
       if (!owns(ticket, session, generation)) return;
       partial = null;
       await refresh();
+      section.dispatchEvent(new CustomEvent("attention-changed", { bubbles: true }));
     } catch (error) {
       if (!owns(ticket, session, generation)) return;
       if (error.status === 401 || error.code === "session_binding_changed") { hide(); client.handleFailure(error); return; }
@@ -213,6 +215,7 @@ export function createNeedsAttentionCard(options) {
     if (!client.session || !canReview()) { hide(); return; }
     if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
     clearRetry();
+    resync = false;
     const ticket = ++epoch, session = client.session, generation = client.generation;
     const focused = document.activeElement;
     const focusedRow = focused?.closest?.("[data-access-request-id]");
@@ -222,11 +225,14 @@ export function createNeedsAttentionCard(options) {
     setBusy(true);
     setStatus("Checking…");
     try {
-      let report = await client.needsAttention(cursor, { includeShadow: includeShadow() });
+      // Independent authorized reads overlap instead of waiting in sequence.
+      // Promise.all also observes both failures if either read rejects first.
+      let [report, queue] = await Promise.all([
+        client.needsAttention(cursor, { includeShadow: includeShadow() }),
+        hasRoomState ? client.request(client.path("/access-requests?status=pending")) : null,
+      ]);
       if (!owns(ticket, session, generation)) return;
       if (hasRoomState) {
-        const queue = await client.request(client.path("/access-requests?status=pending"));
-        if (!owns(ticket, session, generation)) return;
         if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
@@ -247,6 +253,9 @@ export function createNeedsAttentionCard(options) {
         // Avoid leaving keyboard focus on a now-disabled paging control.
         (pages.hidden ? refreshButton : focused.disabled ? (focused === next ? previous : next) : focused).focus();
       }
+      // Events observed while this read was pending may be newer than its
+      // snapshot. Coalesce them into one read after the current render.
+      if (resync) { resync = false; observed = null; sync(); }
     } catch (error) {
       if (!owns(ticket, session, generation)) return;
       if ([401, 403].includes(error.status) || error.code === "session_binding_changed") {
@@ -287,7 +296,8 @@ export function createNeedsAttentionCard(options) {
     observed = next;
     // Preserve the reader's selected page and unsent partial selection. Manual
     // Next/Previous still exercise the server's stale-continuation reset.
-    if (busy || partial || currentReport?.pageOffset > 0) return;
+    if (busy) { resync = true; return; }
+    if (partial || currentReport?.pageOffset > 0) return;
     void refresh();
   }
   return { refresh, hide, sync };
@@ -296,6 +306,7 @@ export function createNeedsAttentionCard(options) {
 // MEMBER-PERMS: the requester uses the same authenticated, reviewed API as REST.
 const WORK_PERMISSIONS = ["accept_work", "complete_work"];
 // Members read these words, not the permission ids the server stores.
+const permissionLabel = permission => WORK_PERMISSION_LABELS[permission] ?? permission.replaceAll("_", " ");
 const WORK_PERMISSION_LABELS = { accept_work: "Accept work", complete_work: "Complete work" };
 
 export function installMemberPermissions({ client, getState, getSession }) {

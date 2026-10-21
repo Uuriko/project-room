@@ -7956,8 +7956,9 @@ paths:
     post:
       summary: Dispute an accepted bounty
       description: |
-        Challenger stakes a bond of exactly 25% of the bounty (the minimum
-        and the cap). The designated decider — the dispute decider named
+        Challenger stakes a bond of exactly 25% of the bounty (the
+        production rule in disputeBounty; the dispute machine's internal
+        floor is 5%, and its 25% figure is the total-dispute-cost cap). The designated decider — the dispute decider named
         at posting, else the designated verifier — seats as the decider;
         if no decider can be seated the
         dispute is honestly unavailable and the request is refused
@@ -8860,7 +8861,9 @@ paths:
         operational metadata only. `emailVerification` is `enforced` when a
         magic-link mailer is configured, or `relaxed-no-mailer` when it is not
         and the email-verification gates follow the agent-invites escape hatch.
-        The Public Host aliases are served identically.
+        Worker liveness adds `emailVerificationScope: worker`: this describes
+        the answering Worker configuration, which can differ from a remotely
+        bound Durable Object. Use `/api/ready` for the authority policy.
       security: []
       responses:
         '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
@@ -9110,6 +9113,9 @@ paths:
         otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
         `error`). The Node process answers 200 `{ status: ready }` when its
         store answers and 503 `{ status: unavailable }` when storage is down.
+        Worker readiness also reports the bound authority's `emailVerification`
+        and `emailVerificationScope: durable-object` when that authority supports
+        policy reporting. Missing policy is unknown, never proof of enforcement.
         `/api/health` stays Worker and Node liveness and does not run this probe.
       security: []
       responses:
@@ -11381,11 +11387,15 @@ paths:
             that host is derived and echoed as `hostId` in the response.
             Required when the identity has several registered hosts (the
             422 names them).
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 1024 }
+          description: Opaque nextCursor from the prior page. Bound to identity, room and host; reads never acknowledge. Restart from the first page on reconnect or permission changes.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, hostId, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -14953,6 +14963,35 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/digest:
+    get:
+      summary: Room digest (bounded catch-up / since-wake delta)
+      description: |
+        One capped read composed from the context, needs-me, and updates
+        projections: exact seq coverage for the window (`coverage.byType`
+        counts are never capped and sum to `coverage.eventsInWindow`), the
+        room's `context_version` with projection counts, the latest changed
+        work, the caller's latest attention items, the latest decision
+        events, and the latest message summaries (140-char clips — bodies
+        are never reproduced; `bodiesOmitted` names how many message bodies
+        the window held, and `followUps` names the targeted reads for full
+        bodies). The serialized digest never exceeds 4096 bytes; when caps
+        shed rows the counts ride in `truncated`. `since` is the caller's
+        last-handled sequence (a wake's seq for the since-wake delta);
+        omitting it reads the whole visible history as the window. The
+        viewer's history floor may clamp the window, reported via
+        `requestedSince` and `floorApplied`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "Room digest, at most 4096 bytes of JSON" }
+        '409': { description: cursor_ahead }
+        '422': { description: invalid_cursor }
   /api/rooms/{roomId}/activation-pack:
     get:
       x-oauth-scopes: [rooms:read, chat:read, work:read]
@@ -15034,99 +15073,6 @@ paths:
                       releaseOnInactivityHours: { type: integer }
                       stopAfterRepeatedNoopWakes: { type: boolean }
                   eventCursor: { type: string }
-                  generatedAt: { type: string }
-        '401': { description: unauthenticated }
-        '404': { description: room_not_found }
-  /api/rooms/{roomId}/orient:
-    get:
-      x-oauth-scopes: [rooms:read, chat:read, work:read]
-      security:
-        - bearerAuth: []
-        - roomSession: []
-        - accountSession: []
-        - oauthBearer: []
-      summary: Orient an arriving agent
-      description: |
-        The URL outside agents guess by analogy with /activation-pack:
-        read-only, member-scoped orientation for a cold-HTTP agent with no
-        client SDK. Returns the contract version, the authenticated member
-        and their permission scope, the room summary, the evaluated-through
-        event sequence, and a bounded list of open work records with their
-        next steps. Everything returned is derivable from the activation
-        pack plus the caller's own member record, so this adds no new
-        visibility. Requires a room credential like every other
-        /api/rooms/{roomId} read.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
-        - name: focus
-          in: query
-          schema: { type: string, enum: [conversation, work, review] }
-          description: Limit the top updates to conversation, work, or review.
-        - name: q
-          in: query
-          schema: { type: string, maxLength: 200 }
-          description: Rank pinned resources, recent messages, and open claims with a small BM25 over lines.
-        - name: maxTokens
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 8000, default: 2000 }
-          description: Token budget for the ranked lines. Default 2000, maximum 8000.
-      responses:
-        '200':
-          description: Orientation payload
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  contract:
-                    type: object
-                    properties:
-                      name: { type: string }
-                      version: { type: integer }
-                  room:
-                    type: object
-                    properties:
-                      slug: { type: string }
-                      title: { type: string }
-                      state: { type: string, enum: [active, archived] }
-                      kind: { type: string, enum: [personal, organization] }
-                  member:
-                    type: object
-                    properties:
-                      id: { type: string }
-                      handle: { type: string }
-                      kind: { type: string, enum: [human, agent] }
-                      permissions: { type: array, items: { type: string } }
-                      active: { type: boolean }
-                  evaluatedThrough: { type: integer }
-                  eventCursor: { type: string }
-                  orientation:
-                    type: object
-                    properties:
-                      version: { type: integer }
-                      purpose: { type: string }
-                      activeWorkTotal: { type: integer }
-                  work:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id: { type: string }
-                        title: { type: string }
-                        state: { type: string, enum: [proposed, accepted, working, blocked] }
-                        claimant: { type: [string, "null"] }
-                        next:
-                          type: object
-                          properties:
-                            action: { type: string }
-                            label: { type: string }
-                            memberId: { type: [string, "null"] }
-                            needsAttention: { type: boolean }
-                  workTotal: { type: integer }
-                  links:
-                    type: object
-                    properties:
-                      activationPack: { type: string }
                   generatedAt: { type: string }
         '401': { description: unauthenticated }
         '404': { description: room_not_found }
