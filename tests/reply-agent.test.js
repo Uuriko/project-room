@@ -872,7 +872,7 @@ test("automatic pickup reports one connection failure per outage and reports a l
   const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
   let reads = 0;
   const gateway = createServer(async (req, res) => {
-    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+    if (req.url === "/api/rooms/commons/agent-work") {
       reads++;
       if (reads !== 3) {
         res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "Temporary outage" } }));

@@ -17,7 +17,7 @@ test("idle queue excludes cancelled history and does not read run metadata", { t
   await listen(server);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const gateway = createServer(async (req, res) => {
-    if (req.url.includes("/reply-requests") && ++listings === 2) {
+    if (req.url.endsWith("/agent-work") && ++listings === 2) {
       controller.abort(); res.writeHead(204); res.end(); return;
     }
     try {
@@ -52,7 +52,8 @@ test("idle queue excludes cancelled history and does not read run metadata", { t
   assert.equal(executed, 0);
   assert.deepEqual(notices, []);
   assert.equal(f.store.room("commons").sequence, before);
-  const listing = reads.find(read => read.path.includes("/reply-requests"));
+  const listing = reads.find(read => read.path.endsWith("/agent-work"));
+  assert.equal(reads.length, 1, "one combined read replaces preflight and separate lists");
   assert.deepEqual(listing.body.requests, [], "closed history must not cross the queue's HTTP boundary");
   assert.equal(reads.filter(read => read.path.endsWith("/request-runs")).length, 0);
   t.diagnostic(`idle request listing: ${listing.bytes} bytes; ${reads.length} completed HTTP reads before next scan`);
