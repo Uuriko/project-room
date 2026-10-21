@@ -1,3 +1,4 @@
+import { isHumanAside } from "../src/aside.js";
 import { messageRepository } from "./message-repository.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
@@ -18,7 +19,8 @@ const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
-  "invite_pending", "access_request", "agent_joined"
+  "invite_pending", "access_request", "agent_joined",
+  "approval", "outbound_draft", "group_review"
 ]);
 const CLAIM_ATTENTION = Object.freeze({
   lease_expiring: "claim_lease_expiring",
@@ -219,6 +221,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
 
   for (const message of byId.receivedBy(memberId)) {
     if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (isHumanAside(state.members, message.authorId, message.body)) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({
@@ -301,15 +304,32 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       `SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added'
          AND json_extract(body,'$.data.joinedVia')='one-time-code' AND json_extract(body,'$.data.referredBy')=? ORDER BY sequence DESC LIMIT 20`
     ).all(roomId, memberId);
+    // Presence events are grouped: one join is one item; several joins are
+    // one line naming who joined, so a burst of agents does not flood the feed.
+    const joins = [];
     for (const row of rows) {
       const event = JSON.parse(row.body), data = event.data ?? {};
       const joined = state.members?.[data.memberId];
       if (!joined || joined.active === false) continue;
-      const at = iso(event.at);
+      joins.push({ memberId: data.memberId, name: joined.displayName, at: iso(event.at) });
+    }
+    if (joins.length === 1) {
+      const [{ memberId: joinedId, name, at }] = joins;
       items.push(draft({
-        kind: "agent_joined", roomId, key: `joined|${data.memberId}`,
-        title: clip(`${joined.displayName} joined with a one-time code`), actor: data.memberId, createdAt: at, updatedAt: at,
-        basis: data.memberId, sourceRef: { memberId: data.memberId },
+        kind: "agent_joined", roomId, key: `joined|${joinedId}`,
+        title: clip(`${name} joined with a one-time code`), actor: joinedId, createdAt: at, updatedAt: at,
+        basis: joinedId, sourceRef: { memberId: joinedId },
+        next: null
+      }));
+    } else if (joins.length > 1) {
+      const [newest] = joins, oldest = joins[joins.length - 1];
+      const names = joins.slice(0, 3).map(join => join.name);
+      const rest = joins.length - names.length;
+      const title = `${names.join(", ")}${rest ? ` and ${rest} more` : ""} joined with one-time codes`;
+      items.push(draft({
+        kind: "agent_joined", roomId, key: `joined|group|${newest.memberId}`,
+        title: clip(title), actor: newest.memberId, createdAt: oldest.at, updatedAt: newest.at,
+        basis: joins.map(join => join.memberId).join(","), sourceRef: { memberIds: joins.map(join => join.memberId) },
         next: null
       }));
     }
@@ -358,10 +378,46 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     }
   }
 
+  if (!needsMeOnly) items.push(...decisionItems(store, roomId, memberId, owner));
+
   const marks = marksFor(store, roomId, memberId);
   const wakes = ackedWakes(store, roomId, memberId, flags);
   const view = items.map(item => ({ ...item, state: sourceState(item, marks.get(item.id), wakes) }));
   return { items: view, flags, skipped: false };
+}
+
+// Needs-you (Town-style home base): approval cards and outbound drafts wait
+// on the room owner; a group review waits on each reviewer that has not
+// answered. The tables belong to their features and may not exist yet, so a
+// missing table contributes nothing rather than an incomplete flag.
+function optionalRows(store, sql, ...args) {
+  try { return store.db.prepare(sql).all(...args); }
+  catch (error) { if (tableMissing(error)) return []; throw error; }
+}
+function decisionItems(store, roomId, memberId, owner) {
+  const items = [];
+  const room = encodeURIComponent(roomId);
+  if (owner) {
+    for (const row of optionalRows(store, "SELECT id, summary, requested_by AS actor, created_at AS at FROM approval_cards WHERE room_id=? AND state='pending'", roomId)) {
+      const at = iso(row.at);
+      items.push(draft({ kind: "approval", roomId, key: `approval|${row.id}`, title: clip(row.summary), actor: row.actor, createdAt: at, updatedAt: at,
+        basis: row.id, sourceRef: { approvalId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/approvals/${encodeURIComponent(row.id)}/decision` } }));
+    }
+    for (const row of optionalRows(store, "SELECT id, channel, recipient, author_id AS actor, created_at AS at FROM outbound_drafts WHERE room_id=? AND state='draft'", roomId)) {
+      const at = iso(row.at);
+      items.push(draft({ kind: "outbound_draft", roomId, key: `outbound|${row.id}`, title: clip(`Draft ${row.channel} to ${row.recipient}`), actor: row.actor, createdAt: at, updatedAt: at,
+        basis: row.id, sourceRef: { draftId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/outbound/${encodeURIComponent(row.id)}/decision` } }));
+    }
+  }
+  const reviews = optionalRows(store, `SELECT r.id, r.draft, r.author_id AS actor, r.created_at AS at FROM group_reviews r
+    WHERE r.room_id=? AND EXISTS (SELECT 1 FROM json_each(r.reviewers) WHERE value=?)
+    AND NOT EXISTS (SELECT 1 FROM group_review_answers a WHERE a.review_id=r.id AND a.member_id=?)`, roomId, memberId, memberId);
+  for (const row of reviews) {
+    const at = iso(row.at);
+    items.push(draft({ kind: "group_review", roomId, key: `group-review|${row.id}`, title: clip(`Review: ${row.draft}`), actor: row.actor, createdAt: at, updatedAt: at,
+      basis: row.id, sourceRef: { reviewId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/reviews/${encodeURIComponent(row.id)}/objections` } }));
+  }
+  return items;
 }
 
 function publish(item) {

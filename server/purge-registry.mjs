@@ -1773,6 +1773,16 @@ const ROWS = [
     }
   },
   {
+    "table": "thread_snoozes",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "wake_queue",
     "key": "room_id",
     "action": "delete",
