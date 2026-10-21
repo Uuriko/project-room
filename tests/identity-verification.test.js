@@ -399,6 +399,82 @@ test("SEC2-C-B: suspension is reversible — re-verify plus admin reactivation r
   assert.equal(f.store.roomAuthority("commons").members[agent.identityId].active, true);
 });
 
+// r195: admin standing in one room must not reach seats in gated rooms the
+// caller does not administer. A room owner can link any identity into a room
+// of their own (no consent asked), so "membership admin of a room where the
+// identity is seated" alone would restore the any-room-owner strip, now with
+// suspension across every gated room.
+test("SEC2-C-B r195: a room owner who links the identity into their own room still cannot strip it (HTTP)", async t => {
+  const f = createAcceptanceFixture();
+  f.store.initialize(initialRoom("annex"));
+  const origin = await startServer(t, f);
+  const attester = makeAttester(f);
+  const agent = f.store.identities.create("Seated agent r195");
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  await post(origin, "/api/rooms/commons/verification-policy", { requireVerified: true }, ownerKey);
+  await post(origin, `/api/agent-identities/${agent.identityId}/verify`, {}, attester.secret);
+  f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  const mallory = f.store.identities.create("Annex owner r195");
+  f.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+    .run("annex", mallory.identityId, "owner", Date.now());
+  const annexKey = f.store.issueAccessKey("annex", "owner");
+  const link = await post(origin, "/api/rooms/annex/identity-links", { identityId: agent.identityId, permissions: [] }, annexKey);
+  assert.equal(link.status, 201);
+  const res = await del(origin, `/api/agent-identities/${agent.identityId}/verify`, mallory.secret);
+  assert.equal(res.status, 403);
+  assert.equal(await errorCode(res), "not_attestation_owner");
+  assert.equal(f.store.agentPlugin.verificationLevel(agent.identityId), "verified");
+  assert.equal(f.store.roomAuthority("commons").members[agent.identityId].active, true);
+});
+
+test("SEC2-C-B r195: manage_members in a non-gated room does not reach the gated seat; admin of every gated room does", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-sec2cb-r195-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => store.close());
+  store.initialize(initialRoom("commons"));
+  store.initialize(initialRoom("annex"));
+  const agent = store.identities.create("Two-room agent r195");
+  const annexAdmin = store.identities.create("Annex admin r195");
+  const commonsAdmin = store.identities.create("Commons admin r195");
+  const ownerCommons = store.issueAccessKey("commons", "owner");
+  const ownerAnnex = store.issueAccessKey("annex", "owner");
+  store.agentPlugin.verifyIdentity({ identityId: agent.identityId, verifiedBy: "ai_attester" });
+  store.identities.link(ownerCommons, "commons", { identityId: commonsAdmin.identityId, permissions: ["manage_members"] });
+  store.agentPlugin.setRoomVerificationPolicy({ roomId: "commons", requireVerified: true, setBy: "owner" });
+  store.identities.link(ownerCommons, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerAnnex, "annex", { identityId: agent.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerAnnex, "annex", { identityId: annexAdmin.identityId, permissions: ["manage_members"] });
+  assert.throws(
+    () => store.agentPlugin.unverifyIdentity({ identityId: agent.identityId, revokedBy: annexAdmin.identityId }),
+    err => err.code === "not_attestation_owner");
+  assert.equal(store.agentPlugin.verificationLevel(agent.identityId), "verified");
+  assert.equal(store.roomAuthority("commons").members[agent.identityId].active, true);
+  const result = store.agentPlugin.unverifyIdentity({ identityId: agent.identityId, revokedBy: commonsAdmin.identityId });
+  assert.deepEqual(result.suspendedRooms, ["commons"]);
+  assert.equal(store.roomAuthority("annex").members[agent.identityId].active, true);
+});
+
+test("SEC2-C-B r195: with no gated seat, only the attester withdraws the attestation", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-sec2cb-r195-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => store.close());
+  store.initialize(initialRoom("annex"));
+  const agent = store.identities.create("Ungated agent r195");
+  const annexAdmin = store.identities.create("Annex admin two r195");
+  const ownerAnnex = store.issueAccessKey("annex", "owner");
+  store.agentPlugin.verifyIdentity({ identityId: agent.identityId, verifiedBy: "ai_attester" });
+  store.identities.link(ownerAnnex, "annex", { identityId: agent.identityId, permissions: [] });
+  store.identities.link(ownerAnnex, "annex", { identityId: annexAdmin.identityId, permissions: ["manage_members"] });
+  assert.throws(
+    () => store.agentPlugin.unverifyIdentity({ identityId: agent.identityId, revokedBy: annexAdmin.identityId }),
+    err => err.code === "not_attestation_owner");
+  const result = store.agentPlugin.unverifyIdentity({ identityId: agent.identityId, revokedBy: "ai_attester" });
+  assert.equal(result.level, "unverified");
+  assert.deepEqual(result.suspendedRooms, []);
+});
+
 test("verification attestations survive a store reload", async t => {
   const f = createAcceptanceFixture();
   const attester = makeAttester(f);

@@ -15001,8 +15001,10 @@ paths:
       summary: Revoke a verification attestation
       description: >-
         Owner-scoped (`pri_` identity secret). The caller must be the
-        original attester or a membership admin of a room where the
-        identity is seated (SEC2-C-B); any other caller is refused. Removes
+        original attester, or a membership admin of every verified-gated
+        room where the identity holds a seat (SEC2-C-B; admin standing in
+        one room does not reach seats in rooms the caller does not
+        administer); any other caller is refused. Removes
         the attestation; the identity returns to the unverified tier, and
         the identity's seats in rooms that require verified identities are
         suspended in the same act (named in suspendedRooms). 20 per address
@@ -15014,7 +15016,7 @@ paths:
       responses:
         '200': { description: "{ identityId, level: 'unverified', revokedBy, suspendedRooms, suspensionFailedRooms }" }
         '401': { description: unauthenticated }
-        '403': { description: "not_attestation_owner (an attestation exists and the caller is neither its attester nor a membership admin for the identity), or not_room_owner (no attestation and the caller has no room-owner or membership-admin standing)" }
+        '403': { description: "not_attestation_owner (an attestation exists and the caller is neither its attester nor a membership admin of every verified-gated room where the identity holds a seat), or not_room_owner (no attestation and the caller has no room-owner or membership-admin standing)" }
         '429': { description: rate_limited }
   /api/agent-identities/{identityId}/verification:
     get:
