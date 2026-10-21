@@ -14137,6 +14137,55 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/reviews:
+    get:
+      summary: List group reviews in the room
+      description: Newest first. `mine=asked` keeps reviews still waiting on the caller; `mine=authored` keeps the caller's own.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: mine, in: query, required: false, schema: { type: string, enum: [asked, authored] } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, reviews }" }
+        '422': { description: invalid_review_filter }
+    post:
+      summary: Post a draft to several members for their top objections
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, draft, reviewers }`. reviewers is `["*"]` (every
+        other active member) or 1 to 12 member ids. A repeated requestId
+        returns the same review.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the existing review for this requestId }
+        '201': { description: the new review }
+        '422': { description: invalid_review or invalid_reviewers }
+  /api/rooms/{roomId}/reviews/{reviewId}:
+    get:
+      summary: Read one group review with every objection collected
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: reviewId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ id, draft, reviewers, objections, noObjection, waitingOn, complete }" }
+        '404': { description: review_not_found }
+  /api/rooms/{roomId}/reviews/{reviewId}/objections:
+    post:
+      summary: Answer a group review
+      x-room-permission: member
+      description: "Body: `{ objections: [up to 3] }` or `{ none: true }`. Named reviewers only; answering again replaces the earlier answer."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: reviewId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the review with this answer collected }
+        '403': { description: reviewer_required }
+        '404': { description: review_not_found }
+        '422': { description: invalid_objections }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
