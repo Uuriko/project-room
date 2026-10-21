@@ -654,6 +654,49 @@ for (const mobile of [false, true]) test(`connected result feedback keeps exact 
 });
 
 const selectionKey = "project-room:result-selection:v1";
+test("phone unsent result feedback survives reload without retargeting to a newer result", { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile: true, expectedWrites: 1 }), p = f.p;
+  const roomDraft = "Keep my separate room draft.";
+  const feedback = "Keep the inspected introduction; clarify its final sentence.";
+  await p.locator("#message-input").fill(roomDraft);
+  await f.open(); await f.read(); await f.ready();
+  const receipt = structuredClone(f.state().workItems["native-result"].receipt);
+  const sourceId = receipt.nativeText.messageId;
+  await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill(feedback);
+  const replyContext = await p.locator("#reply-context").textContent();
+  assert.ok(replyContext.trim(), "the original reply context is visible before leaving");
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null,
+    "phone handoff closes the reader rather than persisting a docked preview");
+
+  f.reopen("native-result");
+  f.change("native-result", T.WORK_BLOCKER_RESOLVED, { resolution: "Revised the introduction" });
+  const body = "A replacement result that must not retarget unfinished feedback.";
+  const posted = f.send("producer", T.MESSAGE_POSTED, { messageId: "phone-revision-after-leaving", workItemId: "native-result", body });
+  f.change("native-result", T.WORK_COMPLETED, { summary: "Revision", nextAction: "Review", producerId: "producer", evidenceKind: "room_text",
+    previousCompletionEventId: receipt.eventId, evidenceMessageId: posted.event.data.messageId,
+    evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body) });
+  const workBeforeReturn = structuredClone(f.state().workItems["native-result"]);
+
+  await p.reload(); await p.locator("#main").waitFor({ state: "visible" });
+  await p.waitForFunction(value => document.querySelector("#message-input").value === value, feedback);
+  assert.equal(await p.locator("#reply-context").textContent(), replyContext);
+  assert.equal(await p.locator("#result-dialog").isVisible(), false,
+    "return must not reopen or substitute a result preview on phone");
+  assert.equal(await p.evaluate(key => sessionStorage.getItem(key), selectionKey), null);
+  await p.locator("#message-form button[type=submit]").click();
+  await p.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const sent = f.state().messages.filter(message => message.body === feedback);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].replyToId, sourceId, "recovered feedback still addresses the inspected source, not its replacement");
+  assert.notEqual(sent[0].replyToId, posted.event.data.messageId);
+  assert.deepEqual(f.state().workItems["native-result"], workBeforeReturn,
+    "returning and discussing cannot approve, reopen or otherwise mutate the newer work result");
+  await p.locator("#thread-back").click();
+  assert.equal(await p.locator("#message-input").inputValue(), roomDraft);
+});
+
 test("reopen restores the inspected result and feedback without upgrading its version", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.p;
   await f.open(); await f.read(); await f.ready();
