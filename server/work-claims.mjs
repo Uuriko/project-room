@@ -641,8 +641,19 @@ const canonicalPayload = value => {
 // The digest binding a requestId to the update it carried: every field
 // updateWork can apply, and nothing else (now/requestId itself excluded —
 // a retry is stamped later and re-uses the id by definition).
+// CURE-4396-2: progressMessageId joins the payload only when a pointer is
+// actually given (an id, or an explicit null clearing one) — the same
+// condition under which updateWork applies it. Builds from before the
+// pointer field digest the no-pointer shape with no such key, and
+// canonicalPayload spells undefined out, so an unconditional key made
+// every no-pointer update digest differently across the deploy boundary
+// and its cross-build retry conflicted (409) instead of replaying. Absent
+// stays byte-identical to the pre-pointer shape; absent, null and an id
+// remain pairwise distinct payloads, so no two of them can collide.
 export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId } = {}) =>
-  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId }), "utf8").digest("hex");
+  createHash("sha256").update(canonicalPayload(progressMessageId === undefined
+    ? { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }
+    : { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId }), "utf8").digest("hex");
 // The bundle digest frozen at finish: sha256 over exactly the bundle's
 // content fields, so the verify step can prove the bundle it checks is the
 // bundle that was delivered (any later mutation of the stored row fails
