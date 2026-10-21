@@ -1,3 +1,4 @@
+import { protectedResourceMetadata, registerDynamicClient, PROTECTED_RESOURCE_PATH } from "./chatgpt-app.mjs";
 import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -1574,12 +1575,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           authorization_endpoint: issuer + "/oauth/authorize",
           token_endpoint: issuer + "/oauth/token",
           revocation_endpoint: issuer + "/oauth/revoke",
+          registration_endpoint: issuer + "/oauth/register",
           response_types_supported: ["code"],
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
           scopes_supported: [...OAUTH_SCOPES],
           token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
         });
+      }
+      // GET /.well-known/oauth-protected-resource — RFC 9728 metadata for the
+      // ChatGPT app endpoint (/mcp/chatgpt). The path-suffixed form is the
+      // one MCP clients try first.
+      if ((url.pathname === PROTECTED_RESOURCE_PATH || url.pathname.startsWith(PROTECTED_RESOURCE_PATH + "/")) && req.method === "GET") {
+        return json(res, 200, protectedResourceMetadata(expectedOrigin()));
+      }
+      // POST /oauth/register — RFC 7591 dynamic client registration for
+      // public PKCE clients such as ChatGPT. Reuses the existing provider.
+      if (url.pathname === "/oauth/register" && req.method === "POST") {
+        const outcome = registerDynamicClient(oauthProvider, await body(req), { randomId: () => randomUUID().replaceAll("-", "") });
+        return json(res, outcome.status, outcome.body);
       }
       // GET /.well-known/feedback — /feedback standard discovery metadata.
       // Mirrors docs/feedback-endpoint.md §7: version, intake URL template,

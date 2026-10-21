@@ -15,6 +15,8 @@ import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
+import { isChatgptAppPath, handleChatgptAppRpc } from "./chatgpt-app.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 export { isRoomMcpPath, MCP_VERSION };
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -126,7 +128,22 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress, pathname, resolveOAuthBearer } = {}) {
+  // ChatGPT app profile: five tools and inline widgets over the same room
+  // profile. Identity secrets and API keys pass through; any other bearer is
+  // an OAuth access token that resolveOAuthBearer may map to room access.
+  if (pathname && isChatgptAppPath(pathname)) {
+    const origin = mcpUrl ? new URL(mcpUrl).origin : undefined;
+    return handleChatgptAppRpc(message, {
+      authorization, origin,
+      delegate: (inner, extra) => dispatchRoomMcp(inner, { mcpUrl, roomMcp, searchParams: new URLSearchParams(), userAgent, remoteAddress, ...extra }),
+      resolveBearer: async header => {
+        const token = /^bearer /i.test(header) ? header.slice(7).trim() : "";
+        if (token.startsWith("pri_") || token.startsWith(API_KEY_PREFIX)) return header;
+        return typeof resolveOAuthBearer === "function" ? resolveOAuthBearer(token) : null;
+      },
+    });
+  }
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -161,7 +178,8 @@ export function mcpRpcStatus(reply) {
 // RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
 export function mcpAuthHeaders(reply) {
   if (mcpRpcStatus(reply) !== 401) return {};
-  return { "WWW-Authenticate": "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
+  const advertised = reply.error?.data?.wwwAuthenticate;
+  return { "WWW-Authenticate": typeof advertised === "string" ? advertised : "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
 }
 
 export function mcpJoinCorsHeaders() {
@@ -243,7 +261,9 @@ export async function roomMcpFetchPost(request, options = {}) {
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
       searchParams: url.searchParams,
-      userAgent: request.headers.get("user-agent")
+      userAgent: request.headers.get("user-agent"),
+      pathname: url.pathname,
+      resolveOAuthBearer: options.resolveOAuthBearer
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -258,7 +278,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, resolveOAuthBearer } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -305,7 +325,9 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       roomMcp,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
-      remoteAddress
+      remoteAddress,
+      pathname: url.pathname,
+      resolveOAuthBearer
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {

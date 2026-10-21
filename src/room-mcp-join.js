@@ -201,6 +201,8 @@ export const ROOM_MCP_PATHS = Object.freeze([
   "/mcp/claude", "/mcp/claude/",
   "/mcp/codex", "/mcp/codex/",
   "/mcp/cursor", "/mcp/cursor/",
+  "/mcp/chatgpt", "/mcp/chatgpt/",
+  "/room/mcp/chatgpt", "/room/mcp/chatgpt/",
   "/room/mcp/claude", "/room/mcp/claude/",
   "/room/mcp/codex", "/room/mcp/codex/",
   "/room/mcp/cursor", "/room/mcp/cursor/"
