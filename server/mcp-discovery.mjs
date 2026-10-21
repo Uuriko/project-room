@@ -42,8 +42,11 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
   automation: focusMembers("automation")
 });
 
-export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
-  const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
+// Default tools/list profile. "core" stays selectable for one release.
+export const DEFAULT_MCP_PROFILE = "lean";
+
+export function listedMcpTools(profile = DEFAULT_MCP_PROFILE, aliases = false, agent = null, focus = undefined) {
+  const outside = focus === "public_work" || ((profile === "core" || profile === "lean") && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
   if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and
@@ -80,7 +83,7 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
 // is served the public-work lobby list at the door (the "public_work" focus
 // branch above), which is a different subject (#3769).
 export function liveEnrolledMcpTools() {
-  return listedMcpTools("core", false, null);
+  return listedMcpTools(DEFAULT_MCP_PROFILE, false, null);
 }
 
 export function liveMcpServerCardJson() {
