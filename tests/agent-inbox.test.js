@@ -133,8 +133,24 @@ test("inbox discovery finds older open requests outside its DM window through ex
   } });
   const sequence = store.room(roomId).sequence;
   const inbox = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
-  assert.deepEqual(inbox.directMessages.map(message => message.messageId), ["recent-chat"]);
-  assert.equal(inbox.next[0].optional, true);
+  // #3948: the inbox walks ASCENDING from the cursor — the first page is the
+  // oldest undelivered DM, and following the cursor reaches the newest one.
+  assert.deepEqual(inbox.directMessages.map(message => message.messageId), ["old-open"]);
+  assert.equal(inbox.cursor.hasMore, true);
+  let walkedPage = inbox, newestPage = null;
+  for (let hops = 0; hops < 10 && walkedPage.cursor.hasMore; hops++) {
+    walkedPage = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1&after=${walkedPage.cursor.after}`, friendSecret)).json();
+    if (walkedPage.directMessages.some(message => message.messageId === "recent-chat")) newestPage = walkedPage;
+  }
+  assert.deepEqual(newestPage?.directMessages.map(message => message.messageId), ["recent-chat"]);
+  // The first page's occupant is the open request itself, so its first next
+  // step is the required read of that request (same step the un-limited
+  // fetch below pins) — not the optional reply step the old DESC window's
+  // ordinary-DM occupant produced.
+  assert.equal(inbox.next[0].action, "read-request");
+  assert.equal(inbox.next[0].nextRead.arguments.requestMessageId, "old-open");
+  assert.equal(inbox.next[0].requestStatus, "open");
+  assert.equal(inbox.next[0].required, true);
   const expanded = await (await get(origin, `/api/rooms/${roomId}/agent-inbox`, friendSecret)).json();
   assert.equal(expanded.next[0].action, "read-request");
   assert.equal(expanded.next[0].nextRead.arguments.requestMessageId, "old-open");
@@ -164,7 +180,15 @@ test("inbox discovery finds older open requests outside its DM window through ex
     requestMessageId: "latest-cancelled", expectedRequestRevision: 0, reason: "No longer needed"
   } });
   const historical = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
-  assert.equal(historical.next[0].requestStatus, "cancelled");
-  assert.equal(historical.next[0].required, false);
-  assert.equal(historical.next[0].actionRole, "context_discovery");
+  // #3948: the cancelled request is the newest DM, so the ascending walk
+  // reaches its page last; there its step is non-required context discovery
+  // (the old DESC window surfaced that step on the first page instead).
+  let historicalPage = historical;
+  for (let hops = 0; hops < 10 && historicalPage.cursor.hasMore; hops++) {
+    historicalPage = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1&after=${historicalPage.cursor.after}`, friendSecret)).json();
+  }
+  assert.deepEqual(historicalPage.directMessages.map(message => message.messageId), ["latest-cancelled"]);
+  assert.equal(historicalPage.next[0].requestStatus, "cancelled");
+  assert.equal(historicalPage.next[0].required, false);
+  assert.equal(historicalPage.next[0].actionRole, "context_discovery");
 });
