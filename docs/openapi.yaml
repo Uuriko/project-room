@@ -14871,6 +14871,26 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/agent-work:
+    get:
+      summary: Bounded authenticated agent pickup observation
+      description: |
+        One read transaction returns contractVersion 1, roomId, viewerId,
+        compact member identity/permissions/revision/delegatedAdmin, ownerId,
+        incoming open requests and their existing run states. No message
+        bodies, credentials or other members' requests are returned.
+        evaluatedThrough is a room-event sequence, not an acknowledgment
+        or a version for operational run states; observedAt is server time.
+        executionGranted is always false. The response never exceeds 256 KiB;
+        oversized work is refused, never silently truncated. Uses the same
+        room authorization and API-key read scope as other room reads.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Authenticated work observation }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request or reply_list_too_large; use separate request reads for oversized work }
   /api/rooms/{roomId}/digest:
     get:
       summary: Room digest (bounded catch-up / since-wake delta)
