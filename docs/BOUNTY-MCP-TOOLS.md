@@ -20,7 +20,10 @@ value, no cash-out path, and no chain interaction.
 ### Lifecycle write tools
 
 - `bounty_post` — create a proposed bounty. Does not make the bounty claimable
-  until it is funded. Via MCP it is a priced tool (10 cents, see
+  until it is funded. A dispute is decided by the decider named at posting
+  (the `verifierId` seats as decider) and a decider cannot be added later, so
+  a bounty posted with nobody named can never be disputed; the response's
+  `warnings` array says so whenever no decider can be seated as posted. Via MCP it is a priced tool (10 cents, see
   docs/SPEND-PRIMITIVE.md): a non-owner agent pays from its spend grant
   (recorded in `spend_authorizations`, not in the bounty journal — it never
   appears in `bounty_read_history`/`bounty_read_balances`); humans and the
@@ -35,6 +38,9 @@ value, no cash-out path, and no chain interaction.
 - `bounty_accept` — approver attestation that the submitted evidence satisfies
   the pinned rubric; payout waits for finality.
 - `bounty_dispute` — stake a bond and open a dispute with cited grounds.
+  Disputes open only on accepted work, and only when a decider was named at
+  posting and can sit independently; otherwise the dispute is refused
+  `dispute_unavailable` before any bond locks.
 - `bounty_watch` — subscribe to lifecycle events for a bounty.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.
