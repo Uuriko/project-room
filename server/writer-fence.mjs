@@ -295,6 +295,9 @@ export const unfencedAdditiveTables = Object.freeze([
   // room-visible state change. DDL is shared with server/thread-mutes.mjs
   // (convergent).
   "thread_mutes",
+  // thread_snoozes: snooze a thread until its next message. Same shape and
+  // reasoning as thread_mutes (private read-time filter), same module.
+  "thread_snoozes",
   // referrals (referral attribution): one row per joined referee, the
   // queryable source of truth behind the referral board. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,
@@ -555,7 +558,9 @@ const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", 
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+// 2026-10-20 additive feature tables, created lazily by their modules; older writers have no code path to them.
+const FEATURE_1020_ADDITIVE_TABLES = Object.freeze(["agent_host_context", "device_signins", "email_optouts", "held_message_settings", "held_wakes", "agent_notes", "approval_cards", "account_briefings", "group_reviews", "group_review_answers", "outbound_policies", "outbound_drafts", "permission_modes", "room_playbooks", "routine_blueprints", "routine_installs", "sharing_limits", "team_connections"]);
+export const lazyAdditiveTables = Object.freeze([...FEATURE_1020_ADDITIVE_TABLES, ...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

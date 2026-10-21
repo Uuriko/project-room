@@ -1,6 +1,7 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
+import { unsubscribeSecretFromEnv } from "../server/email-unsubscribe.mjs";
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { DurableObject } from 'cloudflare:workers';
@@ -46,6 +47,12 @@ import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mj
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
+// Every hosted room lives in this one Durable Object. Requests, health,
+// readiness, and the safety-net cron all address it by this name, so a room
+// moved to another object would need the cron to wake that object too
+// (tests/cron-room-object.test.js fails first).
+const ROOM_OBJECT_NAME = 'invite-only-pilot';
+
 const durableObjectHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
@@ -142,6 +149,7 @@ export class ProjectRoom extends DurableObject {
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      unsubscribeSecret: unsubscribeSecretFromEnv(env),
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
@@ -628,7 +636,7 @@ export default {
       const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? { deployment: env.ROOM_DEPLOYMENT } : {};
       const body = JSON.stringify({
         status: 'ok', servedBy: 'worker', sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deployment,
-        durableObject: { name: 'invite-only-pilot', id: env.ROOM.idFromName('invite-only-pilot').toString() }
+        durableObject: { name: ROOM_OBJECT_NAME, id: env.ROOM.idFromName(ROOM_OBJECT_NAME).toString() }
       });
       return finish(new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } }), 'worker');
     }
@@ -641,7 +649,7 @@ export default {
     // job is stale or failing, so a plain status check catches dead crons.
     if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
       const head = request.method === 'HEAD';
-      try { return finish(jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }), 'durable-object'); }
+      try { return finish(jobHealthResponse(await env.ROOM.getByName(ROOM_OBJECT_NAME).readJobHealth(), { head }), 'durable-object'); }
       catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return finish(jobHealthUnavailable({ head }), 'durable-object'); }
     }
     const address = request.headers.get('CF-Connecting-IP');
@@ -683,7 +691,7 @@ export default {
       const probed = await durableObjectHealth({
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
         start: async () => {
-          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          const result = await env.ROOM.getByName(ROOM_OBJECT_NAME).probeStorage();
           if (!result?.ok) throw new Error('storage probe failed');
           return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         },
@@ -695,7 +703,7 @@ export default {
     }
     let response;
     try {
-      response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+      response = await env.ROOM.getByName(ROOM_OBJECT_NAME).fetch(new Request(request, { headers }));
     } catch {
       // DO construction can fail before its fetch handler exists. Contain that
       // failure here; never retry a request whose write outcome may be unknown.
@@ -735,7 +743,7 @@ export default {
   // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    const room = env.ROOM.getByName('invite-only-pilot');
+    const room = env.ROOM.getByName(ROOM_OBJECT_NAME);
     await room.ensureJobAlarm();
   }
 };
