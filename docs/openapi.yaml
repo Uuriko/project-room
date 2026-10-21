@@ -14881,7 +14881,12 @@ paths:
         bodies, credentials or other members' requests are returned.
         evaluatedThrough is a room-event sequence, not an acknowledgment
         or a version for operational run states; observedAt is server time.
-        executionGranted is always false. The response never exceeds 256 KiB;
+        executionGranted is always false. archivedAt, paused (pausedAt and
+        heldBy, or null) and blockedBy (request ID -> reasons: room_archived,
+        paused, requester_inactive, dm_blocked, dm_consent_required,
+        viewer_not_addressed_agent) name the standing refusals a claim on
+        request-runs would hit; a request absent from blockedBy can still be
+        refused for a stale revision or context. The response never exceeds 256 KiB;
         oversized work is refused, never silently truncated. Uses the same
         room authorization and API-key read scope as other room reads.
       parameters:
