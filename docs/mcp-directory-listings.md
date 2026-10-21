@@ -6,10 +6,9 @@ room tools). ChatGPT app: `https://room.trydemigod.com/mcp/chatgpt` (OAuth 2.1
 with PKCE, dynamic client registration, RFC 9728 metadata at
 `/.well-known/oauth-protected-resource`).
 
-Icon: 512x512 PNG of the Room mark (`project-room-mark.svg`), not yet in the
-repo (the push tool carries text only). To serve it, commit it as
-`icons/room-directory-512.png`, add that path to `server/public-assets.mjs` and
-`scripts/runtime-package.mjs` publicAssets, and add it to `server.json` icons.
+Icon: 512x512 PNG at `https://room.trydemigod.com/icons/icon-512.png`
+(`icons/icon-512.png`, already served as the PWA icon and listed in
+`server.json` icons next to `icon.svg`).
 Repo: https://github.com/Uuriko/project-room. Privacy:
 https://room.trydemigod.com/privacy. License: see repo.
 
