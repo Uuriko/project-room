@@ -94,13 +94,20 @@ above, not JSON-RPC.
 
 ## Full code index
 
-909 rows (868 distinct codes).
+919 rows (878 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `invalid_archive_request` | 422 | Archive request has invalid fields or types | fix+resend | Correct the fields named in the response; use dryRun true to obtain a plan before a real run. |
+| `invalid_room_id` | 422 | Archive roomId is not a valid room identifier | fix+resend | Use the exact room id from current Room access, rather than a room URL. |
+| `invalid_keep_newest` | 422 | Archive retention count is outside the supported range | fix+resend | Set keepNewest to an integer from 100 through 100000 and obtain a new dry run. |
+| `reason_required` | 422 | Operator archive requires a bounded reason | fix+resend | Supply a reason containing 1 through 200 characters. |
+| `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
+| `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
+| `archive_not_ready` | 409 | Message backfill or parity certification is not ready for archive | no | Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run. |
 | `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
@@ -576,6 +583,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_pause_command` | 422 | Supply action (pause or resume), memberId, requestId and, for pause, reason or null | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pause_selection` | 422 | Choose at most one member | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pin` | 422 | messageId and pinned are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_plan` | 422 | expectedSha256 and expectedSequence from the repair plan are required | fix+resend | Re-run the repair plan (POST /api/operator/projection/plan) and resubmit execute with the expectedSha256 and expectedSequence it returned; do not guess them. |
 | `invalid_policy` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_profile` | 422 | displayName must be a string | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_project_offer` | 422 | No detail query parameters accepted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -686,6 +694,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_url` | 400 | url must be a non-empty string up to 2048 characters | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invalid_usage_period` | 422 | Choose an optional number of days only | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_verify_request` | 422 | eventType, data, and signature are the accepted fields | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_view` | 422 | view=brief is the only accepted view; omit it for the full pack | follow hint | Follow this error's hint and next steps. |
 | `invalid_wake` | 422 | Supply a queue key, intent, due time, max attempts and request ID. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_claim` | 422 | fencingToken is required; limit must be 1..50 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_pause` | 422 | Supply a request ID and an optional short reason. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -778,6 +787,7 @@ response's own `hint`/`next` when it names something more specific.
 | `nonprogressing_email_page` | 409 | The sync page did not advance. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `not_authorized` | 403 | ${role}: "${lane}" is not a current member of this room | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: EscrowError route map.) |
 | `not_confirm_gated` | 422 | only confirm-class actions open the confirm sheet | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `not_corrupt` | 422 | The stored projection parses; drift reconciliation belongs to the recovery audit, not this repair | no | The stored projection is not corrupt, so the projection repair has nothing to fix. Reconcile projection drift through the recovery audit instead; do not retry the repair. |
 | `not_dead_letter` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `not_declared` | 409 | Declare what you are looking for before asking for a match | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `not_found` | 404 | No such room or identity | re-list | Re-list the resource and use a current id. Do not guess ids. |
@@ -849,6 +859,7 @@ response's own `hint`/`next` when it names something more specific.
 | `referral_rejected` | 409 | fail(409, "referral_rejected", error.message); } const projection = this.store.storedProjection(roomId, state); if (Buffer.byteLength(projection) > PI | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `reminder_inactive` | 409 | There is no active reminder to cancel. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `reminder_limit` | 409 | Reminder capacity reached. Existing reminders can still be cancelled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `repair_unsupported` | 422 | Archived rooms keep a compacted projection shape; repair runs through the archive path | no | This room is archived. Repair its projection through the archive path; do not retry the operator projection repair on an archived room. |
 | `reply_attempt_not_found` | 404 | Reply attempt not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `reply_attempt_not_found` | 409 | Reply attempt not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `reply_attempt_not_found` | 500 | Reply attempt not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |

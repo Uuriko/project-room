@@ -55,7 +55,7 @@ test("genuinely absent provenance stays unknown - no later event fabricates a pr
 });
 
 test("source pin: proposedById is assigned from the envelope only", () => {
-  const src = readFileSync(new URL("../src/events.js", import.meta.url), "utf8")
+  const src = readFileSync(new URL("../src/work-reducers.js", import.meta.url), "utf8")
     .split("\n").filter(line => !line.trim().startsWith("//")).join("\n");
   assert.match(src, /proposedById:\s*incoming\.actorId/);
   assert.equal(src.includes("data.proposedById"), false);
@@ -306,7 +306,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 38);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 42);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");

@@ -59,6 +59,15 @@ Read the ids in the answers. Plan those ids with a reason such as "Remove QA lef
 
 Find plus plan is the dry run: it lists what would be deleted and writes an audit row, and it does not delete. Execute performs the delete and writes its own audit row.
 
+## Archive old messages (room size cap)
+
+A room's stored state is capped at `PILOT_LIMITS.projectionBytes` (4 MiB). At the cap every write to the room is refused with 409 `pilot_limit`. `POST /api/operator/archive` moves older messages out of the room's stored state into the messages table, where search, threads and exports still read them. Pinned messages, work sources and evidence, reply requests and open threads stay.
+
+1. Dry run (the default): `{"roomId":"muse-room","keepNewest":2000,"reason":"projection cap relief"}`. It replays the room's messages table to the room's head and certifies it, then answers `archived`, `retained`, `freedBytes`, `throughSeq`, `projectionBytes` and an `expect` object. Room data does not change.
+2. Real run: the same body plus `"dryRun":false` and the dry run's `expect`. If the plan moved since the dry run, it answers 409 `plan_changed` and nothing moves.
+
+`keepNewest` is 100 to 100,000 (default 2,000). A room whose messages table cannot be certified at its head answers 409 `archive_not_ready` naming the step (`backfill_blocked`, `backfill_not_caught_up` or `parity_failed`), and nothing moves. Every call that passes input checks writes an audit row (`messages_archive_plan` or `messages_archive`). Take a backup first. Do not run `store.rehydrateAllProjections()` on an archived room: it inlines every body and the result is over the cap.
+
 ## Status
 
 `GET /api/operator/status` returns the deployed version, whether storage is ready, the largest table counts, and the last 10 operator actions. Job heartbeats are on the Worker, so `jobs` is `see /api/health/jobs`.

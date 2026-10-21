@@ -182,3 +182,12 @@ test("submit: a failed submit keeps the minted identity stashed for the retry (M
   assert.equal(result.requestId, attempted[0].requestId);
   assert.equal(result.requestId, stashed.requestId);
 });
+
+ test("room address input resolves before requesting access and refuses unrecognized URLs", () => {
+  for (const roomId of ["https://example.test/rooms/team-7", "https://example.test/room/rooms/team-7/", "/rooms/team-7"]) {
+    assert.equal(buildGeneralAccessRequest({ roomId, displayName: "Ada" }).roomId, "team-7");
+  }
+  for (const roomId of ["https://example.test/unknown", "https://example.test/rooms/bad%2Fid", "not a room"]) {
+    assert.throws(() => buildGeneralAccessRequest({ roomId, displayName: "Ada" }), /room link/);
+  }
+});
