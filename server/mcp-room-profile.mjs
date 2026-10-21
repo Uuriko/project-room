@@ -1,3 +1,4 @@
+import { callMemoryTool, memoryOnboarding, rulesForTurn } from "./agent-memory.mjs";
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
 import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
@@ -223,6 +224,7 @@ function validRoomArgs(name, args) {
     return (args.messageIds !== undefined || args.fileIds !== undefined) && ids(args.messageIds, 50) && ids(args.fileIds, 10);
   }
   if (name === "room_who") return true;
+  if (name.startsWith("room_memory_") || name === "room_rules") return true; // agent-memory.mjs validates and rejects with a reason
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
@@ -538,7 +540,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       roomId, memberId: auth.member.id, identityId: auth.identityId ?? identity.identityId,
       kind: auth.member.kind, permissions: [...auth.member.permissions],
-      checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
+      checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false,
+      ...(() => { const memory = memoryOnboarding(store, auth, roomId); return memory ? { memory } : {}; })()
     };
   }
   if (name === "room_activation_pack") {
@@ -574,7 +577,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     });
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
-    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
+    const rules = rulesForTurn(store, auth, roomId);
+    return { ...context, ...(rules ? { standingRules: rules } : {}), orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
@@ -614,6 +618,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_read_many") return readMany(store, secret, roomId, args);
   if (name === "room_who") return store.presence(secret, roomId, []);
+  if (name.startsWith("room_memory_") || name === "room_rules") return callMemoryTool(store, store.authenticate(secret, roomId), name, roomId, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
   }
