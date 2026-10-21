@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Squads (plan-squads): named groups with a goal, a member roster, and a
 // channel that is a room thread (the thread-root message id; the thread is
 // derived from message replyToId chains, see server/activity.mjs).
@@ -159,8 +160,7 @@ function checkBody(data) {
 function visibleSquad(store, roomId, viewer, row) {
   const view = squadView(row);
   if (view.channel) {
-    const message = store.room(roomId).state.messages.find(m => m.id === view.channel)
-      ?? store.archivedMessage(roomId, view.channel);
+    const message = messageRepository(store, roomId).get(view.channel);
     if (message?.toMemberId || !messageVisibleToViewer(message, viewer, store.historyFloor(roomId, viewer))) view.channel = null;
   }
   return view;
@@ -192,8 +192,9 @@ export function createSquad(store, token, roomId, data, expectedSessionBinding =
     refuseArchivedWrite(store.room(roomId).state);
     if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const room = store.room(roomId);
-    if (input.channelMessageId && !room.state.messages.some(m => m.id === input.channelMessageId && !m.toMemberId
-      && messageVisibleToViewer(m, me, store.historyFloor(roomId, me)))) {
+    const channel = input.channelMessageId ? messageRepository(store, roomId, room.state).get(input.channelMessageId) : null;
+    if (input.channelMessageId && (!channel || channel.toMemberId
+      || !messageVisibleToViewer(channel, me, store.historyFloor(roomId, me)))) {
       fail(422, "squad_channel_unknown", "channelMessageId is not a live message in this room");
     }
     const members = activeMemberIds(room, [...input.memberIds, me]);

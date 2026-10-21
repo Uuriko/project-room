@@ -236,6 +236,7 @@ export const bountyEscrowSchema = `
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
+  CREATE INDEX IF NOT EXISTS bounty_journal_lot_state ON bounty_journal(room_id, account_id, lot_state, seq);
   CREATE TABLE IF NOT EXISTS bounty_records (
     bounty_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL,
@@ -1039,6 +1040,15 @@ export class BountyEscrow {
     for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
       "bounty_reputation_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
+    // Journal lot_state index (AUDIT-50X X-08 / M-4): every balance SUM in
+    // _balanceMillis, _requirePayable, _settleClaimBond and _approvedMillis
+    // filters on (room_id, account_id, lot_state); without this index each
+    // SUM scans the account's whole journal, so a settlement's cost grows
+    // with the account's entire history. Purely additive (IF NOT EXISTS):
+    // the RoomStore boot path creates it via bountyEscrowSchema /
+    // convergeBountyDeployedSchema step 3 (which replays every index DDL),
+    // and this covers direct construction on a pre-index database.
+    for (const ddl of schemaChunks("bounty_journal_lot_state")) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
     if (!hadRubricCols) _backfillRubricPins(this.db);
@@ -2371,8 +2381,12 @@ export class BountyEscrow {
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
-      // The dispute bond is exactly 25% of the bounty: the >= 25% minimum
-      // and the <= 25% total-dispute-cost cap (v2 economics) coincide.
+      // The dispute bond is exactly 25% of the bounty (#3307). That is
+      // this production rule, not a machine minimum: the dispute machine's
+      // own floor is 5% (MIN_BOND_RATIO in server/bounty-disputes.mjs),
+      // which 25% satisfies, and the machine's 25% is its cap on total
+      // recorded dispute cost — so the bond equals the maximum total
+      // dispute cost the machine will record (v2 economics).
       const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
       check(bondMillis === required, "invalid_bond",
         `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);
@@ -2927,7 +2941,17 @@ export class BountyEscrow {
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
       const now = this.nowMs(), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
-      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
+      // The snapshot MUST cover every state the epoch keeper's due-scan
+      // (bounty-epoch-keeper.mjs DUE_WHERE) can count as due — including
+      // 'submitted': _keeperPass has the free-miss refund for it, but a
+      // snapshot that never selects the row makes that branch unreachable
+      // from closeEpoch. That omission was the live stall behind the
+      // guardian census F1 finding (2026-10-18): submitted bounties past
+      // their deadline counted due + overdue every tick while no keeper
+      // action could ever touch them (failed stayed 0 — nothing threw;
+      // the rows were simply never read). finalizeBounty was unaffected
+      // (it selects by id), which is why manual closes always worked.
+      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','submitted','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
         // #3275: each bounty's keeper action is atomic. Keeper actions are

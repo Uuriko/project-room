@@ -55,6 +55,8 @@ function seedReadTables(db) {
   CREATE TABLE IF NOT EXISTS room_public_settings (
     room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS public_unpublish (kind TEXT, target TEXT);
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS public_rooms (slug TEXT PRIMARY KEY, title TEXT);
   CREATE TABLE IF NOT EXISTS public_receipts (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL,
@@ -113,6 +115,10 @@ function insertWorkReceipt(db, id) {
 // the #3783 linkage attached (see the layer note in the header).
 function linkedWorkReceipt(escrow, db, store) {
   const bounty = runToPaid(escrow);
+  // #3594: the lot half of the pair is public only with the owner's
+  // recorded opt-in — the mirror row room.public_receipts_set writes.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)")
+    .run(ROOM);
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
   db.prepare("UPDATE bounty_journal SET receipt_id=? WHERE room_id=? AND lot_id=? AND kind='payout'")
     .run(PWR_ID, ROOM, lotId);
