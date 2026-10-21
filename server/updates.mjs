@@ -18,7 +18,8 @@ const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
-  "invite_pending", "access_request", "agent_joined"
+  "invite_pending", "access_request", "agent_joined",
+  "approval", "outbound_draft", "group_review"
 ]);
 const CLAIM_ATTENTION = Object.freeze({
   lease_expiring: "claim_lease_expiring",
@@ -358,10 +359,46 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     }
   }
 
+  if (!needsMeOnly) items.push(...decisionItems(store, roomId, memberId, owner));
+
   const marks = marksFor(store, roomId, memberId);
   const wakes = ackedWakes(store, roomId, memberId, flags);
   const view = items.map(item => ({ ...item, state: sourceState(item, marks.get(item.id), wakes) }));
   return { items: view, flags, skipped: false };
+}
+
+// Needs-you (Town-style home base): approval cards and outbound drafts wait
+// on the room owner; a group review waits on each reviewer that has not
+// answered. The tables belong to their features and may not exist yet, so a
+// missing table contributes nothing rather than an incomplete flag.
+function optionalRows(store, sql, ...args) {
+  try { return store.db.prepare(sql).all(...args); }
+  catch (error) { if (tableMissing(error)) return []; throw error; }
+}
+function decisionItems(store, roomId, memberId, owner) {
+  const items = [];
+  const room = encodeURIComponent(roomId);
+  if (owner) {
+    for (const row of optionalRows(store, "SELECT id, summary, requested_by AS actor, created_at AS at FROM approval_cards WHERE room_id=? AND state='pending'", roomId)) {
+      const at = iso(row.at);
+      items.push(draft({ kind: "approval", roomId, key: `approval|${row.id}`, title: clip(row.summary), actor: row.actor, createdAt: at, updatedAt: at,
+        basis: row.id, sourceRef: { approvalId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/approvals/${encodeURIComponent(row.id)}/decision` } }));
+    }
+    for (const row of optionalRows(store, "SELECT id, channel, recipient, author_id AS actor, created_at AS at FROM outbound_drafts WHERE room_id=? AND state='draft'", roomId)) {
+      const at = iso(row.at);
+      items.push(draft({ kind: "outbound_draft", roomId, key: `outbound|${row.id}`, title: clip(`Draft ${row.channel} to ${row.recipient}`), actor: row.actor, createdAt: at, updatedAt: at,
+        basis: row.id, sourceRef: { draftId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/outbound/${encodeURIComponent(row.id)}/decision` } }));
+    }
+  }
+  const reviews = optionalRows(store, `SELECT r.id, r.draft, r.author_id AS actor, r.created_at AS at FROM group_reviews r
+    WHERE r.room_id=? AND EXISTS (SELECT 1 FROM json_each(r.reviewers) WHERE value=?)
+    AND NOT EXISTS (SELECT 1 FROM group_review_answers a WHERE a.review_id=r.id AND a.member_id=?)`, roomId, memberId, memberId);
+  for (const row of reviews) {
+    const at = iso(row.at);
+    items.push(draft({ kind: "group_review", roomId, key: `group-review|${row.id}`, title: clip(`Review: ${row.draft}`), actor: row.actor, createdAt: at, updatedAt: at,
+      basis: row.id, sourceRef: { reviewId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/reviews/${encodeURIComponent(row.id)}/objections` } }));
+  }
+  return items;
 }
 
 function publish(item) {
