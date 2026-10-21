@@ -87,17 +87,11 @@ for (const mobile of [false, true]) {
 
     // Scrolling to the bottom advances the horizon (debounced): the divider
     // clears because everything in view now counts as read. Only a reader's
-    // scroll counts, so a real wheel comes first; synthetic scroll events then
-    // cover viewports where the list has no scrollable overflow.
+    // scroll counts. A short desktop list must also recognize the wheel
+    // gesture without requiring a synthetic scroll event.
     const listBox = await page.locator("#message-list").boundingBox();
     await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + Math.min(listBox.height, page.viewportSize().height - listBox.y) / 2);
     await page.mouse.wheel(0, 100000);
-    await page.evaluate(() => {
-      const list = document.querySelector("#message-list");
-      if (list) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event("scroll")); }
-      window.scrollTo(0, document.body.scrollHeight);
-      window.dispatchEvent(new Event("scroll"));
-    });
     await page.waitForFunction(() => !document.querySelector(".chat-divider.unread"), undefined, { timeout: 15000 });
     await capture("read-again");
 

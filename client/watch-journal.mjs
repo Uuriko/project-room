@@ -206,6 +206,9 @@ export class WatchJournal {
     try { this.#owner.exec("BEGIN IMMEDIATE; ROLLBACK;"); return false; }
     catch (error) { if (busy(error)) return true; throw error; }
   }
+  ownerIdentity() {
+    return this.#isHeld() ? this.#db.prepare("SELECT run_id FROM control WHERE id=1").get()?.run_id ?? null : null;
+  }
   status() {
     const held = this.#isHeld(), control = this.#db.prepare("SELECT * FROM control WHERE id=1").get(), state = this.state();
     return { schemaVersion: this.#version, state: held ? control?.stop_requested ? "stop_requested" : "held" : "stopped",

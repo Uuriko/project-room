@@ -29,7 +29,7 @@ export function createNeedsAttentionCard(options) {
   const range = section.querySelector("#attention-range");
   const previous = section.querySelector("#attention-previous");
   const next = section.querySelector("#attention-next");
-  let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null;
+  let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null, resync = false;
   function viewer() {
     const state = typeof getState === "function" ? getState() : null, session = client.session;
     const member = hasRoomState ? (state?.room?.id === session?.roomId ? state?.members?.[session?.member?.id] : null) : session?.member;
@@ -89,7 +89,7 @@ export function createNeedsAttentionCard(options) {
   function hide() {
     epoch++;
     clearRetry();
-    currentReport = null; partial = null; observed = null; activeScope = null; authority = null;
+    currentReport = null; partial = null; observed = null; activeScope = null; authority = null; resync = false;
     section.hidden = true;
     list.innerHTML = "";
     count.textContent = "";
@@ -215,6 +215,7 @@ export function createNeedsAttentionCard(options) {
     if (!client.session || !canReview()) { hide(); return; }
     if (hasRoomState && !client.ownsAccountSession()) { hide(); client.endAccess(); return; }
     clearRetry();
+    resync = false;
     const ticket = ++epoch, session = client.session, generation = client.generation;
     const focused = document.activeElement;
     const focusedRow = focused?.closest?.("[data-access-request-id]");
@@ -224,11 +225,14 @@ export function createNeedsAttentionCard(options) {
     setBusy(true);
     setStatus("Checking…");
     try {
-      let report = await client.needsAttention(cursor, { includeShadow: includeShadow() });
+      // Independent authorized reads overlap instead of waiting in sequence.
+      // Promise.all also observes both failures if either read rejects first.
+      let [report, queue] = await Promise.all([
+        client.needsAttention(cursor, { includeShadow: includeShadow() }),
+        hasRoomState ? client.request(client.path("/access-requests?status=pending")) : null,
+      ]);
       if (!owns(ticket, session, generation)) return;
       if (hasRoomState) {
-        const queue = await client.request(client.path("/access-requests?status=pending"));
-        if (!owns(ticket, session, generation)) return;
         if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
@@ -249,6 +253,9 @@ export function createNeedsAttentionCard(options) {
         // Avoid leaving keyboard focus on a now-disabled paging control.
         (pages.hidden ? refreshButton : focused.disabled ? (focused === next ? previous : next) : focused).focus();
       }
+      // Events observed while this read was pending may be newer than its
+      // snapshot. Coalesce them into one read after the current render.
+      if (resync) { resync = false; observed = null; sync(); }
     } catch (error) {
       if (!owns(ticket, session, generation)) return;
       if ([401, 403].includes(error.status) || error.code === "session_binding_changed") {
@@ -289,7 +296,8 @@ export function createNeedsAttentionCard(options) {
     observed = next;
     // Preserve the reader's selected page and unsent partial selection. Manual
     // Next/Previous still exercise the server's stale-continuation reset.
-    if (busy || partial || currentReport?.pageOffset > 0) return;
+    if (busy) { resync = true; return; }
+    if (partial || currentReport?.pageOffset > 0) return;
     void refresh();
   }
   return { refresh, hide, sync };
