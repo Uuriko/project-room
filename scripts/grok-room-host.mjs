@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { readAgentConnection, ConnectionError } from "../client/agent-connection.mjs";
 import {
   GrokHostError, parseNeedsMeBody, parseWakePing, wakeToAttentionItem,
-  pendingWakeToItem, attentionKey, selectUnhandled, markHandled, setCursor, loadJournal,
+  pendingWakeToItem, attentionKey, selectUnhandled, setCursor, loadJournal,
   emptyJournal, buildRunPlan, assertPlanSafe, childEnvFor, emptyAttentionNext, countKinds
 } from "../client/grok-host.mjs";
 import { leaseHoursFromUntil, parseRoomText } from "../client/text-plug.mjs";
@@ -161,26 +161,44 @@ async function readNeedsMe(connection, { fetchImpl = fetch, since } = {}) {
   return parseNeedsMeBody(parsed);
 }
 
-async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env } = {}) {
+async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env, drain = false } = {}) {
   const hostId = hostIdFor(env);
   const parsed = await jsonRequest(connection, "/api/agent-heartbeats", {
     fetchImpl, method: "POST",
     body: { hostId, mode: "pull-only", cadenceSeconds: 60 }
   });
-  const pending = Array.isArray(parsed.pendingWakes) ? parsed.pendingWakes : [];
+  const pending = Array.isArray(parsed.pendingWakes) ? [...parsed.pendingWakes] : [];
+  // Registration observes only the first page. Unacknowledged signals stay
+  // there until actual completion, so reading that page repeatedly can starve
+  // later work. Traverse without ACKing or manufacturing completion.
+  let page = parsed;
+  // Heartbeat HTTP responses historically omit nextCursor. Begin on the
+  // cursor-bearing poll endpoint rather than inferring a cursor from rows.
+  if (drain && parsed.more === true) {
+    page = await jsonRequest(connection,
+      `/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=0`, { fetchImpl });
+    if (!Array.isArray(page.pendingWakes)) fail("invalid_response", "Pending wake page is missing signals");
+    pending.splice(0, pending.length, ...page.pendingWakes);
+  }
+  const cursors = new Set();
+  while (drain && page.more === true) {
+    const cursor = page.nextCursor;
+    if (typeof cursor !== "string" || !cursor || cursor.length > 1024 || cursors.has(cursor)) {
+      fail("invalid_wake_cursor", "Pending wake pagination did not advance");
+    }
+    cursors.add(cursor);
+    page = await jsonRequest(connection,
+      `/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=0&cursor=${encodeURIComponent(cursor)}`,
+      { fetchImpl });
+    if (!Array.isArray(page.pendingWakes)) fail("invalid_response", "Pending wake page is missing signals");
+    pending.push(...page.pendingWakes);
+  }
   return {
     hostId: parsed.host?.hostId ?? hostId,
     pendingWakes: pending,
     items: pending.map(pendingWakeToItem),
     signalIds: pending.map(row => row.signalId).filter(id => typeof id === "string" && id.length > 0)
   };
-}
-
-async function ackWakes(connection, signalIds, { fetchImpl = fetch } = {}) {
-  if (!signalIds.length) return { acknowledged: [] };
-  return await jsonRequest(connection, "/api/agent-heartbeats/ack", {
-    fetchImpl, method: "POST", body: { signalIds }
-  });
 }
 
 export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
@@ -247,40 +265,80 @@ function nextFor(code) {
   return "See archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
 }
 
+// A dispatch receipt is not completion evidence. Never remove an uncertain
+// reservation automatically: the child may have acted before it failed.
+function dispatchPath(filename, connection, key) {
+  const scope = JSON.stringify([connection.origin, connection.memberId, key]);
+  return join(`${filename}.dispatches`, createHash("sha256").update(scope).digest("hex") + ".json");
+}
+
 async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {
   const filename = journalPathFor(env);
   let journal = readJournalFile(filename);
   const distinct = [...new Map(items.map(item => [attentionKey(item), item])).values()];
-  const fresh = selectUnhandled(distinct, journal);
-  const secrets = [connection.token];
-  const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), secrets));
+  const fresh = selectUnhandled(distinct, journal).filter(item =>
+    !existsSync(dispatchPath(filename, connection, attentionKey(item))));
+  const plans = fresh.map(item => assertPlanSafe(buildRunPlan(item, { origin: connection.origin }), [connection.token]));
   const executed = [];
   for (const plan of plans) {
     if (!execute) continue;
+    const receipt = dispatchPath(filename, connection, plan.key);
+    mkdirSync(dirname(receipt), { recursive: true, mode: 0o700 });
+    let fd;
+    try { fd = openSync(receipt, "wx", 0o600); }
+    catch (error) { if (error.code === "EEXIST") continue; throw error; }
+    try {
+      writeFileSync(fd, JSON.stringify({ key: plan.key, at: now(), status: "unknown" }) + "\n");
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    // Persist the directory entry before any external side effects begin.
+    const dir = openSync(dirname(receipt), "r");
+    try { fsyncSync(dir); } finally { closeSync(dir); }
     const raw = await (runner ?? defaultRunner)(plan, env, connection);
-    // A child has the bearer in its environment; its output is not trusted.
     const redact = (value, limit) => typeof value === "string"
       ? value.replaceAll(connection.token, "[REDACTED]").slice(0, limit) : "";
     const result = { code: raw?.code, stdout: redact(raw?.stdout, 8000), stderr: redact(raw?.stderr, 2000) };
-    executed.push({ key: plan.key, result });
-    if (result.code === 0) {
-      journal = markHandled(journal, plan.item, now());
-      writeJournalFile(filename, journal);
-    }
+    const saved = openSync(receipt, "w", 0o600);
+    try {
+      writeFileSync(saved, JSON.stringify({ key: plan.key, at: now(), status: "process_exited", code: result.code }) + "\n");
+      fsyncSync(saved);
+    } finally { closeSync(saved); }
+    executed.push({ key: plan.key, result, completion: "not_confirmed" });
   }
-  // Preview and unsuccessful execution must not advance past pending work.
-  if (execute && executed.every(entry => entry.result.code === 0) && extra.cursor !== undefined) {
-    journal = setCursor(journal, extra.cursor);
+  // This cursor tracks observed dispatch, never handled work. Uncertain
+  // receipts block advancement; successful processes still leave wakes pending.
+  const dispatched = distinct.every(item => {
+    if (Object.hasOwn(journal.handled, attentionKey(item))) return true;
+    try { return JSON.parse(readFileSync(dispatchPath(filename, connection, attentionKey(item)), "utf8")).code === 0; }
+    catch { return false; }
+  });
+  if (execute && dispatched && extra.cursor !== undefined) {
+    journal = setCursor(readJournalFile(filename), extra.cursor);
     writeJournalFile(filename, journal);
   }
-  return { journal, plans, executed, filename };
+  // Reservation means an attempt may have acted, not that its work is done.
+  // Keep it visible on later polls without retrying or exposing journal contents.
+  const pendingReconciliations = distinct.flatMap(item => {
+    const key = attentionKey(item);
+    if (Object.hasOwn(journal.handled, key)) return [];
+    const receipt = dispatchPath(filename, connection, key);
+    if (!existsSync(receipt)) return [];
+    let saved;
+    try { saved = JSON.parse(readFileSync(receipt, "utf8")); } catch { /* preserve unknown outcome */ }
+    const exited = saved?.key === key && saved.status === "process_exited" && Number.isInteger(saved.code);
+    return [{ key, roomId: item.roomId, messageId: item.kind === "mention" || item.kind === "dm" ? item.id : null,
+      workItemId: item.kind === "work" || item.kind === "handoff" ? item.id : null,
+      stage: exited ? saved.code === 0 ? "result_unverified" : "process_failed" : "outcome_unknown",
+      exitCode: exited ? saved.code : null, action: "inspect_result_before_retry" }];
+  });
+  return { journal, plans, executed, filename, pendingReconciliations };
 }
 
 export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
   const connection = connectionFromEnv(env);
   const filename = journalPathFor(env);
   const journal = readJournalFile(filename);
-  const beat = await beatPullOnly(connection, { fetchImpl, env });
+  const beat = await beatPullOnly(connection, { fetchImpl, env, drain: true });
   const items = [...beat.items];
   let cursor = journal.cursor ?? undefined;
   let identityId = null;
@@ -297,13 +355,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   const result = await planAndJournal({
     connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
-  if (execute) {
-    const completedSignals = beat.pendingWakes.filter(wake =>
-      Object.hasOwn(result.journal.handled, attentionKey(pendingWakeToItem(wake))))
-      .map(wake => wake.signalId).filter(id => typeof id === "string" && id.length > 0);
-    await ackWakes(connection, completedSignals, { fetchImpl });
-  }
-  const silent = result.plans.length === 0;
+  const silent = result.plans.length === 0 && result.pendingReconciliations.length === 0;
   const rooms = [...new Set([
     connection.roomId,
     ...(cursor && typeof cursor.rooms === "object" ? Object.keys(cursor.rooms) : []),
@@ -332,6 +384,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     seen: items.length,
     planned: result.plans,
     executed: result.executed,
+    pendingReconciliations: result.pendingReconciliations,
     hasMore,
     pages,
     cursor: cursor ?? null,
@@ -341,7 +394,9 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     kinds: countKinds(result.plans.map(plan => plan.item)),
     swarm,
     tags,
-    next: silent
+    next: result.pendingReconciliations.length
+      ? "Inspect prior attempts and their Room results before retrying; execution does not confirm completion."
+      : silent
       ? (tags.some(tag => tag.messageId) ? "A tag is waiting. text reply <messageId> | note: ... | room: <room>" : emptyAttentionNext({ execute }))
       : "Review planned items; --execute starts Grok."
   };
@@ -353,7 +408,7 @@ export async function ingestWake({ env = process.env, body, execute = false, run
   const result = await planAndJournal({
     connection, items: [item], env, execute, runner, now
   });
-  return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
+  return { ok: true, planned: result.plans, executed: result.executed, pendingReconciliations: result.pendingReconciliations, key: result.plans[0]?.key ?? null };
 }
 
 // H-20: head+tail capped byte buffer. A noisy child previously had every
@@ -675,7 +730,7 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
   const parsed = parseRoomText(line);
   if (parsed.verb === "pull") {
     const result = await pull({ env, fetchImpl, execute: false });
-    return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length };
+    return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length, pendingReconciliations: result.pendingReconciliations, next: result.next };
   }
   if (parsed.verb === "claim") {
     const leaseHours = parsed.leaseUntil ? leaseHoursFromUntil(parsed.leaseUntil) : undefined;

@@ -1,3 +1,5 @@
+import { hydrateWorkItems, referenceWorkItems } from "./work-repository.mjs";
+import { isMessageEntityRef, referenceMessageEntities, hydrateMessageEntities } from "./message-entity-projection.mjs";
 // Phase 1a: message bodies at rest outside the room projection row.
 //
 // The reducer, the cache and every reader keep full message bodies in
@@ -142,7 +144,21 @@ function releaseUnreferencedBodies(db, roomId, referenced) {
 // The only way a room projection is turned into the text stored in
 // rooms.projection. With enabled=false the output is JSON.stringify(state),
 // byte for byte, apart from rehydrating any bodyRef a raw-read state carries.
-export function storedProjection(db, roomId, state, { enabled = false } = {}) {
+export function storedProjection(db, roomId, state, options = {}) {
+  return serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
+}
+function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [] } = {}) {
+  if (state?.messages?.some(isMessageEntityRef)) state = { ...state, messages: hydrateMessageEntities(db,roomId,state.messages) };
+  if (messageEntities && Array.isArray(state?.messages)) {
+    if (state.messages.some(message => typeof message?.bodyRef === "string" || hasMarker(message))) {
+      const hydrated = hydrateProjection(db, roomId, state, { workEntities: false });
+      if (hydrated.missing.length) throw new Error("projection_corrupt: missing message body");
+      state = hydrated.state;
+    }
+    const messages = referenceMessageEntities(db,roomId,state.messages,pendingMessageIds);
+    if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db,roomId,new Set());
+    return JSON.stringify({...state,messages});
+  }
   const messages = Array.isArray(state?.messages) ? state.messages : null;
   if (!messages) return JSON.stringify(state);
   const carriesRefs = messages.some(message => message && typeof message.bodyRef === "string" || hasMarker(message));
@@ -155,7 +171,7 @@ export function storedProjection(db, roomId, state, { enabled = false } = {}) {
     return JSON.stringify(state);
   }
   if (!enabled) {
-    const text = JSON.stringify(hydrateProjection(db, roomId, structuredClone(state)).state);
+    const text = JSON.stringify(hydrateProjection(db, roomId, structuredClone(state), { workEntities: false }).state);
     releaseUnreferencedBodies(db, roomId, new Set());
     return text;
   }
@@ -224,7 +240,9 @@ export function projectionShapeProblem(state, roomId) {
 // integrity path) pass verifyBodyHashes to keep the per-body check, and
 // a row whose bytes no longer hash to its key is reported missing there,
 // which routes the caller to the same rebuild-from-log recovery.
-export function hydrateProjection(db, roomId, state, { verifyBodyHashes = false } = {}) {
+export function hydrateProjection(db, roomId, state, { verifyBodyHashes = false, workEntities = true } = {}) {
+  if (workEntities) state = hydrateWorkItems(db, roomId, state);
+  if (state?.messages?.some(isMessageEntityRef)) state.messages = hydrateMessageEntities(db,roomId,state.messages);
   const messages = Array.isArray(state?.messages) ? state.messages : [];
   const refs = messages.some(message => message && typeof message.bodyRef === "string");
   if (!refs && !messages.some(hasMarker)) return { state, missing: [] };

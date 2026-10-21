@@ -242,16 +242,24 @@ function parkRoom(store, room, error) {
     errorClass: errorClassOf(error),
     error: errorTextOf(error)
   };
-  const existing = db.prepare("SELECT sequence, event_id, head_seq, error_class, error FROM patrol_blocks WHERE room_id=?").get(room.id);
+  const existing = db.prepare("SELECT sequence, event_id, error_class FROM patrol_blocks WHERE room_id=?").get(room.id);
+  // r67: a park is the cursor position plus the error class. The head is
+  // not part of it: a busy parked room's head moves with every post, and
+  // each head-moved retry that throws the same way at the same cursor used
+  // to count as a fresh park, so the job failed on every post (prod, Oct 18:
+  // 46 failures in a row from 20:28Z, one per minute the parked room was
+  // posted to). The retry still records the new head (so the room is skipped
+  // until it moves again) and the latest error text; only a park that moved
+  // or changed class surfaces again. blocked_at stays when the park stands.
   const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId
-    || existing.head_seq !== block.headSeq || existing.error_class !== block.errorClass || existing.error !== block.error;
+    || existing.error_class !== block.errorClass;
   store.transaction(() => {
     db.prepare(`INSERT INTO patrol_blocks (room_id, sequence, event_id, head_seq, error_class, error, blocked_at)
       VALUES (?,?,?,?,?,?,?)
       ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
         head_seq=excluded.head_seq, error_class=excluded.error_class, error=excluded.error,
-        blocked_at=excluded.blocked_at`)
-      .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now());
+        blocked_at=CASE WHEN ? THEN excluded.blocked_at ELSE patrol_blocks.blocked_at END`)
+      .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now(), fresh ? 1 : 0);
   });
   return { fresh, block: { roomId: room.id, ...block } };
 }
