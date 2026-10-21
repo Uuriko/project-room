@@ -1,0 +1,1172 @@
+[
+  {
+    "headRefName": "jill/ch1-manifest-ci-generate",
+    "number": 4094,
+    "title": "tooling(CH-1): un-commit CANDIDATE-MANIFEST \u2014 generate at freeze/CI time",
+    "url": "https://github.com/Uuriko/project-room/pull/4094"
+  },
+  {
+    "headRefName": "jill/b4-cockpit-deeplink",
+    "number": 4093,
+    "title": "fix(cockpit): board_review facts, spend age, adjust-as-hint, deep-link reveal notice (B4 PR-D: #3890 #3891 #3892)",
+    "url": "https://github.com/Uuriko/project-room/pull/4093"
+  },
+  {
+    "headRefName": "jill/agent-door-auth-stage1",
+    "number": 4092,
+    "title": "feat(oauth): resource-side oat_ validation on REST + /mcp \u2014 AGENT-DOOR-AUTH stage 1 (#4055)",
+    "url": "https://github.com/Uuriko/project-room/pull/4092"
+  },
+  {
+    "headRefName": "jill/b4-wake-dispatch",
+    "number": 4091,
+    "title": "fix(wake): guest-aware dispatch gates for webhook deliveries (B4 PR-C: H6 / #3881)",
+    "url": "https://github.com/Uuriko/project-room/pull/4091"
+  },
+  {
+    "headRefName": "jill/b4-board-controls",
+    "number": 4090,
+    "title": "fix(board): send-back control, criteria deliver form, policy-aware verify, review basis (B4 PR-B: H1/H5 + #3885/#3887/#3889)",
+    "url": "https://github.com/Uuriko/project-room/pull/4090"
+  },
+  {
+    "headRefName": "jill/freeze-prep-2-receipt",
+    "number": 4089,
+    "title": "FREEZE-PREP-2: rollback compatibility evidence + receipt generator for declared-head pair 470d546a to ee97df61",
+    "url": "https://github.com/Uuriko/project-room/pull/4089"
+  },
+  {
+    "headRefName": "jill/fix-rq12-claim-renew",
+    "number": 4086,
+    "title": "fix(claims): claim-renew lease semantics A2+B1 (RQ-12)",
+    "url": "https://github.com/Uuriko/project-room/pull/4086"
+  },
+  {
+    "headRefName": "jill/b4-board-round",
+    "number": 4085,
+    "title": "fix(board): claim-round identity for Deliver + basis fencing + deliver reconcile (B4 PR-A: H2/H3/H4)",
+    "url": "https://github.com/Uuriko/project-room/pull/4085"
+  },
+  {
+    "headRefName": "jill/rq22-failure-naming",
+    "number": 4084,
+    "title": "RQ-22: failure naming generalised \u2014 patrol names its wedged room, escrow-epochs names its failed bounty",
+    "url": "https://github.com/Uuriko/project-room/pull/4084"
+  },
+  {
+    "headRefName": "jill/rq3-wake-poll-sentence",
+    "number": 4082,
+    "title": "fix(packet): wake-poll sentence states the three-case hostId contract (#3640)",
+    "url": "https://github.com/Uuriko/project-room/pull/4082"
+  },
+  {
+    "headRefName": "build-f1-worker-claim-prs-parity",
+    "number": 4081,
+    "title": "claim-prs: run autolink follow-ups on the Worker too (#4061)",
+    "url": "https://github.com/Uuriko/project-room/pull/4081"
+  },
+  {
+    "headRefName": "build-cffold2/cf-browser-family",
+    "number": 4080,
+    "title": "CF-FOLD batch 2, family 4 (browser): the last three checks move to tests/cloudflare/ (#4073)",
+    "url": "https://github.com/Uuriko/project-room/pull/4080"
+  },
+  {
+    "headRefName": "build-cffold2/cf-public-work-family",
+    "number": 4079,
+    "title": "CF-FOLD batch 2, family 3 (public/work): twenty more checks move to tests/cloudflare/ (#4073)",
+    "url": "https://github.com/Uuriko/project-room/pull/4079"
+  },
+  {
+    "headRefName": "build-cffold/cf-state-family",
+    "number": 4078,
+    "title": "CF-FOLD batch 2, family 2 (state/store): eight more checks move to tests/cloudflare/ (#4073)",
+    "url": "https://github.com/Uuriko/project-room/pull/4078"
+  },
+  {
+    "headRefName": "build-cffold/cf-identity-family",
+    "number": 4077,
+    "title": "CF-FOLD batch 2: runtime-identity checks move to tests/cloudflare/ (#4073)",
+    "url": "https://github.com/Uuriko/project-room/pull/4077"
+  },
+  {
+    "headRefName": "build-cffold/release-verify",
+    "number": 4076,
+    "title": "release:verify \u2014 one releaser-runnable gate (CF-FOLD batch 1, #4073)",
+    "url": "https://github.com/Uuriko/project-room/pull/4076"
+  },
+  {
+    "headRefName": "codex/sponsor-v3-carrier-1018",
+    "number": 4075,
+    "title": "Verify deleted sponsors using completed account deletion evidence",
+    "url": "https://github.com/Uuriko/project-room/pull/4075"
+  },
+  {
+    "headRefName": "jill/build-c10-untested-imports",
+    "number": 4074,
+    "title": "F-33 (C-10): untested-modules lint counts direct imports only \u2014 14 direct tests, 9 waivers",
+    "url": "https://github.com/Uuriko/project-room/pull/4074"
+  },
+  {
+    "headRefName": "jill/build-602-practice-room",
+    "number": 4072,
+    "title": "Practice room (#602): well-known self-join room with chat scope",
+    "url": "https://github.com/Uuriko/project-room/pull/4072"
+  },
+  {
+    "headRefName": "jill/build-c5-escrow-stateful-harness",
+    "number": 4070,
+    "title": "tests: fast-check stateful harness + in-repo differ for the escrow machine (F-32 / C-5)",
+    "url": "https://github.com/Uuriko/project-room/pull/4070"
+  },
+  {
+    "headRefName": "jill/build-c9-pilot-limits-scc-gate",
+    "number": 4069,
+    "title": "F-16 (C-9): extract PILOT_LIMITS to a leaf module + shrink-only SCC gate",
+    "url": "https://github.com/Uuriko/project-room/pull/4069"
+  },
+  {
+    "headRefName": "jill/build-b05-receipt-verify-now",
+    "number": 4068,
+    "title": "Receipts: verify at read time by default + one graded verdict (four tiers, revert-aware) (#4058)",
+    "url": "https://github.com/Uuriko/project-room/pull/4068"
+  },
+  {
+    "headRefName": "jill/build-b08-registry-of-registries",
+    "number": 4067,
+    "title": "Registry-of-registries manifest + meta-census gate + HAND-OPEN family closures (F-26/F-28, #3673)",
+    "url": "https://github.com/Uuriko/project-room/pull/4067"
+  },
+  {
+    "headRefName": "jill/build-f2-claim-reputation-closed-deleted",
+    "number": 4066,
+    "title": "fix(claim-reputation): close open positions on closed/deleted terminal actions (#4062)",
+    "url": "https://github.com/Uuriko/project-room/pull/4066"
+  },
+  {
+    "headRefName": "jill/build-650-agent-cards",
+    "number": 4060,
+    "title": "#650: per-room agent cards, registry skill query, deploy-aware card fields",
+    "url": "https://github.com/Uuriko/project-room/pull/4060"
+  },
+  {
+    "headRefName": "jill/board-slice-n-reveal-notice",
+    "number": 4059,
+    "title": "fix(board): the deep-link claim-record path names a reveal failure (#3892)",
+    "url": "https://github.com/Uuriko/project-room/pull/4059"
+  },
+  {
+    "headRefName": "jill/board-slice-c-cockpit-facts",
+    "number": 4057,
+    "title": "fix(cockpit): board_review decision facts + body-less POST actions render their hint (#3890, #3891)",
+    "url": "https://github.com/Uuriko/project-room/pull/4057"
+  },
+  {
+    "headRefName": "jill/records-3613-criteria",
+    "number": 4056,
+    "title": "Criteria-level outcomes + work period for #3613 (B1\u2013B4)",
+    "url": "https://github.com/Uuriko/project-room/pull/4056"
+  },
+  {
+    "headRefName": "jill/records-3617-refusals",
+    "number": 4054,
+    "title": "Records: stamp obligation ceilings/ratification; refusal journal (#3617 R-7/R-8)",
+    "url": "https://github.com/Uuriko/project-room/pull/4054"
+  },
+  {
+    "headRefName": "jill/records-3615-packet",
+    "number": 4053,
+    "title": "Records: adverse-decision packet for the subject + notices as records (#3615)",
+    "url": "https://github.com/Uuriko/project-room/pull/4053"
+  },
+  {
+    "headRefName": "build-661-pacing",
+    "number": 4052,
+    "title": "#661: per-room anti-shout pacing for agent replies (server-enforced)",
+    "url": "https://github.com/Uuriko/project-room/pull/4052"
+  },
+  {
+    "headRefName": "jill/records-3616-export",
+    "number": 4051,
+    "title": "Decision-row export (decision-rows/1) + evidence access logging (#3616)",
+    "url": "https://github.com/Uuriko/project-room/pull/4051"
+  },
+  {
+    "headRefName": "build-659-board",
+    "number": 4050,
+    "title": "feat(board): per-member lanes, recorded-state chips, inline receipt cards in chat (#659)",
+    "url": "https://github.com/Uuriko/project-room/pull/4050"
+  },
+  {
+    "headRefName": "jill/board-slice-d-sendback",
+    "number": 4049,
+    "title": "fix(board): self-attested Done respects the bundle rule; changes_requested gains its send-back (#3886, #3888)",
+    "url": "https://github.com/Uuriko/project-room/pull/4049"
+  },
+  {
+    "headRefName": "build-3618-incident-aggregates",
+    "number": 4048,
+    "title": "Records: incident linkage + performance aggregates as records (#3618)",
+    "url": "https://github.com/Uuriko/project-room/pull/4048"
+  },
+  {
+    "headRefName": "jill/records-3618-incidents",
+    "number": 4047,
+    "title": "Records: incident linkage + stored performance aggregates (#3618 R-10/R-12)",
+    "url": "https://github.com/Uuriko/project-room/pull/4047"
+  },
+  {
+    "headRefName": "jill/board-slice-r-verify-gate",
+    "number": 4046,
+    "title": "fix(board): Verify render mirrors canCloseWork; reviews name their basis (#3885, #3889, #3887)",
+    "url": "https://github.com/Uuriko/project-room/pull/4046"
+  },
+  {
+    "headRefName": "jill/perf-p04-freeze-incremental",
+    "number": 4045,
+    "title": "perf(store): freezeJsonState incremental via a verified-frozen WeakSet (PERF-BUILDS P0-4)",
+    "url": "https://github.com/Uuriko/project-room/pull/4045"
+  },
+  {
+    "headRefName": "codex/metadata-warm-cache-1018",
+    "number": 4044,
+    "title": "Keep room projection cache warm across metadata commits",
+    "url": "https://github.com/Uuriko/project-room/pull/4044"
+  },
+  {
+    "headRefName": "jill/build-3612-record-stamps",
+    "number": 4043,
+    "title": "Records: stamp session-instance, principal, model/harness on consequential records (#3612)",
+    "url": "https://github.com/Uuriko/project-room/pull/4043"
+  },
+  {
+    "headRefName": "jill/perf-p02-metadata-memory",
+    "number": 4042,
+    "title": "perf(store): answer room metadata from memory (PERF-BUILDS P0-2)",
+    "url": "https://github.com/Uuriko/project-room/pull/4042"
+  },
+  {
+    "headRefName": "jill/records-3612-stamps",
+    "number": 4041,
+    "title": "Records: stamp session instance, authorizing principal, and claimed model/harness provenance (#3612)",
+    "url": "https://github.com/Uuriko/project-room/pull/4041"
+  },
+  {
+    "headRefName": "jill/fix-3924-rate-accounting",
+    "number": 4040,
+    "title": "fix(public-work): rate accounting \u2014 per-identity primary budget, per-IP admissions backstop (#3924)",
+    "url": "https://github.com/Uuriko/project-room/pull/4040"
+  },
+  {
+    "headRefName": "jill/build-3615-adverse-decision-packet",
+    "number": 4039,
+    "title": "Records: adverse-decision packet + agent-participation notices as records (#3615)",
+    "url": "https://github.com/Uuriko/project-room/pull/4039"
+  },
+  {
+    "headRefName": "jill/perf-p03-warm-projection",
+    "number": 4038,
+    "title": "perf(store): keep the projection cache warm across non-rooms commits (PERF-BUILDS P0-3)",
+    "url": "https://github.com/Uuriko/project-room/pull/4038"
+  },
+  {
+    "headRefName": "jill/build-3616-decision-rows",
+    "number": 4037,
+    "title": "Records: auditor-grade decision-row export + evidence-read logging (#3616)",
+    "url": "https://github.com/Uuriko/project-room/pull/4037"
+  },
+  {
+    "headRefName": "jill/perf-p01-rearm-gate",
+    "number": 4036,
+    "title": "perf(jobs): stop the per-request job scan (PERF-BUILDS P0-1, supersedes #3809)",
+    "url": "https://github.com/Uuriko/project-room/pull/4036"
+  },
+  {
+    "headRefName": "jill/build-3524b-pricing-guidance",
+    "number": 4035,
+    "title": "feat: bounty pricing guidance at post time from the room's settled receipts (#3524)",
+    "url": "https://github.com/Uuriko/project-room/pull/4035"
+  },
+  {
+    "headRefName": "jill/fix-3793-board-focus-residual",
+    "number": 4034,
+    "title": "fix(board): focus repair on the Close-button and refused-claim paths (#3793 residual)",
+    "url": "https://github.com/Uuriko/project-room/pull/4034"
+  },
+  {
+    "headRefName": "jill/audit50x-c07-status-leg",
+    "number": 4033,
+    "title": "C-07 STATUS-LEG: job-materialized main-HEAD cache \u2014 status route serves cache only, board paints without the leg",
+    "url": "https://github.com/Uuriko/project-room/pull/4033"
+  },
+  {
+    "headRefName": "jill/perf-p0-5-signin-options-worker",
+    "number": 4032,
+    "title": "P0-5: serve GET /api/auth/signin-options from the Worker (zero DO requests)",
+    "url": "https://github.com/Uuriko/project-room/pull/4032"
+  },
+  {
+    "headRefName": "p0-6-messages-archive",
+    "number": 4031,
+    "title": "P0-6: wire archiveRoomMessages \u2014 owner-only operator route + 70%-of-cap job (dry-run by default)",
+    "url": "https://github.com/Uuriko/project-room/pull/4031"
+  },
+  {
+    "headRefName": "jill/cd04-annotation-truth",
+    "number": 4030,
+    "title": "COMP-DEEP #4: MCP annotation truth pass",
+    "url": "https://github.com/Uuriko/project-room/pull/4030"
+  },
+  {
+    "headRefName": "codex/incremental-json-freeze-1018",
+    "number": 4029,
+    "title": "P0-4: reuse verified frozen JSON projection subtrees",
+    "url": "https://github.com/Uuriko/project-room/pull/4029"
+  },
+  {
+    "headRefName": "jill/fix-3594-lot-optin",
+    "number": 4028,
+    "title": "fix(receipts): settled lot receipts require the room's public-receipts opt-in (#3594)",
+    "url": "https://github.com/Uuriko/project-room/pull/4028"
+  },
+  {
+    "headRefName": "jill/audit50x-c06-room-digest",
+    "number": 4027,
+    "title": "feat(digest): server-side room digest + since-wake delta (C-06 ROOM-DIGEST)",
+    "url": "https://github.com/Uuriko/project-room/pull/4027"
+  },
+  {
+    "headRefName": "jill/fix-3948-inbox-cursor-walk",
+    "number": 4026,
+    "title": "fix(inbox): agent-inbox cursor walks ascending \u2014 bursts larger than the page are reachable (#3948)",
+    "url": "https://github.com/Uuriko/project-room/pull/4026"
+  },
+  {
+    "headRefName": "jill/cd06-follow-records",
+    "number": 4025,
+    "title": "COMP-DEEP #6: claim follow records with totals",
+    "url": "https://github.com/Uuriko/project-room/pull/4025"
+  },
+  {
+    "headRefName": "jill/records-3614-retention",
+    "number": 4024,
+    "title": "records: decision records retention class >=4y + legal hold, audit-retention floor (#3614)",
+    "url": "https://github.com/Uuriko/project-room/pull/4024"
+  },
+  {
+    "headRefName": "jill/c08-closeepoch-due-filter",
+    "number": 4023,
+    "title": "perf(escrow): closeEpoch due-filter \u2014 skip the isolated transaction for bounties that cannot act (AUDIT-50X X-06 / M-2)",
+    "url": "https://github.com/Uuriko/project-room/pull/4023"
+  },
+  {
+    "headRefName": "jill/cd01-verdict-inbox-server",
+    "number": 4022,
+    "title": "COMP-DEEP #1: verdict inbox \u2014 attention set + sectioned read (server)",
+    "url": "https://github.com/Uuriko/project-room/pull/4022"
+  },
+  {
+    "headRefName": "jill/cd01-verdict-inbox-ui",
+    "number": 4021,
+    "title": "COMP-DEEP #1: verdict inbox \u2014 human surface",
+    "url": "https://github.com/Uuriko/project-room/pull/4021"
+  },
+  {
+    "headRefName": "jill/fix-3962-genesis-on-ledger-read",
+    "number": 4020,
+    "title": "fix(escrow): served ledger reads provision outstanding genesis first (#3962)",
+    "url": "https://github.com/Uuriko/project-room/pull/4020"
+  },
+  {
+    "headRefName": "jill/c08-lot-state-index",
+    "number": 4019,
+    "title": "perf(escrow): journal lot_state index \u2014 balance SUMs stop scanning whole accounts (AUDIT-50X X-08 / M-4)",
+    "url": "https://github.com/Uuriko/project-room/pull/4019"
+  },
+  {
+    "headRefName": "jill/build-3755-reviewer-load",
+    "number": 4018,
+    "title": "Reviewer load (#3755): pending-review depth surface + less-loaded offering at delivery",
+    "url": "https://github.com/Uuriko/project-room/pull/4018"
+  },
+  {
+    "headRefName": "jill/steal-3524-pricing",
+    "number": 4017,
+    "title": "Bounty pricing guidance at post time from the room's own settled receipts (#3524)",
+    "url": "https://github.com/Uuriko/project-room/pull/4017"
+  },
+  {
+    "headRefName": "jill/steal-3523-replay",
+    "number": 4016,
+    "title": "feat(receipts): receipt replay front end \u2014 timeline first, proof one click deeper (#3523)",
+    "url": "https://github.com/Uuriko/project-room/pull/4016"
+  },
+  {
+    "headRefName": "build-3614-decision-retention",
+    "number": 4015,
+    "title": "feat(records): decision records get a >=4y legal-hold retention class (#3614)",
+    "url": "https://github.com/Uuriko/project-room/pull/4015"
+  },
+  {
+    "headRefName": "codex/request-live-control",
+    "number": 4014,
+    "title": "Stop stale agent execution promptly when a request changes",
+    "url": "https://github.com/Uuriko/project-room/pull/4014"
+  },
+  {
+    "headRefName": "jill/fix-3961-share-link-agent-copy",
+    "number": 4013,
+    "title": "fix(share-links): agent-facing copy states the access actually granted (#3961)",
+    "url": "https://github.com/Uuriko/project-room/pull/4013"
+  },
+  {
+    "headRefName": "jill/build-3613-criteria-outcomes",
+    "number": 4012,
+    "title": "Records: criteria-level outcomes beyond the bounty lane (#3613)",
+    "url": "https://github.com/Uuriko/project-room/pull/4012"
+  },
+  {
+    "headRefName": "jill/fix-3959-receipt-verdict-outcome-split",
+    "number": 4011,
+    "title": "fix(receipts): reconcile a PASS verdict with a rejected outcome on the receipt page (#3959)",
+    "url": "https://github.com/Uuriko/project-room/pull/4011"
+  },
+  {
+    "headRefName": "jill/build-3343-owner-money-roster",
+    "number": 4010,
+    "title": "Owner Cockpit slice 2: Money + Roster on /api/owner/overview (#3343)",
+    "url": "https://github.com/Uuriko/project-room/pull/4010"
+  },
+  {
+    "headRefName": "jill/fix-3967-board-record-focus",
+    "number": 4009,
+    "title": "fix(board): following a card's record link lands focus in the record (#3967)",
+    "url": "https://github.com/Uuriko/project-room/pull/4009"
+  },
+  {
+    "headRefName": "jill/build-3340-attention-badge",
+    "number": 4008,
+    "title": "Owner inbox #3340: account-home Needs Attention badge + per-room deep links from overview Decisions totals",
+    "url": "https://github.com/Uuriko/project-room/pull/4008"
+  },
+  {
+    "headRefName": "jill/fix-3796-join-dialog-focus",
+    "number": 4007,
+    "title": "fix(join): announce the post-sign-in name step, repair focus, trap Tab (#3796)",
+    "url": "https://github.com/Uuriko/project-room/pull/4007"
+  },
+  {
+    "headRefName": "jill/spec-3527-best-of-n",
+    "number": 4006,
+    "title": "docs: best-of-N bounty attempts spec (#3527)",
+    "url": "https://github.com/Uuriko/project-room/pull/4006"
+  },
+  {
+    "headRefName": "jill/fix-3794-created-link-owns-dialog",
+    "number": 4005,
+    "title": "fix(invite): a shown create result owns the dialog's URL (#3794)",
+    "url": "https://github.com/Uuriko/project-room/pull/4005"
+  },
+  {
+    "headRefName": "jill/fix-3740-board-human-note",
+    "number": 4004,
+    "title": "fix(offers): board-level statement that offers are agent-claimed (#3740)",
+    "url": "https://github.com/Uuriko/project-room/pull/4004"
+  },
+  {
+    "headRefName": "jill/fix-3881-webhook-dispatch-guest-seat",
+    "number": 4003,
+    "title": "fix(webhooks): dispatch honors guest (trial-seat) seating (#3881)",
+    "url": "https://github.com/Uuriko/project-room/pull/4003"
+  },
+  {
+    "headRefName": "jill/fix-3753-lease-review-pause",
+    "number": 4002,
+    "title": "fix(work-claims): lease never lapses while a review is outstanding (#3753)",
+    "url": "https://github.com/Uuriko/project-room/pull/4002"
+  },
+  {
+    "headRefName": "jill/fix-3307-dispute-bond-spec",
+    "number": 4001,
+    "title": "docs(escrow): dispute bond spec aligned to live exactly-25% rule (#3307) + true decide path (FS-13 F1)",
+    "url": "https://github.com/Uuriko/project-room/pull/4001"
+  },
+  {
+    "headRefName": "jill/econ-spec-3307",
+    "number": 3999,
+    "title": "#3307: dispute bond copy aligned to the implemented exactly-25% bond (comments/docs only)",
+    "url": "https://github.com/Uuriko/project-room/pull/3999"
+  },
+  {
+    "headRefName": "codex/signin-minimal",
+    "number": 3996,
+    "title": "Simplify sign-in and use invitation-link wording",
+    "url": "https://github.com/Uuriko/project-room/pull/3996"
+  },
+  {
+    "headRefName": "jill/first-shift-sponsor-cap",
+    "number": 3995,
+    "title": "COMP-DEEP #23: sponsor room cap at funding time (C1) + credit-exposure line (C2)",
+    "url": "https://github.com/Uuriko/project-room/pull/3995"
+  },
+  {
+    "headRefName": "codex/google-return-cookie",
+    "number": 3993,
+    "title": "Fix Google sign-in after cross-site account selection",
+    "url": "https://github.com/Uuriko/project-room/pull/3993"
+  },
+  {
+    "headRefName": "jill/fix-3957-front-door-signage",
+    "number": 3992,
+    "title": "fix(front-door): #3957 static hero signage \u2014 cold answers + /about and /docs/agents links",
+    "url": "https://github.com/Uuriko/project-room/pull/3992"
+  },
+  {
+    "headRefName": "jill/fix-3771-password-preservation",
+    "number": 3991,
+    "title": "fix(signin): #3771 preserve typed password across login/signup mode switch (F-12)",
+    "url": "https://github.com/Uuriko/project-room/pull/3991"
+  },
+  {
+    "headRefName": "jill/fix-3960-invite-verify-gate",
+    "number": 3990,
+    "title": "fix(invites): #3960 name the email-verification remedy; split share-link 422s per field",
+    "url": "https://github.com/Uuriko/project-room/pull/3990"
+  },
+  {
+    "headRefName": "jill/build-lean-mcp",
+    "number": 3986,
+    "title": "PERF-10X BUILD-LEAN: slim room_search_actions, lean-as-default MCP catalog, rev-skip (L5 iii)",
+    "url": "https://github.com/Uuriko/project-room/pull/3986"
+  },
+  {
+    "headRefName": "jill/fix-aeo-skill-money-copy",
+    "number": 3985,
+    "title": "fix(skill): SKILL.md money copy matches the shipped settlement reality (AEO)",
+    "url": "https://github.com/Uuriko/project-room/pull/3985"
+  },
+  {
+    "headRefName": "jill/fix-aeo-match-rewards",
+    "number": 3984,
+    "title": "fix(public-work): match declares and serves the reward classes the board serves (AEO drift)",
+    "url": "https://github.com/Uuriko/project-room/pull/3984"
+  },
+  {
+    "headRefName": "jill/fleet-methods-incident-evals",
+    "number": 3983,
+    "title": "test(evals): executable incident fixtures E1\u2013E6 from escaped composition defects",
+    "url": "https://github.com/Uuriko/project-room/pull/3983"
+  },
+  {
+    "headRefName": "codex/fo-join-form-carrier-1018",
+    "number": 3979,
+    "title": "fix: accept pasted human share links in the join form",
+    "url": "https://github.com/Uuriko/project-room/pull/3979"
+  },
+  {
+    "headRefName": "jill/fix-3968-receipt-publish-surface",
+    "number": 3978,
+    "title": "fix(receipts): the owner's publish toggle no longer snaps back on interaction (#3968)",
+    "url": "https://github.com/Uuriko/project-room/pull/3978"
+  },
+  {
+    "headRefName": "jill/fix-3949-invite-rerotation",
+    "number": 3977,
+    "title": "fix(invites): one-shot credential-less replay rotation per redemption receipt (#3949)",
+    "url": "https://github.com/Uuriko/project-room/pull/3977"
+  },
+  {
+    "headRefName": "jill/aeo-b7-agents-copy",
+    "number": 3974,
+    "title": "AEO B7: /agents copy \u2014 personal join link, not the parked referral token",
+    "url": "https://github.com/Uuriko/project-room/pull/3974"
+  },
+  {
+    "headRefName": "jill/freeze-prep-rollback-receipt",
+    "number": 3973,
+    "title": "Freeze-prep: rollback compatibility receipt (ee97df61\u219277df0e0b) + freeze-pair evidence/generator",
+    "url": "https://github.com/Uuriko/project-room/pull/3973"
+  },
+  {
+    "headRefName": "jill/aeo-b5-receipt-verification",
+    "number": 3972,
+    "title": "AEO B5: receipt verification explainer (/receipts) + detail link",
+    "url": "https://github.com/Uuriko/project-room/pull/3972"
+  },
+  {
+    "headRefName": "jill/aeo-b4-offers-settlement",
+    "number": 3970,
+    "title": "AEO B4: /offers SSR 'How paid work settles' passage",
+    "url": "https://github.com/Uuriko/project-room/pull/3970"
+  },
+  {
+    "headRefName": "jill/aeo-b3-mcp-page",
+    "number": 3969,
+    "title": "AEO B3+B6: /docs/agents/mcp subject page + docs OG/Twitter parity",
+    "url": "https://github.com/Uuriko/project-room/pull/3969"
+  },
+  {
+    "headRefName": "jill/aeo-b2-root-definition",
+    "number": 3966,
+    "title": "AEO B2: root definition block + SoftwareApplication JSON-LD",
+    "url": "https://github.com/Uuriko/project-room/pull/3966"
+  },
+  {
+    "headRefName": "jill/aeo-b1-llms-truth",
+    "number": 3965,
+    "title": "AEO B1+B8: funded-work truth in llms.txt/llms-full.txt/agent card, llms-full superset, robots AI crawlers",
+    "url": "https://github.com/Uuriko/project-room/pull/3965"
+  },
+  {
+    "headRefName": "codex/person-remove-carrier-1017",
+    "number": 3955,
+    "title": "Let owners remove people from People without closing the phone drawer",
+    "url": "https://github.com/Uuriko/project-room/pull/3955"
+  },
+  {
+    "headRefName": "jill/fix-3693-finalize-approved",
+    "number": 3952,
+    "title": "fix(escrow): finalizeBounty pays an approved bounty through the per-bounty door (#3693 residual)",
+    "url": "https://github.com/Uuriko/project-room/pull/3952"
+  },
+  {
+    "headRefName": "jill/removals-r2-r3-r27",
+    "number": 3951,
+    "title": "Remove dead owner-alerts dispatcher (R-2) and availablePublicTasks (R-3)",
+    "url": "https://github.com/Uuriko/project-room/pull/3951"
+  },
+  {
+    "headRefName": "grok/event-cursor-hint",
+    "number": 3936,
+    "title": "Events 422: tail/compact refusals get a hint about the value they name",
+    "url": "https://github.com/Uuriko/project-room/pull/3936"
+  },
+  {
+    "headRefName": "codex/basics-computer-use",
+    "number": 3933,
+    "title": "Connect shared work to native Mac setup, computer tools, and readiness",
+    "url": "https://github.com/Uuriko/project-room/pull/3933"
+  },
+  {
+    "headRefName": "claude/timeline-selection-skip",
+    "number": 3859,
+    "title": "Timeline: skip the selection read on arrivals when nothing is selected",
+    "url": "https://github.com/Uuriko/project-room/pull/3859"
+  },
+  {
+    "headRefName": "grok/cut-dead-reaction-storage",
+    "number": 3857,
+    "title": "Cut dead reaction storage, growth reaction mapping, and an unwired QA check",
+    "url": "https://github.com/Uuriko/project-room/pull/3857"
+  },
+  {
+    "headRefName": "claude/back-button",
+    "number": 3848,
+    "title": "Nav: Back after opening a message link returns to where you were",
+    "url": "https://github.com/Uuriko/project-room/pull/3848"
+  },
+  {
+    "headRefName": "claude/docs-font",
+    "number": 3846,
+    "title": "Login font 140 KB -> 4.6 KB; document short merge-slot leases and code drops",
+    "url": "https://github.com/Uuriko/project-room/pull/3846"
+  },
+  {
+    "headRefName": "claude/sent-mark-v2",
+    "number": 3845,
+    "title": "Composer: mark a landed send Sent when its response was lost (12609 a)",
+    "url": "https://github.com/Uuriko/project-room/pull/3845"
+  },
+  {
+    "headRefName": "jill/annot-t2-workof-guard",
+    "number": 3841,
+    "title": "WORKOF-GUARD: validate mapped rows in syncWorkItemClaim (#3465 parity, find:work-item-board-002)",
+    "url": "https://github.com/Uuriko/project-room/pull/3841"
+  },
+  {
+    "headRefName": "jill/annot-t4-vacuous-harden",
+    "number": 3840,
+    "title": "T-4 VACUOUS-HARDEN: gates that cannot fail, made able to fail (OPP-012)",
+    "url": "https://github.com/Uuriko/project-room/pull/3840"
+  },
+  {
+    "headRefName": "jill/annot-t1-members-sweep",
+    "number": 3839,
+    "title": "T-1 MEMBERS-SWEEP: raw members[ \u2192 ownMember burn-down (OPP-003, #3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3839"
+  },
+  {
+    "headRefName": "jill/annot-t6-dead-verdicts",
+    "number": 3838,
+    "title": "T-6 dead-verdicts: execute P-15 verdict batch (OPP-018, F-38/F-39)",
+    "url": "https://github.com/Uuriko/project-room/pull/3838"
+  },
+  {
+    "headRefName": "jill/annot-t5-registry-census",
+    "number": 3836,
+    "title": "Registry-closure census gate + writer-fence closure test (T-5 / OPP-015)",
+    "url": "https://github.com/Uuriko/project-room/pull/3836"
+  },
+  {
+    "headRefName": "jill/audit50x-c04-retention-tier",
+    "number": 3834,
+    "title": "Tier KV backup retention: 7 daily + 4 weekly + 3 monthly TTL classes (C-04)",
+    "url": "https://github.com/Uuriko/project-room/pull/3834"
+  },
+  {
+    "headRefName": "jill/audit50x-c02-relay-delete",
+    "number": 3833,
+    "title": "C-02 RELAY-DELETE: delete the undeployed relay/ Worker + relay.yml",
+    "url": "https://github.com/Uuriko/project-room/pull/3833"
+  },
+  {
+    "headRefName": "jill/audit50x-c01-orient-fix",
+    "number": 3832,
+    "title": "fix(context): stop embedding orient in HTTP context responses (C-01 ORIENT-FIX)",
+    "url": "https://github.com/Uuriko/project-room/pull/3832"
+  },
+  {
+    "headRefName": "jill/perf-backup-gzip",
+    "number": 3821,
+    "title": "Backup gzip transport + per-table byte tally in export trailer (PERF-10X CALL 1)",
+    "url": "https://github.com/Uuriko/project-room/pull/3821"
+  },
+  {
+    "headRefName": "jill/perf-idx-json",
+    "number": 3820,
+    "title": "PERF-10X L1 (schema v39): VIRTUAL generated columns + indexes for the hot event fields",
+    "url": "https://github.com/Uuriko/project-room/pull/3820"
+  },
+  {
+    "headRefName": "jill/fix-knownmember-ownmember",
+    "number": 3818,
+    "title": "fix(reviews): knownMember through ownMember \u2014 prototype ids cannot pass the membership gate (F-22)",
+    "url": "https://github.com/Uuriko/project-room/pull/3818"
+  },
+  {
+    "headRefName": "fix/cf-checks-wiring",
+    "number": 3817,
+    "title": "fix(cloudflare): wire orphaned checks (code-drops, room-export, restore-fk-order) + registry closure guard (F-27)",
+    "url": "https://github.com/Uuriko/project-room/pull/3817"
+  },
+  {
+    "headRefName": "jill/perf-ci-weights",
+    "number": 3815,
+    "title": "perf(ci): refresh unit shard durations from hosted receipts (+ durations-refresh workflow in annex)",
+    "url": "https://github.com/Uuriko/project-room/pull/3815"
+  },
+  {
+    "headRefName": "jill/perf-gateparity",
+    "number": 3812,
+    "title": "verify:pr \u2014 local/hosted gate parity in one command (PERF-10X L14)",
+    "url": "https://github.com/Uuriko/project-room/pull/3812"
+  },
+  {
+    "headRefName": "jill/perf-reseed-memo",
+    "number": 3811,
+    "title": "Memoize public-work reseed gate per DO wake (PERF-10X L11)",
+    "url": "https://github.com/Uuriko/project-room/pull/3811"
+  },
+  {
+    "headRefName": "jill/perf-pumpfix",
+    "number": 3810,
+    "title": "perf(sse): skip and cache the stream pump's redaction view (PERF-10X L12 / CALL 4)",
+    "url": "https://github.com/Uuriko/project-room/pull/3810"
+  },
+  {
+    "headRefName": "jill/perf-alarmtail",
+    "number": 3809,
+    "title": "perf(jobs): arm already-due explicit jobs at ~now, not +60 s (PERF-10X L12 / Lane 8 C4)",
+    "url": "https://github.com/Uuriko/project-room/pull/3809"
+  },
+  {
+    "headRefName": "jill/perf-lotidx",
+    "number": 3804,
+    "title": "perf(reads): lot index, proof-page SQL LIMIT, sitemap batch (PERF-10X L13)",
+    "url": "https://github.com/Uuriko/project-room/pull/3804"
+  },
+  {
+    "headRefName": "jill/fix-3697-session-idempotency-fingerprint",
+    "number": 3752,
+    "title": "fix(sessions): work-session idempotency matcher covers usage figures and budget (#3697)",
+    "url": "https://github.com/Uuriko/project-room/pull/3752"
+  },
+  {
+    "headRefName": "jill/fix-3705-directory-receipt-count",
+    "number": 3751,
+    "title": "fix(directory): receipt_count credits only visible receipts, matched by identity not display name (#3705)",
+    "url": "https://github.com/Uuriko/project-room/pull/3751"
+  },
+  {
+    "headRefName": "jill/fix-3694-channels-prototype",
+    "number": 3748,
+    "title": "fix(events): resolve channels through an own-key helper (#3694)",
+    "url": "https://github.com/Uuriko/project-room/pull/3748"
+  },
+  {
+    "headRefName": "jill/fix-3650-invalid-public-work-fields",
+    "number": 3738,
+    "title": "Name the refused fields in every invalid_public_work 422 (#3650)",
+    "url": "https://github.com/Uuriko/project-room/pull/3738"
+  },
+  {
+    "headRefName": "jill/build-3649-claimable-truth",
+    "number": 3737,
+    "title": "fix(public-work): board claimability accounts for live path fences (#3649)",
+    "url": "https://github.com/Uuriko/project-room/pull/3737"
+  },
+  {
+    "headRefName": "jill/fix-3713-ready-queue-premise",
+    "number": 3735,
+    "title": "Ready queue applies the AvailableWork eligibility rule (#3713)",
+    "url": "https://github.com/Uuriko/project-room/pull/3735"
+  },
+  {
+    "headRefName": "jill/fix-3711-projection-lease",
+    "number": 3734,
+    "title": "fix(board): stop projecting lapsed work-item leases onto board rows (#3711)",
+    "url": "https://github.com/Uuriko/project-room/pull/3734"
+  },
+  {
+    "headRefName": "jill/fix-3640-llms-polling",
+    "number": 3730,
+    "title": "docs(wake): correct the packet's polling-without-hostId claim (#3640)",
+    "url": "https://github.com/Uuriko/project-room/pull/3730"
+  },
+  {
+    "headRefName": "jill/exp5-receipts-wild-share",
+    "number": 3724,
+    "title": "EXP-5 PR2: receipt share block, embeddable verdict badge, proof-page share parity",
+    "url": "https://github.com/Uuriko/project-room/pull/3724"
+  },
+  {
+    "headRefName": "jill/b4prime-slice3-readers",
+    "number": 3714,
+    "title": "feat(board): brief readers resolve definitionOfDone + mode board-first (B-4' Phase 0 slice 3b)",
+    "url": "https://github.com/Uuriko/project-room/pull/3714"
+  },
+  {
+    "headRefName": "jill/hunt-docs-cold-tools",
+    "number": 3696,
+    "title": "docs(cold walkthrough): seven public MCP tools, and rotate needs {confirm:true}",
+    "url": "https://github.com/Uuriko/project-room/pull/3696"
+  },
+  {
+    "headRefName": "jill/build-status-surface-2",
+    "number": 3695,
+    "title": "Operator status surface (2/4): integrity, backup, board, behaviour tiles",
+    "url": "https://github.com/Uuriko/project-room/pull/3695"
+  },
+  {
+    "headRefName": "jill/build-status-surface-4",
+    "number": 3692,
+    "title": "Operator status surface (4/4): console Deployment status section",
+    "url": "https://github.com/Uuriko/project-room/pull/3692"
+  },
+  {
+    "headRefName": "jill/fix-3606-board-pagination",
+    "number": 3691,
+    "title": "fix(public-work): versioned walk cursor \u2014 board pagination exactly-once under mid-walk claims (#3606)",
+    "url": "https://github.com/Uuriko/project-room/pull/3691"
+  },
+  {
+    "headRefName": "jill/hunt-docs-quickstart-accountable",
+    "number": 3690,
+    "title": "docs(quickstart): name the accountable-member rule for work.completed",
+    "url": "https://github.com/Uuriko/project-room/pull/3690"
+  },
+  {
+    "headRefName": "jill/error-census-human",
+    "number": 3665,
+    "title": "Human error copy: dedicated strings for 5 fragment-copy codes (census F-1)",
+    "url": "https://github.com/Uuriko/project-room/pull/3665"
+  },
+  {
+    "headRefName": "jill/fix-3592-cadence-wakeability",
+    "number": 3663,
+    "title": "fix(wake): cadence-aware wakeability window (#3592)",
+    "url": "https://github.com/Uuriko/project-room/pull/3663"
+  },
+  {
+    "headRefName": "jill/shopper-feature",
+    "number": 3662,
+    "title": "Mystery Shopper prototype: shopper-report/1 schema + cold-door runner (#3660)",
+    "url": "https://github.com/Uuriko/project-room/pull/3662"
+  },
+  {
+    "headRefName": "jill/build-status-surface-3",
+    "number": 3657,
+    "title": "Operator status surface (3/4): Worker providers \u2014 heartbeat + backup measurement",
+    "url": "https://github.com/Uuriko/project-room/pull/3657"
+  },
+  {
+    "headRefName": "jill/b4prime-slice3-brief",
+    "number": 3652,
+    "title": "feat(board): brief carriage - definitionOfDone + mode on work-claim rows (B-4' Phase 0 slice 3a)",
+    "url": "https://github.com/Uuriko/project-room/pull/3652"
+  },
+  {
+    "headRefName": "jill/exp1-discovery-metadata",
+    "number": 3647,
+    "title": "Discovery metadata: MCP Registry description names the work loop (server.json 1.1.1) + README registry link",
+    "url": "https://github.com/Uuriko/project-room/pull/3647"
+  },
+  {
+    "headRefName": "jill/build-status-surface",
+    "number": 3646,
+    "title": "Operator status surface (1/3): composed deployment + jobs read",
+    "url": "https://github.com/Uuriko/project-room/pull/3646"
+  },
+  {
+    "headRefName": "jill/fix-3591-escrow-race",
+    "number": 3645,
+    "title": "Fix #3591: self-finalizing bounty escrow entry points (deadline/challenge race)",
+    "url": "https://github.com/Uuriko/project-room/pull/3645"
+  },
+  {
+    "headRefName": "jill/error-census-ax",
+    "number": 3643,
+    "title": "Agent errors: operator-directed recoveries for config codes + catalog invalid_proof_query (census F-3/F-4)",
+    "url": "https://github.com/Uuriko/project-room/pull/3643"
+  },
+  {
+    "headRefName": "jill/b4prime-slice4-accountable",
+    "number": 3641,
+    "title": "feat(board): accountableMemberId on work-claim rows (B-4' Phase 0 slice 4)",
+    "url": "https://github.com/Uuriko/project-room/pull/3641"
+  },
+  {
+    "headRefName": "jill/fix-3579-sharp-align",
+    "number": 3638,
+    "title": "fix(supply-chain): align sharp override at 0.35.5; pin runbook wrangler (#3579)",
+    "url": "https://github.com/Uuriko/project-room/pull/3638"
+  },
+  {
+    "headRefName": "jill/gameday-dr-runbook",
+    "number": 3632,
+    "title": "docs: DR restore runbook from the 2026-10-15 game day (measured RTO ~60s) + BACKUP-DR corrections",
+    "url": "https://github.com/Uuriko/project-room/pull/3632"
+  },
+  {
+    "headRefName": "jill/error-census",
+    "number": 3630,
+    "title": "MCP 500 copy: kill 'Request could not be completed' (error census F-2)",
+    "url": "https://github.com/Uuriko/project-room/pull/3630"
+  },
+  {
+    "headRefName": "jill/b4prime-slice2-decision-fields",
+    "number": 3629,
+    "title": "feat(board): decision-gate fields on work-claim rows (B-4' Phase 0 slice 2)",
+    "url": "https://github.com/Uuriko/project-room/pull/3629"
+  },
+  {
+    "headRefName": "jill/fix-3585-r2-guard",
+    "number": 3622,
+    "title": "Guard the R2 backup target until it is restorable (#3585)",
+    "url": "https://github.com/Uuriko/project-room/pull/3622"
+  },
+  {
+    "headRefName": "jill/fix-deletion-public-teardown",
+    "number": 3621,
+    "title": "fix(account-deletion): tear down a sole-owned room's public footprint on deletion",
+    "url": "https://github.com/Uuriko/project-room/pull/3621"
+  },
+  {
+    "headRefName": "jill/fix-feedback-scrub-first-party",
+    "number": 3620,
+    "title": "fix(feedback): redact first-party credential prefixes (pri_/rak_/ga1.) at intake",
+    "url": "https://github.com/Uuriko/project-room/pull/3620"
+  },
+  {
+    "headRefName": "jill/hunt-ux-board-error-copy",
+    "number": 3611,
+    "title": "Board actions: unconfirmed-outcome copy on transport failure (fixes #3596)",
+    "url": "https://github.com/Uuriko/project-room/pull/3611"
+  },
+  {
+    "headRefName": "jill/fix-3577-skill-installer",
+    "number": 3604,
+    "title": "fix(supply-chain): skill installer copies from the checkout, never fetches from main (#3577)",
+    "url": "https://github.com/Uuriko/project-room/pull/3604"
+  },
+  {
+    "headRefName": "jill/3224-members-slice6-sharelinks",
+    "number": 3600,
+    "title": "refactor(members): ownMember migration slice 6 \u2014 share-links (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3600"
+  },
+  {
+    "headRefName": "jill/hunt-chaos-instance-lock",
+    "number": 3593,
+    "title": "fix(boot): instance lock binds holder identity (pid + start ticks) \u2014 reused pid no longer wedges boot (#3584)",
+    "url": "https://github.com/Uuriko/project-room/pull/3593"
+  },
+  {
+    "headRefName": "jill/attention-owner-alerts",
+    "number": 3590,
+    "title": "feat(attention): wire owner-alerts (O2) as the escalation engine (B-3 step 3 PR4)",
+    "url": "https://github.com/Uuriko/project-room/pull/3590"
+  },
+  {
+    "headRefName": "jill/3224-members-slice3-work",
+    "number": 3586,
+    "title": "refactor(members): ownMember migration slice 3 \u2014 work surfaces (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3586"
+  },
+  {
+    "headRefName": "jill/3224-members-slice4-money",
+    "number": 3582,
+    "title": "refactor(members): ownMember migration slice 4 \u2014 money/public surfaces (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3582"
+  },
+  {
+    "headRefName": "jill/3224-members-slice5-tail",
+    "number": 3580,
+    "title": "refactor(members): ownMember migration slice 5 \u2014 comms/identity tail (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3580"
+  },
+  {
+    "headRefName": "jill/attention-aging-families",
+    "number": 3575,
+    "title": "refactor(attention): bonds + bounty clocks read the aging doctrine (B-3 step 2 PR2)",
+    "url": "https://github.com/Uuriko/project-room/pull/3575"
+  },
+  {
+    "headRefName": "jill/attention-decision-push",
+    "number": 3574,
+    "title": "feat(push): decision push class for decision asks (B-3 step 3, E63)",
+    "url": "https://github.com/Uuriko/project-room/pull/3574"
+  },
+  {
+    "headRefName": "jill/attention-aging-doctrine",
+    "number": 3573,
+    "title": "feat(attention): one aging doctrine + scheduled access-request expiry (B-3 step 2 PR1)",
+    "url": "https://github.com/Uuriko/project-room/pull/3573"
+  },
+  {
+    "headRefName": "jill/availwork-pr3-exceptions",
+    "number": 3571,
+    "title": "AvailableWork true (B-2 PR3): named exceptions \u2014 opportunities + room matchmaking, documented and pinned",
+    "url": "https://github.com/Uuriko/project-room/pull/3571"
+  },
+  {
+    "headRefName": "jill/availwork-pr4-match-window",
+    "number": 3569,
+    "title": "AvailableWork true (B-2 PR4): matcher candidate window reads through the projection",
+    "url": "https://github.com/Uuriko/project-room/pull/3569"
+  },
+  {
+    "headRefName": "jill/3224-members-slice2-store",
+    "number": 3568,
+    "title": "refactor(members): ownMember migration slice 2 \u2014 store core (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3568"
+  },
+  {
+    "headRefName": "jill/3224-members-slice1-joining",
+    "number": 3564,
+    "title": "refactor(members): ownMember migration slice 1 \u2014 joining/authz paths (#3224)",
+    "url": "https://github.com/Uuriko/project-room/pull/3564"
+  },
+  {
+    "headRefName": "jill/availwork-pr2-public-arm",
+    "number": 3563,
+    "title": "AvailableWork true (B-2 PR2): public arm wired in \u2014 claimable read served through the projection",
+    "url": "https://github.com/Uuriko/project-room/pull/3563"
+  },
+  {
+    "headRefName": "jill/availwork-pr1-projection-fields",
+    "number": 3562,
+    "title": "AvailableWork true (B-2 PR1): projection fields for ranking consumers",
+    "url": "https://github.com/Uuriko/project-room/pull/3562"
+  },
+  {
+    "headRefName": "jill/fix-3545-claim-fencing",
+    "number": 3556,
+    "title": "Fence core work claims: claimGeneration round token + state-machine lease enforcement",
+    "url": "https://github.com/Uuriko/project-room/pull/3556"
+  },
+  {
+    "headRefName": "codex/read-updates-1015",
+    "number": 3507,
+    "title": "fix: label read Updates accurately",
+    "url": "https://github.com/Uuriko/project-room/pull/3507"
+  },
+  {
+    "headRefName": "codex/predictable-agent-request-1015",
+    "number": 3506,
+    "title": "Simplify conversation chrome and make first Room requests dependable",
+    "url": "https://github.com/Uuriko/project-room/pull/3506"
+  },
+  {
+    "headRefName": "dependabot/github_actions/astral-sh/setup-uv-10.3.0",
+    "number": 3400,
+    "title": "build(deps): bump astral-sh/setup-uv from 6.8.0 to 10.3.0",
+    "url": "https://github.com/Uuriko/project-room/pull/3400"
+  },
+  {
+    "headRefName": "dependabot/github_actions/actions/checkout-7.0.1",
+    "number": 3399,
+    "title": "chore(deps): bump actions/checkout from 4.4.0 to 7.0.1",
+    "url": "https://github.com/Uuriko/project-room/pull/3399"
+  },
+  {
+    "headRefName": "dependabot/github_actions/actions/download-artifact-8.0.2",
+    "number": 3398,
+    "title": "build(deps): bump actions/download-artifact from 4.3.0 to 8.0.2",
+    "url": "https://github.com/Uuriko/project-room/pull/3398"
+  },
+  {
+    "headRefName": "dependabot/github_actions/actions/upload-artifact-7.0.2",
+    "number": 3397,
+    "title": "chore(deps): bump actions/upload-artifact from 4.6.2 to 7.0.2",
+    "url": "https://github.com/Uuriko/project-room/pull/3397"
+  },
+  {
+    "headRefName": "dependabot/github_actions/actions/cache-6.1.0",
+    "number": 3396,
+    "title": "build(deps): bump actions/cache from 4.2.3 to 6.1.0",
+    "url": "https://github.com/Uuriko/project-room/pull/3396"
+  },
+  {
+    "headRefName": "dependabot/npm_and_yarn/relay/minor-and-patch-fa89ca5a2d",
+    "number": 3395,
+    "title": "build(deps-dev): bump the minor-and-patch group across 1 directory with 2 updates",
+    "url": "https://github.com/Uuriko/project-room/pull/3395"
+  },
+  {
+    "headRefName": "dependabot/npm_and_yarn/minor-and-patch-fa7620eb98",
+    "number": 3394,
+    "title": "build(deps-dev): bump the minor-and-patch group across 1 directory with 4 updates",
+    "url": "https://github.com/Uuriko/project-room/pull/3394"
+  },
+  {
+    "headRefName": "dependabot/npm_and_yarn/cloudflare/minor-and-patch-d746ffe52c",
+    "number": 3393,
+    "title": "build(deps-dev): bump wrangler from 4.116.0 to 4.149.0 in /cloudflare in the minor-and-patch group across 1 directory",
+    "url": "https://github.com/Uuriko/project-room/pull/3393"
+  },
+  {
+    "headRefName": "codex/backup-large-row-20261008",
+    "number": 2104,
+    "title": "Bound oversized KV backup rows and preserve exact bytes",
+    "url": "https://github.com/Uuriko/project-room/pull/2104"
+  },
+  {
+    "headRefName": "codex/conversation-reliability-20261008",
+    "number": 2006,
+    "title": "Keep attachment drafts and retries reliable; add Enter preference",
+    "url": "https://github.com/Uuriko/project-room/pull/2006"
+  },
+  {
+    "headRefName": "codex/human-experience-plan-20261008",
+    "number": 2003,
+    "title": "Reduce human composer bulk and prioritize the experience backlog",
+    "url": "https://github.com/Uuriko/project-room/pull/2003"
+  },
+  {
+    "headRefName": "codex/audit-release-repairs-20261007",
+    "number": 1791,
+    "title": "Fix push opt-out recovery and trace workflow review handoff",
+    "url": "https://github.com/Uuriko/project-room/pull/1791"
+  }
+]

@@ -2,9 +2,13 @@
 // strangers, slow connections and crawlers — not an empty "Connecting to
 // room service…" shell. The contracts, in priority order:
 //
-// 1. A no-JS fetch sees only the wordmark and an enable-JavaScript message.
+// 1. A no-JS fetch sees the wordmark, the citable definition block (AEO
+//    Lane 3, 2026-10-17: the /about definition passage, server-rendered so
+//    crawlers and answer engines can quote the root page) and an
+//    enable-JavaScript message.
 // 2. Link-preview crawlers get OG/Twitter metadata.
-// 3. The landing has no educational links or invite pitch.
+// 3. The landing hero has no entry links or invite pitch (the definition
+//    is prose only).
 // 4. The hero says plainly that the live room needs JavaScript, via <noscript>.
 // 5. Real browser acceptance owns removal on boot and visible sign-in actions.
 //
@@ -19,12 +23,26 @@ import { fileURLToPath } from "node:url";
 
 const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
 
-test("the no-JS shell is a minimal wordmark and enable message", () => {
+test("the no-JS shell is the wordmark, the definition block and the enable message", () => {
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
   assert.match(hero, /PROJECT ROOM/);
+  assert.match(hero, /Project Room is a shared room where people and AI agents work together\./, "citable definition from /about");
+  assert.match(hero, /every finished result ends in a receipt/, "receipt outcome stated");
+  assert.match(hero, /public when the room's owner chooses to publish it/, "receipts are public only by the owner's choice (#3594)");
+  assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
+  assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
-  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 2, "only wordmark and JavaScript guidance");
+  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
   assert.ok(!/<a[ >]|<button[ >]/.test(hero), "no extra entry links or actions");
+});
+
+test("the root carries SoftwareApplication JSON-LD and a claim-shaped description", () => {
+  const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(match => JSON.parse(match[1]));
+  const app = blocks.find(block => block["@type"] === "SoftwareApplication");
+  assert.ok(app, "SoftwareApplication JSON-LD present");
+  assert.equal(app.name, "Project Room");
+  assert.equal(app.url, "https://room.trydemigod.com/");
+  assert.ok(!html.includes("hang out"), "the vague hang-out description is gone");
 });
 
 test("link-preview metadata is present", () => {

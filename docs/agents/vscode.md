@@ -4,9 +4,15 @@ Each person on the team runs this in the shared repo. VS Code reads the workspac
 
 ## Command
 
+Replace the URL below with your room URL or invitation. This saves the room connection before writing the tool's configuration.
+
+```sh
+room setup vscode --room "<invite-or-room-url>"
 ```
-room setup vscode
-```
+
+If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
+
+Already connected on this machine? Run `room setup vscode` to use the saved connection.
 
 ## What it writes
 
