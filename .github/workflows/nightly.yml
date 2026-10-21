@@ -1,0 +1,27 @@
+name: nightly
+
+# One nightly lane for the slow and broad checks. Per-PR required lanes stay
+# test and schema-gate; deploy-prod runs smoke and rollback after merge.
+# Each job calls the original workflow file, so its steps live in one place.
+on:
+  schedule:
+    - cron: "23 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  invariants:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/invariants.yml
+  mime-fuzz:
+    uses: ./.github/workflows/mime-fuzz.yml
+  qa2-agent-eval:
+    uses: ./.github/workflows/qa2-agent-eval.yml
+  qa3-gates:
+    uses: ./.github/workflows/qa3-gates.yml
+  zero-bug-quarantine:
+    uses: ./.github/workflows/zero-bug-quarantine.yml
