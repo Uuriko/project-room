@@ -8,7 +8,8 @@
 // corrections per skill, vague corrections rejected, new corrections start
 // as proposals and activate when the skill author confirms or another person
 // repeats the same correction. An agent may relay a correction, but it stays
-// a proposal until a person confirms it. Nothing is deleted automatically.
+// a proposal until a person confirms it. Nothing is deleted automatically;
+// only a skill's author deletes it.
 //
 // Pure, in-memory, deterministic; clock and ids injected.
 import { randomUUID } from "node:crypto";
@@ -130,6 +131,14 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
     return view(s);
   }
 
+  // The author removes their own skill, corrections and run count with it.
+  function remove(skillId, { by }) {
+    const s = get(skillId);
+    check(who(by, "by").id === s.author.id, "skill_forbidden", "Only the skill author deletes a skill.");
+    skills.delete(skillId);
+    return Object.freeze({ skillId, name: s.name, deleted: true });
+  }
+
   // Most-used first, the way a team discovers what works.
   function list() {
     return Object.freeze([...skills.values()].sort((a, b) => b.runCount - a.runCount || a.name.localeCompare(b.name)).map(view));
@@ -138,5 +147,5 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
   // Plain rows for persistence; feed back through { initial }.
   function snapshot() { return [...skills.values()].map(s => structuredClone(s)); }
 
-  return Object.freeze({ save, find, run, brief, correct, confirm, retire, list, snapshot, get: id_ => view(get(id_)) });
+  return Object.freeze({ save, find, run, brief, correct, confirm, retire, remove, list, snapshot, get: id_ => view(get(id_)) });
 }

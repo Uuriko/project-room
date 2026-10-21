@@ -1256,10 +1256,10 @@
       }
     },
     "team_skill": {
-      "inputSchema": "9b5ce8c38eda1b43",
+      "inputSchema": "8aa46baa10b79355",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": false
       }

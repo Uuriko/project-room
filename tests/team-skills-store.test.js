@@ -92,5 +92,28 @@ test("room_search_actions finds team_skill with its exact schema", async () => {
   const { searchActions } = await import("../server/mcp-action-search.mjs");
   const found = searchActions("run team skill");
   assert.equal(found.matches[0].name, "team_skill");
-  assert.deepEqual(found.matches[0].inputSchema.properties.action.enum, ["list", "save", "run", "correct"]);
+  assert.deepEqual(found.matches[0].inputSchema.properties.action.enum, ["list", "save", "run", "correct", "delete"]);
+});
+
+test("only the author deletes a skill, and the row is gone after reopen", t => {
+  const file = temp(t);
+  let db = open(file);
+  const store = new TeamSkillsStore(db);
+  store.save("r", { name: "Agent skill", instructions: "x", author: codex });
+  store.save("r", { name: "GTM skill", instructions: "y", author: douglas });
+  assert.throws(() => callSkillTool(db, "r", codex, "team_skill", { action: "delete", skill: "GTM skill" }), { code: "skill_forbidden", status: 403 });
+  const out = callSkillTool(db, "r", codex, "team_skill", { action: "delete", skill: "Agent skill" });
+  assert.equal(out.deleted, true);
+  assert.throws(() => callSkillTool(db, "r", codex, "team_skill", { action: "delete", skill: "Agent skill" }), { code: "skill_not_found", status: 404 });
+  db.close();
+  db = open(file, false);
+  assert.deepEqual(new TeamSkillsStore(db).list("r").map(s => s.name), ["GTM skill"]);
+  db.close();
+});
+
+test("list is a read and delete is a write", () => {
+  assert.equal(skillToolIsWrite("team_skill", { action: "list" }), false);
+  assert.equal(skillToolIsWrite("team_skill", { action: "delete", skill: "x" }), true);
+  assert.equal(validSkillToolArguments("team_skill", { action: "delete" }), false);
+  assert.equal(validSkillToolArguments("team_skill", { action: "delete", skill: "x" }), true);
 });
