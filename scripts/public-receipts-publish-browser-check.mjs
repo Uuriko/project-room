@@ -143,14 +143,15 @@ test("the same Settings toggle controls a paid lot receipt's public visibility",
     }
   };
 
-  // Never recorded: the settled lot is served (the recorded-off-only rule).
-  // Lot receipts are composed at read time from the journal and served by
-  // id — they are never stored rows, so the /receipts list (stored rows
-  // only, server/public-read-model.mjs) cannot list them; the toggle's
-  // control over a lot is its public visibility, proven here by id.
-  assert.equal(await lotStatus(), 200);
-  const lotPage = await (await fetch(`${origin}/receipts/${lotId}`)).text();
-  assert.ok(lotPage.includes("Paid lot gallery proof"), "the lot detail page names the bounty");
+  // Never recorded: the settled lot stays private. Since #3594 a settled
+  // lot is public only with the owner's recorded opt-in
+  // (server/public-visibility.mjs): never-recorded, recorded-off, and
+  // unreadable all keep the lot private (404). Lot receipts are composed
+  // at read time from the journal and served by id — they are never
+  // stored rows, so the /receipts list (stored rows only,
+  // server/public-read-model.mjs) cannot list them; the toggle's control
+  // over a lot is its public visibility, proven here by id.
+  assert.equal(await lotStatus(), 404, "never recorded keeps the settled lot private");
 
   await page.goto(origin + "/?room=commons");
   await signInFixture(page, ownerKey);
@@ -159,13 +160,17 @@ test("the same Settings toggle controls a paid lot receipt's public visibility",
   const box = page.locator("#public-receipts-toggle");
   await box.waitFor({ state: "visible" });
 
-  // Record ON, then OFF: the recorded off hides the paid lot everywhere.
+  // Record ON: the settled lot is served through the public read and its
+  // page names the bounty. Then OFF: the recorded off hides it again.
   // (Re-focus before each press: the busy-disable drops focus from the
   // box after a flight — the focus-retention pattern is the #3793 family;
   // a keyboard user tabs back to the control to flip it again.)
   await box.focus(); await page.keyboard.press("Space");
   await waitRecorded(true);
   assert.equal(await page.evaluate(() => document.querySelector("#public-receipts-toggle")?.checked), true);
+  assert.equal(await lotStatus(), 200, "recorded on serves the paid lot receipt");
+  const lotPage = await (await fetch(`${origin}/receipts/${lotId}`)).text();
+  assert.ok(lotPage.includes("Paid lot gallery proof"), "the lot detail page names the bounty");
   await box.focus(); await page.keyboard.press("Space");
   await waitRecorded(false);
   assert.equal(await lotStatus(), 404, "recorded off hides the paid lot receipt");
