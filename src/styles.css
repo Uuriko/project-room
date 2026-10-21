@@ -1513,7 +1513,10 @@ summary { overflow-wrap: anywhere; }
 .auth-panel > * { min-width: 0; max-width: 100%; }
 
 /* A direct result visit omits unrelated administration without duplicating state. */
+#settings-dialog.results-only > :not(.dialog-head):not(#results-panel) { display: none; }
 
+#settings-dialog.results-only #results-panel > summary { display: none; }
+#settings-dialog.results-only #results-panel { border: 0; padding: 0; }
 
 /* A recovery hint appears only when recorded worker progress needs attention. */
 .work-recovery { border-left: 3px solid var(--muted); padding: .5rem .75rem; margin: .75rem 0; }
@@ -1784,35 +1787,17 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 
 #signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
 
-/* Preview is part of the workspace, never a modal over the conversation. */
-.result-header { display: flex; align-items: center; gap: var(--space-2); position: sticky; top: 0; background: var(--panel); padding-block: var(--space-2); z-index: 2; }
-.result-header h2 { flex: 1; min-width: 0; margin: 0; font-size: var(--text-md); overflow-wrap: anywhere; }
-.result-header #close-result { flex: 0 0 auto; min-width: 36px; min-height: 36px; padding: var(--space-1); }
-#result-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; cursor: col-resize; touch-action: none; z-index: 3; }
-#result-resize:hover, #result-resize:focus-visible { background: var(--blue); outline-offset: -2px; }
-.preview-resizing { cursor: col-resize; user-select: none; }
-.inline-result .portable-actions .button { min-height: 32px; padding: var(--space-1) var(--space-2); background: transparent; border-color: transparent; }
+.result-row:has(> .inline-result:not([hidden])) > button[data-read-result],
+.result-row:has(> .inline-result:not([hidden])) > p,
+.result-row:has(> .inline-result:not([hidden])) > .result-meta { display: none; }
+.result-row > .inline-result { border: 0; padding: 0; margin: 0; background: transparent; }
+#room-results-list:has(.inline-result:not([hidden])) > .result-row:not(:has(.inline-result:not([hidden]))) { display: none; }
+#room-results-list > .result-row:has(.inline-result:not([hidden])) { border: 0; padding-block: 0; }
+
+/* One pinned result beside the conversation; the mobile reader stays contextual. */
 @media (min-width: 1100px) {
-  .community-shell:has(> .result-docked:not([hidden])) { grid-template-columns: 12rem minmax(0, 1fr) var(--result-width, 340px); }
-  #main > .result-docked { position: relative; grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; overflow: visible; margin: 0; padding: var(--space-3); border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--panel); display: flex; flex-direction: column; }
-  #main > .result-docked[hidden] { display: none; }
-  #main > .result-docked #result-body { max-height: none; border: 0; padding: 0; min-height: 0; overflow: auto; flex: 1; }
-  #main > .result-docked .portable-actions { flex-shrink: 0; }
+  .community-shell:has(> .result-docked:not([hidden])) { grid-template-columns: 12rem minmax(0, 1fr) minmax(20rem, .85fr); }
+  #main > .result-docked { grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; overflow: auto; margin: 0; padding: var(--space-5); border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--panel); }
+  #main > .result-docked #result-body { max-height: none; border: 0; padding: 0; }
+  #main > .result-docked .portable-actions { position: sticky; bottom: 0; padding-block: var(--space-3); background: var(--panel); }
 }
-
-/* "aside:" from a human: a side remark that wakes no agent. Quieter, not hidden. */
-.message.aside .message-body { opacity: 0.72; font-style: italic; }
-@media (max-width: 1099px) {
-  #main:has(> .result-mobile:not([hidden])) { display: block; }
-  #main:has(> .result-mobile:not([hidden])) > :not(.result-mobile) { display: none; }
-  #main > .result-mobile { margin: 0; height: 100%; overflow: auto; border: 0; border-radius: 0; }
-  .result-mobile .result-header { flex-wrap: wrap; }
-  .result-mobile #close-result { min-height: 44px; }
-}
-
-.result-options { position: relative; }
-.result-options > summary { cursor: pointer; list-style: none; min-width: 36px; min-height: 36px; display: grid; place-items: center; }
-.result-options > div { position: absolute; right: 0; top: 100%; z-index: 4; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-raised); box-shadow: var(--shadow); }
-.result-options > div > button { display: block; width: 100%; text-align: left; }
-.result-options > div > button[hidden] { display: none; }
-@media (pointer: coarse) { .result-options > summary { min-width: 44px; min-height: 44px; } }
