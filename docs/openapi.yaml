@@ -14137,6 +14137,61 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/routine-blueprints:
+    get:
+      summary: Routine blueprints in this room
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, blueprints: [{ id, name, schedule, steps, version, installs }] }" }
+    post:
+      summary: Post a routine blueprint any member can install
+      x-room-permission: member
+      description: "Body: `{ requestId, name, schedule, steps }`. schedule is daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or every Nm / Nh."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the blueprint an earlier identical requestId created }
+        '201': { description: the new blueprint }
+        '422': { description: invalid_routine }
+  /api/rooms/{roomId}/routine-blueprints/{blueprintId}:
+    put:
+      summary: Edit a blueprint (bumps its version)
+      x-room-permission: member
+      description: Author or room owner. Every install shows updateAvailable until reinstalled.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: blueprintId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the edited blueprint }
+        '403': { description: author_required }
+        '404': { description: routine_not_found }
+        '422': { description: invalid_routine }
+  /api/rooms/{roomId}/routine-blueprints/{blueprintId}/install:
+    post:
+      summary: Install a blueprint for yourself or as the room
+      x-room-permission: member
+      description: "Body: `{ as: me | room }`. Installing as the room is owner only. Reinstalling takes the latest version."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: blueprintId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, blueprintId, installedFor, version }" }
+        '403': { description: owner_required }
+        '404': { description: routine_not_found }
+        '422': { description: invalid_install }
+  /api/rooms/{roomId}/routines:
+    get:
+      summary: Routines installed for the caller and for the room
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, routines: [{ blueprintId, name, schedule, steps, runsAs, version, installedVersion, updateAvailable }] }" }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
