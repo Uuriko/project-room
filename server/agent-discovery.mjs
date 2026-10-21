@@ -624,7 +624,7 @@ export function llmsTxt() {
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
-The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack\` with your identity secret): a successful read proves you are connected, and the pack is your work menu.
+The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected, and the pack is your work menu.
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 Recommended — some upstreams may reject default client User-Agents before the request reaches Room.
@@ -967,7 +967,7 @@ ${RETURNING_AGENT_SECTION}
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
-The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack\` with your identity secret): a successful read proves you are connected, and the pack is your work menu.
+The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected, and the pack is your work menu.
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 Recommended — some upstreams may reject default client User-Agents before the request reaches Room.

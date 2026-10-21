@@ -860,6 +860,14 @@ const signinUI = createAuthSigninUI({
   }
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
+const verificationIntentKey = "project-room:verify-email:v1";
+let verificationIntent = null;
+try {
+  if (initialAuthLink.kind === "notice" && initialAuthLink.notice === "verify") {
+    verificationIntent = { email: initialAuthLink.email, at: Date.now() };
+    sessionStorage.setItem(verificationIntentKey, JSON.stringify(verificationIntent));
+  } else verificationIntent = JSON.parse(sessionStorage.getItem(verificationIntentKey) || "null");
+} catch { /* Same-document intent remains available when storage is disabled. */ }
 const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
@@ -966,7 +974,39 @@ async function openPersonalRoomAfterSignup() {
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
+// The verification resume is a convenience on top of the normal landing. A
+// failed read must fall through to that landing, not strand the tab (the
+// intent stays in sessionStorage for 30 minutes and would repeat on reload).
+async function resumeEmailVerification() {
+  try { return await resumeEmailVerificationOnce(); } catch { return false; }
+}
+async function resumeEmailVerificationOnce() {
+  if (!verificationIntent) return false;
+  const intent = verificationIntent;
+  const clear = () => {
+    verificationIntent = null;
+    try { sessionStorage.removeItem(verificationIntentKey); } catch { /* Storage unavailable. */ }
+  };
+  if (typeof intent.email !== "string" || !Number.isFinite(intent.at)
+    || Date.now() - intent.at > 30 * 60 * 1000 || intent.at > Date.now()) { clear(); return false; }
+  const owned = await ensureAccountSession();
+  if (!owned?.authenticated) return false;
+  const methods = await accountClient.request("/api/auth/methods", { session: owned });
+  if (accountClient.session !== owned) return false;
+  // A link is navigation intent, never proof or permission to change accounts.
+  if (!methods.methods?.some(method => method.email?.toLowerCase() === intent.email.toLowerCase())
+    || methods.emailVerification?.status !== "unverified") { clear(); return false; }
+  showAccountWorkspace();
+  await openAccountSettings();
+  if (accountClient.session !== owned) return false;
+  const code = $("#account-settings-body").querySelector('[data-form="email-verify"] [name="code"]');
+  if (!code) return false;
+  code.focus();
+  clear();
+  return true;
+}
 async function landAfterSignIn() {
+  if (await resumeEmailVerification()) return;
   if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
@@ -2712,6 +2752,15 @@ let searchCollapsed = false;
 const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
+  const resultsOnly = query.trim().toLowerCase() === "has:result";
+  $("#results-panel").hidden = !resultsOnly;
+  $("#search-list").hidden = resultsOnly;
+  if (resultsOnly) {
+    $("#search-results").hidden = searchCollapsed;
+    $("#clear-search").hidden = false;
+    setText("#search-count", uiText("result.searchCount", { count: completedResults(state).length }));
+    return;
+  }
   const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
@@ -3941,15 +3990,21 @@ const replyToSharedResult = createResultFeedback({
   getState: () => state, getConversation: () => conversation,
   isBlocked: () => busy || requestReading || pendingMessage || composerFiles.some(file => file.status === "uploading"),
   getDraft: destination => destination === composerKey()
-    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value } : drafts.get(destination),
+    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
+      body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
   onBlocked: () => notice(uiText("result.replyBlocked")),
   openThread(message, destination) {
     setActiveChannel(messageChannelId(message));
     revealMessage(message.id);
     switchThread(destination, true);
   },
-  setReply(messageId) {
+  setReply(messageId, quote) {
     replyToId = messageId;
+    if (quote) {
+      const input = $("#message-input");
+      if (!input.value.startsWith(quote)) input.value = quote + input.value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     updateReply(); saveComposer(); persistDrafts();
     $("#message-input").focus();
   }
@@ -5059,7 +5114,13 @@ let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
-addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
+addEventListener("wheel", event => {
+  noteReaderScroll();
+  // A short conversation cannot emit a scroll event. A downward wheel over
+  // its visible messages still expresses reading through to the end.
+  const list = $("#message-list");
+  if (event.deltaY > 0 && list.contains(event.target) && list.scrollHeight <= list.clientHeight && nearBottomOfList()) scheduleHorizonAdvance();
+}, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
 $("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
@@ -6061,8 +6122,8 @@ $("#room-overview-dialog").addEventListener("click", event => {
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;
-  dialog.classList.toggle("results-only", panelId === "results-panel");
-  $("#settings-title").textContent = panelId === "results-panel" ? "Results" : "Settings";
+  if (panelId === "results-panel") { selectWorkView("results"); return; }
+  $("#settings-title").textContent = "Settings";
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
@@ -6074,10 +6135,6 @@ function openSettings(panelId) {
   }
   renderRecordPanel();
 }
-$("#results-panel > summary").addEventListener("click", event => {
-  event.preventDefault();
-  openSettings("results-panel");
-});
 function openCatchUp() {
   updatesUi?.close();
   const dialog = $("#catchup-dialog");
@@ -6088,7 +6145,14 @@ function openCatchUp() {
   loadReturnBrief();
 }
 function selectWorkView(view) {
-  if (view === "results") openSettings("results-panel");
+  if (view !== "results") return;
+  if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#search-form").hidden = false;
+  $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
+  $("#message-search").value = "has:result";
+  searchCollapsed = false;
+  renderSearch();
+  $("#message-search").focus({ preventScroll: true });
 }
 function resultRow(item) {
   const result = currentResult(item), title = esc(item.title);
@@ -6104,9 +6168,10 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
-  memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) { return replyToSharedResult(message.id); },
+  memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onOriginal(messageId) {
+    searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }
 });
@@ -7307,7 +7372,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   renderContribution(contributions, owned);
   setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
-  $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
+
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
@@ -7315,7 +7380,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
     preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
-    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#room-results-list").focus({ preventScroll: true });
     resultStatus();
     syncResultComparisons();
     syncActionForm();
@@ -7540,10 +7605,6 @@ $("#advanced-room-tools").addEventListener("toggle", event => {
   if (!event.currentTarget.open) closeSecondaryBoards();
 });
 $("#topbar-settings").addEventListener("click", () => openSettings());
-$("#room-results-open").addEventListener("click", () => {
-  if (!state || !session || busy) return;
-  selectWorkView("results");
-});
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
 $("#settings-close").addEventListener("click", () => { closeSecondaryBoards(); $("#settings-dialog").close(); });
 $("#topbar-search-toggle").addEventListener("click", () => {
@@ -7621,6 +7682,7 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  if (await resumeEmailVerification()) return;
   if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
