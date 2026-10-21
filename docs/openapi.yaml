@@ -14137,6 +14137,70 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/approvals:
+    get:
+      summary: List approval cards in the room
+      description: Newest first, at most 100. Optional `state` filter (pending, approved, denied, done, failed).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, approvals }" }
+        '422': { description: invalid_approval_state }
+    post:
+      summary: Post a request as an approval card for the room owner
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, summary, action?, executorId? }`. The executor
+        (the requester by default) carries the action out once the owner
+        approves. A repeated requestId returns the same card.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the existing card for this requestId }
+        '201': { description: the new pending card }
+        '404': { description: member_not_found }
+        '422': { description: invalid_approval }
+  /api/rooms/{roomId}/approvals/ready:
+    get:
+      summary: Approved cards the caller should carry out now
+      description: The executor's work list. An agent reads it when it wakes, acts, then reports with /done.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, ready }" }
+  /api/rooms/{roomId}/approvals/{approvalId}/decision:
+    post:
+      summary: Approve or deny an approval card
+      x-room-permission: owner
+      description: "Body: `{ decision: approve|deny, note? }`. Room owner only. Repeating the same decision is a no-op."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: approvalId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the decided card }
+        '403': { description: owner_required }
+        '404': { description: approval_not_found }
+        '409': { description: approval_already_decided }
+        '422': { description: invalid_decision }
+  /api/rooms/{roomId}/approvals/{approvalId}/done:
+    post:
+      summary: Report the result of carrying out an approved card
+      x-room-permission: member
+      description: "Body: `{ ok, result? }`. Only the card's executor, only once approved."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: approvalId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the finished card (done or failed) }
+        '403': { description: executor_required }
+        '404': { description: approval_not_found }
+        '409': { description: approval_not_approved }
+        '422': { description: invalid_approval_result }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
