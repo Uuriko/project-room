@@ -720,4 +720,8 @@ test("automatic rollback ignores an unused non-table list in a fence import (#44
   const importsFamilies = fence.replace("{ ABUSE_RATE_TABLES }", "{ ABUSE_RATE_TABLES, ABUSE_RATE_FAMILIES }");
   assert.equal(verdict(family, importsFamilies, importsFamilies), false, "list writer-fence imports stays pinned");
   assert.equal(verdict(real, fence + 'export const EXTRA_TABLES = Object.freeze(["extra"]);\n'), false, "writer-fence table definition change");
+  // A stored-value enum another module validates (e.g. a state written to a
+  // table and checked on replay) is not a rate-family list: it stays pinned.
+  const states = text => text.replace("const FAMILY_CAP", 'export const ABUSE_RATE_STATES = Object.freeze(["open", "closed"]);\n\nconst FAMILY_CAP');
+  assert.equal(verdict(states(real).replace('"closed"]', '"closed", "escalated"]'), fence, fence, states(real)), false, "non-family string list stays pinned");
 });

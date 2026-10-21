@@ -29,15 +29,16 @@ export const command = (args, cwd) => {
   return result.stdout;
 };
 // An import of writer-fence is pinned by its source minus whole-line // comments
-// and the items of exported string-only frozen lists that are not *_TABLES,
-// that writer-fence does not import and that the module never uses (e.g. a new
+// and the items of the string-only frozen lists named in UNPINNED_LISTS, when
+// writer-fence does not import them and the module never uses them (e.g. a new
 // ABUSE_RATE_FAMILIES entry, #4413). Every other byte stays pinned. A // line
 // inside a DDL template would be invalid SQLite, so stripping one hides no DDL.
+export const UNPINNED_LISTS = Object.freeze(new Set(["ABUSE_RATE_FAMILIES"]));
 export function importPin(source, fence) {
   const text = String(source).replace(/^[ \t]*\/\/.*(?:\n|$)/gm, '');
   const items = '((?:\\s*"[\\w.:-]*",?)*)\\s*';
   const lists = new RegExp(`^export const ([A-Z][A-Z0-9_]*) = Object\\.freeze\\((?:new Set\\(\\[${items}\\]\\)|\\[${items}\\])\\);$`, 'gm');
-  const open = text.replace(lists, (all, name) => name.endsWith('_TABLES') || String(fence).includes(name) || text.split(name).length !== 2 ? all : `export const ${name} = [unpinned];`);
+  const open = text.replace(lists, (all, name) => !UNPINNED_LISTS.has(name) || String(fence).includes(name) || text.split(name).length !== 2 ? all : `export const ${name} = [unpinned];`);
   return createHash('sha256').update(open).digest('hex');
 }
 export function schemaAt(revision, git = args => command(['git', ...args])) {
