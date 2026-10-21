@@ -18,6 +18,7 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
+import { cleanupDue, sweepCleanupCards } from "./agent-memory-extras.mjs";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
@@ -576,6 +577,18 @@ export const JOBS = Object.freeze([
       if (typeof ctx.growthTick !== "function") return { skipped: 1 };
       return ctx.growthTick();
     }
+  }),
+  // Weekly rule cleanup: one needs-you card per person with dormant,
+  // conflicting or flagged rules. Hourly ticks; the sweep itself skips an
+  // account that already got a card in the last 7 days.
+  defineJob({
+    name: "memory-cleanup",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: (_env, store) => cleanupDue(store),
+    disabledReason: () => "No rules yet",
+    async run(store) { return sweepCleanupCards(store); }
   }),
   defineJob({
     name: "store-growth",

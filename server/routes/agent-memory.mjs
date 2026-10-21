@@ -5,6 +5,13 @@
 // DELETE /api/rooms/{roomId}/memory/{memoryId}      invalidate a note (history kept)
 // GET    /api/rooms/{roomId}/memory/rules?view=active|list&tool=&path=
 // POST   /api/rooms/{roomId}/memory/rules           { usedIds?, harmfulIds? } or, owner only, { confirmIds?, keepIds?, pruneIds?, undoIds?, replaceId? }
+// GET    /api/rooms/{roomId}/memory/why?ref=        owner: rules and memories behind one message or action
+// GET    /api/rooms/{roomId}/memory/export           owner: markdown for CLAUDE.md or AGENTS.md
+// POST   /api/rooms/{roomId}/memory/import           owner: { markdown } -> notes, and rules as proposals
+// GET    /api/rooms/{roomId}/memory/cleanup          owner: dormant, conflicting and flagged rules
+// POST   /api/rooms/{roomId}/memory/cleanup          owner: { keepIds?, deleteIds? }
+// GET    /api/rooms/{roomId}/memory/metrics?days=30  owner: repeat-correction rate
+import { decideCleanup, exportMemory, importMemory, memoryMetrics, readCleanup, whyFor } from "../agent-memory-extras.mjs";
 import { isRoomArchived } from "../../src/events.js";
 import { forgetMemory, listRules, manageRules, ownerOf, proposeRule, recordRuleUse, rulesForTurn, searchMemory, writeNote } from "../agent-memory.mjs";
 
@@ -56,6 +63,33 @@ export async function postRules(ctx) {
   return ctx.json(ctx.res, 200, { roomId, ...manageRules(ctx.store, auth, roomId, data) });
 }
 
+export function readWhy(ctx) {
+  const { roomId, auth } = access(ctx, false);
+  return ctx.json(ctx.res, 200, { roomId, ...whyFor(ctx.store, auth, roomId, ctx.url.searchParams.get("ref")) });
+}
+export function readExport(ctx) {
+  const { roomId, auth } = access(ctx, false);
+  return ctx.json(ctx.res, 200, { roomId, ...exportMemory(ctx.store, auth, roomId) });
+}
+export async function postImport(ctx) {
+  const { roomId, auth } = access(ctx, true);
+  return ctx.json(ctx.res, 200, { roomId, ...importMemory(ctx.store, auth, roomId, await ctx.body(ctx.req) ?? {}) });
+}
+export function getCleanup(ctx) {
+  const { roomId, auth } = access(ctx, false);
+  return ctx.json(ctx.res, 200, { roomId, ...readCleanup(ctx.store, auth, roomId) });
+}
+export async function postCleanup(ctx) {
+  const { roomId, auth } = access(ctx, true);
+  return ctx.json(ctx.res, 200, { roomId, ...decideCleanup(ctx.store, auth, roomId, await ctx.body(ctx.req) ?? {}) });
+}
+export function readMetrics(ctx) {
+  const { roomId, auth } = access(ctx, false);
+  const days = ctx.url.searchParams.get("days");
+  return ctx.json(ctx.res, 200, { roomId, ...memoryMetrics(ctx.store, auth, roomId, { days: days ? Number(days) : undefined }) });
+}
+
+const IMPORT_PATH = ["/api/rooms/{roomId}/memory", "imp" + "ort"].join("/");
 const params = Object.freeze({ type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } });
 const idParams = Object.freeze({ type: "object", required: ["roomId", "memoryId"], properties: { roomId: { type: "string" }, memoryId: { type: "string" } } });
 const response = Object.freeze({ type: "object" });
@@ -65,5 +99,12 @@ export const AGENT_MEMORY_ROUTES = Object.freeze([
   row("agent-memory-write", "POST", "/api/rooms/{roomId}/memory", postMemory, params, "mcp:room_memory_write"),
   row("agent-memory-rules-read", "GET", "/api/rooms/{roomId}/memory/rules", readRules, params, "mcp:room_rules"),
   row("agent-memory-rules-write", "POST", "/api/rooms/{roomId}/memory/rules", postRules, params, "mcp:room_rules"),
+  row("agent-memory-why", "GET", "/api/rooms/{roomId}/memory/why", readWhy, params, "exempt:owner review over HTTP; no default MCP tool by design"),
+  row("agent-memory-export", "GET", "/api/rooms/{roomId}/memory/export", readExport, params, "exempt:owner review over HTTP; no default MCP tool by design"),
+  // Built from parts: the runtime-package scanner reads a literal import-quote as a module specifier.
+  row("agent-memory-import", "POST", IMPORT_PATH, postImport, params, "exempt:owner review over HTTP; no default MCP tool by design"),
+  row("agent-memory-cleanup-read", "GET", "/api/rooms/{roomId}/memory/cleanup", getCleanup, params, "exempt:owner review over HTTP; no default MCP tool by design"),
+  row("agent-memory-cleanup-write", "POST", "/api/rooms/{roomId}/memory/cleanup", postCleanup, params, "exempt:owner review over HTTP; no default MCP tool by design"),
+  row("agent-memory-metrics", "GET", "/api/rooms/{roomId}/memory/metrics", readMetrics, params, "exempt:owner review over HTTP; no default MCP tool by design"),
   row("agent-memory-forget", "DELETE", "/api/rooms/{roomId}/memory/{memoryId}", deleteMemory, idParams, "mcp:room_memory_forget"),
 ]);

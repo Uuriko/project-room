@@ -20,7 +20,7 @@ export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request", "agent_joined",
-  "approval", "outbound_draft", "group_review"
+  "approval", "outbound_draft", "group_review", "memory_cleanup"
 ]);
 const CLAIM_ATTENTION = Object.freeze({
   lease_expiring: "claim_lease_expiring",
@@ -408,6 +408,12 @@ function decisionItems(store, roomId, memberId, owner) {
       items.push(draft({ kind: "outbound_draft", roomId, key: `outbound|${row.id}`, title: clip(`Draft ${row.channel} to ${row.recipient}`), actor: row.actor, createdAt: at, updatedAt: at,
         basis: row.id, sourceRef: { draftId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/outbound/${encodeURIComponent(row.id)}/decision` } }));
     }
+  }
+  // Weekly rule cleanup card for the person whose shared memory it reviews.
+  for (const row of optionalRows(store, "SELECT id, rule_ids, created_at AS at FROM agent_memory_cleanup_cards WHERE room_id=? AND member_id=? AND state='open'", roomId, memberId)) {
+    const at = iso(row.at), n = row.rule_ids.split(",").filter(Boolean).length;
+    items.push(draft({ kind: "memory_cleanup", roomId, key: `memory-cleanup|${row.id}`, title: clip(`Review ${n} rule${n === 1 ? "" : "s"}: dormant, conflicting or flagged`), actor: null, createdAt: at, updatedAt: at,
+      basis: row.id, sourceRef: { cardId: row.id }, next: { method: "POST", path: `/api/rooms/${room}/memory/cleanup` } }));
   }
   const reviews = optionalRows(store, `SELECT r.id, r.draft, r.author_id AS actor, r.created_at AS at FROM group_reviews r
     WHERE r.room_id=? AND EXISTS (SELECT 1 FROM json_each(r.reviewers) WHERE value=?)

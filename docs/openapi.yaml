@@ -14312,6 +14312,69 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ roomId, results, counts, rules }" }
         '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/why:
+    get:
+      summary: Rules and memories behind one message or action
+      description: "Owner only. `ref` is a message id or event id posted by one of your agents."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: ref, in: query, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, ref, actorId, rules, memories }" }
+        '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/export:
+    get:
+      summary: Export memory and active rules as markdown
+      description: "Owner only. Markdown with Rules and Notes sections for CLAUDE.md or AGENTS.md; low-trust notes are left out."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, markdown, rules, notes }" }
+        '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/import:
+    post:
+      summary: Import markdown as notes and proposed rules
+      x-room-permission: member
+      description: "Owner only. Body `{ markdown }`. Rules stay proposed; a secret anywhere refuses the whole file (422 secret_in_memory)."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, proposed, notes, skipped, unchanged, results }" }
+        '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/cleanup:
+    get:
+      summary: Weekly cleanup card listing dormant, conflicting and flagged rules
+      description: "Owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, cardId, openedAt, items }" }
+        '403': { description: owner_required or no_owner_account }
+    post:
+      summary: Keep or delete rules from the cleanup card
+      x-room-permission: member
+      description: "Owner only. Body `{ keepIds?, deleteIds? }`."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, results, remaining, items }" }
+        '403': { description: owner_required or no_owner_account }
+  /api/rooms/{roomId}/memory/metrics:
+    get:
+      summary: Repeat-correction rate
+      description: "Owner only. Corrections, repeats of an already active rule, and their ratio over `days` (default 30)."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365 } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, days, corrections, repeats, repeatCorrectionRate, activeRules }" }
+        '403': { description: owner_required or no_owner_account }
   /api/rooms/{roomId}/memory/{memoryId}:
     delete:
       summary: Invalidate a note (history kept)
