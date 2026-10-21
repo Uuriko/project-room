@@ -1081,3 +1081,22 @@ test("pull rejects missing or cycling wake cursors before execution", async t =>
     assert.equal(runs, 0);
   }
 });
+
+for (const outcome of ['failed', 'unknown', 'exited']) test(`persisted ${outcome} dispatch remains visible for reconciliation without rerunning`, async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const handlers = { needsMe: needsMe([mention()]), acks: [], pendingWakes: [{ signalId: 'sig-recovery', kind: 'mention', roomId: 'den', messageId: 'msg-1' }] };
+  let starts = 0;
+  const args = { env: { ROOM_AGENT_CONFIG: directory }, fetchImpl: roomFetch(handlers), execute: true,
+    runner: async () => { starts++; if (outcome === 'unknown') throw new Error('synthetic lost provider response'); return { code: outcome === 'failed' ? 1 : 0 }; } };
+  if (outcome === 'unknown') await assert.rejects(pull(args), /synthetic lost provider response/);
+  else await pull(args);
+  const resumed = await pull(args);
+  assert.equal(starts, 1, 'an unresolved attempt must not automatically execute twice');
+  assert.equal(resumed.silent, false, 'pending recovery is not an empty queue');
+  assert.equal(resumed.pendingReconciliations.length, 1);
+  assert.equal(resumed.pendingReconciliations[0].stage, outcome === 'unknown' ? 'outcome_unknown' : outcome === 'failed' ? 'process_failed' : 'result_unverified');
+  assert.equal(resumed.pendingReconciliations[0].messageId, 'msg-1');
+  assert.match(resumed.next, /inspect/i);
+  assert.deepEqual(handlers.acks, []);
+  assert.equal(JSON.stringify(resumed.pendingReconciliations).includes(secret), false);
+});
