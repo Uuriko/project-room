@@ -61,6 +61,42 @@ async function signUp(page, origin, email) {
   return (await reply).status();
 }
 
+for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) {
+  test(`late sign-in capabilities preserve typed fields and focus (${label})`, async t => {
+    const f = await setup(t), page = await f.open(viewport);
+    let resolve; const pending = new Promise(done => { resolve = done; });
+    await page.route('**/api/auth/signin-options', route => resolve(route));
+    await page.goto(f.origin); const route = await pending;
+    const email = page.locator('#auth-signin-ui [name=email]'), password = page.locator('#auth-signin-ui [name=password]');
+    await email.fill('draft@example.invalid'); await password.fill(PASSWORD);
+    await route.fulfill({ status: 200, json: { providers: { mail: { configured: false } } } });
+    await page.waitForFunction(() => document.querySelector('#auth-signin-ui [name=password]')?.required);
+    assert.equal(await email.inputValue(), 'draft@example.invalid');
+    assert.equal(await password.inputValue(), PASSWORD);
+    assert.equal(await password.evaluate(node => node === document.activeElement), true);
+  });
+}
+
+test('pending password sign-in fences provider navigation until it settles', async t => {
+  const f = await setup(t), page = await f.open();
+  await page.route('**/api/auth/signin-options', route => route.fulfill({ status: 200, json: { providers: { google: { configured: true } } } }));
+  let resolve; const pending = new Promise(done => { resolve = done; });
+  await page.route('**/api/auth/password/login', route => resolve(route));
+  let oauth = 0;
+  await page.route('**/api/auth/google/start', route => { oauth++; return route.fulfill({ status: 200, body: 'Synthetic provider' }); });
+  await page.goto(f.origin);
+  await page.locator('#auth-signin-ui [name=email]').fill('pending@example.invalid');
+  await page.locator('#auth-signin-ui [name=password]').fill(PASSWORD);
+  await page.locator('#auth-signin-ui button[type=submit]').click(); const route = await pending;
+  assert.equal(await page.locator('#auth-panel').evaluate(node => node.inert), true);
+  const box = await page.locator('#google-signin').boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  assert.equal(oauth, 0); assert.equal(page.url(), f.origin + '/');
+  await route.fulfill({ status: 401, json: { error: { code: 'invalid_credentials', message: 'Invalid credentials' } } });
+  await page.waitForFunction(() => document.querySelector('#auth-signin-ui')?.getAttribute('aria-busy') === 'false');
+  await page.locator('#google-signin').click(); assert.equal(oauth, 1);
+});
+
 const visibleCount = (page, text) => page.getByText(text, { exact: false }).evaluateAll(nodes => nodes.filter(n => n.offsetParent !== null).length);
 
 test("signup, then verify by the emailed code; a wrong code is reported once", { timeout: 60000 }, async t => {
@@ -86,18 +122,43 @@ test("signup, then verify by the emailed code; a wrong code is reported once", {
   assert.ok(f.store.accountLogins.findAccountByVerifiedEmail(email), "the account's email is verified");
 });
 
-test("the verify email's link opens cleanly on a signed-out phone", { timeout: 60000 }, async t => {
-  const f = await setup(t);
-  const desk = await f.open(DESK);
-  const email = "journey-link@example.invalid";
-  assert.equal(await signUp(desk, f.origin, email), 202);
-  const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
-  assert.ok(mail?.link, "the verify mail carries a link");
-  const phone = await f.open(PHONE);
-  await phone.goto(mail.link);
-  await phone.locator("#auth-panel").waitFor({ state: "visible" });
-  await phone.waitForTimeout(500);
-  assert.equal(await visibleCount(phone, "incomplete or invalid"), 0, "no invalid sign-in link error");
+for (const alreadySignedIn of [true, false]) {
+  test(`verification link resumes the existing code form (${alreadySignedIn ? "signed in" : "signed out"})`, { timeout: 60000 }, async t => {
+    const f = await setup(t), desk = await f.open(DESK);
+    const email = "journey-link@example.invalid";
+    assert.equal(await signUp(desk, f.origin, email), 202);
+    await desk.locator("#main").waitFor({ state: "visible" });
+    const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
+    const page = alreadySignedIn ? desk : await f.open(PHONE);
+    await page.goto(mail.link);
+    if (!alreadySignedIn) {
+      await page.locator('#auth-signin-ui [name=password]').fill(PASSWORD);
+      await page.locator('#auth-signin-ui button[type=submit]').click();
+    }
+    const code = page.getByLabel("Verification code");
+    await code.waitFor({ timeout: 5000 });
+    await code.fill(mail.code);
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await page.getByText("Email verified.").waitFor();
+    assert.ok(f.store.accountLogins.findAccountByVerifiedEmail(email));
+    await page.goto(mail.link);
+    await page.locator("#main:visible, #account-rooms-panel:visible").first().waitFor();
+    assert.equal(await page.getByLabel("Verification code").isVisible(), false,
+      "an already verified account must not reopen the code form");
+  });
+}
+
+test("verification navigation does not select a different signed-in account", async t => {
+  const f = await setup(t), first = await f.open(DESK), second = await f.open(PHONE);
+  await signUp(first, f.origin, "verification-first@example.invalid");
+  await first.locator("#main").waitFor({ state: "visible" });
+  const mail = f.mailTo("verification-first@example.invalid");
+  await signUp(second, f.origin, "verification-second@example.invalid");
+  await second.locator("#main").waitFor({ state: "visible" });
+  await second.goto(mail.link);
+  await second.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await second.getByLabel("Verification code").isVisible(), false);
+  assert.equal(await second.evaluate(() => sessionStorage.getItem("project-room:verify-email:v1")), null);
 });
 
 async function magicLinkReuse(t) {
