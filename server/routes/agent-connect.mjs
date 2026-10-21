@@ -6,10 +6,10 @@
 // module lands.
 
 import { createHash } from "node:crypto";
-import { buildSetupIntro } from "../setup-intro.mjs";
 
 const PAGE_BUDGET = 3072;
 export const UNAVAILABLE = "Ask the room owner for a new link.\nAlready redeemed it? Resend the same redeem request with the same requestId, or with your saved identity secret as the Bearer token, to get your connection again.\n";
+import { buildSetupIntro } from "../setup-intro.mjs";
 const HOSTED_ORIGIN = "https://room.trydemigod.com";
 
 const PERMISSION_WORDS = Object.freeze({
