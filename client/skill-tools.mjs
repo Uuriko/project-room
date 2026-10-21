@@ -1,33 +1,44 @@
-// Team skill actions for the hosted MCP surface, reachable through
-// room_search_actions / room_run_action once registered in the hosted tool
-// list. Pure definitions plus argument validation; dispatch lives in
-// server/skill-tool-dispatch.mjs.
+// Team skill action for the hosted MCP surface: one tool, team_skill, with
+// action list | save | run | correct, reachable through room_search_actions
+// and room_run_action. One tool instead of four keeps the full catalog
+// inside its budget. Pure definition plus argument validation; dispatch
+// lives in server/skill-tool-dispatch.mjs.
 const text = (max, description) => ({ type: "string", minLength: 1, maxLength: max, description });
-const skillRef = text(80, "Skill name or id.");
-const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
-const tool = (name, description, inputSchema, readOnly) => ({
-  name, description, inputSchema,
-  annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: readOnly, openWorldHint: false }
-});
 
-export const skillTools = [
-  tool("skill_list", "List this room's team skills, most used first. Each shows its author and run count, for example \"Douglas's GTM skill, used 23 times\". Read only.", schema(), true),
-  tool("skill_save", "Save a repeatable workflow as a team skill credited to you. name is unique in the room; instructions are plain language. Anyone in the room can run it.", schema({ name: text(80, "Skill name."), instructions: text(4000, "Plain-language steps.") }, ["name", "instructions"]), false),
-  tool("skill_run", "Run a team skill. Returns the skill brief (instructions plus its active corrections) to follow, and counts the run.", schema({ skill: skillRef }, ["skill"]), false),
-  tool("skill_correct", "Relay a person's correction to a team skill, for example \"Keep every bio under 50 words\". It is saved to that skill only and stays a proposal until the skill author confirms it. Be specific; vague corrections are refused.", schema({ skill: skillRef, text: text(280, "The correction, as the person said it."), source: text(200, "Where it was said, such as a message id.") }, ["skill", "text"]), false),
-];
+export const SKILL_ACTIONS = Object.freeze(["list", "save", "run", "correct"]);
+const REQUIRED = Object.freeze({ list: [], save: ["name", "instructions"], run: ["skill"], correct: ["skill", "text"] });
 
-const BY_NAME = new Map(skillTools.map(entry => [entry.name, entry]));
-export const isSkillTool = name => typeof name === "string" && BY_NAME.has(name);
-export const skillToolIsWrite = name => isSkillTool(name) && !BY_NAME.get(name).annotations.readOnlyHint;
+export const skillTools = [{
+  name: "team_skill",
+  description: "Team skills: named, repeatable workflows saved in this room, credited to their author with a run count (\"Douglas's GTM skill, used 23 times\"). action list shows them most used first. action save { name, instructions } saves one credited to you. action run { skill } returns the brief to follow (instructions plus active corrections) and counts the run. action correct { skill, text } relays a person's correction, saved to that skill only; it stays a proposal until the skill author confirms it. skill is a name or id.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: [...SKILL_ACTIONS] },
+      skill: text(80, "Skill name or id (run, correct)."),
+      name: text(80, "New skill name (save)."),
+      instructions: text(4000, "Plain-language steps (save)."),
+      text: text(280, "The correction, as the person said it (correct)."),
+      source: text(200, "Where the correction was said, such as a message id (correct).")
+    },
+    required: ["action"],
+    additionalProperties: false
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+}];
+
+export const isSkillTool = name => name === "team_skill";
+// list is a read; everything else writes.
+export const skillToolIsWrite = (name, args = {}) => isSkillTool(name) && args?.action !== "list";
 
 export function validSkillToolArguments(name, args) {
-  const entry = BY_NAME.get(name);
-  if (!entry || !args || typeof args !== "object" || Array.isArray(args)) return false;
-  const { properties, required } = entry.inputSchema;
-  if (!required.every(key => typeof args[key] === "string" && args[key].trim())) return false;
-  return Object.entries(args).every(([key, value]) => {
+  if (!isSkillTool(name) || !args || typeof args !== "object" || Array.isArray(args)) return false;
+  const { properties } = skillTools[0].inputSchema;
+  if (!SKILL_ACTIONS.includes(args.action)) return false;
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "action") continue;
     const spec = properties[key];
-    return spec && typeof value === "string" && value.trim().length >= 1 && value.length <= spec.maxLength;
-  });
+    if (!spec || typeof value !== "string" || !value.trim() || value.length > spec.maxLength) return false;
+  }
+  return REQUIRED[args.action].every(key => typeof args[key] === "string");
 }

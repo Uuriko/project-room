@@ -42,29 +42,55 @@ test("a failed operation rolls back", t => {
   assert.equal(store.list("r").length, 1);
 });
 
-test("actions: save, run, correct and list through the dispatcher", t => {
+test("team_skill action: save, run, correct and list through the dispatcher", t => {
   const db = open(temp(t));
-  const saved = callSkillTool(db, "r", douglas, "skill_save", { name: "Team page", instructions: "Add people to the team page." });
+  const call = (actor, args) => callSkillTool(db, "r", actor, "team_skill", args);
+  const saved = call(douglas, { action: "save", name: "Team page", instructions: "Add people to the team page." });
   assert.equal(saved.skill.author.id, "douglas");
-  const relay = callSkillTool(db, "r", codex, "skill_correct", { skill: "Team page", text: "Keep every bio under 50 words" });
+  const relay = call(codex, { action: "correct", skill: "Team page", text: "Keep every bio under 50 words" });
   assert.equal(relay.status, "proposed");
   assert.match(relay.next, /Douglas/);
-  const run = callSkillTool(db, "r", codex, "skill_run", { skill: "team page" });
+  const run = call(codex, { action: "run", skill: "team page" });
   assert.deepEqual(run.rules, []);
   assert.match(run.brief, /Add people/);
   new TeamSkillsStore(db).confirm("r", "Team page", relay.correctionId, { by: douglas });
-  assert.deepEqual(callSkillTool(db, "r", codex, "skill_run", { skill: "Team page" }).rules, ["Keep every bio under 50 words"]);
-  const list = callSkillTool(db, "r", codex, "skill_list", {});
-  assert.equal(list.skills[0].label, "Douglas's Team page, used 2 times");
-  assert.throws(() => callSkillTool(db, "r", codex, "skill_run", { skill: "nope" }), { status: 404 });
-  assert.throws(() => callSkillTool(db, "r", codex, "skill_run", {}), { status: 400 });
+  assert.deepEqual(call(codex, { action: "run", skill: "Team page" }).rules, ["Keep every bio under 50 words"]);
+  assert.equal(call(codex, { action: "list" }).skills[0].label, "Douglas's Team page, used 2 times");
+  assert.throws(() => call(codex, { action: "run", skill: "nope" }), { status: 404 });
+  assert.throws(() => call(codex, { action: "run" }), { status: 400 });
 });
 
-test("tool definitions validate arguments and mark writes", () => {
-  assert.deepEqual(skillTools.map(t => t.name), ["skill_list", "skill_save", "skill_run", "skill_correct"]);
-  assert.equal(validSkillToolArguments("skill_run", { skill: "x", extra: "y" }), false);
-  assert.equal(validSkillToolArguments("skill_correct", { skill: "x", text: "a".repeat(281) }), false);
-  assert.equal(validSkillToolArguments("skill_save", { name: "n", instructions: "i" }), true);
-  assert.equal(skillToolIsWrite("skill_list"), false);
-  assert.equal(skillToolIsWrite("skill_save"), true);
+test("team_skill definition validates arguments and marks writes", () => {
+  assert.deepEqual(skillTools.map(t => t.name), ["team_skill"]);
+  assert.equal(validSkillToolArguments("team_skill", { action: "run", skill: "x", extra: "y" }), false);
+  assert.equal(validSkillToolArguments("team_skill", { action: "correct", skill: "x", text: "a".repeat(281) }), false);
+  assert.equal(validSkillToolArguments("team_skill", { action: "save", name: "n", instructions: "i" }), true);
+  assert.equal(validSkillToolArguments("team_skill", { action: "delete" }), false);
+  assert.equal(skillToolIsWrite("team_skill", { action: "list" }), false);
+  assert.equal(skillToolIsWrite("team_skill", { action: "save" }), true);
+});
+
+test("room purge removes the room's skills and nothing else", async t => {
+  const { PURGE_TABLES } = await import("../server/purge-registry.mjs");
+  const { countPurge } = await import("../server/operator-purge.mjs");
+  const entry = PURGE_TABLES.find(e => e.table === "room_team_skills");
+  assert.ok(entry, "purge registry covers room_team_skills");
+  assert.equal(entry.action, "delete");
+  assert.deepEqual(entry.match.room, ["room_id"]);
+  const db = open(temp(t));
+  const rowsFor = roomId => countPurge(db, [{ kind: "room", id: roomId }]).find(r => r.table === "room_team_skills").rows;
+  assert.equal(rowsFor("room-a"), 0, "absent table counts as zero");
+  const skills = new TeamSkillsStore(db);
+  skills.save("room-a", { name: "A1", instructions: "x", author: douglas });
+  skills.save("room-a", { name: "A2", instructions: "x", author: douglas });
+  skills.save("room-b", { name: "B1", instructions: "x", author: douglas });
+  assert.equal(rowsFor("room-a"), 2);
+  assert.equal(rowsFor("room-b"), 1);
+});
+
+test("room_search_actions finds team_skill with its exact schema", async () => {
+  const { searchActions } = await import("../server/mcp-action-search.mjs");
+  const found = searchActions("run team skill");
+  assert.equal(found.matches[0].name, "team_skill");
+  assert.deepEqual(found.matches[0].inputSchema.properties.action.enum, ["list", "save", "run", "correct"]);
 });
