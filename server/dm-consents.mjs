@@ -56,6 +56,11 @@ export const dmConsentSchema = `
 
 export const DM_CONSENT_STATUSES = Object.freeze(["pending", "approved", "rejected", "blocked", "revoked"]);
 export const DM_CONSENT_DECISIONS = Object.freeze(["approve", "reject", "block"]);
+// The 403 refusal codes this module's gate emits (request path + requireDmAllowed).
+// Single source for the DM consent vocabulary: the browser copy in
+// src/dm-consents.js is stamped from these constants by
+// scripts/sync-dm-consent-vocab.mjs and pinned by tests/dm-consent-vocab.test.js.
+export const DM_CONSENT_REFUSAL_CODES = Object.freeze(["dm_consent_required", "dm_blocked"]);
 export const MAX_DM_REASON_CHARS = 500;
 
 const nowMs = () => Date.now();

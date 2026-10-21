@@ -11,12 +11,20 @@
 // incomingDmRequests, dmConsentActionsForPeer, dmConsentFailureMessage)
 // are unit-tested in tests/dm-consent-ui.test.js.
 
-export const DM_CONSENT_STATUSES = Object.freeze(["pending", "approved", "rejected", "blocked", "revoked"]);
+// DM consent vocabulary — single source is server/dm-consents.mjs; the
+// block between the markers is generated from it by
+// scripts/sync-dm-consent-vocab.mjs (check: --check, wired into
+// scripts/check.mjs) and pinned by tests/dm-consent-vocab.test.js.
+// The refusal codes are server refusal codes for the DM consent gate
+// (HTTP 403): application-level refusals — the session is still valid —
+// so the HTTP client must NOT treat them like an auth failure (which
+// ends access). The client carries no DM_CONSENT_STATUSES copy: no
+// consumer ever read one, so the dead literal was deleted instead of
+// being stamped (SM-R-SM11).
+// dm-consent-vocab:begin
 export const DM_CONSENT_DECISIONS = Object.freeze(["approve", "reject", "block"]);
-// Server refusal codes for the DM consent gate (HTTP 403). These are
-// application-level refusals — the session is still valid — so the HTTP
-// client must NOT treat them like an auth failure (which ends access).
 export const DM_CONSENT_REFUSAL_CODES = Object.freeze(["dm_consent_required", "dm_blocked"]);
+// dm-consent-vocab:end
 
 // Mirrors server/dm-consents.mjs _handleOf exactly.
 export function dmConsentHandleOf(member) {
