@@ -7713,21 +7713,20 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    // QA 2026-10-20: a signed-in account user has no room cookie, so the
-    // probe 401'd on every room load. Probe only without an account session,
-    // or after the account path is refused.
-    const probeRoomCookie = async () => {
+    // The room cookie is probed before the account gate: an agent or joiner
+    // cookie for this room keeps its own identity even when a human account
+    // session also exists (agent-signin-browser-check). QA 2026-10-20 tried
+    // skipping this for account users; that let the account replace the agent.
+    if (requestedRoom && !accountHomeFromLocation()) {
       try {
         const joined = await client.restore();
-        if (joined?.roomId === requestedRoom) return true;
+        if (joined?.roomId === requestedRoom) return;
         client.endAccess();
       } catch (error) {
         if (![401, 403].includes(error.status)) throw error;
       }
-      return false;
-    };
+    }
     const account = await ensureAccountSession();
-    if (requestedRoom && !accountHomeFromLocation() && !account?.authenticated && await probeRoomCookie()) return;
     if (!account?.authenticated) {
       if (initialDesktopProvider && !initialGoogleFailed && !initialGitHubFailed) {
         const provider = initialDesktopProvider;
@@ -7752,7 +7751,6 @@ const ready = (async () => {
       try { await client.restore(requestedRoom); }
       catch (error) {
         if (![401, 403].includes(error.status)) throw error;
-        if (!accountHomeFromLocation() && await probeRoomCookie()) return;
         showAccountWorkspace();
         showRoomAccessNotice();
       }

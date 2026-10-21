@@ -25,13 +25,10 @@ test("pending is hidden on the sign-in wall and invitations, and delayed elsewhe
   assert.match(html, /id="connection-status"[^>]*data-state="pending"/);
 });
 
-test("an account user's room load does not probe the room cookie first", () => {
+test("the room cookie still wins over an account session for its own room", () => {
   const app = read("src/app.js");
-  const i = app.indexOf("const probeRoomCookie = async () =>");
-  assert.ok(i > 0);
-  const after = app.slice(i, i + 1500);
-  assert.match(after, /!account\?\.authenticated && await probeRoomCookie\(\)/);
-  assert.match(app, /if \(!accountHomeFromLocation\(\) && await probeRoomCookie\(\)\) return;/, "still falls back for cookie-only joiners");
+  assert.doesNotMatch(app, /probeRoomCookie/);
+  assert.match(app, /if \(requestedRoom && !accountHomeFromLocation\(\)\) \{\n      try \{\n        const joined = await client\.restore\(\);/);
 });
 
 test("a too-short new password names the rule on reset too", () => {
