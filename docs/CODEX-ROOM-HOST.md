@@ -142,6 +142,134 @@ threads, private process environment, unsupported interactive requests, malforme
 output, disconnects, timeouts and duplicate profile locks. Live authenticated model
 execution requires the dedicated profile login and remains separate qualification.
 
+## Keep the host listening
+
+After dedicated login and the protocol check, keep one supervisor running:
+
+```sh
+ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch \
+  /absolute/private-room-journal.sqlite /absolute/runtime.json
+```
+
+This picks up explicitly invoked public asks assigned to this member, one at a
+time. It polls the authoritative assistant queue every two seconds because room
+event notifications do not cover every assistant state change. It does not turn
+ordinary chat messages into execution requests. An unresolved owned attempt is
+reconciled before any new ask. Retry delays are persisted and back off to thirty
+seconds; restarting the process does not erase the original execution journal.
+
+The existing watcher ownership lock lives beside the journal in `.sqlite.watch`.
+A second supervisor using that directory fails instead of competing for work.
+The separate runtime-profile lock also prevents two live Codex processes sharing
+one profile. Keep both paths stable. Ctrl-C/SIGTERM interrupts owned work and
+closes the runtime process group; uncertain outcomes remain recoverable in Room.
+
+JSON status lines distinguish `watching_room`, `protocol_qualified`, `running`,
+`settled`, `recovery_pending`, `retrying_room`, and `stopped`. Protocol qualification
+still does not prove provider login. Missing credentials require dedicated login;
+unsupported runtime questions require a separately connected decision interface.
+An idle supervisor currently has local status only: Room's existing connected
+indicator is based on recent active-run reports, not a persistent idle heartbeat.
+
+This command is a foreground service; it does not install a login item or modify
+host settings. For desktop computer tools, explicitly configure the dedicated
+Codex profile's MCP server with `ProjectRoomTools --connection /absolute/path/to/connection.json`.
+The native application must supply that connection file and the user must enable
+its grants. The supervisor neither enables computer access nor imports another
+Codex profile's MCP settings.
+
+## Desktop host control contract
+
+The desktop launches the same foreground host. It does not need a separate
+runtime scheduler. `--watch` checks protocol and dedicated-profile credentials at
+startup, even when no ask is queued. A missing login produces `login_required`
+and bounded retries before any claim or model call.
+
+```sh
+node scripts/run-codex-room.mjs --preflight /absolute/runtime.json
+node scripts/run-codex-room.mjs --status-watch /absolute/private-room-journal.sqlite
+node scripts/run-codex-room.mjs --stop-watch /absolute/private-room-journal.sqlite
+```
+
+Preflight uses App Server `account/read` with `refreshToken: false`. Only
+`credentials: present | login_required | not_required | unknown` is returned;
+account email, plan, account ID, and credential values are discarded. `present`
+means the runtime reported configured credentials, not that a model call has
+succeeded. `modelExecution` remains `not_tested`.
+
+The owner writes `<journal>.watch/status.json` atomically with mode 0600. Schema 1
+contains `sessionId`, `pid`, `startedAt`, `updatedAt`, `origin`, `roomId`, `memberId`,
+`phase`, `protocol`, `credentials`, `modelExecution`, and an optional `runId`.
+The heartbeat refreshes every five seconds, including while idle or executing.
+It contains no prompts, answers, tool arguments, tokens, or provider identity.
+The status command also reports `processState`, `fresh`, and `stopRequested`.
+A missing ownership lock reports stopped; a heartbeat older than fifteen seconds
+reports unknown and clears readiness. Native callers must also compare the PID
+with their actual child process. Do not infer readiness from an old JSON file.
+
+Stop writes the existing watcher control request and returns immediately. The
+caller must still wait for the owned process to exit. A stop request or process
+exit alone does not prove that external tool effects were cancelled; Room's
+attempt journal and Stop acknowledgement remain the execution authority.
+
+For a compact read-only queue view, use
+`ROOM_AGENT_CONFIG=/absolute/room-connection node scripts/agent-resume.mjs --focus assistant`.
+This shows this agent's current shared requests, pending input IDs, and Stop/Resume
+state without acknowledging, claiming, or executing work. An unchanged room
+context version never suppresses current shared requests.
+
+## Native computer use with the shared host
+
+Enable local tools in the Mac app and grant Accessibility and Screen Recording
+through its My Mac controls as needed. In the dedicated runtime JSON, add:
+
+```json
+"macTools": {
+  "command": "/absolute/Project Room.app/Contents/MacOS/ProjectRoomTools",
+  "connection": "/absolute/Library/Application Support/Project Room/Local Tools/connection.json"
+}
+```
+
+Input defaults to `"inputApproval": "prompt"`. This unattended host cannot obtain
+interactive approval, so input remains blocked and the shared run reports Needs
+input. After explicitly deciding to authorize computer control for this host,
+the Mac owner may add `"inputApproval": "approve"` inside `macTools`. This is a
+per-tool policy for `mac_input`, not global approval or a shell sandbox change.
+Native enablement and OS permissions are still required. A room message cannot
+change this private host configuration. A completed model response is not proof
+that the requested action happened; structured approval refusals survive restart
+and prevent automatic publication as a successful shared result.
+
+This explicitly delegates the configured native tools to the agent selected by
+this host's private Room connection. Use it only for a room whose authorized
+shared asks may control this Mac. Do not configure it just to enable ordinary
+chat. It does not enroll a device for arbitrary rooms or give every room member
+personal computer authority. The Mac app and host must remain running; web
+participants interact through the existing shared ask, not a browser-to-OS port.
+
+The host exposes only status, app observation, screenshot and input from this
+MCP server. It does not add the broker's unsandboxed process/file tools to the
+runtime. Native MCP tools have their own owner grant and OS permissions; Codex's
+shell sandbox does not constrain those native capabilities. The connection path
+is explicit because the runtime uses an isolated HOME. The nonce is not passed
+in command arguments or posted to the room. Pause in My Mac revokes local tools.
+
+Use `mac_app_state` first; target its process and window IDs. `mac_input` offers
+activate, click, type, key and scroll. Click and scroll require explicit coordinates, normalized 0..1
+within the window, top-left origin, independent of screenshot scaling. Activate
+is a request, so reobserve before input. Input requires the target app/window to
+remain focused. Keyboard input is sent to the target process; clicks use the
+session event stream after checking the target at the pointer. A dispatched event does not prove
+an app saved or submitted anything: observe the result. Preserve operation IDs
+on retry; prepared outcomes after a crash require reconciliation.
+
+Screenshots retain at most eight private PNGs in a dedicated captures directory.
+Retention scans those captures rather than the growing operation journal. MCP
+returns a separate JPEG image block (up to 1024px and 600KB), so the model can see
+it without reading outside its workspace. Image bytes are not repeated in the
+text metadata or room history. The model receives the image; `uploaded:false`
+means no Room attachment upload, not that the provider never sees it. There is
+no continuous screen recording, and only one capture runs at a time.
 ### Reproduce the bounded live qualification
 
 With an already authenticated dedicated profile, run:
