@@ -80,7 +80,7 @@
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
     "src/conversation.js": "sha256:d57145d2edb2bbdb21b9099be509ad6e14dc3f5a04dff386250e4a26eaa759af",
     "src/display-name-guard.js": "sha256:91ea4bfe1b6c3edd516473601c50a37d5c37f37c388a7b2bf28ffd754c850626",
-    "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
+    "src/dm-consents.js": "sha256:8953ac454233e43dd0209694226178ecc62cc52c68b3456da53310f3cbca3207",
     "src/entry.js": "sha256:c754905664f1e2f3f7f38689cdb82b5cfda956dc5b2c7f143544a35d7cf77477",
     "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
     "src/events.js": "sha256:065c342ae33f5a114fa0c7397048f225304e5598e70a15ac0caf45a47601e89d",
