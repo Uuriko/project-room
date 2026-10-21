@@ -296,4 +296,4 @@ is reported as such; this does not certify physical sleep/wake or successful com
 
 ## Platform qualification
 
-See the [execution portability plan and qualification evidence](EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
+See the [execution portability plan and qualification evidence](../archive/docs/plans/EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
