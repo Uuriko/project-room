@@ -1,3 +1,4 @@
+import { isHumanAside } from "./aside.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -2341,7 +2342,8 @@ function renderMessages() {
     if (node.dataset.key !== key) node.dataset.key = key;
     if (node.dataset.messageRecordId !== message.id) node.dataset.messageRecordId = message.id;
     const muted = isMutedBy(state, session?.member?.id, message.authorId);
-    const className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`;
+    const aside = state ? isHumanAside(state.members, message.authorId, message.body) : false;
+    const className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${aside ? " aside" : ""}${session && !muted && !aside && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`;
     if (node.className !== className) node.className = className;
     if (node.getAttribute("tabindex") !== "-1") node.tabIndex = -1;
     const html = messageContent(message, cluster, message.id === unreadAnchorId || message.id === horizonAnchorId, mentionable);
