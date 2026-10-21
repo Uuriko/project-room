@@ -170,6 +170,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 
 test('unconfigured Google entry is hidden and a direct provider URL returns to usable sign-in', { timeout: 25000 }, async t => {
   const f = await setup(t);
+  // The password form mounts before the asynchronous provider settings arrive.
+  await f.page.locator('#google-signin').waitFor({ state: 'hidden' });
   assert.equal(await f.page.locator('#google-signin').isVisible(), false);
   await f.page.goto(new URL('/api/auth/google/start', f.page.url()).href);
   await f.page.locator('#auth-error').filter({ hasText: 'Google sign-in isn’t available' }).waitFor();
