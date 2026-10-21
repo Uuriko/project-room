@@ -85,7 +85,7 @@ test("pack shape: every documented field is present", async t => {
   const response = await getPack(origin, ROOM, f.ownerKey);
   assert.equal(response.status, 200);
   const pack = await response.json();
-  assert.deepEqual(Object.keys(pack).sort(), ["contentTrust", "coordinationNorms", "eventCursor", "generatedAt", "members",
+  assert.deepEqual(Object.keys(pack).sort(), ["contentTrust", "coordinationNorms", "eventCursor", "generatedAt", "members", "myClaims",
     "openClaims", "openWork", "orient", "orientation", "participationRules", "pinnedResources", "repoHead", "room"]);
   assert.equal(pack.orient.contract.name, "project-room/orient");
   assert.equal(pack.orient.member.id, "owner");

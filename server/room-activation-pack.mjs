@@ -68,6 +68,15 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       claimAction: { method: "POST", endpoint: string, params: object }
  *     }
  *   ],
+ *   myClaims: [                // member viewers only: board claims the
+ *     {                        // viewer owns (the menu's held half — the
+ *       id: string,            // starter a room create seeds pre-claimed
+ *       title: string,         // lives here, never in openClaims)
+ *       state: string,         // board claim state, e.g. "claimed"
+ *       leaseExpiresAt: string|null,
+ *       untrusted: true        // title is member-authored
+ *     }
+ *   ],
  *   pinnedResources: [         // pinned messages, pin order
  *     {
  *       messageId: string,
@@ -199,6 +208,18 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
+    // The menu's held half: openClaims lists only work the viewer may
+    // pick up, so a claim the viewer already holds — above all the
+    // starter a room create seeds pre-claimed to its creator — was
+    // invisible in the pack while orient's `claims` showed it. Mirror
+    // orient's selection (board rows the viewer owns, same shared
+    // boardList memo) so the two surfaces cannot diverge again.
+    try {
+      pack.myClaims = boardList(roomSlug)
+        .filter(item => item?.owner === viewerId)
+        .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state,
+          leaseExpiresAt: item.leaseExpiresAt ?? null, untrusted: true }));
+    } catch { pack.myClaims = []; }
   }
   return pack;
 }
