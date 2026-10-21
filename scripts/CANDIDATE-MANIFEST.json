@@ -66,7 +66,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:a5edccd46833367bc06f94cd5c92758d0a333aacab567345f98a5f79ba307016",
-    "src/app.js": "sha256:96cefe7e6a4af7dd6bef6841142912c56c4b2c3ce7e516064ffee763e44f7bee",
+    "src/app.js": "sha256:5558e3adbd7d80c8cc6bf5adf55ea11710f3cf56f730ca9b47aaaf6af295283f",
     "src/auth-signin-ui.js": "sha256:28a9fd7d332d4719509fe16b45a3c8fcc9d4068d35d5625dd8390200c6086c67",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -160,6 +160,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:301419dd2256c996a6c774b7a5a8f18713f68a2d4478da1e29c97548d1098cb8",
-    "package.json": "sha256:abf571a60321ed55a12c51274155057e208082b99831dfe871d1e9271e7997f2"
+    "package.json": "sha256:fa9ec651aa0c17b952f160a9b916f69b17a709dc1415dc62265e9472a89c8187"
   }
 }
