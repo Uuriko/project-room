@@ -1,6 +1,7 @@
 // Schema-aware recovery for deploy-prod. Reading /api/version/worker does not
 // open a Durable Object; schemas are parsed from exact Git blobs, never evaluated.
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +28,18 @@ export const command = (args, cwd) => {
   }
   return result.stdout;
 };
+// An import of writer-fence is pinned by its source minus whole-line // comments
+// and the items of exported string-only frozen lists that are not *_TABLES,
+// that writer-fence does not import and that the module never uses (e.g. a new
+// ABUSE_RATE_FAMILIES entry, #4413). Every other byte stays pinned. A // line
+// inside a DDL template would be invalid SQLite, so stripping one hides no DDL.
+export function importPin(source, fence) {
+  const text = String(source).replace(/^[ \t]*\/\/.*(?:\n|$)/gm, '');
+  const items = '((?:\\s*"[\\w.:-]*",?)*)\\s*';
+  const lists = new RegExp(`^export const ([A-Z][A-Z0-9_]*) = Object\\.freeze\\((?:new Set\\(\\[${items}\\]\\)|\\[${items}\\])\\);$`, 'gm');
+  const open = text.replace(lists, (all, name) => name.endsWith('_TABLES') || String(fence).includes(name) || text.split(name).length !== 2 ? all : `export const ${name} = [unpinned];`);
+  return createHash('sha256').update(open).digest('hex');
+}
 export function schemaAt(revision, git = args => command(['git', ...args])) {
   if (!shaPattern.test(revision ?? '')) return null;
   try {
@@ -39,7 +52,8 @@ export function schemaAt(revision, git = args => command(['git', ...args])) {
     const imports = [...new Set([...text.matchAll(/^\s*import\s[^;]*?\sfrom\s+["']\.\/([\w.-]+\.mjs)["']/gm)].map(match => `server/${match[1]}`))].sort();
     const pinned = [['server/writer-fence.mjs', blob], ...imports.map(path => [path, git(['rev-parse', `${revision}:${path}`]).trim()])];
     if (!pinned.every(([, sha]) => shaPattern.test(sha))) return null;
-    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
+    const definitions = pinned.map(([path, sha], index) => index ? `${path}#${importPin(git(['show', `${revision}:${path}`]), text)}` : `${path}@${sha}`);
+    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, definitions: definitions.join('\n') };
   } catch { return null; }
 }
 export function allocation(status) {

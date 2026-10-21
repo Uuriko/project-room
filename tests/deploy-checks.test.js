@@ -676,8 +676,10 @@ test("automatic rollback refuses when a table list imported by writer-fence chan
   const oldRev = "1".repeat(40), newRev = "2".repeat(40);
   const blobs = { [`${oldRev}:server/writer-fence.mjs`]: "f".repeat(40), [`${newRev}:server/writer-fence.mjs`]: "f".repeat(40),
     [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40) };
+  const sources = { [`${oldRev}:server/abuse-rate-buckets.mjs`]: 'export const ABUSE_RATE_TABLES = Object.freeze(["abuse_rate_buckets"]);\n',
+    [`${newRev}:server/abuse-rate-buckets.mjs`]: 'export const ABUSE_RATE_TABLES = Object.freeze(["abuse_rate_buckets", "abuse_rate_new"]);\n' };
   const git = args => {
-    if (args[0] === "show") return fence;
+    if (args[0] === "show") return sources[args[1]] ?? fence;
     if (args[0] === "rev-parse" && blobs[args[1]]) return `${blobs[args[1]]}\n`;
     throw new Error(`unexpected git ${args.join(" ")}`);
   };
@@ -687,7 +689,35 @@ test("automatic rollback refuses when a table list imported by writer-fence chan
   const decision = automaticRollbackDecision(previous, 42, candidate);
   assert.equal(decision.eligible, false);
   assert.match(decision.reason, /definitions changed/);
-  // Same imported blobs on both sides stays eligible.
-  blobs[`${newRev}:server/abuse-rate-buckets.mjs`] = "3".repeat(40);
+  // Same imported source on both sides stays eligible.
+  sources[`${newRev}:server/abuse-rate-buckets.mjs`] = sources[`${oldRev}:server/abuse-rate-buckets.mjs`];
   assert.equal(automaticRollbackDecision(previous, 42, schemaAt(newRev, git)).eligible, true);
+});
+
+test("automatic rollback ignores an unused non-table list in a fence import (#4413) but not table or DDL edits", () => {
+  const real = readFileSync(new URL("../server/abuse-rate-buckets.mjs", import.meta.url), "utf8");
+  const fence = 'import { ABUSE_RATE_TABLES } from "./abuse-rate-buckets.mjs";\nexport const STORE_SCHEMA_VERSION = 42;\n';
+  const oldRev = "1".repeat(40), newRev = "2".repeat(40);
+  const verdict = (edited, newFence = fence, baseFence = fence, base = real) => {
+    const git = args => {
+      const text = args[1].endsWith("writer-fence.mjs") ? (args[1].startsWith(newRev) ? newFence : baseFence) : (args[1].startsWith(newRev) ? edited : base);
+      return args[0] === "rev-parse" ? `${createHash("sha1").update(text).digest("hex")}\n` : text;
+    };
+    const prior = schemaAt(oldRev, git);
+    return automaticRollbackDecision({ known: true, versionId: recoveryOld, sourceRevision: oldRev, codeSchemaVersion: 42, schemaSource: prior }, 42, schemaAt(newRev, git)).eligible;
+  };
+  const family = real.replace("export const ABUSE_RATE_FAMILIES = Object.freeze(new Set([\n",
+    '// `agent-connect` is the invite-code lookup bucket.\nexport const ABUSE_RATE_FAMILIES = Object.freeze(new Set([\n  "agent-connect",\n');
+  assert.notEqual(family, real);
+  assert.match(family, /"agent-connect",\n  "login"/);
+  assert.equal(verdict(real), true);
+  assert.equal(verdict(family), true, "#4413: one new rate family and a comment");
+  assert.equal(verdict(real.replace('["abuse_rate_buckets"]', '["abuse_rate_buckets", "abuse_rate_more"]')), false, "new table in the imported list");
+  assert.equal(verdict(real.replace("until_ms INTEGER NOT NULL\n", "until_ms INTEGER NOT NULL,\n    note TEXT\n")), false, "column in the DDL");
+  assert.equal(verdict(real.replace("const ready = new WeakSet();", 'const ready = new WeakSet();\nconst MIGRATE = "ALTER TABLE abuse_rate_buckets ADD COLUMN note TEXT";')), false, "new ALTER");
+  const use = text => text.replace("const FAMILY_CAP", "const FIRST = ABUSE_RATE_FAMILIES;\nconst FAMILY_CAP");
+  assert.equal(verdict(use(family), fence, fence, use(real)), false, "list used in the module stays pinned");
+  const importsFamilies = fence.replace("{ ABUSE_RATE_TABLES }", "{ ABUSE_RATE_TABLES, ABUSE_RATE_FAMILIES }");
+  assert.equal(verdict(family, importsFamilies, importsFamilies), false, "list writer-fence imports stays pinned");
+  assert.equal(verdict(real, fence + 'export const EXTRA_TABLES = Object.freeze(["extra"]);\n'), false, "writer-fence table definition change");
 });
