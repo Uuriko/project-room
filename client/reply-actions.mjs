@@ -73,7 +73,26 @@ export function recordedReplyAction(name, args, command, receipt) {
 }
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
   const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+  let confirmed = confirmsAgentCommand(receipt, command, identity);
+  // A reply to a private thread inherits its recipient during server admission.
+  // Keep the submitted bytes unchanged on retries. Only accept that one added
+  // field after checking both the complete receipt and an authorized parent read.
+  const recipient = receipt?.event?.data?.toMemberId;
+  if (!confirmed && name === "room_reply" && !Object.hasOwn(command.data, "toMemberId") && validId(recipient)
+      && confirmsAgentCommand(receipt, { ...command, data: { ...command.data, toMemberId: recipient } }, identity)) {
+    try {
+      const timeout = AbortSignal.timeout(5000);
+      const parent = await client.messageThread(command.data.replyToId, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      const message = parent?.thread;
+      if (parent?.roomId === identity.roomId && message?.id === command.data.replyToId
+          && validId(message.authorId) && validId(message.toMemberId)
+          && [message.authorId, message.toMemberId].includes(identity.memberId)) {
+        const otherParty = message.authorId === identity.memberId ? message.toMemberId : message.authorId;
+        confirmed = recipient === otherParty;
+      }
+    } catch { /* A recorded write with unavailable corroboration remains uncertain. */ }
+  }
+  if (!confirmed) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
   return recordedReplyAction(name, args, command, receipt);
 }

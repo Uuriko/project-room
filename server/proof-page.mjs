@@ -14,7 +14,7 @@
 // Honesty contract (docs/RECEIPTS-PAGE.md): names are as the room recorded
 // them, not identity-verified; hashes are stored values, not re-verified at
 // read time; these records are unsigned. Credit movements are NOT claimed
-// here: bounty lots are proved by signed lot receipts on their own public
+// here: bounty lots are proved by lot receipts on their own public
 // pages (/receipts/<lotId>), so this page makes no payment claim at all.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
@@ -23,7 +23,7 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./receipts-page.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
-import { PROOF_LEVELS } from "./receipt-share.mjs";
+import { PROOF_LEVELS, jsonLdScriptTag } from "./receipt-share.mjs";
 
 export { PROOF_LEVELS };
 
@@ -35,7 +35,7 @@ export const PROOF_HONESTY = Object.freeze([
   "Names are as the room recorded them — member display names, or a self-supplied name on public-work receipts — not identity-verified.",
   "Hashes are stored sha256 values, not re-verified when this page is read.",
   "These records are unsigned. A receipt proves the room stored this record and the owner chose to publish it — nothing beyond the level named on each entry.",
-  "No payment is proved on this page. Bounty credit movements are proved by signed lot receipts, each served on its own public page once its bounty settles, unless the room owner has turned public receipts off.",
+  "No payment is proved on this page. Bounty credit movements are proved by lot receipts — unsigned records of the movement and the settlement verdict shown, kept in the room's credit ledger — each served on its own public page once its bounty settles and only while the room owner has public receipts turned on — off, or never turned on, keeps a settled lot private.",
   "Only receipts the room owner chose to publish appear here. Turning public receipts off removes this page's entries; private work is never listed.",
 ]);
 
@@ -51,8 +51,11 @@ footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:v
 img,svg,table{max-width:100%}
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -64,12 +67,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -157,7 +160,34 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
   }).join("") || `<p>No published results yet. A result appears here when work is settled in this room and the owner has public receipts on — each one as a receipt anyone can open.</p>`;
   const next = nextCursor ? `<p><a href="/r/${escapeHtml(slug)}/proof?cursor=${escapeHtml(nextCursor)}">Older results</a></p>` : "";
   const honesty = PROOF_HONESTY.map(line => `<li>${escapeHtml(line)}</li>`).join("");
-  const html = `${head({ title: `${room.title} — proof of work`, description, path: `/r/${slug}/proof` })}
+  // Structured data mirrors this page's visible entries — same titles,
+  // same level labels, same level notes — so a machine quoting the page
+  // quotes what a reader sees (distribution research R4).
+  const jsonLd = jsonLdScriptTag({
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: `${room.title} — proof of work`,
+    url: `${ROOM_ORIGIN}/r/${slug}/proof`,
+    description,
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: entries.map((entry, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: entry.title,
+        url: `${ROOM_ORIGIN}${entry.receiptHref}`,
+        description: `${entry.proofLabel} — ${PROOF_LEVELS[entry.proofLevel].note}`,
+      })),
+    },
+  });
+  const html = `${head({
+    title: `${room.title} — proof of work`,
+    description,
+    path: `/r/${slug}/proof`,
+    jsonLd,
+    ogImage: `${ROOM_ORIGIN}/r/${slug}/proof/og.png`,
+    ogAlt: description,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/r/${escapeHtml(slug)}">${escapeHtml(room.title)}</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(room.title)} — proof of work</h1>

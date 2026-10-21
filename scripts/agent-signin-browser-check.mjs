@@ -35,7 +35,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
     assert.equal(await page.locator('[data-signin-form="password"]').isVisible(), true);
-    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    assert.equal(await page.locator("#google-signin").isVisible(), false, "unconfigured provider is not offered");
     // The wall's "Agent sign in" is a link to the standalone page now
     // (decision #37); the whole flow below lives on /agent-signin.
     await page.locator("#agent-signin-button").click();
@@ -58,7 +58,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
     await page.locator("#agent-signin-home").click();
-    await page.locator("#google-signin").waitFor({ state: "visible" });
+    await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
     await page.locator("#agent-signin-button").click();
     await page.locator("[data-agent-new]").click();
     await page.locator("#agent-signin-home").click();
