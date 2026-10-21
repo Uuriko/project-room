@@ -169,19 +169,19 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
 export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs, connectionUnavailable = false;
+  let delay = intervalMs, connectionUnavailable = false, pendingStatement;
+  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
   while (!signal?.aborted) {
     let cursor = null;
     try {
-      const { requests, evaluatedThrough } = await client.replyRequests({ status: "all", signal });
+      const { requests, evaluatedThrough } = await client.replyRequests({ direction: "incoming", status: "open", signal });
       cursor = evaluatedThrough;
-      const { runs } = await client.requestRuns(undefined, { signal });
-      const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
+      const { runs } = requests.length ? await client.requestRuns(undefined, { signal }) : { runs: {} };
       const owned = request => Object.hasOwn(runs, request.id);
       const eligible = requests.filter(request => isRequestEligible(request, {
         owned: owned(request),
         runState: runs[request.id]?.state,
-        hasPendingDelivery: Boolean(pending(request)),
+        hasPendingDelivery: owned(request) && runs[request.id]?.state !== "needs_attention" && Boolean(pending(request)),
       }));
       for (const request of eligible.slice(0, 50)) {
         signal?.throwIfAborted();
