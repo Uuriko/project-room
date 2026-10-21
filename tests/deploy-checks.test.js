@@ -410,7 +410,7 @@ test("CLI --write refuses missing assets and rejects conflicting flags", async t
 });
 
 // Actual deployment recovery owner: no live credentials or writes in fixtures.
-import { rollbackDecision, recoverWorkers, recoveryDescription, observeWorker, schemaAt, withApiRetry, transientApiFailure, deploymentStatus, parseDeploymentStatus, restDeploymentStatus, allocation } from "../scripts/deploy-recovery.mjs";
+import { automaticRollbackDecision, recoverWorkers, recoveryDescription, observeWorker, schemaAt, withApiRetry, transientApiFailure, deploymentStatus, parseDeploymentStatus, restDeploymentStatus, allocation } from "../scripts/deploy-recovery.mjs";
 import { parse as parseYaml } from "yaml";
 const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
@@ -457,21 +457,21 @@ test("rollback schema gate rejects lower and unknown schemas without executing o
     assert.equal(report.workers.prod.rollbackAttempted, false);
     assert.doesNotMatch(recoveryDescription(report), /rolled back|ROLLBACK VERIFIED/);
   }
-  assert.equal(rollbackDecision(previousWorker(38), 38, fenceProof(38)).eligible, true);
-  assert.match(rollbackDecision(previousWorker(38), 38, fenceProof(38)).reason, /compatibility is not established/);
+  assert.equal(automaticRollbackDecision(previousWorker(38), 38, fenceProof(38)).eligible, true);
+  assert.match(automaticRollbackDecision(previousWorker(38), 38, fenceProof(38)).reason, /compatibility is not established/);
 });
 
 test("rollback requires consistent exact source evidence, including same-schema changes", async () => {
   const previous = previousWorker(42), candidate = fenceProof(42);
   for (const proof of [undefined, {}, { ...candidate, blob: "invalid" }, { ...candidate, version: 41 },
     { ...candidate, revision: "unknown" }, { ...candidate, blob: "e".repeat(40) }]) {
-    assert.equal(rollbackDecision(previous, 42, proof).eligible, false);
+    assert.equal(automaticRollbackDecision(previous, 42, proof).eligible, false);
   }
   for (const proof of [undefined, { ...previous.schemaSource, revision: "c".repeat(40) },
     { ...previous.schemaSource, version: 41 }, { ...previous.schemaSource, blob: "invalid" }]) {
-    assert.equal(rollbackDecision({ ...previous, schemaSource: proof }, 42, candidate).eligible, false);
+    assert.equal(automaticRollbackDecision({ ...previous, schemaSource: proof }, 42, candidate).eligible, false);
   }
-  assert.equal(rollbackDecision(previous, 42, candidate).eligible, true);
+  assert.equal(automaticRollbackDecision(previous, 42, candidate).eligible, true);
   let calls = 0;
   const report = await recoverWorkers({ targetSha: "c".repeat(40), candidateCodeSchemaVersion: 42,
     candidateSchemaSource: candidate, prod: previous, entry: previous }, { prod: true }, {
