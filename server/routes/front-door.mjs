@@ -8,11 +8,19 @@
 // the route lives here, not inline in server/http.mjs.
 import { collectPublicReceipts } from "../receipts-live.mjs";
 
+// The hero features one receipt to visitors. Internal QA and fleet test runs
+// are published too (they count), but must not be the featured example
+// (QA 2026-10-20: "FLEET-QA share journey…" was the face of /about).
+const INTERNAL_TITLE = /^\s*(fleet-|qa[-_:\s]|qa\d|swarm-|test[-_:\s])/i;
+export function featuredReceipt(receipts) {
+  return receipts.find(receipt => !INTERNAL_TITLE.test(String(receipt?.title ?? ""))) ?? null;
+}
+
 export function frontDoorFacts(ctx) {
   ctx.rate(`receipts:${ctx.remoteAddress}`, 120);
   ctx.res.setHeader("Cache-Control", "no-store");
   const receipts = collectPublicReceipts(ctx.store);
-  const latest = receipts[0] ?? null;
+  const latest = featuredReceipt(receipts);
   return ctx.json(ctx.res, 200, {
     schema: "project-room-front-door/1",
     counters: {
