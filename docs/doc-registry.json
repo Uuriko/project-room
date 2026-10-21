@@ -3,7 +3,7 @@
  "corpus": "repo",
  "repo": "Uuriko/project-room",
  "registry_path_in_repo": "docs/doc-registry.json",
- "reconciled_at_base": "cc0527a9e19eaea3e92672ca2c1f4e21dc90e162",
+ "reconciled_at_base": "ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba",
  "seeded_at": "2026-10-19",
  "seeded_by": "DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18)",
  "seed_sources": [
@@ -7733,6 +7733,1196 @@
    "census_disposition": "MERGE-INTO canonical doc for its topic (named at execution)",
    "census_size": 2764,
    "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "ROOM-STATE.md",
+  "kind": "file",
+  "type": "GENERATED",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "generator",
+   "refs": [
+    "scripts/room"
+   ]
+  },
+  "ttl_days": null,
+  "last_reviewed": "2026-09-16",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): GENERATED machine board produced by scripts/room rebuild (stamp 2026-09-16T18:27:34Z, board Uuriko/project-room#266, do-not-hand-edit). Registered GENERATED so the full-tree join accounts for it without prose stewardship.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — generated artefact; generator-governed, no stewardship TTL",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-09-16"
+  }
+ },
+ {
+  "path": "desktop/macos/DISTRIBUTION.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): Mac distribution how-to (DMG/zip notarization steps). Post-seed full-tree drift file named by the fleet validator join at PR #4398's head but never in docs/INDEX.md.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/ADMIN-GUIDE.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): Project Room administrator guide (installation, users, maintenance). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/AGENT-DIGEST.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-17",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): compact room catch-up written for agent clients. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-17"
+  }
+ },
+ {
+  "path": "docs/AGENT-FAST-PATH-20261006.txt",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): DATED SNAPSHOT 2026-10-06 — research and proposed direction, self-labelled NOT a join doc; kept as a working record. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/AGENT-HELP-OFFERS.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): guidance for agents — offer help without taking over. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/CONTINUITY-BUILD-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): build prompt and evidence-gated execution plan (continuity programme). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/EXACT-REVIEW-PACKET-20261013.txt",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): exact review preparation packet (2026-10-13), dated working artefact. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/FAST-AGENT-WORK-20261013.txt",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): fast task reads for agents (2026-10-13), dated working artefact. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/INVITATION-AUDIT.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-13",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): private invitation journal and recovery notes. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-13"
+  }
+ },
+ {
+  "path": "docs/LEAN-CHAT-DELIVERY-20261012.txt",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): implementation receipt — lean chat delivery (2026-10-12), dated working artefact. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/OPERATOR.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): operator runbook — the operator surface, secret setup, test-data removal. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/RELEASE-QUALIFICATION-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): release qualification execution plan. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/ROOM-CUA-DESKTOP.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): connect Cua desktop (agent client wiring). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/ROOM-KITS-HARNESS-JEV-ROY.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): kits / harness / Jev / Roy ladder doc. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/ROOM-RECEIPT-V1.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): room.receipt.v1 artifacts receipt contract (self-declared Contract, not a live API yet). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/ROOM-SCORER.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): Room Scorer — warp-shaped LLM judge description. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/SESSION-API.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-16",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): session HTTP endpoint reference. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-16"
+  }
+ },
+ {
+  "path": "docs/WEEKLY-LEARNINGS.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-06",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): hand-appended weekly learnings queue read by scripts/weekly-learnings.mjs. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-06"
+  }
+ },
+ {
+  "path": "docs/WORK-AUTHORITY-DECISION.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): decision record — work authority before the next storage cutover. Registered at reference depth as WORKING: this registry has no DECISION rows, and the seed conventions reserve ttl-null for ARCHIVE/GENERATED. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/WORK-CUTOVER-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): canonical work and acceptance cutover plan. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/WORK-INTEGRATION-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): integrated candidate and recovery qualification plan. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "docs/WORK-ITEM-SESSION.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-14",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): work item session notes. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-14"
+  }
+ },
+ {
+  "path": "docs/WORK-LIFECYCLE-BUILD-PLAN.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-18",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): work lifecycle and authority build plan. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-18"
+  }
+ },
+ {
+  "path": "perf/BASELINE-local.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-08",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): local perf baseline (REL-20). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-08"
+  }
+ },
+ {
+  "path": "perf/herdr-bench-RESULTS.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): herdr-bench session-substrate benchmark results (lane P1). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-07"
+  }
+ },
+ {
+  "path": "plugins/project-room/commands/room-pull.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "agent-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-09-29",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): plugin slash-command definition (Claude Code command frontmatter). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-09-29"
+  }
+ },
+ {
+  "path": "research/B8-MISC-IDEMPOTENCY.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): B8 idempotency audit — miscellaneous mutations (200-hard-tasks research). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "research/PRODUCT200-RELIABILITY-ANCHOR-INDEX.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): PRODUCT-200 reliability regression anchor index. Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "research/PRODUCT200-RELIABILITY-FINAL-REPORT.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "qa-surface",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-09",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): PRODUCT-200 reliability final report (worker D6-10/50, batch 2). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-09"
+  }
+ },
+ {
+  "path": "research/SETTLEMENT-DATA-RETENTION.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): settlement data retention and privacy policy (200-hard-tasks #16). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-07"
+  }
+ },
+ {
+  "path": "research/SETTLEMENT-OPS-RUNBOOK.md",
+  "kind": "file",
+  "type": "RUNBOOK",
+  "topic": null,
+  "owner_role": "operator",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 10240,
+  "budget_bytes": 10240,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): settlement ops runbook (200-hard-tasks #17). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-07"
+  }
+ },
+ {
+  "path": "server/session-adapter/BRIDGE-API.md",
+  "kind": "file",
+  "type": "CONTRACT",
+  "topic": null,
+  "owner_role": "contract",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-07",
+  "size_cap_bytes": 5120,
+  "budget_bytes": 5120,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by DOCS-DS4-R (2026-10-21): bridge HTTP API contract, B4 (adapter) to B3 (bridge). Post-seed full-tree drift file.",
+  "seed_rule": "DOCS-DS4-R (2026-10-21) — post-seed full-tree drift; reference-depth registration; door selection deferred to first owner review",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": null,
+   "last_change": "2026-10-07"
   }
  }
  ],

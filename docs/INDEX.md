@@ -1,4 +1,4 @@
-<!-- generated-by: gen-doc-index@1 · source: cc0527a9e19eaea3e92672ca2c1f4e21dc90e162 · inputs: docs/doc-registry.json@033d27f1 -->
+<!-- generated-by: gen-doc-index@1 · source: ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba · inputs: docs/doc-registry.json@0d9f5a6f -->
 # Documentation index
 
 One-screen map of the documentation set, generated from the doc
@@ -112,4 +112,4 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `skills/` (family: 21 files)
 - `archive/` pinned set (20 files)
 
-Registered: 215 rows · listed here: 88 lines · archive pinned set: 20 files · not listed (reference depth): 101 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
+Registered: 248 rows · listed here: 88 lines · archive pinned set: 20 files · not listed (reference depth): 134 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
