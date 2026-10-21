@@ -3111,12 +3111,28 @@ export class BountyEscrow {
       const cutoff = isoNow(this.nowMs() - 30 * 24 * 3600 * 1000);
       const rep30 = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS earned
         FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='payout' AND at >= ?`).get(roomId, lane, cutoff).earned;
+      // P5 (MONEY-LEGIBILITY step 4): the genesis endowment, disclosed on
+      // the read itself. Balances read 0 until the room's first money act
+      // silently materializes the endowment (ensureGenesis runs inside the
+      // mutating entry points, never on this read), so a pre-transaction
+      // reader could not tell the endowment exists or that it is per-room.
+      // Derived from the journal only — this read still issues nothing.
+      const genesisIssued = this.db.prepare(
+        "SELECT COUNT(*) AS n FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='genesis'")
+        .get(roomId, lane).n > 0;
       // Slice 8: the graduated anti-flake ladder, derived from strikes
       // inside the decay window — the cooldown (rung 3+) is visible on the
       // identity card so lanes know when they may claim again.
       const flake = this._flakeState(roomId, lane);
       return Object.freeze({ identity: lane, ...byState,
         total: byState.payable + byState.locked + byState.attributed + byState.approved,
+        // The room's member endowment, stated on every balances read so it
+        // is visible BEFORE the first transaction, with its scope: the
+        // endowment belongs to this room only and does not transfer.
+        endowment: Object.freeze({ credits: GENESIS_CREDITS, scope: "per-room", issued: genesisIssued,
+          note: genesisIssued
+            ? `This balance includes the room's ${GENESIS_CREDITS}-credit member endowment. The endowment is per-room: it exists only in this room and does not transfer to other rooms.`
+            : `This room grants every member a ${GENESIS_CREDITS}-credit endowment, issued automatically on the room's next bounty transaction (post, fund, claim, dispute, epoch close, or transfer) after they join. The endowment is per-room only and does not transfer. Your balances above do not include it yet.` }),
         flake: Object.freeze({ strikes: flake.strikes, rung: flake.rung,
           bondMultiplier: flake.bondMultiplier,
           cooldownUntil: flake.cooldownUntilMs === null ? null : new Date(flake.cooldownUntilMs).toISOString() }),

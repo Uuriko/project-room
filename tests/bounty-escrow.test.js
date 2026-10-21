@@ -67,6 +67,29 @@ test("genesis issues 100 credits per lane and conservation holds on empty room",
   assert.equal(bal(escrow, JILL).payable, 100);
 });
 
+test("P5: balances disclose the per-room endowment before and after issuance", () => {
+  const { escrow } = makeEscrow();
+  const FRESH = "room-p5-fresh";
+  // Pre-transaction: every figure reads 0 and nothing in the payload said
+  // an endowment exists. The read now states it — amount, per-room scope,
+  // and that it is not in the figures yet. The read itself issues nothing.
+  const before = escrow.balances(FRESH, JILL);
+  assert.equal(before.payable, 0);
+  assert.equal(before.endowment.credits, 100);
+  assert.equal(before.endowment.scope, "per-room");
+  assert.equal(before.endowment.issued, false);
+  assert.match(before.endowment.note, /do not include it yet/);
+  assert.match(before.endowment.note, /per-room/);
+  assert.equal(escrow.balances(FRESH, JILL).payable, 0, "a balances read never issues the endowment");
+  // The room's first money act materializes it for every member at once.
+  escrow.postBounty(FRESH, { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(3_600_000) });
+  const after = escrow.balances(FRESH, GROK);
+  assert.equal(after.endowment.issued, true);
+  assert.equal(after.payable, 100);
+  assert.match(after.endowment.note, /includes the room's 100-credit member endowment/);
+  expectConserved(escrow);
+});
+
 test("canonicalLane maps room member ids to ledger lanes", () => {
   assert.equal(canonicalLane("id:agent/jill"), "id:agent/jill");
   assert.equal(canonicalLane("id:agent:jill"), "id:agent/jill");
