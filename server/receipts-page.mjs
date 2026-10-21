@@ -85,9 +85,9 @@ const verificationLabel = state => state === "verified" ? "Member-verified compl
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
-  const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
+  const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); const wait = waitTextOf(item.wait); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
-<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
+<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}${wait ? ` · ${escapeHtml(wait)}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
@@ -220,6 +220,10 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       submitted: "Submitted — no reviewer decision is recorded yet.",
     }[receipt.state] ?? `Recorded state: ${receipt.state}.`;
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
+    // The submitter's own view of an undecided wait (P6): how long this
+    // submission has been waiting, on the receipt page they come back to.
+    const waitText = waitTextOf(receipt.wait);
+    if (waitText) rows.push(`<div><dt>Waiting</dt><dd>${escapeHtml(waitText)} (submitted <time datetime="${escapeHtml(receipt.wait.submittedAt)}">${escapeHtml(when(receipt.wait.submittedAt))}</time>)</dd></div>`);
     if (review.verificationVerdict) rows.push(`<div><dt>Recorded check verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""} — this check does not override the delivery outcome above.</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
     if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
@@ -365,7 +369,19 @@ const publicJson = receipt => ({
   // no journal lot row carries neither, and none is forged here.
   ...(receipt.lotId ? { lotId: receipt.lotId } : {}),
   ...(receipt.settlement ? { settlement: receipt.settlement } : {}),
+  // The undecided wait (MONEY-LEGIBILITY P6): the read model sets this on
+  // an undecided public-work receipt only; decided receipts carry none.
+  ...(receipt.wait ? { wait: receipt.wait } : {}),
 });
+
+// The waiting-age line for an undecided public submission (P6), worded
+// once so the queue card and the receipt's own page agree: the age comes
+// from the read model's derived `wait` block, never recomputed here.
+export const waitTextOf = wait => {
+  if (!wait || !Number.isInteger(wait.days) || wait.days < 0) return null;
+  const age = wait.days === 0 ? "submitted today" : wait.days === 1 ? "submitted 1 day ago" : `submitted ${wait.days} days ago`;
+  return `${age} · awaiting decision`;
+};
 
 export function receiptsListJson(page) {
   return {

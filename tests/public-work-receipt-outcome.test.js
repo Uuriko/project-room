@@ -183,6 +183,41 @@ test('rejected public-work receipt reads as rejected everywhere; undecided claim
   }
 });
 
+test('P6: an undecided public submission shows its waiting age on every public face; a decided one shows none', t => {
+  const f = unpaidFixture(t, 'human');
+  const pending = f.finish('waiting-task');
+  const decided = f.finish('decided-task');
+  f.reviews.decide('commons', 'owner', decided.receiptId, f.input(decided, 'reject', 0, { decision: 'rejected' }));
+  // Age the undecided submission in the public list row: submitted 13
+  // days ago, nobody has decided — the census's exemplar shape.
+  const old = new Date(Date.now() - 13 * 86_400_000).toISOString();
+  f.store.db.prepare('UPDATE public_receipts SET at=? WHERE id=?').run(old, pending.receiptId);
+  const pub = publicReceiptById(f.store, pending.receiptId);
+  assert.equal(pub.state, 'submitted');
+  assert.equal(pub.wait.awaitingDecision, true);
+  assert.equal(pub.wait.submittedAt, old);
+  assert.equal(pub.wait.days, 13);
+  // A decided receipt carries no wait block on any face.
+  const pubDecided = publicReceiptById(f.store, decided.receiptId);
+  assert.equal(pubDecided.state, 'rejected');
+  assert.equal(pubDecided.wait, undefined);
+  // JSON faces carry the derived block (projection only — stored record
+  // untouched, byte for byte).
+  assert.equal(receiptJson(pub).wait.days, 13);
+  assert.deepEqual(f.stored(pending.receiptId), pending);
+  const list = receiptsListJson(queryPublicReceipts(f.store, {}));
+  const byId = Object.fromEntries(list.receipts.map(entry => [entry.id, entry]));
+  assert.equal(byId[pending.receiptId].wait.days, 13);
+  assert.equal(byId[decided.receiptId].wait, undefined);
+  // HTML faces: the public queue card and the submitter's own receipt page
+  // render the same waiting-age line; the decided page never does.
+  const listHtml = renderReceiptsHtml(queryPublicReceipts(f.store, {}));
+  assert.match(listHtml, /submitted 13 days ago · awaiting decision/);
+  const html = renderReceiptDetailHtml(pub);
+  assert.match(html, /<dt>Waiting<\/dt><dd>submitted 13 days ago · awaiting decision/);
+  assert.doesNotMatch(renderReceiptDetailHtml(pubDecided), /awaiting decision/);
+});
+
 test('FAIL verdict and revision request read truthfully, and a later acceptance still lands as verified', t => {
   const f = unpaidFixture(t, 'agent');
   // Agent-mode offers name the agent reviewer for both verify and decide.
