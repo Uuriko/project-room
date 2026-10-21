@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Moderation (issue #6 E4): report a message to the room owner; mute a member
 // for yourself.
 //
@@ -98,7 +99,7 @@ export class Moderation {
       if (!reason) fail(422, "invalid_report", "Say briefly why you are reporting this message");
       if (reason.length > reportLimits.reasonLength || /[\p{Cc}]/u.test(reason.replace(/[\n\t]/g, ""))) fail(422, "invalid_report", `Keep the reason to ${reportLimits.reasonLength} characters of plain text`);
       const room = this.store.room(roomId);
-      const message = room.state.messages.find(m => m.id === request.messageId) ?? this.store.archivedMessage(roomId, request.messageId);
+      const message = messageRepository(this.store, roomId, room.state).get(request.messageId);
       if (!message) fail(404, "message_not_found", "That message is not in this room");
       // A reporter can only report what they can read: a DM between two other
       // members (or history before a since_join reporter's join) answers
@@ -127,12 +128,12 @@ export class Moderation {
       // #643: owner-by-id — the owner capability follows the owner identity,
       // not the member kind; an agent owner may review reports. Owner-only.
       if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
-      const messages = new Map(room.state.messages.map(m => [m.id, m]));
+      const messages = messageRepository(this.store, roomId, room.state);
       // The owner is not exempt from DM privacy: a reported DM's body is shown
       // only when the owner is one of its two parties (and in their history).
       const ownerFloor = summaryHistoryFloor(this.store, roomId, auth.member.id);
       const reports = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? ORDER BY created_at DESC, report_id").all(roomId).map(row => {
-        const message = messages.get(row.message_id) ?? this.store.archivedMessage(roomId, row.message_id);
+        const message = messages.get(row.message_id);
         return {
           ...receipt(row), reporterId: row.reporter_id, authorId: row.author_id,
           message: message ? {

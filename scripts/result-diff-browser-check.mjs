@@ -11,7 +11,9 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
 
-async function setup(t, width) {
+const retainedBody = "Result A\nKeep this line\nMissing named owner\n".repeat(35);
+
+async function setup(t, width, { retained = false } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
   let browser;
   t.after(async () => {
@@ -40,7 +42,7 @@ async function setup(t, width) {
   send("owner", T.WORK_PROPOSED, { workItemId: "calm-result", title: "A first result", definitionOfDone: "One version", mode: "read", accountableMemberId: "producer", verifierMemberId: "human-checker", independentVerificationRequired: true });
   lifecycle("calm-result");
   completeWithText("calm-result", "Only version of this result");
-  const first = completeWithText("revision-journey", "Result A\nKeep this line\nMissing named owner");
+  const first = completeWithText("revision-journey", retained ? retainedBody : "Result A\nKeep this line\nMissing named owner");
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -129,27 +131,27 @@ for (const width of [1440, 390]) {
     await reviewer.locator("#close-result").click();
     assert.equal(await card(reviewer).locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
     await reviewer.locator('[data-work-record-id="calm-result"] [data-read-result]').click();
-    await reviewer.locator("#result-body").getByText("Only version of this result", { exact: true }).waitFor();
+    await reviewer.waitForFunction(() => document.activeElement?.dataset.messageRecordId && document.activeElement.textContent.includes("Only version of this result"));
+    assert.equal(await reviewer.locator("#result-dialog").isVisible(), false, "first short result opens in the conversation");
     assert.equal(await reviewer.locator("#result-diff").isVisible(), false, "different work's first result cannot retain B comparison");
     assert.equal(await reviewer.locator("#result-diff").textContent(), "");
-    await reviewer.locator("#close-result").click();
   });
 
   test(`retained result ${width}px: reopening labels earlier text and preserves focus`, { timeout: 30000 }, async t => {
-    const f = await setup(t, width), page = await f.login("owner");
+    const f = await setup(t, width, { retained: true }), page = await f.login("owner");
     await openResult(page);
     assert.doesNotMatch(await page.locator("#result-status").textContent(), /Earlier result/, "completed work awaiting review is still current");
     assert.equal(await page.locator("#result-diff").isVisible(), false);
     f.mutate(T.WORK_BLOCKED, { reason: "Reopened for correction", nextAction: "Name the owner" });
     await card(page).getByText(/Reopened for correction/).waitFor({ state: "attached" });
     assert.match(await page.locator("#result-status").textContent(), /Earlier result/);
-    assert.equal(await page.locator("#result-body").textContent(), "Result A\nKeep this line\nMissing named owner");
+    assert.equal(await page.locator("#result-body").textContent(), retainedBody);
     await page.locator("#close-result").click();
     assert.equal(await card(page).locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
     await openResult(page);
     assert.match(await page.locator("#result-status").textContent(), /Earlier result/);
-    assert.equal(await page.locator("#result-body").textContent(), "Result A\nKeep this line\nMissing named owner");
+    assert.equal(await page.locator("#result-body").textContent(), retainedBody);
   });
 }
 
