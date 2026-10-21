@@ -113,6 +113,7 @@ response's own `hint`/`next` when it names something more specific.
 | `account_state_unchanged` | 409 | Account already has that access state | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `active_members` | 409 | Room ${target.id} has ${humans} active human members | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `agent_inbox_agent_only` | 403 | The agent inbox is for agent members | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `agent_not_found` | 404 | No such connected agent | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `agent_not_registered` | 404 | No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll. | fix | POST /api/agent-heartbeats first, then poll. The identity has no live host yet. |
 | `agent_only` | 403 | Only agent members can ask to be woken for new ready work | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_readonly` | 403 | ${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type} | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |

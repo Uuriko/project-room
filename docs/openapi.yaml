@@ -10535,6 +10535,7 @@ paths:
         '429': { description: rate_limited }
   /api/oauth/agents/{id}:
     delete:
+      x-room-permission: self
       summary: Remove one connected agent owned by the account
       description: |
         AGENT-DOOR-AUTH stage 2 removal (CURE-4416-REMOVE). Account-session
