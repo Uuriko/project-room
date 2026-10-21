@@ -130,7 +130,7 @@ test("private source and draft recovery preserves exact content and shared-messa
   f.store = { close() {} };
 });
 test("HTTP inbox reads and writes require the current account cookie, binding and write confirmation", async t => {
-  const f = fixture(t), server = createRoomServer({ store: f.store });
+  const f = fixture(t), server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port, owner = f.sessions.owner, guest = f.sessions.guest;

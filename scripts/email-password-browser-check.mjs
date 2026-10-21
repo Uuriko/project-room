@@ -6,7 +6,6 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { hashPassword } from "../src/password-auth.mjs";
-import { clickChrome } from "./room-chrome.mjs";
 
 const password = "synthetic-email-password";
 async function setup(t, { login = true } = {}) {
@@ -78,13 +77,11 @@ test("password signup opens one personal room without optional setup, with profi
   assert.equal((await rooms()).length, 1, 'reload cannot create another room');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: `${shots}/first-run-1280.png` });
-  await clickChrome(page, '#account-settings-button');
-  await page.locator('#nav-inbox').click(); await page.locator('#inbox-panel').waitFor({ state: 'visible' });
-  await page.locator('.inbox-gmail details > summary').click();
-  await page.locator('#inbox-setup').click();
-  await page.locator('#setup-name').fill('Ada');
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await page.locator('#account-setup-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#session-menu-button').click();
+  await page.locator('#account-profile-button').click();
+  await page.locator('#account-profile-dialog [name="displayName"]').fill('Ada');
+  await page.locator('#account-profile-dialog button[type="submit"]').click();
+  await page.locator('#account-profile-dialog').waitFor({ state: 'hidden' });
   const profile = await (await page.context().request.get(origin + '/api/account/profile', { headers: { 'X-Session-Binding': account.sessionBinding } })).json();
   assert.equal(profile.displayName, 'Ada', 'explicit later personalization persists the account profile');
   assert.equal((await rooms()).length, 1, 'profile editing cannot duplicate the workspace');

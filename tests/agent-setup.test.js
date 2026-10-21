@@ -37,6 +37,10 @@ test("self-serve join links parse in the CLI and connect like the old hash links
   const result = await f.connect({ target: `${f.origin}/join/${invite.code}` });
   assert.equal(result.status, "connected");
   assert.equal(result.roomId, "commons");
+  assert.equal(result.orientation.view, "brief");
+  assert.equal(result.orientation.full, "/api/rooms/commons/activation-pack");
+  assert.deepEqual(result.orientation.you.permissions, result.permissions);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.orientation)) <= 2048);
 });
 test("one connection survives lost registration and redemption responses with one identity and membership", async t => {
   const f = await fixture(t), invite = f.invite(); let lose = "agent-identities";

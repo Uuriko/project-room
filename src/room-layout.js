@@ -15,7 +15,12 @@ export function installRoomLayout() {
   });
   get('#invite-people-button').textContent = 'Invite';
   const invites = get('#invite-navigation');
-  const invitationState = () => { invites.hidden = ['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].every(selector => get(selector).hidden); };
+  const invitationState = () => {
+    const visible = ['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].filter(selector => !get(selector).hidden).length;
+    invites.hidden = visible === 0;
+    invites.querySelector('summary').hidden = visible <= 1;
+    if (visible === 1) invites.open = true;
+  };
   for (const selector of ['#invite-people-button', '#connect-agent-button', '#invite-agents-button']) new MutationObserver(invitationState).observe(get(selector), { attributes: true, attributeFilter: ['hidden'] });
   invitationState();
   for (const selector of ['#invite-people-button', '#connect-agent-button', '#invite-agents-button']) {
@@ -53,7 +58,7 @@ export function installRoomLayout() {
     if (layout === nextLayout) return;
     layout = nextLayout;
     for (const { node, anchor, destination } of entries) {
-      if (room && (node.id !== "workspace-nav" || !compact.matches)) { if (node.parentNode !== destination) destination.append(node); }
+      if (room) { if (node.parentNode !== destination) destination.append(node); }
       else if (node.previousSibling !== anchor) anchor.after(node);
     }
     // A menu left open in one destination must not carry over to another.
