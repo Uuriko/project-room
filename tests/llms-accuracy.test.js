@@ -146,11 +146,11 @@ test("packet prose states exact core and total counts that match the served list
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     const stated = packet.match(/core profile \((\d+) tools plus the (\d+) public join readers, (\d+) total/);
     assert.ok(stated, `${label} must state exact core/join/total counts in the tools profile prose`);
-    const [, core, join, total] = stated.map(Number);
+    const [, core, joinCount, total] = stated.map(Number);
     assert.equal(core, CORE_18.length, `${label} prose core count must equal the enumerated core tools`);
-    assert.equal(join, JOIN_READERS.length, `${label} prose join-reader count must equal the enumerated join readers`);
+    assert.equal(joinCount, JOIN_READERS.length, `${label} prose join-reader count must equal the enumerated join readers`);
     assert.equal(total, names.length, `${label} prose total must equal the served member tools/list length`);
-    assert.equal(core + join, total, `${label} prose counts must add up`);
+    assert.equal(core + joinCount, total, `${label} prose counts must add up`);
   }
 });
 
