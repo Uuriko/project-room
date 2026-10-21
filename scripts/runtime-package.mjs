@@ -165,7 +165,6 @@ optional.push("server/owner-delegates.mjs"); // Owner-delegate authority (import
 optional.push("server/display-name-guard.mjs"); // Identity mint/link guard is part of the runtime import closure.
 optional.push("server/agent-invites.mjs");
 optional.push("server/routes/agent-connect.mjs"); // GET /a/<code> agent invite page (imported by server/http.mjs and server/agent-invites.mjs)
-optional.push("server/connect-link.mjs"); // runtime modules added by this change
 optional.push("server/setup-intro.mjs"); // runtime modules added by this change
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("server/growth-loop.mjs"); // Referral growth: activation, room credits, payout guard (imported by server/referrals.mjs and server/agent-rooms.mjs)

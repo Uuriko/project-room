@@ -51,6 +51,10 @@ export const KEEP = [
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
   "server/push-notifications-supported.mjs",
+  // Per-agent connect link (#4476). Its loader is the /mcp and
+  // /oauth/authorize wiring in server/http.mjs, held while open PRs edit
+  // that file. Remove this entry in the wiring PR.
+  "server/connect-link.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
