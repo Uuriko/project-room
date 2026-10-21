@@ -51,3 +51,22 @@ test("Settings shows a rename form to the owner only and keeps the header in syn
   assert.match(app, /type: T\.ROOM_TITLE_SET, data: \{ title \}/);
   assert.match(app, /if \(room\?\.title\) \{ \$\("#room-title"\)\.textContent = room\.title;/);
 });
+
+test("room.title_set writes are gated until ROOM_TITLE_SET_WRITES=1; replay always applies", async () => {
+  const { createAcceptanceFixture } = await import("../scripts/acceptance-fixture.mjs");
+  const { randomUUID } = await import("node:crypto");
+  const saved = process.env.ROOM_TITLE_SET_WRITES;
+  try {
+    delete process.env.ROOM_TITLE_SET_WRITES;
+    const off = createAcceptanceFixture();
+    assert.throws(() => off.store.command(off.keys.owner, "commons", { id: randomUUID(), type: T.ROOM_TITLE_SET, data: { title: "Gated" } }), /not enabled/);
+    process.env.ROOM_TITLE_SET_WRITES = "1";
+    const on = createAcceptanceFixture();
+    on.store.command(on.keys.owner, "commons", { id: randomUUID(), type: T.ROOM_TITLE_SET, data: { title: "Open" } });
+    assert.equal(on.store.room("commons").state.room.title, "Open");
+  } finally {
+    if (saved === undefined) delete process.env.ROOM_TITLE_SET_WRITES; else process.env.ROOM_TITLE_SET_WRITES = saved;
+  }
+  // Replay of a stored rename does not depend on the write gate.
+  assert.equal(applyEvent(seed(), rename(owner, "Replayed")).room.title, "Replayed");
+});

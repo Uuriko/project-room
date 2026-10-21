@@ -1368,10 +1368,15 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    workEntities = true, roomTitleWrites = globalThis.process?.env?.["ROOM_TITLE_SET_WRITES"] === "1", bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    // room.title_set is new (QA 2026-10-20). A build that predates it throws on
+    // replay of any room that holds one, so a rollback would brick renamed rooms.
+    // Writes stay off until a build that replays it is the rollback target;
+    // then set ROOM_TITLE_SET_WRITES=1. Replay is always on.
+    this.roomTitleWrites = roomTitleWrites === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
@@ -5971,6 +5976,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (conflict) fail(409, "session_claimed", conflict);
         }
       }
+      if (command.type === T.ROOM_TITLE_SET && !this.roomTitleWrites)
+        fail(409, "rename_not_enabled", "Renaming rooms is not enabled on this server yet");
       const HALT_GATED = [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
         T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
       if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])

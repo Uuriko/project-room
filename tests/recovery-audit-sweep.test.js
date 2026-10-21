@@ -51,6 +51,7 @@ const W = "test-handoff";
 const W2 = "write-work";
 
 function sweep() {
+  process.env.ROOM_TITLE_SET_WRITES = "1"; // room.title_set writes are gated; the sweep audits them.
   const fixture = createAcceptanceFixture();
   const state = () => fixture.store.room("commons").state;
   const item = (id = W) => state().workItems[id];
