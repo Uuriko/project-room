@@ -133,12 +133,15 @@ test("outside identity gets the packet's seven public-work tools plus four join 
   assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member core profile is the packet's 18 essential tools plus room_wait and the 4 join readers", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
+  // The 18 essential tools, then room_wait (core since ROOM-WAIT: the wake
+  // primitive; the packet's compact core set enumerates it right after
+  // bond_propose), plus the 4 public join readers: 23 total.
+  assert.equal(names.length, 23, `core profile must be 23 tools, got ${names.length}`);
   assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  assert.deepEqual(names.slice(18, 19), ["room_wait"]);
+  assert.deepEqual(names.slice(19), JOIN_READERS);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
