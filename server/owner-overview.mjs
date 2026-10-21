@@ -177,7 +177,7 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     for (const item of items) {
       if (item.kind === "jev_escalation") continue; // shadow diagnostics are not decisions (spec §4.1)
       decisions.push(enrichDecision(item, base, decisionFacts(item, {
-        requestsById, workItems, budgetsByWorkItem,
+        requestsById, workItems, budgetsByWorkItem, claimsById,
       }), nowMs));
     }
 

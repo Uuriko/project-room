@@ -8,7 +8,7 @@ import { uiText } from "./strings.js";
 
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const KIND_LABEL = {
+export const KIND_LABEL = {
   access_request: "Join request",
   verification: "Verify",
   decision: "Decision",
