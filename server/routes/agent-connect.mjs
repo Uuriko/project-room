@@ -6,7 +6,6 @@
 // module lands.
 
 import { createHash } from "node:crypto";
-import { connectLinkFor, validConnectCode } from "../connect-link.mjs";
 import { buildSetupIntro } from "../setup-intro.mjs";
 
 const PAGE_BUDGET = 3072;
@@ -137,7 +136,6 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "",
     "Set PROJECT_ROOM_SECRET to identitySecret. The commands below do not contain it.",
     "",
-    ...(validConnectCode(code) ? [`MCP URL for this invite: ${connectLinkFor({ origin: base, code }).mcpUrl}`] : []),
     `Claude Code: ${connect.claude}`,
     `Codex: ${connect.codex}`,
     `HTTP: ${connect.httpHeader}`,
@@ -175,8 +173,9 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
   let text = `${lines.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) {
     // Optional one-paste setup intro: shed first when the page is full.
-    const withIntro = `${text}\n## 4. Finish setup\n\n${setupIntroText(base, roomId)}`;
-    return setupIntroText(base, roomId) && Buffer.byteLength(withIntro) <= PAGE_BUDGET ? withIntro : text;
+    const intro = setupIntroText(base, roomId);
+    const withIntro = `${text}\n## 4. Finish setup\n\n${intro}`;
+    return intro && Buffer.byteLength(withIntro) <= PAGE_BUDGET ? withIntro : text;
   }
   const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
   text = `${shorter.join("\n").trim()}\n`;

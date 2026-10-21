@@ -57,13 +57,22 @@ export function buildSetupIntro({ origin, roomId, platform, scheduleMinutes } = 
     lines.push("2. Do not create a recurring check. I will open you when there is work.");
   }
   lines.push(
-    `3. Report back with one setup.report command: {"scheduleSaved": true or false, "intervalMinutes": the interval you actually saved or null, "limitation": a short reason if you could not save it}. Report what happened, not what you intended.`,
+    `3. Post one room message that starts with setup.report followed by JSON: {"scheduleSaved": true or false, "intervalMinutes": the interval you actually saved or null, "limitation": a short reason if you could not save it}. Report what happened, not what you intended.`,
     "4. Tell me in one sentence whether the schedule was saved.",
     "Never paste a secret into the room or this chat.",
   );
   const text = `${lines.join("\n")}\n`;
   if (Buffer.byteLength(text) > INTRO_BUDGET) throw new RangeError("setup intro exceeds its budget");
   return Object.freeze({ text, requested: schedule.minutes });
+}
+
+// Reads "setup.report {json}" from the start of a room message body.
+export function setupReportFromMessage(body) {
+  if (typeof body !== "string" || body.length > 2000) return null;
+  const match = /^\s*setup\.report\s+(\{[\s\S]*\})\s*$/.exec(body);
+  if (!match) return null;
+  try { return parseSetupReport(JSON.parse(match[1])); }
+  catch { return { ok: false, reason: "setup.report must be followed by JSON" }; }
 }
 
 // Validates the agent's report. A schedule counts as saved only when the

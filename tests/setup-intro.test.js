@@ -59,3 +59,12 @@ test("the /a/<code> page ends with the setup intro when it fits, and sheds it wh
   assert.ok(Buffer.byteLength(full) <= 3072);
   assert.match(full, /identitySecret/);
 });
+
+test("the report is read from a room message that starts with setup.report", async () => {
+  const { setupReportFromMessage } = await import("../server/setup-intro.mjs");
+  assert.deepEqual(setupReportFromMessage('setup.report {"scheduleSaved": true, "intervalMinutes": 10}').report, { scheduleSaved: true, intervalMinutes: 10, limitation: null });
+  assert.equal(setupReportFromMessage("setup.report {nope}").ok, false);
+  assert.equal(setupReportFromMessage("hello setup.report {}"), null);
+  assert.equal(setupReportFromMessage(null), null);
+  assert.equal(setupReportFromMessage("setup.report " + "x".repeat(3000)), null);
+});
