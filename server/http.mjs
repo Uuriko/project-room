@@ -27,7 +27,7 @@ import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-202
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
-import { handleAgentConnect } from "./routes/agent-connect.mjs";
+import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, liveAgentInvite, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
@@ -3091,8 +3091,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // An agent invite code asked for without HTML gets the /a/ steps.
+        const agentCode = joinPathAgentCode(url.pathname);
+        const liveCode = agentCode && liveAgentInvite(store, agentCode) ? agentCode : null;
+        if (liveCode && !acceptPrefersHtml(req.headers.accept)) {
+          const agentUrl = new URL(url);
+          agentUrl.pathname = `/a/${encodeURIComponent(liveCode)}`;
+          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate, reject, origin: expectedOrigin() })) return;
+        }
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
-        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        let page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        if (liveCode) page = joinPageForAgentCode(page, liveCode);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
@@ -4539,12 +4548,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+          return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate
             // would deadlock invite mint permanently instead of nudging the
             // owner to verify. Where mail is configured the gate still applies.
-            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }), expectedOrigin()));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
