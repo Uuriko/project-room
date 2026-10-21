@@ -158,6 +158,7 @@ optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a
 optional.push("server/read-cursor.mjs"); // safe scalar foundation imported by needs-me
 optional.push("server/storage-limits.mjs"); // r56: storage value limit reported on /api/version (imported by server/http.mjs)
 optional.push("server/needs-me.mjs"); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
+optional.push("server/reviewer-load.mjs"); // #3755: per-reviewer pending-review depth (imported by server/needs-me.mjs and server/work-claim-routes.mjs; imports server/work-claims.mjs)
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
 optional.push("server/agent-identities.mjs");
