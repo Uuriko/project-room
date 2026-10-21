@@ -337,6 +337,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
   // A DM wakes with kind dm (coalescing on messageId is covered at the
   // unit level; the room itself rejects duplicate messageIds).
+  // Wake order is timestamp then signal ID, not insertion order. Give this
+  // later message a later timestamp rather than depending on random IDs.
+  at += 1;
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "dm-1", body: "direct ping", toMemberId: "wakeagent" } });
   const afterDm = f.store.agentHeartbeats.pendingWakes(identity.identityId);
