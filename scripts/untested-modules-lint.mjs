@@ -9,15 +9,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
-  // NEW modules here.
-  "agent-key-registry.mjs",
-  "gmail-content.mjs",
+  // NEW modules here. (agent-key-registry.mjs left the list with IR-1:
+  // tests/restore-reconcile-coverage.test.js imports it.)
   "inbox-collab-routes.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
   "sla-breach-journal.mjs",
-  "vendor/gmail-html-sanitizer.mjs",
   // 2026-09-30 (M-57): the old substring check falsely counted these as
   // tested (e.g. needle "activity" matching "activity-feed"). They predate
   // the gate and are covered via HTTP-boundary tests; recording them here

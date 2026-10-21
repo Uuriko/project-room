@@ -370,9 +370,9 @@ test("feed never serves a stale parsed projection, even when the row is rewritte
   // without touching the room sequence: the feed must still pick it up —
   // a sequence-keyed cache would serve the stale parse here.
   const row = store.db.prepare("SELECT projection, sequence FROM rooms WHERE id=?").get(ROOM);
-  const projection = JSON.parse(row.projection);
+  const projection = structuredClone(store.room(ROOM).state);
   projection.workItems["w-memo"].title = "Retitled by repair";
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), ROOM);
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(store.storedProjection(ROOM, projection), ROOM);
   const after = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(ROOM);
   assert.equal(after.sequence, row.sequence, "sequence untouched by the direct rewrite");
   const second = await (await get("/api/opportunities.json")).json();

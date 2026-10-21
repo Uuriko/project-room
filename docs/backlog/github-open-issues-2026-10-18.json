@@ -1,0 +1,1608 @@
+[
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 4088,
+    "title": "public-read-model: per-record failures are swallowed silently \u2014 add a skip channel with record ids",
+    "url": "https://github.com/Uuriko/project-room/issues/4088"
+  },
+  {
+    "labels": [],
+    "number": 4073,
+    "title": "CF-FOLD: execute the decision-17 check-shadow fold (#3217 item 3b implementation)",
+    "url": "https://github.com/Uuriko/project-room/issues/4073"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 4071,
+    "title": "Post-landing correction owed: PR #3953's three reviewed findings shipped uncorrected",
+    "url": "https://github.com/Uuriko/project-room/issues/4071"
+  },
+  {
+    "labels": [],
+    "number": 4065,
+    "title": "Static-asset cache/ETag behaviour differs between the edge and Node asset paths",
+    "url": "https://github.com/Uuriko/project-room/issues/4065"
+  },
+  {
+    "labels": [],
+    "number": 4064,
+    "title": "work-handoff: file list silently truncates at 64; envelope checksPassed is asserted, never evaluated; verify() comment overclaims a room check",
+    "url": "https://github.com/Uuriko/project-room/issues/4064"
+  },
+  {
+    "labels": [],
+    "number": 4063,
+    "title": "claim-autolink: superseded matches eat links, repo-case defeats webhook freshness, auto-link events attribute to the owner",
+    "url": "https://github.com/Uuriko/project-room/issues/4063"
+  },
+  {
+    "labels": [],
+    "number": 4062,
+    "title": "claim-reputation fold leaks positions on closed/deleted claims (phantom positions count toward HOARDING_CAP)",
+    "url": "https://github.com/Uuriko/project-room/issues/4062"
+  },
+  {
+    "labels": [],
+    "number": 4061,
+    "title": "Worker claim-prs job never runs autolink discovery or deploy linking (production is the Worker)",
+    "url": "https://github.com/Uuriko/project-room/issues/4061"
+  },
+  {
+    "labels": [],
+    "number": 4058,
+    "title": "Receipts: verify at read time + one graded verdict (Proof-UX R1/R2, RECEIPT-VERIFY-NOW)",
+    "url": "https://github.com/Uuriko/project-room/issues/4058"
+  },
+  {
+    "labels": [],
+    "number": 4055,
+    "title": "Serve /.well-known/oauth-protected-resource (RFC 9728) \u2014 unblocks Claude Connectors / ChatGPT Apps discovery",
+    "url": "https://github.com/Uuriko/project-room/issues/4055"
+  },
+  {
+    "labels": [],
+    "number": 3998,
+    "title": "[docs] CHALLENGE.md \"Featured agents\" promise points at a nonexistent section \u2014 delete the promise lines (census D10)",
+    "url": "https://github.com/Uuriko/project-room/issues/3998"
+  },
+  {
+    "labels": [],
+    "number": 3997,
+    "title": "[migration] Remove retired board_vtwo_* tables/stub (code-sweep C-06, via census cluster G)",
+    "url": "https://github.com/Uuriko/project-room/issues/3997"
+  },
+  {
+    "labels": [],
+    "number": 3994,
+    "title": "[residual] Docs corpus Phase 1c: onboarding results.md removal (split from #3236)",
+    "url": "https://github.com/Uuriko/project-room/issues/3994"
+  },
+  {
+    "labels": [],
+    "number": 3989,
+    "title": "[check] Guest-identity insert path: confirm no one-room uniqueness assumption remains after the self-serve door cut (#3403 residual)",
+    "url": "https://github.com/Uuriko/project-room/issues/3989"
+  },
+  {
+    "labels": [],
+    "number": 3982,
+    "title": "W-3 gate build 3: summary-count checker for coordinator digests (catalogue C-1/C-2/C-3, BS-04)",
+    "url": "https://github.com/Uuriko/project-room/issues/3982"
+  },
+  {
+    "labels": [],
+    "number": 3981,
+    "title": "W-3 gate build 2: verify-claim as a mandatory step in lane acceptance (catalogue F-8/W-3/R-5)",
+    "url": "https://github.com/Uuriko/project-room/issues/3981"
+  },
+  {
+    "labels": [],
+    "number": 3980,
+    "title": "W-3 gate build 1: land.mjs polls job conclusion (not status) and refuses foreground execution (catalogue L-5/L-8)",
+    "url": "https://github.com/Uuriko/project-room/issues/3980"
+  },
+  {
+    "labels": [],
+    "number": 3976,
+    "title": "AEO follow-up: serve docs/FAQ.md at /faq with FAQPage JSON-LD (and fix its stale bounty lines)",
+    "url": "https://github.com/Uuriko/project-room/issues/3976"
+  },
+  {
+    "labels": [],
+    "number": 3975,
+    "title": "AEO: no alternatives/comparison coverage for AgentBounties, Clanker Cloud, Company OS (battery prompts 19-21 ABSENT)",
+    "url": "https://github.com/Uuriko/project-room/issues/3975"
+  },
+  {
+    "labels": [],
+    "number": 3968,
+    "title": "Receipt publishing opt-in has no user-reachable surface \u2014 #3776 projection is gated on a toggle that does not exist in the UI",
+    "url": "https://github.com/Uuriko/project-room/issues/3968"
+  },
+  {
+    "labels": [],
+    "number": 3967,
+    "title": "Board card work link opens the record behind the still-open board dialog \u2014 keyboard focus stays trapped in the board",
+    "url": "https://github.com/Uuriko/project-room/issues/3967"
+  },
+  {
+    "labels": [],
+    "number": 3963,
+    "title": "[Low] GET /api/agent-rooms returns member rooms; OpenAPI summary says 'owned'",
+    "url": "https://github.com/Uuriko/project-room/issues/3963"
+  },
+  {
+    "labels": [],
+    "number": 3962,
+    "title": "[QA-WAVE-C L2] Fresh-room members read 0.00 credits until the first escrow write: genesis issuance is lazy and balances() never triggers it",
+    "url": "https://github.com/Uuriko/project-room/issues/3962"
+  },
+  {
+    "labels": [],
+    "number": 3961,
+    "title": "Share-link agent copy misstates access: co_admin join-agent response calls it a 'guest pass' (read+chat, work out of scope); co_admin share-link refusal claims a browser session is required",
+    "url": "https://github.com/Uuriko/project-room/issues/3961"
+  },
+  {
+    "labels": [],
+    "number": 3960,
+    "title": "Cold founder invite dead-end: unverified-email owner can create/post/work but share-link creation fails with misleading errors and no verify path",
+    "url": "https://github.com/Uuriko/project-room/issues/3960"
+  },
+  {
+    "labels": [],
+    "number": 3959,
+    "title": "Public receipt contradicts itself to a stranger: Outcome 'Rejected' while every verdict/check on the page says PASS, with no explanation",
+    "url": "https://github.com/Uuriko/project-room/issues/3959"
+  },
+  {
+    "labels": [],
+    "number": 3958,
+    "title": "Stranger receipt: paid settlement (lot_) receipts absent from /receipts index, and the lot receipt page shows From = To (same account), no worker/poster names, no description of the work",
+    "url": "https://github.com/Uuriko/project-room/issues/3958"
+  },
+  {
+    "labels": [],
+    "number": 3957,
+    "title": "Front door orphans /about: root page gives a cold stranger no what/who/first-action/cost (static view is only 'PROJECT ROOM / Connecting to room service\u2026')",
+    "url": "https://github.com/Uuriko/project-room/issues/3957"
+  },
+  {
+    "labels": [],
+    "number": 3949,
+    "title": "Invite replay: credential-less re-rotation is unlimited within the 30-day window \u2014 code+requestId replays repeatedly take over the identity and lock out the saved-secret holder (#3923 residual)",
+    "url": "https://github.com/Uuriko/project-room/issues/3949"
+  },
+  {
+    "labels": [],
+    "number": 3948,
+    "title": "Agent inbox after-cursor silently loses messages: burst over limit is skipped forever, and an over-head cursor suppresses future DMs/mentions (#3922)",
+    "url": "https://github.com/Uuriko/project-room/issues/3948"
+  },
+  {
+    "labels": [],
+    "number": 3924,
+    "title": "[B3] Public-work rate limits are per-egress-IP and count refused attempts: one retry storm starves every agent behind the IP",
+    "url": "https://github.com/Uuriko/project-room/issues/3924"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3913,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 14 (SCRIPTS-OPS) Low findings bundle (4)",
+    "url": "https://github.com/Uuriko/project-room/issues/3913"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450xg",
+        "name": "documentation",
+        "description": "Improvements or additions to documentation",
+        "color": "0075ca"
+      }
+    ],
+    "number": 3912,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 13 (MCP-AGENT-SURFACE) Low findings bundle (1)",
+    "url": "https://github.com/Uuriko/project-room/issues/3912"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3911,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 12 (CLOUDFLARE-DO) Low findings bundle (3)",
+    "url": "https://github.com/Uuriko/project-room/issues/3911"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3910,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 11 (STREAMS-WAKE) Low findings bundle (3)",
+    "url": "https://github.com/Uuriko/project-room/issues/3910"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3909,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 10 (BOARD-UI) Low findings bundle (5)",
+    "url": "https://github.com/Uuriko/project-room/issues/3909"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3908,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 08 (IDENTITY-ACCESS) Low findings bundle (3)",
+    "url": "https://github.com/Uuriko/project-room/issues/3908"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3907,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 07 (MONEY-SETTLEMENT) Low findings bundle (2)",
+    "url": "https://github.com/Uuriko/project-room/issues/3907"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3906,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 06 (MONEY-ESCROW) Low findings bundle (1)",
+    "url": "https://github.com/Uuriko/project-room/issues/3906"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3905,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 04 (HTTP-AUTHZ) Low findings bundle (1)",
+    "url": "https://github.com/Uuriko/project-room/issues/3905"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3904,
+    "title": "[Low] Bug sweep 2026-10-16 \u2014 lane 02 (MESSAGES-INTEGRITY) Low findings bundle (2)",
+    "url": "https://github.com/Uuriko/project-room/issues/3904"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3897,
+    "title": "[Medium] deploy-prod: a cancelled run between the two Worker uploads leaves a skewed pair with no recovery",
+    "url": "https://github.com/Uuriko/project-room/issues/3897"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3892,
+    "title": "[Medium] Claim-record deep-link path (revealClaimRecord) swallows reveal failure; the click path does not",
+    "url": "https://github.com/Uuriko/project-room/issues/3892"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3891,
+    "title": "[Medium] Owner Cockpit renders the spend 'adjust' action as a Deny button POSTing an empty body to spend-allowance",
+    "url": "https://github.com/Uuriko/project-room/issues/3891"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3890,
+    "title": "[Medium] Owner Cockpit decision facts lack board_review entirely (age, consequence, label, sort); spend items share the invisible age",
+    "url": "https://github.com/Uuriko/project-room/issues/3890"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3889,
+    "title": "[Medium] Identical re-review after the basis moved silently records nothing while the board announces 'Reviewed'",
+    "url": "https://github.com/Uuriko/project-room/issues/3889"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3888,
+    "title": "[Medium] changes_requested is a board dead end: no send-back or resume control in the human UI",
+    "url": "https://github.com/Uuriko/project-room/issues/3888"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3887,
+    "title": "[Medium] Self-attested delivered claim cannot be completed from the board (owner-verify step missing)",
+    "url": "https://github.com/Uuriko/project-room/issues/3887"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3886,
+    "title": "[Medium] Board one-step Done is refused for self-attested claims carrying acceptance criteria",
+    "url": "https://github.com/Uuriko/project-room/issues/3886"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3885,
+    "title": "[Medium] Board offers Verify under independent_principal to approvers without the verify permission",
+    "url": "https://github.com/Uuriko/project-room/issues/3885"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3881,
+    "title": "[Medium] Webhook dispatch re-check is identity_links-only: queued guest deliveries would skip-loop forever",
+    "url": "https://github.com/Uuriko/project-room/issues/3881"
+  },
+  {
+    "labels": [],
+    "number": 3842,
+    "title": "qa5-a11y-c-browser-check fails on main: #tasks-board-open (Board button) never visible, 0/6 tests",
+    "url": "https://github.com/Uuriko/project-room/issues/3842"
+  },
+  {
+    "labels": [],
+    "number": 3837,
+    "title": "manual-owner-exercise-check fails on main: 'Save as result' action never visible in the return stage",
+    "url": "https://github.com/Uuriko/project-room/issues/3837"
+  },
+  {
+    "labels": [],
+    "number": 3796,
+    "title": "Join dialog stays open after a successful account creation \u2014 focus dropped to <body>, room reachable only after manually dismissing it",
+    "url": "https://github.com/Uuriko/project-room/issues/3796"
+  },
+  {
+    "labels": [],
+    "number": 3794,
+    "title": "Creating an invite link never surfaces the new link's URL \u2014 the dialog keeps showing a pre-existing guest link, so a 'Member' invite silently joins people as guests",
+    "url": "https://github.com/Uuriko/project-room/issues/3794"
+  },
+  {
+    "labels": [],
+    "number": 3793,
+    "title": "Board dialog drops focus to <body> on close (button and Escape) and on a refused claim; Account view opens with focus on <body>",
+    "url": "https://github.com/Uuriko/project-room/issues/3793"
+  },
+  {
+    "labels": [],
+    "number": 3779,
+    "title": "Access review omits owner-delegate grants \u2014 highest-authority grant class invisible in /access-review",
+    "url": "https://github.com/Uuriko/project-room/issues/3779"
+  },
+  {
+    "labels": [],
+    "number": 3778,
+    "title": "wakeUrl-only hosts never receive wake pings: deliverWakePing journals wakeUrl rows only as an adjunct to a subscription delivery",
+    "url": "https://github.com/Uuriko/project-room/issues/3778"
+  },
+  {
+    "labels": [],
+    "number": 3771,
+    "title": "Session-one: form submits silently do nothing when required fields are missing \u2014 required fields unmarked, no error (signup, new work, save-as-result, decision)",
+    "url": "https://github.com/Uuriko/project-room/issues/3771"
+  },
+  {
+    "labels": [],
+    "number": 3761,
+    "title": "Work-item sync rewrites board rows' pullRequests from acquisition-time event facts: board-appended PR links dropped, recorded outcomes reset to open",
+    "url": "https://github.com/Uuriko/project-room/issues/3761"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz4502w",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      }
+    ],
+    "number": 3755,
+    "title": "Reviewer load is invisible and unbounded: no queue depth surface, rota, or balancing for the scarcest resource",
+    "url": "https://github.com/Uuriko/project-room/issues/3755"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3753,
+    "title": "[High] Delivered work is silently discarded when the 24h claim lease expires during review wait",
+    "url": "https://github.com/Uuriko/project-room/issues/3753"
+  },
+  {
+    "labels": [],
+    "number": 3744,
+    "title": "Mobile tap targets under 44px across public and owner surfaces (measured: /receipts 8 of 8)",
+    "url": "https://github.com/Uuriko/project-room/issues/3744"
+  },
+  {
+    "labels": [],
+    "number": 3743,
+    "title": "Sign-in wall offers OAuth doors before availability resolves \u2014 GitHub tap dead-ends on a 503 page (current main)",
+    "url": "https://github.com/Uuriko/project-room/issues/3743"
+  },
+  {
+    "labels": [],
+    "number": 3741,
+    "title": "Pending public-work reviews are invisible: no attention signal, Project panel says 'No tasks yet', Results buried 3 deep",
+    "url": "https://github.com/Uuriko/project-room/issues/3741"
+  },
+  {
+    "labels": [],
+    "number": 3740,
+    "title": "Session-one (mobile): a human cannot claim public work \u2014 every offer ends at 'Take it to your agent'",
+    "url": "https://github.com/Uuriko/project-room/issues/3740"
+  },
+  {
+    "labels": [],
+    "number": 3731,
+    "title": "Spec gap: undocumented escrow validation rules (self-claim, future deadline, verifier membership, band assignment, transfer layering)",
+    "url": "https://github.com/Uuriko/project-room/issues/3731"
+  },
+  {
+    "labels": [],
+    "number": 3729,
+    "title": "Spec gap: keeper semantics \u2014 finalize/epoch behaviors no doc states (funded refunds, epoch keeper pass, no-op 422, post-ruling approval, split, reason codes)",
+    "url": "https://github.com/Uuriko/project-room/issues/3729"
+  },
+  {
+    "labels": [],
+    "number": 3728,
+    "title": "Spec gap: approvalMode decides who may accept/reject but appears in no public doc; accept/reject docs promise verifier review unconditionally",
+    "url": "https://github.com/Uuriko/project-room/issues/3728"
+  },
+  {
+    "labels": [],
+    "number": 3725,
+    "title": "invariants CI harness drops the TAP error text \u2014 0ms failures are undiagnosable",
+    "url": "https://github.com/Uuriko/project-room/issues/3725"
+  },
+  {
+    "labels": [],
+    "number": 3722,
+    "title": "llms.txt never mentions the starter claim that room creation pre-claims for you (2h lease already ticking)",
+    "url": "https://github.com/Uuriko/project-room/issues/3722"
+  },
+  {
+    "labels": [],
+    "number": 3721,
+    "title": "llms.txt golden path dead-ends on an empty public board: no documented next step when match returns zero recommendations",
+    "url": "https://github.com/Uuriko/project-room/issues/3721"
+  },
+  {
+    "labels": [],
+    "number": 3720,
+    "title": "llms.txt: board claim endpoint requires a JSON object body the doc never mentions (literal follower gets 400 invalid_json)",
+    "url": "https://github.com/Uuriko/project-room/issues/3720"
+  },
+  {
+    "labels": [],
+    "number": 3718,
+    "title": "Served-but-never-loaded client modules: pwa-install.js and push-ask.js ship in the manifest with no production importer",
+    "url": "https://github.com/Uuriko/project-room/issues/3718"
+  },
+  {
+    "labels": [],
+    "number": 3717,
+    "title": "EXECUTION-BRIEF decision #19d unimplemented: no shared scrubSecrets library \u2014 at least four divergent redaction implementations",
+    "url": "https://github.com/Uuriko/project-room/issues/3717"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3715,
+    "title": "Intermittent: native wake-bridge replay assertion (1 !== 0) \u2014 second occurrence",
+    "url": "https://github.com/Uuriko/project-room/issues/3715"
+  },
+  {
+    "labels": [],
+    "number": 3713,
+    "title": "Premise-flagged claims stay claimable through the board ready queue while AvailableWork excludes them",
+    "url": "https://github.com/Uuriko/project-room/issues/3713"
+  },
+  {
+    "labels": [],
+    "number": 3712,
+    "title": "Board projection drops review basis and verifier attestation: reviewed completion unreachable via the board door for work-item-originated claims",
+    "url": "https://github.com/Uuriko/project-room/issues/3712"
+  },
+  {
+    "labels": [],
+    "number": 3711,
+    "title": "Board claims projected from work items oscillate in_progress <-> unclaimed under the lease sweep (expired item leases)",
+    "url": "https://github.com/Uuriko/project-room/issues/3711"
+  },
+  {
+    "labels": [],
+    "number": 3710,
+    "title": "Public-receipts consent copy never discloses search indexing or link-sharing reach",
+    "url": "https://github.com/Uuriko/project-room/issues/3710"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC7GgB-w",
+        "name": "bounty",
+        "description": "Internal $DASHA bug bounty report (see docs/BUG-BOUNTY.md)",
+        "color": "5319e7"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC9aUAJg",
+        "name": "launch-readiness",
+        "description": "First Shift launch-readiness findings",
+        "color": "B60205"
+      }
+    ],
+    "number": 3709,
+    "title": "[launch-readiness] The neglect ladder pays junk at 35.6 cr/h under a passive operator; only reviewer diligence bounds it (bond + flake ladder: adversary net -6 cr when reviews happen)",
+    "url": "https://github.com/Uuriko/project-room/issues/3709"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC7GgB-w",
+        "name": "bounty",
+        "description": "Internal $DASHA bug bounty report (see docs/BUG-BOUNTY.md)",
+        "color": "5319e7"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC9aUAJg",
+        "name": "launch-readiness",
+        "description": "First Shift launch-readiness findings",
+        "color": "B60205"
+      }
+    ],
+    "number": 3708,
+    "title": "[launch-readiness] Rotation caps exist nowhere in code, and even perfectly enforced they leak: collusion ring extracted 31.6 cr (44% of float) at 17x the honest rate",
+    "url": "https://github.com/Uuriko/project-room/issues/3708"
+  },
+  {
+    "labels": [],
+    "number": 3706,
+    "title": "llms-full.txt is smaller than llms.txt and is not a superset \u2014 the 'Full agent packet' omits the work-claim board section",
+    "url": "https://github.com/Uuriko/project-room/issues/3706"
+  },
+  {
+    "labels": [],
+    "number": 3705,
+    "title": "Public directory receipt_count counts hidden receipts and cross-credits agents who share a display name",
+    "url": "https://github.com/Uuriko/project-room/issues/3705"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC7GgB-w",
+        "name": "bounty",
+        "description": "Internal $DASHA bug bounty report (see docs/BUG-BOUNTY.md)",
+        "color": "5319e7"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC9aUAJg",
+        "name": "launch-readiness",
+        "description": "First Shift launch-readiness findings",
+        "color": "B60205"
+      }
+    ],
+    "number": 3704,
+    "title": "[launch-readiness] Fresh lanes are STANDARD band, not probation: the rail does not make FS-14 established-lane-only as the packet claims",
+    "url": "https://github.com/Uuriko/project-room/issues/3704"
+  },
+  {
+    "labels": [],
+    "number": 3701,
+    "title": "SKILL.md tells agents they will 'get paid' / 'start earning' \u2014 contradicts the product's own payment honesty",
+    "url": "https://github.com/Uuriko/project-room/issues/3701"
+  },
+  {
+    "labels": [],
+    "number": 3700,
+    "title": "Served OpenAPI inventory omits the entire public proof surface (receipts, proof pages, room pages, agent directory)",
+    "url": "https://github.com/Uuriko/project-room/issues/3700"
+  },
+  {
+    "labels": [],
+    "number": 3697,
+    "title": "Work-session idempotency matcher ignores spendCents/rounds/toolCalls/budget: a retry with different usage figures is silently accepted as a duplicate",
+    "url": "https://github.com/Uuriko/project-room/issues/3697"
+  },
+  {
+    "labels": [],
+    "number": 3694,
+    "title": "Reducer resolves channels by raw index: prototype names (toString) pass as existing channels in src/events.js",
+    "url": "https://github.com/Uuriko/project-room/issues/3694"
+  },
+  {
+    "labels": [],
+    "number": 3693,
+    "title": "bounty_finalize cannot pay out an approved bounty, its tool/doc copy promises it can, and the agent door has no payout path at all",
+    "url": "https://github.com/Uuriko/project-room/issues/3693"
+  },
+  {
+    "labels": [],
+    "number": 3689,
+    "title": "Defect class: served contract drifts from gated sources \u2014 served-vs-source parity in the contract gate",
+    "url": "https://github.com/Uuriko/project-room/issues/3689"
+  },
+  {
+    "labels": [],
+    "number": 3686,
+    "title": "Defect class: one time constant, several semantic roles \u2014 time-constant registry with single-role lint",
+    "url": "https://github.com/Uuriko/project-room/issues/3686"
+  },
+  {
+    "labels": [],
+    "number": 3682,
+    "title": "Defect class: whole-tree checks judge PRs against a moving main \u2014 make shared checkers base-relative",
+    "url": "https://github.com/Uuriko/project-room/issues/3682"
+  },
+  {
+    "labels": [],
+    "number": 3681,
+    "title": "Defect class: checks that pass without checking \u2014 gate canaries for every CI gate",
+    "url": "https://github.com/Uuriko/project-room/issues/3681"
+  },
+  {
+    "labels": [],
+    "number": 3680,
+    "title": "Defect class: backup writers ship without a proven restore reader \u2014 writer\u2194reader registry + semantic round-trip gate",
+    "url": "https://github.com/Uuriko/project-room/issues/3680"
+  },
+  {
+    "labels": [],
+    "number": 3678,
+    "title": "Defect class: wall-clock timing assertions in tests \u2014 ban in unit suite, budgets only in the priced harness",
+    "url": "https://github.com/Uuriko/project-room/issues/3678"
+  },
+  {
+    "labels": [],
+    "number": 3677,
+    "title": "Defect class: cursor/walk semantics reinvented per surface \u2014 one walk + mutation-walk property test",
+    "url": "https://github.com/Uuriko/project-room/issues/3677"
+  },
+  {
+    "labels": [],
+    "number": 3676,
+    "title": "Defect class: idempotency scope/payload binding reinvented per surface \u2014 replay-matrix conformance gate",
+    "url": "https://github.com/Uuriko/project-room/issues/3676"
+  },
+  {
+    "labels": [],
+    "number": 3675,
+    "title": "[docs] RECEIPTS-PAGE names the public-receipts setting but never says how an owner records it \u2014 and 'publicly listed' silently means the public-page opt-in, not the directory listing",
+    "url": "https://github.com/Uuriko/project-room/issues/3675"
+  },
+  {
+    "labels": [],
+    "number": 3674,
+    "title": "Defect class: publication/hiding policy is per-surface \u2014 one publication gate for all public reads",
+    "url": "https://github.com/Uuriko/project-room/issues/3674"
+  },
+  {
+    "labels": [],
+    "number": 3673,
+    "title": "Defect class: registration omissions \u2014 every registry needs a closure check, not hand registration",
+    "url": "https://github.com/Uuriko/project-room/issues/3673"
+  },
+  {
+    "labels": [],
+    "number": 3672,
+    "title": "agent-invites: legacy v1 invite codes \u2014 header comment contradicts codeHash; holders get a misleading 404",
+    "url": "https://github.com/Uuriko/project-room/issues/3672"
+  },
+  {
+    "labels": [],
+    "number": 3670,
+    "title": "[docs] wants-work capabilities enum is unnamed at the front door \u2014 llms.txt shows the field, AGENT-START-HERE's example implies free text; server refuses anything but work|land|deploy",
+    "url": "https://github.com/Uuriko/project-room/issues/3670"
+  },
+  {
+    "labels": [],
+    "number": 3669,
+    "title": "Capacity finding (HUNT-LOAD): no load shedding under claim-fabric overload \u2014 congestion collapse + client-timed-out writes still applied ~60s later",
+    "url": "https://github.com/Uuriko/project-room/issues/3669"
+  },
+  {
+    "labels": [],
+    "number": 3668,
+    "title": "[docs] AGENT-START-HERE Step 6 names POST /api/access-requests with no body \u2014 the required shape exists only in SWARM-PLUG-IN",
+    "url": "https://github.com/Uuriko/project-room/issues/3668"
+  },
+  {
+    "labels": [],
+    "number": 3666,
+    "title": "work-sessions 'next' hint sends agents to POST /work-claims to register a work item \u2014 that never creates one (session then 404s work_not_found)",
+    "url": "https://github.com/Uuriko/project-room/issues/3666"
+  },
+  {
+    "labels": [],
+    "number": 3664,
+    "title": "Board claim leases: fixed 24h term, no expiry warning or renewal affordance in the claim flow (EXP-10 friction #1)",
+    "url": "https://github.com/Uuriko/project-room/issues/3664"
+  },
+  {
+    "labels": [],
+    "number": 3660,
+    "title": "Feature: Summon a mystery shopper \u2014 per-room cold-board friction report for owners",
+    "url": "https://github.com/Uuriko/project-room/issues/3660"
+  },
+  {
+    "labels": [],
+    "number": 3659,
+    "title": "Standing gate (design): new error codes must ship with an agent recovery and a human remedy (or an explicit waiver)",
+    "url": "https://github.com/Uuriko/project-room/issues/3659"
+  },
+  {
+    "labels": [],
+    "number": 3658,
+    "title": "Errors catalog integrity: 79 corrupted meaning rows, a shipped code missing (drift-guard blind spot), an HTTP 0 row, unreliable 'no mapped recovery' markers",
+    "url": "https://github.com/Uuriko/project-room/issues/3658"
+  },
+  {
+    "labels": [],
+    "number": 3655,
+    "title": "llms.txt served by a non-production deployment links the production origin for the full packet, MCP, and agent card",
+    "url": "https://github.com/Uuriko/project-room/issues/3655"
+  },
+  {
+    "labels": [],
+    "number": 3654,
+    "title": "AGENT-START-HERE's 'rehearse this verification right now' receipt 404s on every deployment except production",
+    "url": "https://github.com/Uuriko/project-room/issues/3654"
+  },
+  {
+    "labels": [],
+    "number": 3653,
+    "title": "Receipts: no 'since this receipt was issued' line is possible today \u2014 post-issuance changes delete or rewrite the receipt instead of annotating it",
+    "url": "https://github.com/Uuriko/project-room/issues/3653"
+  },
+  {
+    "labels": [],
+    "number": 3651,
+    "title": "Documented agent front-door path takes 7 calls to first receipt; the session-one contract budgets 6",
+    "url": "https://github.com/Uuriko/project-room/issues/3651"
+  },
+  {
+    "labels": [],
+    "number": 3650,
+    "title": "invalid_public_work 422 never names the refused fields its own hint tells the agent to fix",
+    "url": "https://github.com/Uuriko/project-room/issues/3650"
+  },
+  {
+    "labels": [],
+    "number": 3649,
+    "title": "Public board advertises tasks as claimable while a live path fence makes every claim 409 \u2014 claimableCount ignores path fencing",
+    "url": "https://github.com/Uuriko/project-room/issues/3649"
+  },
+  {
+    "labels": [],
+    "number": 3640,
+    "title": "llms.txt: wake poll without hostId does not 422 for an agent with a registered host (doc inaccuracy, both revisions)",
+    "url": "https://github.com/Uuriko/project-room/issues/3640"
+  },
+  {
+    "labels": [],
+    "number": 3639,
+    "title": "[deploy] Rollback re-opens #3549 for share-link joins \u2014 the co_admin cap is join-time code, not a stored grant",
+    "url": "https://github.com/Uuriko/project-room/issues/3639"
+  },
+  {
+    "labels": [],
+    "number": 3637,
+    "title": "Signup answers check_email on mailer-less deployments while binding the session immediately \u2014 the stated state never resolves",
+    "url": "https://github.com/Uuriko/project-room/issues/3637"
+  },
+  {
+    "labels": [],
+    "number": 3635,
+    "title": "AGENT-START-HERE: the 428 proof-of-work step has prose math but no worked code snippet",
+    "url": "https://github.com/Uuriko/project-room/issues/3635"
+  },
+  {
+    "labels": [],
+    "number": 3634,
+    "title": "Agent front-door docs contradict themselves: query-parameter handling (silently ignored vs 422) and MCP tool counts (7 / ~23 / 7+4)",
+    "url": "https://github.com/Uuriko/project-room/issues/3634"
+  },
+  {
+    "labels": [],
+    "number": 3626,
+    "title": "Decision push class needs an interrupt budget + flood state (EEMUA 191)",
+    "url": "https://github.com/Uuriko/project-room/issues/3626"
+  },
+  {
+    "labels": [],
+    "number": 3625,
+    "title": "dr: no operator procedure for post-restore credential re-issue or first-tick verification (game-day steps had to be improvised)",
+    "url": "https://github.com/Uuriko/project-room/issues/3625"
+  },
+  {
+    "labels": [],
+    "number": 3623,
+    "title": "docs: BACKUP-DR.md state and RTO are stale after the #3409/#3324/#3325 closures (game-day measured restore 42.8s, mechanical RTO ~60s)",
+    "url": "https://github.com/Uuriko/project-room/issues/3623"
+  },
+  {
+    "labels": [],
+    "number": 3618,
+    "title": "Records: no incident linkage; performance rates not maintained as records (accountability R-10/R-12)",
+    "url": "https://github.com/Uuriko/project-room/issues/3618"
+  },
+  {
+    "labels": [],
+    "number": 3617,
+    "title": "Records: ceilings/ratification not stamped at action time; refusals mostly unrecorded (accountability R-7/R-8)",
+    "url": "https://github.com/Uuriko/project-room/issues/3617"
+  },
+  {
+    "labels": [],
+    "number": 3616,
+    "title": "Records: no auditor-grade decision-row export to customer custody (accountability R-5/R-11)",
+    "url": "https://github.com/Uuriko/project-room/issues/3616"
+  },
+  {
+    "labels": [],
+    "number": 3615,
+    "title": "Records: no subject-facing adverse-decision packet, and notices are not records (accountability R-4/R-6)",
+    "url": "https://github.com/Uuriko/project-room/issues/3615"
+  },
+  {
+    "labels": [],
+    "number": 3614,
+    "title": "Records: decision records have no retention class \u2014 declare \u22654y + legal hold (accountability R-3)",
+    "url": "https://github.com/Uuriko/project-room/issues/3614"
+  },
+  {
+    "labels": [],
+    "number": 3613,
+    "title": "Records: criteria-level outcomes and period-of-use stop at the bounty lane (accountability R-2)",
+    "url": "https://github.com/Uuriko/project-room/issues/3613"
+  },
+  {
+    "labels": [],
+    "number": 3612,
+    "title": "Records: consequential records lack session-instance, stamped principal, and model/harness version (accountability R-1/R-9)",
+    "url": "https://github.com/Uuriko/project-room/issues/3612"
+  },
+  {
+    "labels": [],
+    "number": 3609,
+    "title": "Production public receipts feed is frozen at 2026-10-06 \u2014 no room receipts or merged-PR receipts ever reach it",
+    "url": "https://github.com/Uuriko/project-room/issues/3609"
+  },
+  {
+    "labels": [],
+    "number": 3608,
+    "title": "Public-work offers: 100-per-room LIFETIME cap (all states counted) will wall the First Shift board program",
+    "url": "https://github.com/Uuriko/project-room/issues/3608"
+  },
+  {
+    "labels": [],
+    "number": 3607,
+    "title": "Board/workItem divergence presents reopened (rework) work as done on the proof surface",
+    "url": "https://github.com/Uuriko/project-room/issues/3607"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3606,
+    "title": "[Medium] Public board pagination (claimableFirst + offer_id cursor) duplicates and silently drops tasks when claim state changes mid-walk",
+    "url": "https://github.com/Uuriko/project-room/issues/3606"
+  },
+  {
+    "labels": [],
+    "number": 3603,
+    "title": "Deletion retention policy never discloses backup retention / restore resurrection",
+    "url": "https://github.com/Uuriko/project-room/issues/3603"
+  },
+  {
+    "labels": [],
+    "number": 3602,
+    "title": "Feedback scrubber stores the product's own credentials (pri_/rak_/ga1.) verbatim",
+    "url": "https://github.com/Uuriko/project-room/issues/3602"
+  },
+  {
+    "labels": [],
+    "number": 3601,
+    "title": "Account deletion leaves a sole-owned room's public page, receipts, and sitemap entries live forever",
+    "url": "https://github.com/Uuriko/project-room/issues/3601"
+  },
+  {
+    "labels": [],
+    "number": 3596,
+    "title": "Board actions leak raw 'Failed to fetch' on transport failure, with no outcome guidance or refresh",
+    "url": "https://github.com/Uuriko/project-room/issues/3596"
+  },
+  {
+    "labels": [],
+    "number": 3594,
+    "title": "[Security] Settled bounty lot receipts are public by default \u2014 they bypass the room public-receipts opt-in that gates every other receipt shape",
+    "url": "https://github.com/Uuriko/project-room/issues/3594"
+  },
+  {
+    "labels": [],
+    "number": 3592,
+    "title": "Wakeability window (24h) contradicts declared heartbeat cadence (up to 7d): healthy slow-cadence agents read as not wakeable",
+    "url": "https://github.com/Uuriko/project-room/issues/3592"
+  },
+  {
+    "labels": [],
+    "number": 3591,
+    "title": "Bounty escrow: deadline/challenge boundaries are a race \u2014 accept-vs-finalize and dispute-vs-finalize outcomes depend on who pokes first",
+    "url": "https://github.com/Uuriko/project-room/issues/3591"
+  },
+  {
+    "labels": [],
+    "number": 3588,
+    "title": "Activation funnel: 'saw board' stage is unmeasurable \u2014 no surface records a board view (with claimableCount)",
+    "url": "https://github.com/Uuriko/project-room/issues/3588"
+  },
+  {
+    "labels": [],
+    "number": 3585,
+    "title": "R2 backup target breaks at current size: writer buffers the whole export in DO memory, and no restore path can read an R2 backup",
+    "url": "https://github.com/Uuriko/project-room/issues/3585"
+  },
+  {
+    "labels": [],
+    "number": 3584,
+    "title": "[Bug][Ops] Stale instance lock wedges all future boots when the dead server's PID is reused by any live process",
+    "url": "https://github.com/Uuriko/project-room/issues/3584"
+  },
+  {
+    "labels": [],
+    "number": 3579,
+    "title": "Supply chain: sharp override drifts across Cloudflare pnpm files (0.35.4 vs 0.35.5); operator runbooks execute unpinned tools",
+    "url": "https://github.com/Uuriko/project-room/issues/3579"
+  },
+  {
+    "labels": [],
+    "number": 3578,
+    "title": "Supply chain: dependency install scripts execute during npm ci in secret-bearing workflows",
+    "url": "https://github.com/Uuriko/project-room/issues/3578"
+  },
+  {
+    "labels": [],
+    "number": 3577,
+    "title": "Supply chain: skill installer fetches auto-invoked agent instructions from mutable main via curl | sh",
+    "url": "https://github.com/Uuriko/project-room/issues/3577"
+  },
+  {
+    "labels": [],
+    "number": 3560,
+    "title": "diff-size same-head flips explained: PR-body edits between runs, not checker nondeterminism",
+    "url": "https://github.com/Uuriko/project-room/issues/3560"
+  },
+  {
+    "labels": [],
+    "number": 3557,
+    "title": "Board (work-claims) REST API is undocumented: zero work-claims routes in served OpenAPI",
+    "url": "https://github.com/Uuriko/project-room/issues/3557"
+  },
+  {
+    "labels": [],
+    "number": 3548,
+    "title": "Landing hero: collaboration front door (room, real receipt, live counters, two doors)",
+    "url": "https://github.com/Uuriko/project-room/issues/3548"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz4502w",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC29cNuA",
+        "name": "priority:later",
+        "description": "Retained proposal; not part of current execution",
+        "color": "EDEDED"
+      }
+    ],
+    "number": 3545,
+    "title": "Core work-claim leases have no fencing token: finish path is gated by owner identity only",
+    "url": "https://github.com/Uuriko/project-room/issues/3545"
+  },
+  {
+    "labels": [],
+    "number": 3527,
+    "title": "Best-of-N bounty attempts: spec first (attempt cap, loser visibility, dispute scope)",
+    "url": "https://github.com/Uuriko/project-room/issues/3527"
+  },
+  {
+    "labels": [],
+    "number": 3526,
+    "title": "Public receipt gallery with clone-as-template for completed bounties",
+    "url": "https://github.com/Uuriko/project-room/issues/3526"
+  },
+  {
+    "labels": [],
+    "number": 3525,
+    "title": "Promote a completed bounty run into a room Skill (human-gated, receipt-linked)",
+    "url": "https://github.com/Uuriko/project-room/issues/3525"
+  },
+  {
+    "labels": [],
+    "number": 3524,
+    "title": "Bounty pricing guidance at post time from the room's own receipt history",
+    "url": "https://github.com/Uuriko/project-room/issues/3524"
+  },
+  {
+    "labels": [],
+    "number": 3523,
+    "title": "Receipt replay front-end: render receipts as a readable work timeline",
+    "url": "https://github.com/Uuriko/project-room/issues/3523"
+  },
+  {
+    "labels": [],
+    "number": 3483,
+    "title": "auditRecovery content digest canonicalizes BLOB cells byte-by-byte (~5.3s per MiB) \u2014 restore verification cost scales with attachment bytes",
+    "url": "https://github.com/Uuriko/project-room/issues/3483"
+  },
+  {
+    "labels": [],
+    "number": 3460,
+    "title": "[Low][docs] llms.txt work-claim board omits the claimed -> in_progress -> done ordering \u2014 a literal first close 422s",
+    "url": "https://github.com/Uuriko/project-room/issues/3460"
+  },
+  {
+    "labels": [],
+    "number": 3438,
+    "title": "insufficient_funds copy: exact numbers, but no remedy and raw identity id instead of a name (H-J6 PARTIAL)",
+    "url": "https://github.com/Uuriko/project-room/issues/3438"
+  },
+  {
+    "labels": [],
+    "number": 3437,
+    "title": "Human UI has no surface for bounties or credit balances: the first-owner money journey is invisible to a human owner (H-J1 FAIL)",
+    "url": "https://github.com/Uuriko/project-room/issues/3437"
+  },
+  {
+    "labels": [],
+    "number": 3413,
+    "title": "[Perf][Medium] Room/board reads are O(board) per request: 2,000-item board work view ~0.5 s median idle (10x small room), activation pack ~0.4 s",
+    "url": "https://github.com/Uuriko/project-room/issues/3413"
+  },
+  {
+    "labels": [],
+    "number": 3408,
+    "title": "[Perf] applyEvent deep-clones the entire room state per event: history replay (import / projection rebuild) is quadratic, and every live write gets slower as the room grows",
+    "url": "https://github.com/Uuriko/project-room/issues/3408"
+  },
+  {
+    "labels": [],
+    "number": 3406,
+    "title": "Double-served route: GET /api/rooms/{roomId}/access-requests legacy branch is shadowed by the route-table row",
+    "url": "https://github.com/Uuriko/project-room/issues/3406"
+  },
+  {
+    "labels": [],
+    "number": 3401,
+    "title": "Test/CI scratch leaks fill the 512 MB /tmp tmpfs on shared dev VMs (ENOSPC class)",
+    "url": "https://github.com/Uuriko/project-room/issues/3401"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3379,
+    "title": "Invite redeem: mint-vs-link fork is unsignaled in the 201 response and undisclosed in llms.txt (silent duplicate identity)",
+    "url": "https://github.com/Uuriko/project-room/issues/3379"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3378,
+    "title": "Access-request approve silently discards the decider's note (decision_note written only on deny)",
+    "url": "https://github.com/Uuriko/project-room/issues/3378"
+  },
+  {
+    "labels": [],
+    "number": 3375,
+    "title": "[Outfitter] App Store: curated catalog -> self-serve -> metered",
+    "url": "https://github.com/Uuriko/project-room/issues/3375"
+  },
+  {
+    "labels": [],
+    "number": 3374,
+    "title": "[Outfitter v0] Receipts: tools_used[] capture + 'Made with' rail",
+    "url": "https://github.com/Uuriko/project-room/issues/3374"
+  },
+  {
+    "labels": [],
+    "number": 3373,
+    "title": "[Outfitter v0] Syndication freshness for seed listings",
+    "url": "https://github.com/Uuriko/project-room/issues/3373"
+  },
+  {
+    "labels": [],
+    "number": 3372,
+    "title": "[Outfitter v0] Per-listing install snippets from the canonical origin constant",
+    "url": "https://github.com/Uuriko/project-room/issues/3372"
+  },
+  {
+    "labels": [],
+    "number": 3371,
+    "title": "[Outfitter v0] /outfitter human page (thin, server-rendered)",
+    "url": "https://github.com/Uuriko/project-room/issues/3371"
+  },
+  {
+    "labels": [],
+    "number": 3370,
+    "title": "[Outfitter v0] Generated read surfaces: GET /catalog + GET /catalog.txt",
+    "url": "https://github.com/Uuriko/project-room/issues/3370"
+  },
+  {
+    "labels": [],
+    "number": 3369,
+    "title": "[Outfitter v0] scripts/catalog-check.mjs: catalog freshness/schema CI gate",
+    "url": "https://github.com/Uuriko/project-room/issues/3369"
+  },
+  {
+    "labels": [],
+    "number": 3368,
+    "title": "[Outfitter v0] Catalog source file: catalog/listings.json schema + seed listings",
+    "url": "https://github.com/Uuriko/project-room/issues/3368"
+  },
+  {
+    "labels": [],
+    "number": 3365,
+    "title": "Error registry burn-down: migrate the remaining thrown codes into ERROR_REGISTRY (ratchet: new codes are registry-born)",
+    "url": "https://github.com/Uuriko/project-room/issues/3365"
+  },
+  {
+    "labels": [],
+    "number": 3349,
+    "title": "Budget trip-wire's SESSION_STOPPED drops the triggering spendCents",
+    "url": "https://github.com/Uuriko/project-room/issues/3349"
+  },
+  {
+    "labels": [],
+    "number": 3344,
+    "title": "Owner Cockpit slice 3: receipt drill-down with in-UI verification, and the Morning Brief",
+    "url": "https://github.com/Uuriko/project-room/issues/3344"
+  },
+  {
+    "labels": [],
+    "number": 3343,
+    "title": "Owner Cockpit slice 2: Money (cents + credits, never mixed) and Roster sections",
+    "url": "https://github.com/Uuriko/project-room/issues/3343"
+  },
+  {
+    "labels": [],
+    "number": 3340,
+    "title": "Owner inbox: no account-level Needs Attention exists \u2014 badge needs an account aggregate endpoint (\u00a78.3 re-scoped)",
+    "url": "https://github.com/Uuriko/project-room/issues/3340"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3323,
+    "title": "Generated budget stop/pause is not atomic: failures are swallowed, partial writes commit, and the 409 falsely reports the session stopped",
+    "url": "https://github.com/Uuriko/project-room/issues/3323"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3322,
+    "title": "Budget trip-wire has no attempt binding: a stale over-budget report force-stops the newer attempt",
+    "url": "https://github.com/Uuriko/project-room/issues/3322"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3318,
+    "title": "Test time bomb: begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the real wall clock",
+    "url": "https://github.com/Uuriko/project-room/issues/3318"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3308,
+    "title": "claim_released pays +1 reputation with no velocity or re-claim guard: zero-cost serial claim-release cycling farms standing",
+    "url": "https://github.com/Uuriko/project-room/issues/3308"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3307,
+    "title": "Dispute bond is specified two ways: dispute machine opens at max(1, 5% of bounty), escrow enforces exactly 25%",
+    "url": "https://github.com/Uuriko/project-room/issues/3307"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450xg",
+        "name": "documentation",
+        "description": "Improvements or additions to documentation",
+        "color": "0075ca"
+      }
+    ],
+    "number": 3299,
+    "title": "Agent coordination log \u2014 Jill (Muse) \u21c4 Codex \u21c4 other fleets",
+    "url": "https://github.com/Uuriko/project-room/issues/3299"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz4502w",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      }
+    ],
+    "number": 3294,
+    "title": "PERF-1: signed-out / page weight \u2014 execute the approved budget (D5-5)",
+    "url": "https://github.com/Uuriko/project-room/issues/3294"
+  },
+  {
+    "labels": [],
+    "number": 3270,
+    "title": "MCP identity mint returns 500 'internal' for reserved role names where REST returns the actionable 422",
+    "url": "https://github.com/Uuriko/project-room/issues/3270"
+  },
+  {
+    "labels": [],
+    "number": 3264,
+    "title": "REST wake ack has no batch cap (55 ids accepted); MCP and both clients cap at 50",
+    "url": "https://github.com/Uuriko/project-room/issues/3264"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 3224,
+    "title": "[tracking] Finish raw members[...] migration behind ownMember/requireMember and add the lint ban",
+    "url": "https://github.com/Uuriko/project-room/issues/3224"
+  },
+  {
+    "labels": [],
+    "number": 3221,
+    "title": "[simplification] E6 work-stack merges: mirror cut, trial-tasks merge, workItems migration, Demigod park, offers rename",
+    "url": "https://github.com/Uuriko/project-room/issues/3221"
+  },
+  {
+    "labels": [],
+    "number": 3213,
+    "title": "Hosted MCP initialize instructions name non-existent tools (post, reply, react); unknown_tool error claims 'no name close' with suggestion:null even for near-misses",
+    "url": "https://github.com/Uuriko/project-room/issues/3213"
+  },
+  {
+    "labels": [],
+    "number": 3212,
+    "title": "Hosted MCP: room_join hidden behind undiscoverable tools/list profile parameter \u2014 guided join path lands on a catalog with no join tool",
+    "url": "https://github.com/Uuriko/project-room/issues/3212"
+  },
+  {
+    "labels": [],
+    "number": 3211,
+    "title": "AGENT-START-HERE ends at first public-work receipt: no route to room membership, activation pack, plugin, or heartbeat/wake setup",
+    "url": "https://github.com/Uuriko/project-room/issues/3211"
+  },
+  {
+    "labels": [],
+    "number": 3209,
+    "title": "llms.txt under-specifies three contracts it names: access-request join path, wants-work capabilities enum, full-profile-only heartbeat/wake tools",
+    "url": "https://github.com/Uuriko/project-room/issues/3209"
+  },
+  {
+    "labels": [],
+    "number": 2009,
+    "title": "herdr-migrate force-release doesn't pre-validate operator authority (V168 follow-up)",
+    "url": "https://github.com/Uuriko/project-room/issues/2009"
+  },
+  {
+    "labels": [],
+    "number": 1907,
+    "title": "Flaky/hanging: 'room import round-trips a large (1500-event) export' never resolves",
+    "url": "https://github.com/Uuriko/project-room/issues/1907"
+  },
+  {
+    "labels": [],
+    "number": 1905,
+    "title": "Load: concurrent write throughput collapses (6.5/s, p95 5.4s at 16 writers)",
+    "url": "https://github.com/Uuriko/project-room/issues/1905"
+  },
+  {
+    "labels": [],
+    "number": 1609,
+    "title": "Discovery gap: /api/opportunities.json is empty and never points at the public-work pool",
+    "url": "https://github.com/Uuriko/project-room/issues/1609"
+  },
+  {
+    "labels": [],
+    "number": 1566,
+    "title": "MCP room_create omits `starter`, breaking its 'Same call as POST /api/agent-rooms' contract",
+    "url": "https://github.com/Uuriko/project-room/issues/1566"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450rA",
+        "name": "bug",
+        "description": "Something isn't working",
+        "color": "d73a4a"
+      }
+    ],
+    "number": 1506,
+    "title": "Priced-tool MCP charge path still 500s on prod after #1491",
+    "url": "https://github.com/Uuriko/project-room/issues/1506"
+  },
+  {
+    "labels": [],
+    "number": 942,
+    "title": "Follow-up to #931: require identity-holder proof at agent enrollment; scope peer-DM reads by room",
+    "url": "https://github.com/Uuriko/project-room/issues/942"
+  },
+  {
+    "labels": [],
+    "number": 941,
+    "title": "Security deep pass 1: guest-link credentials + cross-review patterns (P1-P5)",
+    "url": "https://github.com/Uuriko/project-room/issues/941"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAACz450xg",
+        "name": "documentation",
+        "description": "Improvements or additions to documentation",
+        "color": "0075ca"
+      },
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC0FrsWg",
+        "name": "coordination",
+        "description": "",
+        "color": "ededed"
+      }
+    ],
+    "number": 728,
+    "title": "Current product execution: reliable connections, coding together, private Inbox",
+    "url": "https://github.com/Uuriko/project-room/issues/728"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC29cNuA",
+        "name": "priority:later",
+        "description": "Retained proposal; not part of current execution",
+        "color": "EDEDED"
+      }
+    ],
+    "number": 661,
+    "title": "[proposal][ux] Anti-shout pacing for multi-agent rooms",
+    "url": "https://github.com/Uuriko/project-room/issues/661"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC29cNuA",
+        "name": "priority:later",
+        "description": "Retained proposal; not part of current execution",
+        "color": "EDEDED"
+      }
+    ],
+    "number": 659,
+    "title": "[proposal][ux] Per-room Board view: render the work ledger next to the chat",
+    "url": "https://github.com/Uuriko/project-room/issues/659"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC29cNuA",
+        "name": "priority:later",
+        "description": "Retained proposal; not part of current execution",
+        "color": "EDEDED"
+      }
+    ],
+    "number": 650,
+    "title": "[proposal][research] A2A-compatible agent cards: well-known URI + skill-queryable registry (augments #600, #601)",
+    "url": "https://github.com/Uuriko/project-room/issues/650"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDOUPGoMc8AAAAC29cNuA",
+        "name": "priority:later",
+        "description": "Retained proposal; not part of current execution",
+        "color": "EDEDED"
+      }
+    ],
+    "number": 602,
+    "title": "[proposal] A well-known practice room where new agents can self-join with chat scope",
+    "url": "https://github.com/Uuriko/project-room/issues/602"
+  }
+]

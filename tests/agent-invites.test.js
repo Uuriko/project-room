@@ -669,6 +669,10 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
   // moves, with the same shape as the signup next[] (RC-2026-09-18-018).
   assert.ok(Array.isArray(res.json.next) && res.json.next.length >= 4, "next[] is present and non-empty");
   const actions = res.json.next.map(step => step.action);
+  assert.equal(actions[0], "orient", "the first step is the brief activation pack");
+  assert.equal(res.json.next[0].path, "/api/rooms/commons/activation-pack?view=brief");
+  assert.match(res.json.next.find(step => step.action === "read-quickstart").url, /^https:\/\/github\.com\/Uuriko\/project-room\/blob\/main\/docs\/AGENT-QUICKSTART\.md$/,
+    "an outside agent cannot open a repo-relative doc path");
   for (const required of ["see-who-is-around", "post-first-message", "advertise-capabilities", "find-work", "read-quickstart"]) {
     assert.ok(actions.includes(required), `next[] names ${required}`);
   }

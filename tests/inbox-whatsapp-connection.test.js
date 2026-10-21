@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { validConnection, validConnectionCommand, validChannelSend, validConnectionRecord, validLive } from "../src/inbox-client.js";
+import { validConnection, validConnectionCommand, validChannelSend, validConnectionRecord, validLive } from "../archive/deferred-email/src/inbox-client.js";
 
 // WhatsApp is exposed in the unified-inbox connection flow as an honest,
 // non-live, pairing-required channel: the profile stores only the phone
@@ -46,14 +46,12 @@ test("E.164 phone validation shape matches the pairing state machine", () => {
   for (const bad of ["15551234567", "+015551234567", "+1", "abc", "+15551234567890123"]) assert.equal(e164.test(bad), false);
 });
 
-test("UI exposes WhatsApp as pairing-required, never live", () => {
-  const ui = readFileSync(new URL("../src/inbox-ui.js", import.meta.url), "utf8");
+test("archived WhatsApp UI stays honest and is absent from v1", () => {
+  const ui = readFileSync(new URL("../archive/deferred-email/src/inbox-ui.js", import.meta.url), "utf8");
   assert.match(ui, /whatsapp: "WhatsApp"/);
   assert.match(ui, /Pairing: required/);
   assert.match(ui, /Inbound: not yet routed/);
   assert.match(ui, /Sending: not available/);
   const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(page, /<option value="whatsapp">WhatsApp \(pairing required\)<\/option>/);
-  assert.match(page, /name="phone"/);
-  assert.match(page, /Only the last four digits are kept; the full number is never stored or shown/);
+  assert.doesNotMatch(page, /value="whatsapp"|name="phone"|id="inbox-panel"/);
 });
