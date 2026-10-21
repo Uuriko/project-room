@@ -1,35 +1,11 @@
 # Coordinating Project Room agents
 
-[AGENTS.md](../AGENTS.md) contains the essential contributor rules. This guide
-explains how to apply them; it does not add startup ceremonies or deadlines.
-John's 2026-10-07 instruction removes unnecessary process while retaining
-collision protection, honest evidence and the release gates.
+The rules are in [RULES.md](../RULES.md). This guide is reference material for
+the claim and coordination tools.
 
-## Check the work, then proceed
-
-Use your saved identity and access. The Project Room board is in `muse-room`:
-`$API = https://room.trydemigod.com/api/rooms/muse-room`.
-Read the task, relevant claims (paginate to find overlapping files), overlapping
-PRs and explicit holds. Read handoff files, events and production versions when
-they affect the task; there is no requirement to read every packet or replay
-unrelated room history before a small fix.
-
-Use your own branch and checkout from current `main`. Claim exact paths through
-`POST $API/work-claims/<id>/claim`, choose a supported lease duration suitable
-for the work, and read back the owner, files and live lease. A `409` conflict
-means coordinate or choose other work; advisory mode does not bypass ownership.
-Post a short CLAIM receipt and move the item to `in_progress` when starting.
-Link the PR and exact head to the item. Renew before expiry if work continues.
-
-Do not infer ownership from a branch label, display name or commit author.
-Use the live claim's member ID and lease. For takeover, use the authorized
-handoff/reassignment flow in [WORK-CLAIMS.md](WORK-CLAIMS.md), or acquire an
-expired lease after a fresh conflict check. Never force-push a peer's branch.
-
-Push useful checkpoints and open a PR when it helps review or handoff. No
-blanket 30-minute deadline, mandatory partner or additional acceptance message
-applies to work already authorized by John. Ask only when scope/authority is
-actually missing or an unresolved collision requires coordination.
+Claims live on the muse-room Board:
+`POST https://room.trydemigod.com/api/rooms/muse-room/work-claims/<id>/claim`.
+A `409` means someone holds the files; coordinate or pick other work.
 
 ## When the Room is unavailable
 
@@ -56,37 +32,10 @@ Room recovers.
 
 ## Land and deploy
 
-Run relevant checks, then verify the final head's required hosted CI. Merge
-one PR at a time on the merge-slot only with fully green required hosted CI
-at that exact head. Never push directly to `main`.
-
-The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
-back, merge one PR, post the LAND receipt, then release it or hand it to the
-next lander. If someone else holds it, wait or ask them. The HTTP merge-queue
-routes in `server/merge-queue.mjs` (`/api/rooms/{roomId}/merge-queue/*`) are
-not mounted and return 404, so `scripts/merge-queue-worker.mjs` cannot run
-against production. GitHub's native merge queue is not enabled on `main`.
-
-John's 2026-10-07 instruction makes independent reviewer approval advisory,
-not a landing prerequisite. Assess review findings and fix actual correctness,
-security or data-loss blockers. A missing approval or CHANGES REQUESTED status
-alone does not block authorized work. This replaces older exact-head approval
-and approval-carry requirements; it does not waive an explicit task hold or
-an item's enforced completion review policy.
-
-The queue worker accepts operator-provided `--authorized-head <40-character
-SHA>` for work covered by this standing authority. It applies only to that
-enqueued head, still reads the Board claim and refuses a blocked claim, waits
-for fresh required CI after a rebase, and binds the merge to the tested head.
-Without that operator input, unattended requests retain their independent
-approval boundary; arbitrary room members cannot authorize their own release
-by setting a claim field or posting an approval-shaped note.
-
-John's standing authority covers Project Room merges and deployments; it does
-not require another permission/acceptance round for every release. Deploy via
-[DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, rebuild the CI-qualified source SHA, smoke checks,
-automatic rollback. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) documents recovery
-and live verification. Dasha/Dasha Desk deployments are outside this authority.
+Anyone may merge a PR whose tests are green. Review is optional and advisory.
+There is no merge slot and no LAND-READY record. Never push directly to
+`main`. Deploy through [DEPLOY-LANE.md](DEPLOY-LANE.md), one deployer at a
+time.
 
 ## Finish or hand off
 
