@@ -23,14 +23,17 @@ Split landing into two phases. Only the second is serialized.
 ### Phase 1: readiness, in parallel, no slot
 
 Any member may publish a readiness record for a PR. It is the existing
-LAND-READY record, checked mechanically instead of by the slot holder:
+LAND-READY record, checked mechanically instead of by the slot holder. Today
+that record is a room message, `LAND-READY {json}`, with `prNumber`,
+`headSha`, `baseSha`, `mergeable`, `contexts` and `note`; adopting this
+proposal means writing that format down next to the gate that checks it.
+A record is valid when:
 
 - `headSha` is the PR's current head;
 - `baseSha` is the base the checks ran against;
 - every required check run on `headSha` completed with success or an
   intentional skip;
-- an independent source review names `headSha` (or an earlier head whose
-  later commits the review explicitly covers);
+- an independent source review names exactly `headSha`;
 - no open problem key, task hold or `RELEASE-PAUSE` names the PR.
 
 The release merge gate validates the record when it is published and again
@@ -43,11 +46,14 @@ The slot holder takes the oldest valid record and, inside the slot:
 1. Re-read `main`. If `main` equals the record's `baseSha`, merge with the
    head SHA pinned.
 2. If `main` moved, classify the commits between `baseSha` and `main`:
-   - **Disjoint:** none of them touch a file the PR touches, and the PR
-     does not touch a shared global file (`package.json`, lockfiles,
+   - **Disjoint:** none of them touch a file the PR touches, and neither
+     side touches a shared global file (`package.json`, lockfiles,
      `.github/workflows/**`, `scripts/unit-shards.mjs`, schema or migration
-     files). Merge with the head SHA pinned. The full suite on the new main
-     commit is the integration check.
+     files). "Neither side" matters: a global change already on `main` plus
+     an unrelated PR is not disjoint either. Merge with the head SHA pinned.
+     The full suite on the new main commit is the integration check.
+     File disjointness is a policy choice to accept some risk, not proof the
+     two changes work together.
    - **Overlapping or global:** do not merge. Mark the record stale with
      reason `base-moved-overlap`; the author rebases, CI reruns, and a new
      record is published.
@@ -58,12 +64,19 @@ after five minutes so a crashed holder cannot stall landing.
 
 ### After landing
 
-- `main` runs the full suite on every push, as today.
-- Deploys stay gated on a green `main` (deploy-prod already requires it,
-  with smoke checks and automatic rollback).
+- `main` runs the full suite on every push, as today. `test.yml` keeps one
+  running main run and only the newest pending one, so several quick
+  disjoint merges are tested together, not one run per merge.
+- Deploys stay gated on a green `main`. Auto-deploy (`workflow_run`)
+  needs both `test` and `schema-gate` green. A manual `deploy-prod` dispatch
+  needs only `schema-gate` and treats `test` as advisory, so manual deploys
+  during parallel landing need the operator to check `test` themselves.
 - If `main` goes red after a disjoint merge, landing pauses (existing
-  `RELEASE-PAUSE`), the last landed PR is reverted, and its record is
-  marked `integration-failed`.
+  `RELEASE-PAUSE`) until the culprit is known. `auto-revert.yml` reverts the
+  head commit of the red run, which in a batch tested together may not be
+  the culprit. Before adopting this, either find the culprit (test each
+  merge in the batch on its own) or turn auto-revert off for batched runs.
+  The culprit's record is marked `integration-failed`.
 
 ## What changes in code
 
@@ -72,13 +85,16 @@ currently outside this repository):
 
 - record validation callable without holding `MERGE-SLOT`;
 - `grantOf` accepts a validated record plus the disjoint-base check instead
-  of requiring the base to equal `main`;
+  of requiring the base to equal `main`. The GitHub merge call pins only the
+  head SHA, so the gate must re-read `main` and redo the disjoint check
+  right before the call, inside the slot;
 - `guardedMerge` keeps rejecting a second concurrent merge, so the slot
   still serializes the merge call itself;
 - slot lease of five minutes.
 
 Required tests: stale head, stale base with overlapping files, stale base
-with disjoint files, global-file PR on a moved base, two records racing for
+with disjoint files, global-file PR on a moved base, ordinary PR on a base
+moved by a global-file change, two records racing for
 the slot, slot expiry, red main after a disjoint merge.
 
 ## Not proposed
