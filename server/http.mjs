@@ -27,7 +27,7 @@ import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-202
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
-import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, liveAgentInvite, withAgentInviteLink } from "./routes/agent-connect.mjs";
+import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
@@ -3092,12 +3092,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         // An agent invite code asked for without HTML gets the /a/ steps.
+        // The lookup is a scrypt hash (agent-invites codeHash), so it shares
+        // /a/<code>'s per-address limit, and the preview it reads is handed
+        // to the /a/ handler so one GET hashes the code once.
         const agentCode = joinPathAgentCode(url.pathname);
-        const liveCode = agentCode && liveAgentInvite(store, agentCode) ? agentCode : null;
+        if (agentCode) rate(`agent-connect:${remoteAddress}`, 30);
+        const livePreview = agentCode ? agentInvitePreview(store, agentCode) : null;
+        const liveCode = livePreview ? agentCode : null;
         if (liveCode && !acceptPrefersHtml(req.headers.accept)) {
           const agentUrl = new URL(url);
           agentUrl.pathname = `/a/${encodeURIComponent(liveCode)}`;
-          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate, reject, origin: expectedOrigin() })) return;
+          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate: () => {}, reject, origin: expectedOrigin(), preview: livePreview })) return;
         }
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
         let page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);

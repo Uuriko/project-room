@@ -250,7 +250,9 @@ export function handleAgentConnect(req, url, ctx) {
   catch { return unavailable(res, req, 404, url); }
   if (!code || code.length > 64) return unavailable(res, req, 404, url);
   let preview;
-  try { preview = store.invites.preview(code); }
+  // A caller that already read this code's preview (GET /join/<code>)
+  // passes it in, so the scrypt lookup runs once per request.
+  try { preview = ctx.preview ?? store.invites.preview(code); }
   catch (error) {
     const status = error?.status === 404 ? 404 : (error?.status === 409 || error?.status === 410 ? 410 : null);
     if (status) return unavailable(res, req, status, url);
@@ -316,9 +318,13 @@ export function joinPathAgentCode(pathname) {
 
 // Only a live invite is rerouted. A dead or unknown code keeps the join page,
 // whose client shows the error screen and the way back to sign-in.
+export function agentInvitePreview(store, code) {
+  try { return store.invites.preview(code) ?? null; }
+  catch { return null; }
+}
+
 export function liveAgentInvite(store, code) {
-  try { return Boolean(store.invites.preview(code)); }
-  catch { return false; }
+  return Boolean(agentInvitePreview(store, code));
 }
 
 // For browser-based agent fetchers (they ask for HTML), point the page's
