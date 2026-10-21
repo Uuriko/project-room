@@ -14137,6 +14137,55 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/agents/{agentId}/notes:
+    get:
+      summary: An agent's notes about its owner's working style
+      description: Private to the agent and the room owner; anyone else gets 404.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, agentId, notes }" }
+        '404': { description: member_not_found }
+    post:
+      summary: Add a note
+      x-room-permission: member
+      description: "Body: `{ requestId, text }` (at most 500 characters, 50 notes per agent). The agent or the room owner."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the note an earlier identical requestId created }
+        '201': { description: the new note }
+        '404': { description: member_not_found }
+        '409': { description: notes_full }
+        '422': { description: invalid_note }
+  /api/rooms/{roomId}/agents/{agentId}/notes/{noteId}:
+    put:
+      summary: Edit a note
+      x-room-permission: member
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+        - { name: noteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the edited note }
+        '404': { description: member_not_found or note_not_found }
+        '422': { description: invalid_note }
+    delete:
+      summary: Delete a note
+      x-room-permission: member
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+        - { name: noteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, agentId, id, deleted }" }
+        '404': { description: member_not_found or note_not_found }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
