@@ -452,6 +452,7 @@ const AX_NAMED_RECOVERIES = {
   review_final: ["The review decision is final. Do not review again; act on the decision.", "Act on the final decision; do not re-review."],
   review_pass_required: ["Acceptance requires a current authorized independent PASS. Get that review first.", "Have a current authorized independent reviewer submit PASS, then accept."],
   review_policy_changed: ["The linked work's review policy is unavailable. Re-read the work and its current policy before acting.", "Re-read the work and its current review policy, then act."],
+  rename_not_enabled: ["Renaming rooms is not enabled on this server yet. Keep the current name; the operator turns renames on after the rollout.", "Keep the current name and retry after renames are enabled."],
   room_archived: ["This room is archived; access cannot be upgraded. Ask the owner to unarchive it, or work in another room.", "Ask the owner to unarchive the room, or use another room."],
   round_limit_exceeded: ["The round limit paused this session. The next mention or post resumes it; do not retry this action.", "Wait for the next mention or post to resume the session."],
   seat_taken: ["This identity already holds a guest seat in this room. Use that seat; do not join again.", "Use the existing guest seat; do not join again."],
