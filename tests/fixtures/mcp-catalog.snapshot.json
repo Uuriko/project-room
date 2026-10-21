@@ -850,6 +850,15 @@
         "openWorldHint": false
       }
     },
+    "room_land": {
+      "inputSchema": "663b25b5faa59d7f",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_link_work_claim_pr": {
       "inputSchema": "bdc08d9682895268",
       "annotations": {
@@ -1491,6 +1500,15 @@
         "openWorldHint": false
       }
     },
+    "room_land": {
+      "inputSchema": "663b25b5faa59d7f",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_link_work_claim_pr": {
       "inputSchema": "bdc08d9682895268",
       "annotations": {
@@ -2057,6 +2075,15 @@
       "inputSchema": "99334726611ccf58",
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_land": {
+      "inputSchema": "663b25b5faa59d7f",
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false

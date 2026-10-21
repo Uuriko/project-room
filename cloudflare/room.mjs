@@ -130,6 +130,7 @@ export class ProjectRoom extends DurableObject {
     });
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
+    this.store.mergeTrain.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
     let googleAuth = null;

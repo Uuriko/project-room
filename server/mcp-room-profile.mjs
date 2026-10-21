@@ -274,6 +274,19 @@ function validRoomArgs(name, args) {
       && claimantOk && requestIdOk;
   }
   if (name === "list_land_queue") return true;
+  if (name === "room_land") {
+    const idOk = (v) => v === undefined || (typeof v === "string" && v.length >= 1 && v.length <= 64);
+    if (!["enqueue", "list", "approve", "remove", "smoke", "pause", "resume", "metrics"].includes(args.action)) return false;
+    if (args.reason !== undefined && (typeof args.reason !== "string" || args.reason.length > 300)) return false;
+    if (args.action === "enqueue") {
+      return typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200
+        && Number.isSafeInteger(args.prNumber) && args.prNumber >= 1 && args.prNumber <= 100000000
+        && (args.claimantMemberId === undefined || validId(args.claimantMemberId));
+    }
+    if (args.action === "approve" || args.action === "remove") return typeof args.entryId === "string" && idOk(args.entryId);
+    if (args.action === "smoke") return typeof args.batchId === "string" && idOk(args.batchId) && typeof args.ok === "boolean";
+    return true;
+  }
   if (name === "remove_land_item") {
     const requestIdOk = args.requestId === undefined
       || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
@@ -493,6 +506,33 @@ async function callLandTool(store, secret, name, args) {
   });
 }
 
+// Merge train (server/merge-train.mjs). list is a read; every other action
+// is a room write under the autonomy tier, like the land queue.
+export async function callMergeTrainTool(store, secret, args) {
+  const auth = store.authenticate(secret, args.roomId);
+  if (args.action !== "list" && args.action !== "metrics") {
+    enforceAutonomyTierForAction({
+      db: store.db, roomId: args.roomId, state: store.room(args.roomId).state, actor: auth.member, action: "room_land",
+      fail: (status, code, message) => { throw new ServiceError(status, code, message); },
+    });
+  }
+  return runMergeTrainAction(store, args.roomId, auth.member.id, args);
+}
+
+export function runMergeTrainAction(store, roomId, memberId, args) {
+  const train = store.mergeTrain;
+  if (args.action === "list") return train.list(roomId, memberId);
+  if (args.action === "enqueue") {
+    return train.enqueue(roomId, memberId, { repo: args.repo, prNumber: args.prNumber, claimantMemberId: args.claimantMemberId ?? null });
+  }
+  if (args.action === "approve") return train.approve(roomId, memberId, { entryId: args.entryId });
+  if (args.action === "remove") return train.remove(roomId, memberId, { entryId: args.entryId });
+  if (args.action === "smoke") return train.recordSmoke(roomId, memberId, { batchId: args.batchId, ok: args.ok });
+  if (args.action === "pause" || args.action === "resume") return train.setPaused(roomId, memberId, args.action === "pause", args.reason ?? null);
+  if (args.action === "metrics") return train.metrics(roomId, memberId);
+  throw new ServiceError(422, "invalid_action", "action must be enqueue, list, approve, remove, smoke, pause, resume, or metrics");
+}
+
 // Spend-primitive MVP (charge-then-forward): the tool is never invoked until
 // payment has settled against the agent's spend grant. Unpriced tools,
 // humans, and the room owner pass through untouched. A SpendGrantError means
@@ -617,6 +657,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
   }
+  if (name === "room_land") return callMergeTrainTool(store, secret, args);
   if (name === "room_list_peer_dms") return listPeerDms(store, secret, args);
   if (name === "room_put_file") {
     return store.roomAttachments.stage(secret, roomId, {
@@ -1043,7 +1084,7 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
   "room_post_message",
-  "add_land_item", "remove_land_item", "report_tip",
+  "add_land_item", "remove_land_item", "report_tip", "room_land",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke",

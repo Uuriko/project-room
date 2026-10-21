@@ -404,6 +404,15 @@ export async function seedRecoveryCoverage(f) {
     (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
     VALUES ('commons', 'recovery-land-req', 'add_land_item', 'owner', ?, 1, '{"duplicate":false}', ?, ?)`)
     .run("b".repeat(64), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO merge_train_entries (room_id, entry_id, repo, pr_number, item_id, claimant_member_id,
+    head_sha, risk, risk_reasons, state, batch_id, note, created_at, updated_at)
+    VALUES ('commons', 'mt_recovery', 'acme/widgets', 7, 'lq_recovery', 'owner', ?, 'safe', '["docs"]', 'confirmed', 'mtb_recovery', NULL, ?, ?)`)
+    .run("a".repeat(40), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO merge_train_batches (room_id, batch_id, repo, state, base_sha, branch, head_sha, entry_ids,
+    created_at, updated_at) VALUES ('commons', 'mtb_recovery', 'acme/widgets', 'confirmed', ?, 'room-train/mtb_recovery', ?, '["mt_recovery"]', ?, ?)`)
+    .run("d".repeat(40), "e".repeat(40), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO merge_train_control (room_id, paused, by_member_id, reason, updated_at) VALUES ('commons', 0, 'owner', NULL, ?)`).run(f.now());
+  f.store.db.prepare(`INSERT INTO merge_train_flaky (room_id, repo, name, flips, last_at) VALUES ('commons', 'acme/widgets', 'unit', 1, ?)`).run(f.now());
   f.store.db.prepare(`INSERT INTO agent_invite_redeem_receipts
     (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
     VALUES ('recovery-redeem-req', ?, ?, 'commons', 'owner', 'Recovery', '[]', ?)`)

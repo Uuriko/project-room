@@ -1186,6 +1186,24 @@ export class LandQueue {
   // for an offline claimant, plus an agent.wake delivery whose signal carries
   // pr, head, state, and what changed. Online claimants already see the room
   // event. No identity link means there is no host to wake.
+  // Merge train return: the PR broke the train or the prod smoke. Turn the
+  // item red with a note so it surfaces in the claimant's needs-me, commit a
+  // land.updated receipt (changed ["red"]) and wake the claimant.
+  markReturned(roomId, itemId, note) {
+    const row = this.#row(roomId, itemId);
+    if (!row) return null;
+    const now = Math.max(this.store.now(), row.updated_at + 1);
+    let incoming = null;
+    this.store.transaction(() => {
+      this.db.prepare("UPDATE land_queue SET checks_state='red', last_error=?, observed=1, updated_at=? WHERE room_id=? AND item_id=?")
+        .run(String(note ?? "").slice(0, 300), now, roomId, itemId);
+      incoming = this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, itemId)), ["red"]);
+    });
+    const item = viewFromRow(this.#row(roomId, itemId));
+    if (incoming) this.wakeClaimant(roomId, item.claimantMemberId, incoming, landWakePayload(item, ["red"]));
+    return item;
+  }
+
   wakeClaimant(roomId, claimantMemberId, incoming, payload) {
     let identityId = null;
     try {

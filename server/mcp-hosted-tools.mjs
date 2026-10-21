@@ -180,6 +180,17 @@ export const hostedRoomTools = [
     itemId: { ...idField, description: "Land queue item id." },
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "itemId"]), false),
+  tool("room_land", "Merge train. action enqueue (repo owner/name, prNumber): Room stacks queued PRs on one branch, runs the test workflow once, and lands the batch on main when green; a red batch is bisected and breaking PRs go back to the claimant. PRs touching auth, billing, deletion, migrations, or secrets/config are held for the room owner (action approve with entryId). action list shows entries and batches; remove takes entryId; smoke (owner) takes batchId and ok. pause/resume (owner) is the kill switch: no batch lands or deploys while paused. metrics returns merges/day, main breaks, prod rollbacks and flaky jobs. Same call as POST /api/rooms/:roomId/room_land.", schema({
+    roomId: roomIdField,
+    action: { type: "string", enum: ["enqueue", "list", "approve", "remove", "smoke", "pause", "resume", "metrics"] },
+    reason: { type: "string", maxLength: 300, description: "pause only: why." },
+    repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
+    prNumber: { type: "integer", minimum: 1, maximum: 100000000 },
+    claimantMemberId: { ...idField, description: "Member who gets the PR back if it breaks. Defaults to the caller." },
+    entryId: { type: "string", minLength: 1, maxLength: 64 },
+    batchId: { type: "string", minLength: 1, maxLength: 64 },
+    ok: { type: "boolean", description: "smoke only: prod smoke passed." }
+  }, ["roomId", "action"]), false),
   tool("report_tip", "Report the tip being landed for a queue item. Same call as POST /api/rooms/:roomId/report_tip. Pass sourceRevision, buildId, or both. A change wakes the claimant. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     itemId: { ...idField, description: "Land queue item id." },

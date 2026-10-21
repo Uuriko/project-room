@@ -73,6 +73,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/read-cursor.mjs'); // safe scalar foundation
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
+  paths.add('server/merge-train.mjs'); paths.add('server/merge-train-paths.mjs'); paths.add('server/routes/merge-train.mjs'); // merge train (imported by server/store.mjs and server/routes/table.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)
   paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)

@@ -52,6 +52,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_put_file", blurb: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.", focus: ["work"] },
   { name: "room_commit_file", blurb: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.", focus: ["work"] },
   { name: "add_land_item", blurb: "Add a pull request to this room's land queue. Pass roomId, repo (owner/name), and prNumber." },
+  { name: "room_land", blurb: "Merge train: enqueue a ready PR (repo, prNumber); Room batch-tests and lands it.", focus: ["review", "work"] },
   { name: "list_land_queue", blurb: "List this room's land queue.", focus: ["review"] },
   { name: "wake_pause", blurb: "Pause your queued wakes in this room.", alias: "wake.pause", focus: ["automation"] },
   { name: "wake_resume", blurb: "Resume your queued wakes in this room.", alias: "wake.resume", focus: ["automation"] },

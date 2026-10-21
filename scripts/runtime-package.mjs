@@ -158,6 +158,7 @@ optional.push("server/read-cursor.mjs"); // safe scalar foundation imported by n
 optional.push("server/storage-limits.mjs"); // r56: storage value limit reported on /api/version (imported by server/http.mjs)
 optional.push("server/needs-me.mjs"); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
+optional.push("server/merge-train.mjs", "server/merge-train-paths.mjs", "server/routes/merge-train.mjs"); // merge train (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
 optional.push("server/agent-identities.mjs");
 optional.push("server/owner-delegates.mjs"); // Owner-delegate authority (imported by server/store.mjs; delegate flag consumed by server/guest-agent-links.mjs, server/guest-invites.mjs, server/agent-invites.mjs, server/access-review.mjs, server/agent-connections.mjs)
