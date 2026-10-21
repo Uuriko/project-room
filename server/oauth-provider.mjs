@@ -131,7 +131,18 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
 
   // Step 1: validate an authorization request. Returns the validated request
   // for the consent screen; throws on invalid client/redirect/scope.
-  const validateAuthorizationRequest = ({ clientId, redirectUri, scopes, state, codeChallenge }) => {
+  const validateResource = resource => {
+    if (resource === undefined || resource === null || resource === "") return null;
+    // RFC 8707 resource indicator: the audience the token is minted for.
+    check(typeof resource === "string" && resource.length <= 512, "resource must be an absolute URL up to 512 chars");
+    let parsed;
+    try { parsed = new URL(resource); } catch { parsed = null; }
+    check(parsed && (parsed.protocol === "https:" || parsed.protocol === "http:") && !parsed.hash && !parsed.username && !parsed.password,
+      "resource must be an absolute http(s) URL without a fragment");
+    return parsed.href.replace(/\/$/, "");
+  };
+
+  const validateAuthorizationRequest = ({ clientId, redirectUri, scopes, state, codeChallenge, resource }) => {
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     const client = getClient(clientId);
     check(client, "unknown client_id");
@@ -143,14 +154,14 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       "state must be a string up to 1024 chars if given");
     check(typeof codeChallenge === "string" && CODE_CHALLENGE_PATTERN.test(codeChallenge),
       "code_challenge (PKCE S256) is required");
-    return Object.freeze({ client, redirectUri, scopes: validScopes, state: state ?? null, codeChallenge });
+    return Object.freeze({ client, redirectUri, scopes: validScopes, state: state ?? null, codeChallenge, resource: validateResource(resource) });
   };
 
   // Step 2: after the user approves, issue an authorization code.
-  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge }) => {
+  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge, resource }) => {
     check(typeof userId === "string" && userId.length > 0 && userId.length <= 128,
       "userId must be a non-empty string up to 128 chars");
-    const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge });
+    const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge, resource });
     const code = `oac_${newSecret(24)}`;
     const record = {
       codeHash: sha256(code),
@@ -159,6 +170,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       redirectUri: validated.redirectUri,
       scopes: validated.scopes,
       codeChallenge: validated.codeChallenge,
+      resource: validated.resource,
       createdAt: now(),
       expiresAt: now() + AUTH_CODE_TTL_MS,
       used: false,
@@ -213,7 +225,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     record.familyId = familyId;
     record.used = true;
 
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session });
+    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session, resource: record.resource ?? null });
   };
 
   // Session metadata attached at issuance (F-02): the IP and User-Agent
@@ -231,7 +243,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // Every access+refresh pair minted from one grant shares a familyId.
   // Rotation carries the familyId forward; reuse of a rotated refresh token
   // (record.rotatedBy set) then revokes the whole family (F-01).
-  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session } = {}) => {
+  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session, resource = null } = {}) => {
     const validScopes = validateScopes(scopes);
     const accessToken = `oat_${newSecret()}`;
     const refreshToken = `oar_${newSecret()}`;
@@ -239,13 +251,13 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const meta = normalizeSessionMeta(session);
     accessStore.set(sha256(accessToken), {
       tokenHash: sha256(accessToken),
-      clientId, userId, scopes: validScopes, familyId,
+      clientId, userId, scopes: validScopes, familyId, resource,
       createdAt: at, expiresAt: at + ACCESS_TOKEN_TTL_MS, revoked: false,
       ip: meta.ip, userAgent: meta.userAgent,
     });
     refreshStore.set(sha256(refreshToken), {
       tokenHash: sha256(refreshToken),
-      clientId, userId, scopes: validScopes, familyId,
+      clientId, userId, scopes: validScopes, familyId, resource,
       createdAt: at, expiresAt: at + REFRESH_TOKEN_TTL_MS, revoked: false,
       rotatedBy: null, // hash of the refresh token that superseded this one
       ip: meta.ip, userAgent: meta.userAgent,
@@ -307,7 +319,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     // both refresh tokens live in between.
     const next = issueTokenPair({
       clientId: record.clientId, userId: record.userId,
-      scopes: [...record.scopes], familyId: record.familyId, session,
+      scopes: [...record.scopes], familyId: record.familyId, session, resource: record.resource ?? null,
     });
     record.revoked = true; // rotation: old refresh token is single-use
     record.rotatedBy = sha256(next.refreshToken);
@@ -329,6 +341,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       userId: record.userId,
       clientId: record.clientId,
       scopes: Object.freeze([...record.scopes]),
+      resource: record.resource ?? null,
     });
   };
 
