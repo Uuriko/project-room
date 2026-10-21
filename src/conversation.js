@@ -631,3 +631,23 @@ export function arrivalsAfterShown(messages, isShown) {
   messages.forEach((message, index) => { if (isShown(message)) last = index; });
   return messages.slice(last + 1).filter(message => !isShown(message));
 }
+
+// --- QA 2026-10-20 ---
+// Empty timeline copy (QA 2026-10-20). A link guest reads only messages
+// posted after joining (PRIV-2 since_join), so "No messages yet" was false in
+// a room with history; guests also cannot invite, so the Invite shortcut was
+// a dead click. Pure so it can be tested without the DOM.
+export function emptyTimelineHtml({ historyHidden = false, canInvite = false } = {}) {
+  const lead = historyHidden
+    ? "Messages from before you joined are hidden. New messages show up here."
+    : "No messages yet.";
+  const invite = canInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : "";
+  return `<li class="empty-note">${lead} <button type="button" class="text-button" data-empty-write>Write the first one</button>${invite}</li>`;
+}
+
+// Recipient picker and work selects: people read names, not member ids.
+// displayNames (member-display-names.js) already adds the id only when two
+// members share a name.
+export function memberOptionLabel(displayName, kind, { revoked = false } = {}) {
+  return `${displayName} · ${kind}${revoked ? " · access revoked" : ""}`;
+}
