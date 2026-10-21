@@ -51,6 +51,7 @@ const W = "test-handoff";
 const W2 = "write-work";
 
 function sweep() {
+  process.env.ROOM_TITLE_SET_WRITES = "1"; // room.title_set writes are gated; the sweep audits them.
   const fixture = createAcceptanceFixture();
   const state = () => fixture.store.room("commons").state;
   const item = (id = W) => state().workItems[id];
@@ -77,6 +78,7 @@ function sweep() {
   step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: true });
   step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.ROOM_PUBLIC_RECEIPTS_SET, "owner", { enabled: true });
+  step(T.ROOM_TITLE_SET, "owner", { title: "Renamed sweep room" });
   // --- PRIV-2: history setting (restored to "all" for the rest of the sweep) and export audit. ---
   step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "since_join" });
   step(T.ROOM_HISTORY_VISIBILITY_SET, "owner", { historyVisibility: "all" });
@@ -340,6 +342,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 66,
+  assert.equal(Object.values(T).length, 67,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

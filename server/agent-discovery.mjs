@@ -1476,6 +1476,26 @@ export function agentsJson() {
         ]
       },
       {
+        id: "rename-room",
+        name: "Rename a room",
+        description: "The room owner records room.title_set. The room's title changes for every member; the event log keeps earlier names.",
+        steps: [
+          {
+            id: "room-title-set",
+            name: "Record room.title_set",
+            description: "Owner-only command on the room event path. data.title is 1 to 120 characters after trimming. Hosted MCP room_rename sends the same command.",
+            actions: [{
+              type: "https://schema.org/UpdateAction",
+              method: "POST",
+              url: `${origin}/api/rooms/{roomId}/commands`,
+              description: "Body {\"id\":\"<uuid>\",\"type\":\"room.title_set\",\"data\":{\"title\":\"New name\"}}.",
+              authentication: "required",
+              auth_note: "room owner bearer; {roomId} is the room"
+            }]
+          }
+        ]
+      },
+      {
         id: "archive-room",
         name: "Archive a room",
         description: "The room owner records room.archived. The room becomes read-only: reads, streams, and export continue; every later write answers 409 room_archived.",

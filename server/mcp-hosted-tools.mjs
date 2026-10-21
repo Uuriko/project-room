@@ -145,6 +145,11 @@ export const hostedRoomTools = [
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["roomId"]), false),
+  tool("room_rename", "Rename a room. Room owner only. Same write as POST /api/rooms/:roomId/commands with type room.title_set. title is 1 to 120 characters after trimming, with no control characters. Pass a stable requestId to make retries safe. Archived rooms answer room_archived.", schema({
+    roomId: roomIdField,
+    title: { type: "string", minLength: 1, maxLength: 120 },
+    requestId: { type: "string", minLength: 1, maxLength: 128, description: "Stable command id for safe retries." }
+  }, ["roomId", "title"]), false),
   tool("room_list_agent_invites", "List agent invite codes for a room. Same read as GET /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Rows carry the inviteId handle, never the raw code.", schema({ roomId: roomIdField }, ["roomId"])),
   tool("room_revoke_agent_invite", "Revoke one unused agent invite code. Same write as DELETE /api/rooms/:roomId/agent-invites. Needs the manage_members grant. Redeemed and already revoked codes return invite_unavailable.", schema({
     roomId: roomIdField,

@@ -221,7 +221,7 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.match(doc.doors.www, /^https:\/\//);
   assert.ok(doc.docs.plug_in.endsWith("docs/SWARM-PLUG-IN.md"), "enrollment guide linked");
   assert.deepEqual(doc.flows.map(flow => flow.id),
-    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm", "archive-room", "identity-secret"]);
+    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm", "rename-room", "archive-room", "identity-secret"]);
   assert.doesNotMatch(body, /issues\/1160/);
   const archived = doc.flows.find(flow => flow.id === "archive-room");
   assert.match(archived.description, /room\.archived/);

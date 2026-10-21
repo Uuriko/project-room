@@ -235,6 +235,13 @@ const ALLOW = {
       reward: "the tool is the volunteer-scoped subset of the route.",
     },
   },
+  room_rename: {
+    // "Same write as POST /api/rooms/:roomId/commands with type room.title_set."
+    transportOnly: {
+      title: "Sent as the room.title_set command's data.title; the commands route takes a generic command envelope, so the field has no top-level REST counterpart.",
+      requestId: "MCP command-receipt key, sent as the command id ('Pass a stable requestId to make retries safe'). No top-level REST counterpart by design.",
+    },
+  },
   room_needs_me: {
     wireTyped: {
       since: "Tool: 'Complete returned cursor, unchanged. Legacy sequence numbers also accepted.' (untyped: the cursor is a JSON object, the legacy form a number). REST: the query-string wire encoding of the same logical value; the route description documents both forms ('since is a sequence number or the previous complete returned cursor object').",

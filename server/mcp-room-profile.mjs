@@ -224,6 +224,8 @@ function validRoomArgs(name, args) {
     return hasScope && profileOk && permsOk && ttlOk && nameOk;
   }
   if (name === "room_list_agent_invites") return true;
+  if (name === "room_rename") return typeof args.title === "string" && args.title.trim().length > 0 && args.title.length <= 120
+    && (args.requestId === undefined || typeof args.requestId === "string" && args.requestId.length > 0 && args.requestId.length <= 128);
   if (name === "room_revoke_agent_invite") return typeof args.inviteId === "string" && args.inviteId.length > 0 && args.inviteId.length <= 64;
   if (name === "room_get_file" || name === "room_discard_file") return validId(args.id);
   if (name === "room_commit_file") return validId(args.id) && validId(args.messageId);
@@ -600,6 +602,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return store.invites.create(secret, roomId, request);
+  }
+  if (name === "room_rename") {
+    return commandReceipt(store, secret, roomId, { id: args.requestId ?? globalThis.crypto.randomUUID(), type: "room.title_set", data: { title: args.title } }, "renamed");
   }
   if (name === "room_list_agent_invites") return { roomId, invites: store.invites.list(secret, roomId) };
   if (name === "room_revoke_agent_invite") return store.invites.revoke(secret, roomId, args.inviteId);
@@ -1003,7 +1008,7 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
-  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite", "room_rename",
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
   "dm_posted",
 ]);

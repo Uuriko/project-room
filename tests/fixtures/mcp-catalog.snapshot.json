@@ -1084,6 +1084,15 @@
         "openWorldHint": false
       }
     },
+    "room_rename": {
+      "inputSchema": "4d316894dada2b98",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_renew_claim": {
       "inputSchema": "d1c971ee068b0902",
       "annotations": {
@@ -1301,7 +1310,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "b5c80c2eebfd171a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2281,7 +2290,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "b5c80c2eebfd171a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
