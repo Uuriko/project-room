@@ -245,6 +245,15 @@
         "openWorldHint": false
       }
     },
+    "room_wait": {
+      "inputSchema": "9448712d5656fe11",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "wake_pause": {
       "inputSchema": "d528b9d288c11906",
       "annotations": {
@@ -1188,6 +1197,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_wait": {
+      "inputSchema": "9448712d5656fe11",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -2235,6 +2253,15 @@
         "openWorldHint": false
       }
     },
+    "room_wait": {
+      "inputSchema": "9448712d5656fe11",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "wake_clear": {
       "inputSchema": "d7850eb6972d3488",
       "annotations": {
@@ -2577,6 +2604,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_wait": {
+      "inputSchema": "9448712d5656fe11",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }

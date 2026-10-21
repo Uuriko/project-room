@@ -47,8 +47,8 @@ const size = tools => JSON.stringify(tools).length;
 
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 117, "full is unchanged");
+  assert.equal(core.length, 23, "default core: room_wait joined under the agreed default-list slot (ROOM-WAIT, Grok #4339 reservation)");
+  assert.equal(full.length, 118, "full grew by room_wait only");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);

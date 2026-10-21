@@ -1080,7 +1080,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null, hostId = null, cursor = null }) {
+  notePoll({ agentId, roomId = null, hostId = null, cursor = null, door = "poll" }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -1090,7 +1090,7 @@ export class AgentHeartbeats {
       // Pre-heartbeat DB without agent_hosts (read-only opens never
       // migrate): no host ever reported, so the agent is unregistered.
     }
-    if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]), more: false });
+    if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]), more: false, nextCursor: null });
     // plan-wake-live: the poll itself is listener evidence — best-effort on
     // pre-migration DBs without agent_wake_polls (read-only never migrates).
     // The pending-wake read below still serves; only the stamp is skipped.
@@ -1107,7 +1107,7 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
-    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door, cursor });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
     });

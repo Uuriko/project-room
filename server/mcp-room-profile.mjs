@@ -14,9 +14,9 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { heartbeatWithListener, validListenerLease, resolveListenerLeaseRoom, listenerLeaseView } from "./agent-listener-contract.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
-import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
+import { assertScopedKeyListener, scopedKeyPresenceView, scopedKeyHostId, roomKeyHostId } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -38,6 +38,7 @@ import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
+import { messageRepository } from "./message-repository.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
 import { friendBondCommand } from "../src/friend-bond.js";
@@ -322,6 +323,12 @@ function validWakeArgs(name, args) {
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
+  if (name === "room_wait") {
+    return validHostId(args.hostId)
+      && (args.waitMs === undefined || (Number.isInteger(args.waitMs) && args.waitMs >= 0 && args.waitMs <= 50000))
+      && (args.roomId === undefined || validId(args.roomId))
+      && (args.cursor === undefined || (typeof args.cursor === "string" && args.cursor.length > 0 && args.cursor.length <= 1024));
+  }
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
     const memberOk = args.memberId === undefined || validId(args.memberId);
@@ -767,6 +774,7 @@ async function callWakeTool(store, secret, identity, name, args) {
       return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null, door: "mcp" });
     });
   }
+  if (name === "room_wait") return roomWait(store, secret, identity, args);
   if (name === "wake_pause") {
     const requestId = args.requestId ?? randomUUID();
     return store.wakeQueue.pause(secret, args.roomId, { requestId, reason: args.reason ?? null }, null, { memberId: args.memberId ?? null });
@@ -788,6 +796,120 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.agentPlugin.unsubscribeWebhook({ identityId: agentId, subscriptionId: args.subscriptionId });
   }
   throw new ServiceError(500, "internal", "Request could not be completed");
+}
+
+// ROOM-WAIT: enrich a page of wake signals with the current message each
+// signal points at, read through the same live-projection repository the
+// needs-me read uses (an edited message shows its current body; a deleted
+// DM resolves to null, never its scrubbed text). Signals that do not point
+// at a room message (work pointers, roomless signals) ride unenriched.
+function enrichWakeSignals(store, signals) {
+  const repositories = new Map();
+  return signals.map(signal => {
+    if (!signal.roomId || typeof signal.messageId !== "string") return signal;
+    try {
+      if (!repositories.has(signal.roomId)) repositories.set(signal.roomId, messageRepository(store, signal.roomId));
+      const record = repositories.get(signal.roomId).get(signal.messageId);
+      if (!record) return { ...signal, message: null };
+      return { ...signal, message: Object.freeze({
+        body: record.body ?? null, authorId: record.authorId ?? null,
+        ...(record.toMemberId ? { toMemberId: record.toMemberId } : {}),
+        ...(record.replyToId ? { replyToId: record.replyToId } : {}),
+      }) };
+    } catch { return { ...signal, message: null }; }
+  });
+}
+
+function roomWaitReceipt(store, { agentId, hostId, waiterHostId, page, cursorIn, waitedMs, timedOut, listener, receiving, roomScope }) {
+  const pendingWakes = enrichWakeSignals(store, page.pendingWakes);
+  const paused = store.agentHeartbeats.pausedRoomsOf(agentId)
+    .filter(entry => roomScope === null || entry.roomId === roomScope);
+  const next = [];
+  if (pendingWakes.length > 0) {
+    next.push({ action: "ack-after-handling", tool: "heartbeat_ack",
+      description: "Acknowledge only the signals you have handled. A verified reply is what discharges a wake; receiving it here does not, and neither does cursor progress." });
+  }
+  next.push({ action: "wait-again", tool: "room_wait",
+    description: "Call room_wait again with the returned cursor to block for the next signal without re-receiving the ones you have seen." });
+  // The cursor is the receipt position after the last returned signal.
+  // The store page only mints nextCursor when more remain, so a final
+  // page's position is minted here, in the store's own scope-bound
+  // format ([1, agentId, roomId, hostId, createdAt, signalId]); an empty
+  // page leaves the caller's position untouched.
+  const last = page.pendingWakes.at(-1);
+  const cursor = page.nextCursor ?? (last
+    ? Buffer.from(JSON.stringify([1, agentId, roomScope, waiterHostId, last.createdAt, last.signalId])).toString("base64url")
+    : cursorIn);
+  return {
+    agentId, hostId, pendingWakes, more: page.more === true,
+    cursor,
+    waitedMs, timedOut, listener, receiving,
+    ...(paused.length ? { paused } : {}),
+    next,
+  };
+}
+
+// ROOM-WAIT: the MCP listen call — the poll door's wait, held inside one
+// tools/call. Mirrors GET /api/agent-wakes/poll (waiter registered before
+// the first read, credential re-resolved after the hold, waiter released
+// in finally) and adds the two things the HTTP door splits across calls:
+// the listener lease for the wait's scope, acquired up front through the
+// shared contract resolution, and a receipt cursor over the pending set.
+// This call never acknowledges: signals leave the queue only through
+// ackWakes (heartbeat_ack, or a verified-reply completion door).
+async function roomWait(store, secret, identity, args) {
+  const agentId = identity.identityId;
+  const resolveAuth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } });
+  const auth = resolveAuth(null, MCP_WAKE_SCOPE);
+  if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+  const waiterHostId = auth.scopedKey ? scopedKeyHostId(auth, args.hostId)
+    : auth.roomId ? roomKeyHostId(auth, args.hostId) : args.hostId;
+  const waitMs = args.waitMs ?? 50000;
+  const cursor = args.cursor ?? null;
+  const roomScope = auth.roomId ?? args.roomId ?? null;
+  const leaseRoomId = resolveListenerLeaseRoom(store, auth, args.roomId ?? null);
+  const lease = store.agentHeartbeats.acquireListenerLease({ agentId, roomId: leaseRoomId, listenerId: waiterHostId });
+  const listener = listenerLeaseView(auth, lease);
+  const hostRow = store.agentHeartbeats.statusOf(agentId).hosts?.find(host => host.hostId === waiterHostId) ?? null;
+  const mode = hostRow?.mode ?? null;
+  // Truthful receiving state for this call: holding the lease and the wait
+  // is "listening"; a contended host is "connected" when it is wakeable
+  // and "pull-only" when that is its declared mode.
+  const receiving = { status: listener.acquired ? "listening" : mode === "pull-only" ? "pull-only" : "connected", mode };
+  const present = (page, waitedMs, timedOut) => roomWaitReceipt(store, {
+    agentId, hostId: args.hostId, waiterHostId, page, cursorIn: cursor, waitedMs, timedOut, listener, receiving, roomScope });
+  if (!listener.acquired) {
+    // Another listener owns this scope's queue. Never queue behind it and
+    // never hand this caller the pending set as if it were the listener:
+    // report the contention and return at once.
+    return present({ pendingWakes: [], more: false, nextCursor: null }, 0, false);
+  }
+  let wakeResolve;
+  const woken = new Promise(resolve => { wakeResolve = resolve; });
+  // Register the waiter BEFORE the pending read (the poll door's ordering),
+  // otherwise a signal landing between the read and the wait is missed.
+  const releaseWaiter = store.agentHeartbeats.addWakeWaiter(agentId, waiterHostId, {
+    roomId: roomScope, onWake: () => wakeResolve(true) });
+  try {
+    const first = store.agentHeartbeats.notePoll({ agentId, roomId: roomScope, hostId: waiterHostId, cursor, door: "mcp" });
+    if (!first.registered) throw new HeartbeatError(404, "agent_not_registered",
+      "No host has reported for this identity yet — call heartbeat_set or wake_register first, then room_wait.");
+    if (first.pendingWakes.length > 0 || waitMs === 0) return present(first, 0, false);
+    const startedAt = Date.now();
+    let timer = null;
+    const woke = await Promise.race([woken, new Promise(resolve => { timer = setTimeout(() => resolve(false), waitMs); })]);
+    if (timer !== null) clearTimeout(timer);
+    const waitedMs = Date.now() - startedAt;
+    // The credential may have moved rooms or been revoked mid-hold; the
+    // HTTP poll door re-resolves before answering for the same reason.
+    const fresh = resolveAuth(null, MCP_WAKE_SCOPE);
+    if (fresh.identityId !== agentId || (fresh.roomId ?? null) !== (auth.roomId ?? null))
+      throw new HeartbeatError(403, "identity_changed", "Credential identity changed during the wait");
+    const page = store.agentHeartbeats.notePoll({ agentId, roomId: roomScope, hostId: waiterHostId, cursor, door: "mcp" });
+    return present(page, waitedMs, !woke && page.pendingWakes.length === 0);
+  } finally {
+    releaseWaiter();
+  }
 }
 
 const BASE64_TOOLS = new Set(["room_put_file", "inbox_put_attachment"]);
