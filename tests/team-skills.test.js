@@ -84,3 +84,13 @@ test("snapshot round-trips through initial", () => {
   assert.equal(r2.get(s.skillId).runCount, 1);
   assert.deepEqual([...r2.brief(s.skillId).rules], ["Always cite the source doc"]);
 });
+
+test("proposed corrections are capped per skill", async () => {
+  const { createSkillRegistry, MAX_PROPOSED_CORRECTIONS } = await import("../server/team-skills.mjs");
+  const reg = createSkillRegistry();
+  const author = { kind: "human", id: "h1", label: "Potter" };
+  const agent = { kind: "agent", id: "a1", label: "Codex" };
+  const s = reg.save({ name: "Release notes", instructions: "Write release notes from the merged PR list.", author });
+  for (let i = 0; i < MAX_PROPOSED_CORRECTIONS; i++) reg.correct(s.skillId, { text: `Mention the PR number ${i} in every bullet`, by: agent });
+  assert.throws(() => reg.correct(s.skillId, { text: "Add one more different rule here please", by: agent }), e => e.code === "correction_limit");
+});

@@ -20,6 +20,8 @@ const fail = (code, message) => { throw new SkillError(code, message); };
 const check = (ok, code, message) => { if (!ok) fail(code, message); };
 
 export const MAX_ACTIVE_CORRECTIONS = 4;
+// Proposals wait on the author; bound them so one skill row cannot grow without limit.
+export const MAX_PROPOSED_CORRECTIONS = 12;
 export const MAX_SKILLS_PER_ROOM = 50;
 export const BRIEF_TOKEN_CAP = 400;
 const VAGUE = /^(be better|do better|fix it|make it good|improve( it)?|be careful|try harder|no|wrong|bad)\.?$/i;
@@ -93,6 +95,9 @@ export function createSkillRegistry({ clock = () => Date.now(), id = () => rando
       existing.repeats += 1;
       return view(s);
     }
+    const proposed = s.corrections.filter(x => x.status === "proposed").length;
+    check(proposed < MAX_PROPOSED_CORRECTIONS, "correction_limit",
+      `This skill already has ${MAX_PROPOSED_CORRECTIONS} corrections waiting on its author. Repeat one of those instead.`);
     const c = { correctionId: id(), text: body, by: author.id, byKind: author.kind, source, status: "proposed", repeats: 0, createdAt: iso() };
     s.corrections.push(c);
     if (author.kind === "human" && author.id === s.author.id) return activate(s, c);

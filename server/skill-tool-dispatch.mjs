@@ -21,7 +21,7 @@ export function callSkillTool(store, roomId, actor, name, args = {}) {
         const s = skills.correct(roomId, args.skill, { text: args.text, by: actor, source: args.source ?? null });
         const wanted = args.text.trim().toLowerCase();
         const c = s.corrections.find(x => x.text.toLowerCase() === wanted) ?? s.corrections.at(-1);
-        return { roomId, skillId: s.skillId, correctionId: c.correctionId, status: c.status, next: c.status === "proposed" ? `Waiting on ${s.author.label} to confirm.` : null };
+        return { roomId, skillId: s.skillId, correctionId: c.correctionId, status: c.status, next: c.status === "proposed" ? `Saved as a proposal. It does not change the skill until ${s.author.label} confirms it in Project Room, and that confirm control has not shipped yet.` : null };
       }
     }
   } catch (error) {
