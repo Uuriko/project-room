@@ -32,6 +32,9 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     private let status = NSTextField(labelWithString: "Connecting…")
     private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
     private var localTools: LocalToolsWindow?
+    private let acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)?
+    private let localAgentNotice = NSTextField(wrappingLabelWithString: "")
+    private let localAgentNoticeRow = NSStackView()
     private var authentication: (any RoomAuthenticationSession)?
     private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
     private var wakeObserver: NSObjectProtocol?
@@ -51,8 +54,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
         precondition(RoomLocation.allowed(url))
+        precondition(acceptanceLocalToolsFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        self.acceptanceLocalToolsFactory = acceptanceLocalToolsFactory
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
         precondition(acceptanceAuthenticationFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
@@ -98,10 +103,18 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         status.textColor = .secondaryLabelColor
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         bar.addArrangedSubview(status)
-        for view in [bar, webView] { view.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(view) }
+        let reviewMac = NSButton(title: "Open My Mac", target: self, action: #selector(showMyMac)); reviewMac.bezelStyle = .rounded
+        localAgentNotice.font = .systemFont(ofSize: 12)
+        localAgentNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        localAgentNoticeRow.orientation = .horizontal; localAgentNoticeRow.spacing = 8
+        localAgentNoticeRow.addArrangedSubview(localAgentNotice); localAgentNoticeRow.addArrangedSubview(reviewMac)
+        localAgentNoticeRow.isHidden = true
+        let chrome = NSStackView(views: [bar, localAgentNoticeRow]); chrome.orientation = .vertical; chrome.alignment = .leading; chrome.spacing = 8
+        for view in [chrome, webView] { view.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(view) }
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor, constant: 8), bar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), bar.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12),
-            webView.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 8), webView.bottomAnchor.constraint(equalTo: container.bottomAnchor), webView.leadingAnchor.constraint(equalTo: container.leadingAnchor), webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            chrome.topAnchor.constraint(equalTo: container.topAnchor, constant: 8), chrome.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), chrome.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            bar.widthAnchor.constraint(equalTo: chrome.widthAnchor), localAgentNoticeRow.widthAnchor.constraint(equalTo: chrome.widthAnchor),
+            webView.topAnchor.constraint(equalTo: chrome.bottomAnchor, constant: 8), webView.bottomAnchor.constraint(equalTo: container.bottomAnchor), webView.leadingAnchor.constraint(equalTo: container.leadingAnchor), webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
         window.center()
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -120,6 +133,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             }
         }
         open(url)
+        if !isolated {
+            do { try prepareLocalStatus(); localTools?.resumeReceiving() }
+            catch { updateLocalAgentNotice("This Mac’s agent status is unavailable. Open My Mac to check its connection.") }
+        }
     }
 
     public func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
@@ -311,8 +328,25 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
     }
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
+    public func updateLocalAgentNotice(_ text: String?) {
+        localAgentNotice.stringValue = text ?? ""
+        localAgentNoticeRow.isHidden = text == nil
+    }
+    private func prepareLocalStatus() throws {
+        if localTools == nil {
+            localTools = try acceptanceLocalToolsFactory?() ?? LocalToolsWindow()
+            localTools?.onReadinessChange = { [weak self] in self?.updateLocalAgentNotice($0) }
+            localTools?.conversationIsVisible = { [weak self] in
+                guard let self else { return false }
+                return self.window.isVisible && !self.window.isMiniaturized
+            }
+        }
+    }
     @objc public func showMyMac() {
-        do { if localTools == nil { localTools = try LocalToolsWindow() }; localTools?.show() }
+        do {
+            try prepareLocalStatus()
+            localTools?.show()
+        }
         catch let failure as LocalToolFailure {
             tell(failure.code == "mac_tools_already_running" ? "Another Project Room instance owns this Mac connection. Use its My Mac window, or quit it and try again." : "Local tools could not open. Check that Project Room can write its Application Support folder, then try again.")
         } catch { tell("Local tools could not open. Try again after restarting Project Room.") }
