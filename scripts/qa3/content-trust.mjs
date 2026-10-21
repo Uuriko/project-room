@@ -6,9 +6,13 @@
 // event envelope is never touched). CURE-4437-TRUST: the /events and SSE
 // cells assert the stamp PER EVENT (the guest's post and the guest's edit
 // wrappers individually), not on the page/frame blob — a page-level marker
-// alone no longer passes them. Webhook payloads are fenced (Q3-D). Board
-// lists are stamped (SEC-2). A guest cannot add a Board review note, so a
-// review-profile member writes the Board marker.
+// alone no longer passes them. CURE-4437-2: a filtered /events read
+// (type=message.posted — the documented polling pattern) must still mark
+// a post whose served text is the owner's rewrite of the guest's message:
+// the filtered consumer never sees the message.edited wrapper, so the
+// post wrapper alone carries the true author. Webhook payloads are fenced
+// (Q3-D). Board lists are stamped (SEC-2). A guest cannot add a Board
+// review note, so a review-profile member writes the Board marker.
 // Usage: node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173 --db room.sqlite
 import { argv, exit } from "node:process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -220,6 +224,35 @@ try {
     detail: ssePerEvent
       ? "post and edit frames each stamped per-event"
       : `per-event frame stamp missing (post stamped: ${frameMarked("message.posted")}, edit stamped: ${frameMarked("message.edited")})`,
+  });
+
+  // CURE-4437-2: the filtered read. The guest posts a second message and
+  // the OWNER rewrites it; a consumer polling type=message.posted (the
+  // documented pattern) never receives the message.edited wrapper, so the
+  // post wrapper — read here as the guest — must itself be stamped, and
+  // its folded body is the owner's text.
+  const guestMessageId2 = randomUUID();
+  must(await client.request("POST", `${roomPath}/commands`, {
+    token: guest.secret,
+    body: cmd("message.posted", { messageId: guestMessageId2, body: `${marker} SECOND` }),
+  }), "guest second message");
+  must(await client.request("POST", `${roomPath}/commands`, {
+    token: owner.secret,
+    body: cmd("message.edited", { messageId: guestMessageId2, body: `${marker} OWNEREDIT`, expectedMessageRevision: 0 }),
+  }), "owner rewrite of the guest message");
+  const filtered = await client.request("GET", `${roomPath}/events?type=message.posted&limit=100`, { token: guest.secret });
+  if (filtered.status !== 200) throw new Error(`filtered events: HTTP ${filtered.status}`);
+  const filteredPost = (filtered.json?.events ?? []).find(entry =>
+    entry?.event?.type === "message.posted" && entry?.event?.data?.messageId === guestMessageId2);
+  const filteredOk = Boolean(filteredPost) && filteredPost.untrusted === true
+    && JSON.stringify(filteredPost.event).includes("OWNEREDIT");
+  report.cell({
+    name: "http /events filtered (type=message.posted)",
+    matched: filteredOk,
+    expectedFail: null,
+    detail: filteredOk
+      ? "owner-rewritten post is stamped on the filtered read; the edit wrapper is filtered out, the mark is on the post"
+      : `filtered post wrapper unstamped or body not the owner's text (found: ${Boolean(filteredPost)}, untrusted: ${filteredPost?.untrusted})`,
   });
 
   exit(report.finish());

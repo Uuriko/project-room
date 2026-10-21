@@ -17,7 +17,7 @@ import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
-import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { CONTENT_TRUST, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
@@ -590,16 +590,25 @@ export class RoomAgentClient {
   // as after does not repeat the page. hasMore means older messages exist.
   async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
     const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
-    const mapMessage = ({ sequence, event }) => ({
-      sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
-      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
-      ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
-      ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
-        && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
-      ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
-    });
+    // The /events entry wrapper carries the server's trust stamp, keyed on
+    // the author of the text the folded envelope serves (the last editor,
+    // not the poster — CURE-4437-2). Preserve it: re-deriving the mark
+    // from the poster resurrects the owner-rewrite residual (an agent's
+    // own post, rewritten by the owner, arriving as the agent's own text).
+    const mapMessage = entry => {
+      const { sequence, event } = entry;
+      return {
+        sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
+        body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
+        ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+        ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
+          && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
+        ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {}),
+        ...(entry.untrusted === true ? { untrusted: true } : {})
+      };
+    };
     const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
-    const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
+    const mapped = messages;
     const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
     return withContentTrust({
       roomId: this.#roomId,

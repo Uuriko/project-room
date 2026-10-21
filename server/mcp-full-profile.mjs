@@ -33,7 +33,7 @@ import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trus
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
-import { markIfOther, stampBoard, withContentTrust } from "./content-trust.mjs";
+import { markIfOther, messageTextAuthorId, stampBoard, withContentTrust } from "./content-trust.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
@@ -109,7 +109,17 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
     mapMessage,
   });
-  const mapped = messages.map(message => markIfOther(message, memberId, message.from));
+  // The fold above serves each message's CURRENT body, whose author is the
+  // last editor when the message was edited — key the mark on the text
+  // author from the same projection window, not the original poster
+  // (CURE-4437-2, as on the stampEvents doors). `from` stays the poster.
+  const recordById = new Map();
+  for (const record of currentMessages ?? []) {
+    if (record && typeof record.id === "string") recordById.set(record.id, record);
+  }
+  const archivedLookup = currentMessages?.archivedLookup;
+  const recordOf = id => recordById.get(id) ?? (typeof archivedLookup === "function" ? archivedLookup(id) : undefined);
+  const mapped = messages.map(message => markIfOther(message, memberId, messageTextAuthorId(recordOf(message.messageId), message.from)));
   const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
   return withContentTrust({
     roomId, messages: mapped,

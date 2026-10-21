@@ -966,7 +966,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // most of the per-tick saving. Non-empty pages get the F9 SEC-2b
         // trust stamp at this boundary (wrapper-level, as on the MCP door):
         // the frame's event envelope is never touched.
-        const batch = raw.events.length ? stampEvents(redactEventPage(raw, store.redactionMessages(roomId)), auth.member.id) : raw;
+        const messages = raw.events.length ? store.redactionMessages(roomId) : null;
+        const batch = raw.events.length ? stampEvents(redactEventPage(raw, messages), auth.member.id, messages) : raw;
         if (!batch.events.length) res.write(": connected transport only\n\n");
         let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
@@ -5242,7 +5243,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
           }
           const tail = Number(params.get("tail"));
-          return json(res, 200, stampEvents(redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), store.redactionMessages(roomId)), viewerId));
+          const tailMessages = store.redactionMessages(roomId);
+          return json(res, 200, stampEvents(redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), tailMessages), viewerId, tailMessages));
         }
         // B4 agent read-path: server-side type/mentions filters + an opt-in
         // compact shape. With none of the new parameters present the
@@ -5252,13 +5254,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor", "compact must be 1 or 0");
         }
         const typeParam = params.get("type");
+        const pageMessages = store.redactionMessages(roomId);
         return json(res, 200, stampEvents(redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
           { actor: params.get("actor"), since: params.get("since"), until: params.get("until"),
             types: typeParam === null ? null : typeParam.split(",").map(part => part.trim()).filter(part => part.length > 0),
             mentions: params.get("mentions"),
             compact: compactParam === "1" || compactParam === "true",
-            expectedSessionBinding: fence }), store.redactionMessages(roomId)), viewerId));
+            expectedSessionBinding: fence }), pageMessages), viewerId, pageMessages));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only

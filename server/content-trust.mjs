@@ -81,11 +81,25 @@ export function stampSearch(result, viewerId) {
   });
 }
 
+// The author of the text a message record currently carries. An edited
+// message's body is its last editor's text (the projection records
+// editedBy at edit time, like deletedBy), so the stamp keys on the editor,
+// not the original poster. A message edited before editedBy was recorded
+// (editedAt set, editedBy absent — legacy or archived records) has an
+// unknowable text author: return null so callers fail closed and mark it.
+// Deleted messages serve no text (the tombstone), so the fallback stands.
+export function messageTextAuthorId(message, fallbackId) {
+  if (!message || message.deletedAt) return fallbackId;
+  if (typeof message.editedBy === "string") return message.editedBy;
+  if (message.editedAt != null) return null;
+  return fallbackId;
+}
+
 export function stampThread(message, viewerId) {
   if (!message || typeof message !== "object") return message;
   const replies = (message.replies ?? []).map(reply => stampThread(reply, viewerId));
   const { replies: _replies, ...rest } = message;
-  return { ...markIfOther(rest, viewerId, message.authorId), replies };
+  return { ...markIfOther(rest, viewerId, messageTextAuthorId(message, message.authorId)), replies };
 }
 
 export function stampReplyRead(value, viewerId) {
@@ -151,32 +165,78 @@ export function stampBoard(board) {
 
 // The event types whose payload carries member-authored text an agent reads
 // as content (CURE-4437-TRUST: the full EVENT_TYPES catalogue classified
-// against reducer/producer payload evidence). The wrapper is marked by the
-// envelope actor — the member whose text the event's payload now carries:
-// for message.edited that is the editor, not the original poster; for work
-// events the proposer/updater. Owner-authored orientation events
-// (room.created, room.charter_updated — the annotateOrientation trust
-// "owner" class), label-only events (member displayName, channel slug
-// names) and text-free lifecycle/config events stay unmarked: their
-// payloads carry no prose. A future text-bearing type must be added here;
-// an undecidable one belongs here too (fail closed).
+// against reducer/producer payload evidence; CURE-4437-2: the NO-TEXT class
+// re-audited producer by producer, which moved six types here —
+// bond.proposed (optional member note), bond.revoked (the reducer requires
+// a reason in the event data), room.archived and ownership.transferred
+// (optional member reason, ≤280 chars), reply_request.cancelled (a reason
+// is required free text), session.started (a member-written environment
+// string)). The wrapper is marked by the member whose text the event's
+// payload now carries: for message.edited that is the editor, not the
+// original poster; for work events the proposer/updater. Owner-authored
+// orientation events (room.created, room.charter_updated — the
+// annotateOrientation trust "owner" class), label-only events (member
+// displayName, channel slug names) and text-free lifecycle/config events
+// stay unmarked: their payloads carry no prose. A future text-bearing
+// type must be added here; an undecidable one belongs here too (fail
+// closed).
 const MEMBER_TEXT_EVENT_TYPES = new Set([
   "message.posted", "message.edited", "dm.posted",
   "work.proposed", "work.blocked", "work.blocker_resolved", "work.completed",
   "work.superseded", "work.handoff_recorded", "work.help_updated",
   "work.help_offer_opened", "work.help_offer_updated",
   "verification.recorded", "owner.decision_recorded", "decision.recorded",
-  "member.status_updated", "capabilities.advertised"
+  "member.status_updated", "capabilities.advertised",
+  "bond.proposed", "bond.revoked",
+  "room.archived", "ownership.transferred", "reply_request.cancelled",
+  "session.started"
 ]);
 
+// The two types the PRIV-1 read fold rewrites to the message's current
+// body (server/redact-read.mjs MESSAGE_BODY_TYPES). Their envelopes serve
+// the last editor's text under the original poster's actorId, so the
+// wrapper keys on the projection record's text author instead.
+const FOLDED_MESSAGE_TYPES = new Set(["message.posted", "message.edited"]);
+
+function foldedMessageId(event) {
+  const data = event?.data;
+  if (!data || typeof data !== "object") return null;
+  if (typeof data.messageId === "string") return data.messageId;
+  if (event.type === "message.posted" && typeof event.id === "string") return event.id;
+  return null;
+}
+
+// The same index the read fold builds (projection messages plus the
+// archived-record lookup), so the stamp derives the text author from the
+// same source the fold derived the served body from.
+function indexMessages(messages) {
+  const byId = new Map();
+  for (const message of messages ?? []) {
+    if (message && typeof message.id === "string") byId.set(message.id, message);
+  }
+  const archived = messages?.archivedLookup;
+  if (typeof archived !== "function") return byId;
+  return { get: id => byId.get(id) ?? archived(id) };
+}
+
 // Marks the {sequence, event} wrapper. The canonical event body is unchanged.
-export function stampEvents(page, viewerId) {
+// `messages` is the projection window the read fold used (callers pass
+// store.redactionMessages(roomId)); without it, folded message wrappers
+// fall back to the envelope actor, the pre-CURE-4437-2 keying.
+export function stampEvents(page, viewerId, messages) {
   if (!page?.events) return page;
+  let byId = null;
   return withContentTrust({
     ...page,
     events: page.events.map(entry => {
-      if (!MEMBER_TEXT_EVENT_TYPES.has(entry?.event?.type)) return entry;
-      return markIfOther(entry, viewerId, entry.event.actorId);
+      const event = entry?.event;
+      if (!MEMBER_TEXT_EVENT_TYPES.has(event?.type)) return entry;
+      let authorId = event.actorId;
+      if (messages && FOLDED_MESSAGE_TYPES.has(event.type)) {
+        byId ??= indexMessages(messages);
+        authorId = messageTextAuthorId(byId.get(foldedMessageId(event)), event.actorId);
+      }
+      return markIfOther(entry, viewerId, authorId);
     })
   });
 }
