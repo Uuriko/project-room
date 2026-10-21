@@ -11,10 +11,12 @@ import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
+import { buildWorkClaimPage } from "./work-claim-routes.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { checkHostContext } from "./agent-heartbeats.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
@@ -27,6 +29,8 @@ import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
+import { messageRepository } from "./message-repository.mjs";
+import { messageVisibleToViewer } from "./history-visibility.mjs";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
@@ -102,6 +106,29 @@ function failureValue(error) {
     return { status, code, message: error.message };
   }
   return { status: 500, code: "internal", message: "Request could not be completed" };
+}
+
+// Batch read for the lean default. Same visibility rules as the projection
+// reads (DM parties only, PRIV-2 history floor, tombstones hidden). Pure read:
+// no cursor, receipt or read marker moves.
+function readMany(store, secret, roomId, args) {
+  const auth = store.authenticate(secret, roomId);
+  const floor = store.historyFloor(roomId, auth.member.id);
+  const messageIds = [...new Set(args.messageIds ?? [])];
+  const found = messageIds.length ? messageRepository(store, roomId).getMany(messageIds) : new Map();
+  const messages = [];
+  const missing = { messageIds: [], fileIds: [] };
+  for (const id of messageIds) {
+    const m = found.get(id);
+    if (!messageVisibleToViewer(m, auth.member.id, floor)) { missing.messageIds.push(id); continue; }
+    messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, replyToId: m.replyToId ?? null, workItemId: m.workItemId ?? null });
+  }
+  const files = [];
+  for (const id of [...new Set(args.fileIds ?? [])]) {
+    try { files.push(store.roomAttachments.get(secret, roomId, id)); }
+    catch (error) { if (error?.status === 404 || error?.status === 403) missing.fileIds.push(id); else throw error; }
+  }
+  return { roomId, messages, files, missing };
 }
 
 export function identityBearer(authorization) {
@@ -185,6 +212,17 @@ function validRoomArgs(name, args) {
     return idOk && messageOk && replyOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
+  if (name === "room_search") {
+    return typeof args.query === "string" && args.query.trim().length > 0 && args.query.length <= 80
+      && (args.kind === undefined || ["messages", "work", "pinned"].includes(args.kind))
+      && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 200)
+      && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length >= 1 && args.cursor.length <= 512);
+  }
+  if (name === "room_read_many") {
+    const ids = (value, max) => value === undefined || Array.isArray(value) && value.length >= 1 && value.length <= max && value.every(validId);
+    return (args.messageIds !== undefined || args.fileIds !== undefined) && ids(args.messageIds, 50) && ids(args.fileIds, 10);
+  }
+  if (name === "room_who") return true;
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
@@ -303,6 +341,11 @@ function validSignalIds(signalIds) {
     && signalIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128);
 }
 
+function validHostContext(value) {
+  if (value === undefined || value === null) return true;
+  try { checkHostContext(value); return true; } catch { return false; }
+}
+
 function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
@@ -319,7 +362,8 @@ function validWakeArgs(name, args) {
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
       && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
-      && (args.workWakes === undefined || typeof args.workWakes === "boolean");
+      && (args.workWakes === undefined || typeof args.workWakes === "boolean")
+      && validHostContext(args.context);
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
@@ -388,13 +432,19 @@ function listWork(store, secret, args) {
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
     nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
   })) ?? null;
+  // Live file claims ride along on the default listing so the core profile
+  // can see who holds which paths without room_read_board.
+  const claims = focus === "all" && store.workClaims && member
+    ? buildWorkClaimPage(store.workClaims.list(args.roomId), args.roomId, member.id,
+      new URLSearchParams({ view: "summary" }), Date.now()).claims
+    : null;
   return stampWorkListing({
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     ...(sort ? { sort } : {}),
-    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
+    work, ...(claims ? { claims } : {}), ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
 
@@ -559,6 +609,11 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);
+  if (name === "room_search") {
+    return store.search(secret, roomId, args.query, args.kind ?? "messages", null, { limit: args.limit ?? 50, before: args.cursor ?? null });
+  }
+  if (name === "room_read_many") return readMany(store, secret, roomId, args);
+  if (name === "room_who") return store.presence(secret, roomId, []);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
   }
@@ -845,7 +900,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       result: {
         ...versionNote,
         protocolVersion: negotiated,
-        capabilities: { tools: {} },
+        capabilities: { tools: { listChanged: false } },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: AUTH_INSTRUCTIONS
       }
