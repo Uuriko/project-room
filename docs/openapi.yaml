@@ -1113,6 +1113,7 @@ paths:
         '413': { description: One current message exceeds the bounded read byte limit }
         '422': { description: Invalid selection }
   /api/inbox/setup:
+    x-self-host-only: true
     get:
       summary: Read or save resumable setup preferences.
       security:
@@ -1148,6 +1149,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail:
+    x-self-host-only: true
     get:
       summary: Gmail availability and connection status. No tokens are returned.
       security:
@@ -1159,6 +1161,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/mailbox:
+    x-self-host-only: true
     post:
       summary: Read, search, compose, save provider drafts and organize the owner's Gmail mailbox.
       security:
@@ -1212,6 +1215,7 @@ paths:
         '502': { description: Gmail unavailable. }
         '503': { description: Gmail is not configured. }
   /api/inbox/gmail/connect:
+    x-self-host-only: true
     post:
       summary: Start Gmail read, send and organize OAuth; returns authorizationUrl.
       security:
@@ -1232,6 +1236,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/sync:
+    x-self-host-only: true
     post:
       summary: Apply a bounded Gmail history sync; expired history reloads 50 recent inbox messages. No remote mailbox edits.
       security:
@@ -1251,6 +1256,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/disconnect:
+    x-self-host-only: true
     post:
       summary: Delete locally stored Gmail credentials and disconnect. Saved copies remain.
       security:
@@ -1270,6 +1276,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/auth/gmail/callback:
+    x-self-host-only: true
     get:
       summary: Consume single-use PKCE state, check initiating account session, save encrypted grant, return to inbox.
       security: []
@@ -1482,6 +1489,10 @@ paths:
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
+        Each member also carries `context` (`{ machine?, repo?, branch?,
+        activity?: busy|idle, doing?, updatedAt }` from the agent's latest heartbeat,
+        null otherwise) and `claim` (`{ id, title, state }` for the member's
+        newest live work claim, or null).
         Derived state is working only for a fresh processing/active session;
         listening for an SSE watcher, canonical online agent host (respecting
         each host's cadence), or a human command within 5 minutes; idle for
@@ -9142,6 +9153,33 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '409': { description: Stale expectedSessionRevision }
         '422': { description: invalid_logout }
+  /api/account/briefing:
+    get:
+      summary: The caller's morning briefing across every room
+      description: >-
+        Account-session read. Off by default: answers `{ enabled: false }`
+        until turned on. When on, a headline, the count of items that
+        arrived since the previous briefing, the top items that need the
+        caller (from Updates), and a per-room count.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ enabled, hour, since, incomplete, briefing: { headline, changedSinceLast, needsYou, byRoom } }" }
+        '401': { description: account_session_required }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
+    put:
+      summary: Turn the morning briefing on or off
+      x-room-permission: account
+      description: "Account-session write (X-CSRF-Token, Origin). Body: `{ enabled, hour? }` with hour 0-23 (default 8)."
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ enabled, hour }" }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_briefing }
+        '429': { description: rate_limited }
   /api/account/sessions:
     get:
       summary: List the account's live account sessions
@@ -11231,6 +11269,16 @@ paths:
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
                 cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
+                context:
+                  type: [object, "null"]
+                  additionalProperties: false
+                  description: "Optional presence shown in room presence: plain machine, repo and branch names (never secrets) and activity busy or idle. Omitted keeps the stored context; null clears it."
+                  properties:
+                    machine: { type: string, minLength: 1, maxLength: 120 }
+                    repo: { type: string, minLength: 1, maxLength: 120 }
+                    branch: { type: string, minLength: 1, maxLength: 120 }
+                    activity: { type: string, enum: [busy, idle] }
+                    doing: { type: string, minLength: 1, maxLength: 80 }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
                   oneOf:
@@ -11929,6 +11977,7 @@ paths:
         '422': { description: invalid_deletion or invalid_purge_plan }
         '429': { description: rate_limited }
   /api/inbox/connections:
+    x-self-host-only: true
     get:
       summary: List the account's channel connections
       description: |
@@ -11954,6 +12003,7 @@ paths:
                     items: { $ref: '#/components/schemas/ChannelConnection' }
         '401': { description: account_session_required }
   /api/inbox/connections/{id}:
+    x-self-host-only: true
     get:
       summary: Read one channel connection
       description: Account-session route. 404 channel_connection_not_found for another account's connection.
@@ -11991,6 +12041,7 @@ paths:
                       - $ref: '#/components/schemas/TelegramLiveStatus'
         '404': { description: channel_connection_not_found }
   /api/inbox/connections/{id}/reconnect:
+    x-self-host-only: true
     post:
       summary: Owner-authenticated live import trigger (Telegram)
       description: |
@@ -12059,6 +12110,7 @@ paths:
         '422': { description: invalid_channel_update (body shape) }
         '429': { description: rate_limited }
   /api/inbox/connections/commands:
+    x-self-host-only: true
     post:
       summary: Add, update or remove one of the account's channel connections
       description: |
@@ -12133,6 +12185,7 @@ paths:
         '422': { description: "invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape)" }
         '429': { description: rate_limited }
   /api/inbox/channel-sends:
+    x-self-host-only: true
     post:
       summary: Dispatch or reconcile a queued Inbox reply through the channel transport
       description: |
@@ -12195,6 +12248,7 @@ paths:
         '422': { description: invalid_inbox_send }
         '429': { description: rate_limited }
   /api/inbox/connections/{id}/sync:
+    x-self-host-only: true
     post:
       summary: Import one recorded Telegram page
       description: |
@@ -12229,6 +12283,7 @@ paths:
         '409': { description: "channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor" }
         '422': { description: invalid_channel_update }
   /api/inbox/webhooks/{connectionId}:
+    x-self-host-only: true
     post:
       summary: Provider webhook delivery (Telegram)
       description: |
@@ -12266,6 +12321,7 @@ paths:
         '422': { description: invalid_channel_update }
         '429': { description: rate_limited (60 per minute per verified connection; 1200 per minute per address) }
   /api/inbox:
+    x-self-host-only: true
     get:
       summary: The account's private inbox
       description: >-
@@ -12293,6 +12349,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
   /api/inbox/search:
+    x-self-host-only: true
     get:
       summary: Full-text search over the account's visible inbox sources
       description: >-
@@ -12325,6 +12382,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
   /api/inbox/threads:
+    x-self-host-only: true
     get:
       summary: Conversation/thread view over the account's visible inbox sources
       description: >-
@@ -12356,6 +12414,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_limit or unsupported_inbox_view }
   /api/inbox/sla/dashboard:
+    x-self-host-only: true
     get:
       summary: SLA dashboard — response-time percentiles, breach counts, open-conversation sweep
       description: >-
@@ -12931,6 +12990,7 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ total, closed, byStatus, escalationRate }" }
   /api/inbox/quarantine:
+    x-self-host-only: true
     get:
       summary: Held-message quarantine review listing
       description: >-
@@ -12956,6 +13016,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_quarantine }
   /api/inbox/quarantine/coverage:
+    x-self-host-only: true
     get:
       summary: Per-signal review-coverage dashboard for the quarantine queue
       description: >-
@@ -12974,6 +13035,7 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, generatedAt, totals: { held, confirmed, dismissed, split, reviewed, total, reviewCoverage }, zeroCoverageSignals: [signalKey], perSignal: [{ key, held, confirmed, dismissed, reviewed, split, total, reviewCoverage, shareOfHolds, avgScore, avgWeight }] } — sorted least-covered first; reviewCoverage is null when a denominator is zero" }
         '401': { description: account_session_required }
   /api/inbox/quarantine/release:
+    x-self-host-only: true
     post:
       summary: Owner confirms a held message (accepts it into the inbox)
       description: >-
@@ -12999,6 +13061,7 @@ paths:
         '422': { description: invalid_quarantine_release }
         '404': { description: quarantine_not_found }
   /api/inbox/quarantine/dismiss:
+    x-self-host-only: true
     post:
       summary: Owner dismisses a held message as spam
       description: >-
@@ -13024,6 +13087,7 @@ paths:
         '422': { description: invalid_quarantine_dismiss }
         '404': { description: quarantine_not_found }
   /api/inbox/quarantine/split:
+    x-self-host-only: true
     post:
       summary: Owner splits a held message off its thread
       description: >-
@@ -13052,6 +13116,7 @@ paths:
         '404': { description: quarantine_not_found }
         '409': { description: quarantine_already_split }
   /api/inbox/sources/{sourceId}/attachments:
+    x-self-host-only: true
     get:
       summary: List one inbox source's attachment descriptors
       description: >-
@@ -13074,6 +13139,7 @@ paths:
         '404': { description: inbox_source_not_found }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}/attachments/{attachmentId}:
+    x-self-host-only: true
     get:
       summary: Verify one attachment's descriptor membership
       description: >-
@@ -13101,6 +13167,7 @@ paths:
         '404': { description: inbox_source_not_found or inbox_attachment_not_found }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
+    x-self-host-only: true
     get:
       summary: Read one inbox source and its private draft
       description: >-
@@ -13119,6 +13186,7 @@ paths:
         '404': { description: Source not found for this account }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}/share-context:
+    x-self-host-only: true
     get:
       summary: Audience for sharing a source into a room
       description: >-
@@ -13138,6 +13206,7 @@ paths:
         '403': { description: Not a member of the room }
         '422': { description: invalid_room }
   /api/inbox/sources/{sourceId}/room-results:
+    x-self-host-only: true
     get:
       summary: Room results that can answer a source
       description: >-
@@ -13159,6 +13228,7 @@ paths:
         '200': { description: "{ contractVersion, viewer, sourceId, roomId, sourceRevision, results }" }
         '422': { description: invalid_room or invalid_inbox_result }
   /api/inbox/sources/{sourceId}/send-context:
+    x-self-host-only: true
     get:
       summary: What a send from this source would use
       description: >-
@@ -13174,6 +13244,7 @@ paths:
         '200': { description: Send context plus simulationAvailable }
         '409': { description: channel_sending_unavailable }
   /api/inbox/sources/{sourceId}/sends:
+    x-self-host-only: true
     get:
       summary: Send attempts recorded for a source
       description: Account-session read of the durable send journal for one source.
@@ -13185,6 +13256,7 @@ paths:
         '422': { description: session_binding_required }
         '200': { description: "{ contractVersion, viewer, sourceId, sends, simulationAvailable }" }
   /api/inbox/sources/{sourceId}/reply-review:
+    x-self-host-only: true
     get:
       summary: Reply review context
       description: >-
@@ -13203,6 +13275,7 @@ paths:
         '200': { description: "{ contractVersion, view, viewer, sourceId, attempt, comparison, update }" }
         '422': { description: unsupported_inbox_view }
   /api/inbox/commands:
+    x-self-host-only: true
     post:
       summary: Apply one private inbox command
       description: >-
@@ -13245,6 +13318,7 @@ paths:
         '422': { description: "invalid_inbox_request, invalid_inbox_source, invalid_inbox_draft, invalid_inbox_result or invalid_inbox_share" }
         '429': { description: rate_limited }
   /api/inbox/review:
+    x-self-host-only: true
     post:
       summary: Record a reply review
       description: >-
@@ -13273,6 +13347,7 @@ paths:
         '409': { description: "idempotency_conflict, reply_update_unresolved or a stale revision" }
         '422': { description: invalid_reply_review }
   /api/inbox/simulation:
+    x-self-host-only: true
     post:
       summary: Drive the synthetic send transport (local only)
       description: >-
@@ -14122,11 +14197,14 @@ paths:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, threadIds: [thread-root ids] } plus the viewer ownership envelope" }
+        '200': { description: "{ roomId, threadIds: [thread-root ids], snoozedThreadIds: [thread-root ids] } plus the viewer ownership envelope" }
     post:
       summary: Mute or unmute a thread
       description: >-
-        Body: `{ threadId, muted }`. `threadId` may be any message in the
+        Body: `{ threadId, muted, until? }`. `until: "next_message"` snoozes
+        the thread instead: it is hidden until someone else posts in it, then
+        surfaces again on its own. `muted: false` clears a mute or a snooze.
+        `threadId` may be any message in the
         thread and resolves to the thread root; 404 message_not_found when it
         names no message in this room. Idempotent both ways; 422
         invalid_thread_mute on a malformed body.
@@ -14137,6 +14215,526 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/agents/{agentId}/notes:
+    get:
+      summary: An agent's notes about its owner's working style
+      description: Private to the agent and the room owner; anyone else gets 404.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, agentId, notes }" }
+        '404': { description: member_not_found }
+    post:
+      summary: Add a note
+      x-room-permission: member
+      description: "Body: `{ requestId, text }` (at most 500 characters, 50 notes per agent). The agent or the room owner."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the note an earlier identical requestId created }
+        '201': { description: the new note }
+        '404': { description: member_not_found }
+        '409': { description: notes_full }
+        '422': { description: invalid_note }
+  /api/rooms/{roomId}/agents/{agentId}/notes/{noteId}:
+    put:
+      summary: Edit a note
+      x-room-permission: member
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+        - { name: noteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the edited note }
+        '404': { description: member_not_found or note_not_found }
+        '422': { description: invalid_note }
+    delete:
+      summary: Delete a note
+      x-room-permission: member
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+        - { name: noteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, agentId, id, deleted }" }
+        '404': { description: member_not_found or note_not_found }
+  /api/rooms/{roomId}/routine-blueprints:
+    get:
+      summary: Routine blueprints in this room
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, blueprints: [{ id, name, schedule, steps, version, installs }] }" }
+    post:
+      summary: Post a routine blueprint any member can install
+      x-room-permission: member
+      description: "Body: `{ requestId, name, schedule, steps }`. schedule is daily HH:MM, weekdays HH:MM, weekly <day> HH:MM, or every Nm / Nh."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the blueprint an earlier identical requestId created }
+        '201': { description: the new blueprint }
+        '422': { description: invalid_routine }
+  /api/rooms/{roomId}/routine-blueprints/{blueprintId}:
+    put:
+      summary: Edit a blueprint (bumps its version)
+      x-room-permission: member
+      description: Author or room owner. Every install shows updateAvailable until reinstalled.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: blueprintId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the edited blueprint }
+        '403': { description: author_required }
+        '404': { description: routine_not_found }
+        '422': { description: invalid_routine }
+  /api/rooms/{roomId}/routine-blueprints/{blueprintId}/install:
+    post:
+      summary: Install a blueprint for yourself or as the room
+      x-room-permission: member
+      description: "Body: `{ as: me | room }`. Installing as the room is owner only. Reinstalling takes the latest version."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: blueprintId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, blueprintId, installedFor, version }" }
+        '403': { description: owner_required }
+        '404': { description: routine_not_found }
+        '422': { description: invalid_install }
+  /api/rooms/{roomId}/routines:
+    get:
+      summary: Routines installed for the caller and for the room
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, routines: [{ blueprintId, name, schedule, steps, runsAs, version, installedVersion, updateAvailable }] }" }
+  /api/rooms/{roomId}/team-connections:
+    get:
+      summary: Team connections the caller may use
+      description: The room owner sees every connection with its opaque connectionRef; other members see the ones granted to them, without the reference.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, connections }" }
+    post:
+      summary: Share one service connection with the team
+      x-room-permission: owner
+      description: >-
+        Body: `{ requestId, service, label, connectionRef, scope, members? }`.
+        scope is all, members (with 1 to 50 member ids) or automations.
+        connectionRef is an opaque conn_ reference; Room never stores a
+        token. A repeated requestId returns the same connection.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the connection an earlier identical requestId created }
+        '201': { description: the new connection }
+        '403': { description: owner_required }
+        '422': { description: invalid_team_connection }
+  /api/rooms/{roomId}/team-connections/{connectionId}:
+    put:
+      summary: Change who a team connection is granted to
+      x-room-permission: owner
+      description: "Body: `{ scope, members? }`."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the updated connection }
+        '403': { description: owner_required }
+        '404': { description: team_connection_not_found }
+        '422': { description: invalid_team_connection }
+    delete:
+      summary: Stop sharing a team connection
+      x-room-permission: owner
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, id, deleted }" }
+        '403': { description: owner_required }
+        '404': { description: team_connection_not_found }
+  /api/rooms/{roomId}/team-connections/{connectionId}/access:
+    get:
+      summary: May the caller use this team connection now?
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: connectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, id, service, allowed, reason }" }
+        '404': { description: team_connection_not_found }
+  /api/rooms/{roomId}/spend-preview:
+    post:
+      summary: Preview what a priced action will cost before it runs
+      x-room-permission: member
+      description: >-
+        Body: `{ tool }`. Returns the price, the caller's own cap and the
+        shared room budget before and after, and whether the charge gate
+        would refuse it (reason no_spend_grant, tool_not_allowlisted,
+        over_per_call_cap, member_cap_reached or room_budget_reached).
+        Nothing is reserved or charged. Unpriced tools and the room owner
+        preview as free.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, tool, priceCents, label, wouldRefuse, reason, member, room }" }
+        '422': { description: invalid_spend_preview }
+  /api/rooms/{roomId}/permission-modes:
+    get:
+      summary: Each member's permission mode in this room
+      description: ask (default, every change waits for the owner), safe (safe actions run on their own) or all. Also lists the safe actions.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, modes: [{ memberId, mode }], safeActions }" }
+    put:
+      summary: Set an agent's permission mode
+      x-room-permission: owner
+      description: "Body: `{ requestId, agentId, mode }`. Room owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, mode }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_permission_mode }
+  /api/rooms/{roomId}/permission-modes/check:
+    post:
+      summary: May the caller do this action without asking?
+      x-room-permission: member
+      description: "Body: `{ action }`. Returns decision allow or ask; on ask, next points at the approval-card route."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, mode, action, decision, next }" }
+        '422': { description: invalid_action }
+  /api/rooms/{roomId}/outbound-policy:
+    get:
+      summary: Which members may send out of Room without a draft
+      description: Every active member with allowSend (false unless the owner allowed it).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, policies: [{ memberId, allowSend }] }" }
+    put:
+      summary: Allow or stop an agent sending without a draft
+      x-room-permission: owner
+      description: "Body: `{ requestId, agentId, allowSend }`. Room owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, allowSend }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_outbound_policy }
+  /api/rooms/{roomId}/outbound:
+    get:
+      summary: List outbound draft cards
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: state, in: query, required: false, schema: { type: string, enum: [draft, approved, discarded, sent] } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, drafts }" }
+        '422': { description: invalid_draft_state }
+    post:
+      summary: Ask to send something out of Room
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, channel, to, subject?, body }`. When the owner
+        allowed this agent to send, answers 200 `{ mode: "send" }` and the
+        agent sends it. Otherwise answers 201 `{ mode: "draft", draft }`
+        and nothing leaves Room until the owner approves.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: send allowed, or the existing draft for this requestId }
+        '201': { description: a new draft card }
+        '422': { description: invalid_outbound }
+  /api/rooms/{roomId}/outbound/{draftId}/decision:
+    post:
+      summary: Approve or discard an outbound draft
+      x-room-permission: owner
+      description: "Body: `{ decision: approve|discard, body? }`. body replaces the text when the owner edits it."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: draftId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the decided draft }
+        '403': { description: owner_required }
+        '404': { description: draft_not_found }
+        '409': { description: draft_already_decided }
+        '422': { description: invalid_decision }
+  /api/rooms/{roomId}/outbound/{draftId}/sent:
+    post:
+      summary: Record an approved draft as sent
+      x-room-permission: member
+      description: The draft's author, after sending it. Approved drafts only; repeating is a no-op.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: draftId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the sent draft }
+        '403': { description: author_required }
+        '404': { description: draft_not_found }
+        '409': { description: draft_not_approved }
+  /api/rooms/{roomId}/spend-meter:
+    get:
+      summary: Live spend tally against the room and agent caps
+      description: >-
+        The room line (allowance, used, percent, paused) and one line per
+        agent holding a spend grant. The room owner sees every agent; other
+        members see their own. paused is true once a hard cap is reached;
+        the spend grant and allowance gates then refuse the next priced call.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, period, room, agents, paused }" }
+  /api/rooms/{roomId}/reviews:
+    get:
+      summary: List group reviews in the room
+      description: Newest first. `mine=asked` keeps reviews still waiting on the caller; `mine=authored` keeps the caller's own.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: mine, in: query, required: false, schema: { type: string, enum: [asked, authored] } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, reviews }" }
+        '422': { description: invalid_review_filter }
+    post:
+      summary: Post a draft to several members for their top objections
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, draft, reviewers }`. reviewers is `["*"]` (every
+        other active member) or 1 to 12 member ids. A repeated requestId
+        returns the same review.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the existing review for this requestId }
+        '201': { description: the new review }
+        '422': { description: invalid_review or invalid_reviewers }
+  /api/rooms/{roomId}/reviews/{reviewId}:
+    get:
+      summary: Read one group review with every objection collected
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: reviewId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ id, draft, reviewers, objections, noObjection, waitingOn, complete }" }
+        '404': { description: review_not_found }
+  /api/rooms/{roomId}/reviews/{reviewId}/objections:
+    post:
+      summary: Answer a group review
+      x-room-permission: member
+      description: "Body: `{ objections: [up to 3] }` or `{ none: true }`. Named reviewers only; answering again replaces the earlier answer."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: reviewId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the review with this answer collected }
+        '403': { description: reviewer_required }
+        '404': { description: review_not_found }
+        '422': { description: invalid_objections }
+  /api/rooms/{roomId}/playbook:
+    get:
+      summary: Read the room's pinned playbook
+      description: >-
+        The latest version (null when the room has none) and the changelog
+        lines newer than `since`. Agents load it on wake and pass the version
+        they last followed as `since` to see what changed.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: since, in: query, required: false, schema: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, playbook, changed, changelog }" }
+        '422': { description: invalid_since }
+    put:
+      summary: Publish a new playbook version
+      x-room-permission: owner
+      description: >-
+        Body: `{ requestId, body, note, baseVersion }`. Room owner or a member
+        with manage_members. baseVersion must equal the current version (0
+        for the first). The old text stays readable by version.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the version an earlier identical requestId created }
+        '201': { description: "{ roomId, playbook }" }
+        '403': { description: owner_required }
+        '409': { description: playbook_version_conflict }
+        '422': { description: invalid_playbook }
+  /api/rooms/{roomId}/playbook/versions/{version}:
+    get:
+      summary: Read one past playbook version
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, playbook }" }
+        '404': { description: playbook_version_not_found }
+  /api/rooms/{roomId}/approvals:
+    get:
+      summary: List approval cards in the room
+      description: Newest first, at most 100. Optional `state` filter (pending, approved, denied, done, failed).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, approvals }" }
+        '422': { description: invalid_approval_state }
+    post:
+      summary: Post a request as an approval card for the room owner
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, summary, action?, executorId? }`. The executor
+        (the requester by default) carries the action out once the owner
+        approves. A repeated requestId returns the same card.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the existing card for this requestId }
+        '201': { description: the new pending card }
+        '404': { description: member_not_found }
+        '422': { description: invalid_approval }
+  /api/rooms/{roomId}/approvals/ready:
+    get:
+      summary: Approved cards the caller should carry out now
+      description: The executor's work list. An agent reads it when it wakes, acts, then reports with /done.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, ready }" }
+  /api/rooms/{roomId}/approvals/{approvalId}/decision:
+    post:
+      summary: Approve or deny an approval card
+      x-room-permission: owner
+      description: "Body: `{ decision: approve|deny, note? }`. Room owner only. Repeating the same decision is a no-op."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: approvalId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the decided card }
+        '403': { description: owner_required }
+        '404': { description: approval_not_found }
+        '409': { description: approval_already_decided }
+        '422': { description: invalid_decision }
+  /api/rooms/{roomId}/approvals/{approvalId}/done:
+    post:
+      summary: Report the result of carrying out an approved card
+      x-room-permission: member
+      description: "Body: `{ ok, result? }`. Only the card's executor, only once approved."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: approvalId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the finished card (done or failed) }
+        '403': { description: executor_required }
+        '404': { description: approval_not_found }
+        '409': { description: approval_not_approved }
+        '422': { description: invalid_approval_result }
+  /api/rooms/{roomId}/sharing-limits:
+    get:
+      summary: List what each member may share of its owner's information
+      description: >-
+        Every active member's sharing limit, a list of kinds (code, files,
+        calendar, email, contacts, docs, finance, location, personal). A
+        member that never set one shares code only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, limits: [{ memberId, share }] }" }
+    put:
+      summary: Set a sharing limit
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, share, agentId? }`. A member sets its own limit;
+        only the room owner sets another member's (403 owner_required).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, share }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_sharing_limits }
+  /api/rooms/{roomId}/sharing-limits/check:
+    post:
+      summary: Check whether sharing some kinds stays inside the caller's limit
+      x-room-permission: member
+      description: >-
+        Body: `{ kinds, what? }`. Returns `{ allowed, outside, ask }`. When a
+        kind is outside the limit, `ask` is the room_ask_user question to put
+        to the owner before sharing.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, allowed, outside, ask }" }
+        '422': { description: invalid_sharing_check }
+  /api/rooms/{roomId}/self-wake:
+    get:
+      summary: Read the caller's own next scheduled check
+      description: >-
+        The caller's pending self-wake: when it next checks the room and a
+        short label such as "next check in 12 min". Nulls when none is set.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, nextCheckAt, label, note }" }
+    post:
+      summary: Schedule the caller's own next check
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, in, note? }`. `in` is a duration up to 7 days
+        (15m, 2h, or a number of seconds). Rides the durable wake queue under
+        one queue key per member, so a new time replaces the old one. Guests
+        cannot schedule. 422 invalid_self_wake on a malformed body.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ roomId, memberId, nextCheckAt, label, note }" }
+        '403': { description: guest_scope_denied }
+        '422': { description: invalid_self_wake }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
