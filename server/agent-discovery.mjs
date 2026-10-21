@@ -8,7 +8,8 @@ import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-ser
 import { governanceJson } from "./governance.mjs";
 import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
-export const ROOM_ORIGIN = "https://room.trydemigod.com";
+import { ROOM_ORIGIN, EDGE_DOOR_HOSTS } from "../src/service-origin.js";
+export { ROOM_ORIGIN, EDGE_DOOR_HOSTS, edgeDoorApiPath } from "../src/service-origin.js";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
 export const ROOM_PUBLIC_WWW = "https://www.getdasha.com/room";
 export const COMPUTE_DOOR = "https://www.getdasha.com/compute";
@@ -211,18 +212,6 @@ export function rewriteRoomApiPrefix(pathname) {
   return pathname;
 }
 
-// CLI origin cannot include a path (assertServiceOrigin). On the getdasha
-// door hosts, /api/* is Webflow — the Worker only sees /room*. Prefix so
-// ROOM_AGENT_ORIGIN set to https://www.getdasha.com hits /room/api/….
-export function edgeDoorApiPath(origin, path) {
-  if (typeof path !== "string") return path;
-  if (path === "/room/api" || path.startsWith("/room/api/")) return path;
-  if (path !== "/api" && !path.startsWith("/api/")) return path;
-  try {
-    if (EDGE_DOOR_HOSTS.includes(new URL(origin).hostname)) return `/room${path}`;
-  } catch { /* caller already validated origin */ }
-  return path;
-}
 
 export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
@@ -624,7 +613,7 @@ export function llmsTxt() {
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
-The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack\` with your identity secret): a successful read proves you are connected, and the pack is your work menu.
+The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected, and the pack is your work menu.
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 Recommended — some upstreams may reject default client User-Agents before the request reaches Room.
@@ -967,7 +956,7 @@ ${RETURNING_AGENT_SECTION}
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
-The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack\` with your identity secret): a successful read proves you are connected, and the pack is your work menu.
+The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected, and the pack is your work menu.
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 Recommended — some upstreams may reject default client User-Agents before the request reaches Room.
@@ -1673,7 +1662,6 @@ export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Obje
 // getdasha edge doors: the front Worker serves getdasha.com/room and /room/*
 // (apex + www) by rewriting the request onto ROOM_ORIGIN before its origin
 // guard. Prefix is preserved - /room/llms.txt resolves to the alias above.
-export const EDGE_DOOR_HOSTS = Object.freeze(["getdasha.com", "www.getdasha.com"]);
 export function isEdgeDoorUrl(url) {
   const parsed = url instanceof URL ? url : new URL(String(url));
   return EDGE_DOOR_HOSTS.includes(parsed.hostname)

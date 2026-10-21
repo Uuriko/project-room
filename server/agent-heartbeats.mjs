@@ -655,7 +655,7 @@ export class AgentHeartbeats {
     const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
-      pendingWakes: page.signals, more: page.more,
+      pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
       ...(pausedRooms.length ? { paused: pausedRooms } : {}),
       pushConfigured, pushSuspended, reachability,
     });
@@ -1083,20 +1083,33 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat" } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
+    const scope = [1, agentId, roomId, hostId];
+    let after = null;
+    if (cursor !== null) {
+      try {
+        if (typeof cursor !== "string" || cursor.length > 1024) throw new Error();
+        const value = JSON.parse(Buffer.from(cursor, "base64url").toString());
+        if (!Array.isArray(value) || value.length !== 6 || JSON.stringify(value.slice(0, 4)) !== JSON.stringify(scope)
+          || !Number.isSafeInteger(value[4]) || value[4] < 0 || typeof value[5] !== "string" || value[5].length > 128) throw new Error();
+        after = { createdAt: value[4], signalId: value[5] };
+      } catch { check(false, 422, "invalid_wake_cursor", "Wake cursor does not match this scope"); }
+    }
     const probe = limit + 1;
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
-      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, roomId, roomId, probe).map(signalView);
-    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
-    // R327-1 (r6): a paused member's room wakes are HELD, not dropped - they
-    // stay unacknowledged and reappear on resume. The caller learns why from
-    // pausedRoomsOf() (heartbeat and poll carry `paused`).
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const combined = [...messages, ...work].filter(s => !held.has(s.roomId)).sort((a, b) => a.createdAt - b.createdAt);
+    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
+      AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
+      AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
+      ORDER BY created_at,signal_id LIMIT ?`)
+      .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
+        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
+    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
+    const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
+      .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
     const page = combined.slice(0, limit);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
@@ -1117,6 +1130,7 @@ export class AgentHeartbeats {
     return Object.freeze({
       signals: Object.freeze(page),
       more: combined.length > limit,
+      nextCursor: combined.length > limit ? Buffer.from(JSON.stringify([...scope, page.at(-1).createdAt, page.at(-1).signalId])).toString("base64url") : null,
     });
   }
 
@@ -1129,7 +1143,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null, hostId = null }) {
+  notePoll({ agentId, roomId = null, hostId = null, cursor = null }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -1156,9 +1170,9 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
-    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll" });
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
     return Object.freeze({
-      agentId, registered: true, pendingWakes: page.signals, more: page.more,
+      agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
     });
   }
 
