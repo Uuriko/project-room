@@ -55,7 +55,7 @@ const pageFiles = new Map([
 const dynamicRoutes = new Set([
   "/receipts", "/demo", "/terms", "/privacy", "/subprocessors",
   "/acceptable-use", "/report", "/legal",
-  "/llms.txt", "/kits.txt", "/.well-known/agent.json",
+  "/llms.txt", "/kits.txt", "/.well-known/agent.json", "/.well-known/ai-catalog.json",
 ]);
 
 // Server canonicalization (server/http.mjs): the .html forms redirect to the
