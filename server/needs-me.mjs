@@ -630,6 +630,27 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
+// Merge train PRs held for a person (auth, billing, deletion, migrations,
+// secrets/config). Only the room owner sees them; safe PRs never appear.
+export function landReviewsOf(store, roomId, memberId) {
+  const held = store.mergeTrain?.heldFor(roomId, memberId) ?? [];
+  let paused = false;
+  try { paused = held.length > 0 || memberId === store.room(roomId).state.room.ownerId ? Boolean(store.mergeTrain?.isPaused(roomId)) : false; }
+  catch { paused = false; }
+  if (!held.length && !paused) return null;
+  return {
+    roomId,
+    count: held.length,
+    ...(paused ? { paused: true } : {}),
+    top: held.slice(0, ACTIONS_NEEDED_SHOWN).map(entry => ({
+      entryId: entry.entryId, pr: `${entry.repo}#${entry.prNumber}`, why: entry.riskReasons
+    })),
+    next: held.length
+      ? { tool: "room_land", arguments: { roomId, action: "approve", entryId: held[0].entryId } }
+      : { tool: "room_land", arguments: { roomId, action: "resume" } }
+  };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -671,6 +692,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myWork = [];
   const myClaims = [];
   const actionsNeeded = [];
+  const landReviews = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -694,6 +716,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
     if (needed) actionsNeeded.push(needed);
+    const review = landReviewsOf(store, link.roomId, link.memberId);
+    if (review) landReviews.push(review);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -756,5 +780,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), ...(landReviews.length ? { landReviews } : {}), cursor, hasMore, untrusted: true };
 }

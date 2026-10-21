@@ -337,6 +337,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // the module verifies its own schema on open. Rows never grant permission.
   "land_queue",
   "land_queue_idempotency",
+  // merge_train_* (server/merge-train.mjs): additive, not fenced, same
+  // reasoning as land_queue. Rows never grant permission.
+  "merge_train_entries",
+  "merge_train_batches",
+  "merge_train_control",
+  "merge_train_flaky",
   // agent_capability_grants (UFO-steal slice 1, RC-2026-09-27-2728:
   // per-agent capability grant edges). One row per (room, agent,
   // capability); revocation stamps revoked_at, expiry is lazy/fail-closed.
