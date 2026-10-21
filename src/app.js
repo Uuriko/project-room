@@ -5117,10 +5117,12 @@ const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
 addEventListener("wheel", event => {
   noteReaderScroll();
-  // A short conversation cannot emit a scroll event. A downward wheel over
-  // its visible messages still expresses reading through to the end.
+  // A conversation at its end cannot emit a scroll event for a downward
+  // wheel: a short list has nothing to scroll, and a longer list already at
+  // the bottom has nowhere to go. A downward wheel over its visible
+  // messages still expresses reading through to the end.
   const list = $("#message-list");
-  if (event.deltaY > 0 && list.contains(event.target) && list.scrollHeight <= list.clientHeight && nearBottomOfList()) scheduleHorizonAdvance();
+  if (event.deltaY > 0 && list.contains(event.target) && nearBottomOfList()) scheduleHorizonAdvance();
 }, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
