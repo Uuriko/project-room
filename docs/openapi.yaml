@@ -9142,6 +9142,33 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '409': { description: Stale expectedSessionRevision }
         '422': { description: invalid_logout }
+  /api/account/briefing:
+    get:
+      summary: The caller's morning briefing across every room
+      description: >-
+        Account-session read. Off by default: answers `{ enabled: false }`
+        until turned on. When on, a headline, the count of items that
+        arrived since the previous briefing, the top items that need the
+        caller (from Updates), and a per-room count.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ enabled, hour, since, incomplete, briefing: { headline, changedSinceLast, needsYou, byRoom } }" }
+        '401': { description: account_session_required }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
+    put:
+      summary: Turn the morning briefing on or off
+      x-room-permission: account
+      description: "Account-session write (X-CSRF-Token, Origin). Body: `{ enabled, hour? }` with hour 0-23 (default 8)."
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ enabled, hour }" }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_briefing }
+        '429': { description: rate_limited }
   /api/account/sessions:
     get:
       summary: List the account's live account sessions
