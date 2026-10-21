@@ -6,48 +6,144 @@ import CoreGraphics
     public let window: NSWindow
     private let service: LocalTools
     private let connection: LocalToolConnection
+    private let host: LocalRoomHost
+    private let hostState = NSTextField(wrappingLabelWithString: "")
+    private let hostToggle = NSButton(title: "Start agent", target: nil, action: nil)
+    private let macConnect = NSButton(title: "Connect Mac tools…", target: nil, action: nil)
+    private let hostConnect = NSButton(title: "Set up agent…", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let toggle = NSButton(title: "Enable local tools", target: nil, action: nil)
+    private let advancedControls = NSStackView()
     private var timer: Timer?
-    public init(service: LocalTools? = nil) throws {
+    private var hostIssue: String?
+    private var setupWindow: LocalRoomHostSetupWindow?
+    public var onReadinessChange: ((String?) -> Void)? { didSet { onReadinessChange?(lastReadiness) } }
+    public var conversationIsVisible: (() -> Bool)?
+    private var lastReadiness: String?
+    public init(service: LocalTools? = nil, host: LocalRoomHost? = nil) throws {
         let owned = try service ?? LocalTools()
+        self.host = try host ?? LocalRoomHost()
         self.service = owned; connection = try LocalToolConnection(service: owned)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 380), styleMask: [.titled,.closable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620), styleMask: [.titled,.closable], backing: .buffered, defer: false)
         super.init()
         window.title = "My Mac · Project Room"; window.isReleasedWhenClosed = false
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "Let agents work on this Mac"); title.font = .systemFont(ofSize: 21, weight: .semibold)
-        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files and run programs as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
-        let scope = NSTextField(wrappingLabelWithString: "This connects local agents. Web and shared-room device access are still being built."); scope.textColor = .secondaryLabelColor
+        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files, run programs, and control apps as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
+        let scope = NSTextField(wrappingLabelWithString: "A connected room agent can use this Mac while Project Room is open. Only enable access for a room you trust."); scope.textColor = .secondaryLabelColor
         toggle.target = self; toggle.action = #selector(changeEnabled); toggle.bezelStyle = .rounded
         let setup = NSButton(title: "macOS permissions…", target:self, action:#selector(openPermissions)); setup.bezelStyle = .rounded
         let copy = NSButton(title:"Copy agent connection", target:self, action:#selector(copyConnection)); copy.bezelStyle = .rounded
-        let controls = NSStackView(views:[toggle,setup,copy]); controls.orientation = .horizontal; controls.spacing = 8
+        let controls = NSStackView(views:[toggle,setup]); controls.orientation = .horizontal; controls.spacing = 8
         for view in [title,explanation,state,permissions,controls,scope] { stack.addArrangedSubview(view) }
+        hostConnect.target = self; hostConnect.action = #selector(setupHost); hostConnect.bezelStyle = .rounded
+        hostToggle.target = self; hostToggle.action = #selector(toggleHost); hostToggle.bezelStyle = .rounded
+        macConnect.target = self; macConnect.action = #selector(connectMacTools); macConnect.bezelStyle = .rounded
+        let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle]); hostControls.spacing = 8
+        let importHost = NSButton(title: "Import existing host configuration…", target: self, action: #selector(connectHost)); importHost.bezelStyle = .rounded
+        let advanced = NSButton(checkboxWithTitle: "Advanced", target: self, action: #selector(toggleAdvanced(_:)))
+        advancedControls.orientation = .vertical; advancedControls.alignment = .leading; advancedControls.spacing = 8
+        advancedControls.addArrangedSubview(copy); advancedControls.addArrangedSubview(importHost)
+        advancedControls.isHidden = true
+        for view in [hostState, hostControls, advanced, advancedControls] { stack.addArrangedSubview(view) }
+        for label in [explanation, state, permissions, scope, hostState] {
+            label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
         refresh(); window.center()
-        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in
+            guard let self, self.window.isVisible || self.conversationIsVisible?() == true else { return }
+            self.refresh()
+        } }
+    }
+    public func resumeReceiving() {
+        do { try host.resumeReceiving() }
+        catch { hostIssue = "Could not reconnect. Check agent setup or another running host." }
+        refresh()
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
-    public func stop() { timer?.invalidate(); connection.stop() }
+    public func stop() { setupWindow?.stop(); timer?.invalidate(); host.stopAndWait(); connection.stop() }
+    @objc private func toggleAdvanced(_ sender: NSButton) {
+        advancedControls.isHidden = sender.state != .on
+    }
     @objc private func changeEnabled() {
         let enabled = service.status()["enabled"] as? Bool == true
         service.setEnabled(!enabled)
         do { try connection.publish() } catch { service.setEnabled(false); state.stringValue = "Connection could not update. Tools paused."; return }
         refresh()
     }
+    @objc private func setupHost() {
+        setupWindow = LocalRoomHostSetupWindow(host: host) { [weak self] in
+            guard let self else { return }
+            self.setupWindow = nil; self.hostIssue = nil
+            do { try self.host.start() }
+            catch { self.hostIssue = "Setup saved. Check the connection and start the agent again." }
+            self.refresh()
+        }
+        setupWindow?.show(on: window)
+    }
+    @objc private func connectHost() {
+        let picker = NSOpenPanel(); picker.canChooseDirectories = false; picker.allowsMultipleSelection = false
+        picker.title = "Choose your agent host configuration"
+        picker.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = picker.url else { return }
+            do { try self.host.configure(url); self.hostIssue = nil }
+            catch { self.hostIssue = "Could not connect. Check the host configuration and its file paths." }
+            self.refresh()
+        }
+    }
+    @objc private func connectMacTools() {
+        let selected = host.snapshot()
+        let alert = NSAlert(); alert.messageText = "Connect this Mac to your room agent"
+        alert.informativeText = "Room: \(selected["roomId"] as? String ?? "")\n\(selected["origin"] as? String ?? "")\n\nObservation lets the agent read app state and screenshots. App control also lets it type, click and scroll as you. Local tools must be enabled and macOS permissions granted. Other room members may contribute requests to this agent."
+        alert.addButton(withTitle: "Observation only"); alert.addButton(withTitle: "Allow app control"); alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn else { return }
+            let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
+            do {
+                try self.host.connectMacTools(executable: executable, connection: self.connection.connectionURL,
+                    allowInput: response == .alertSecondButtonReturn)
+                self.hostIssue = "Mac tools connected. Enable local tools, then start the agent."
+            } catch { self.hostIssue = "Could not connect Mac tools. Stop the agent and check its setup, then try again." }
+            self.refresh()
+        }
+    }
+    @objc private func toggleHost() {
+        hostIssue = nil
+        if host.snapshot()["running"] as? Bool == true || host.snapshot()["receivingEnabled"] as? Bool == true {
+            do { try host.disconnect() }
+            catch { hostIssue = "Agent stopping, but disconnect could not be saved. Check folder access before reopening Project Room." }
+        }
+        else { do { try host.start() } catch { hostIssue = (error as? LocalToolFailure)?.code == "room_connection_changed"
+            ? "The room connection changed. Choose Set up agent to review its setup before starting."
+            : "Could not start. Check setup or another running host." } }
+        refresh()
+    }
     private func refresh() {
+        let agent = host.snapshot(), running = agent["running"] as? Bool == true, stopping = agent["stopping"] as? Bool == true
+        hostState.stringValue = hostIssue ?? (agent["message"] as? String ?? "Agent status unavailable")
+        hostToggle.title = stopping ? "Stopping…" : (running || agent["receivingEnabled"] as? Bool == true) ? "Disconnect agent" : "Start agent"
+        hostToggle.isEnabled = agent["configured"] as? Bool == true && !stopping
+        hostConnect.isEnabled = !running
+        macConnect.isEnabled = agent["configured"] as? Bool == true && !running && !stopping
+
         let snapshot = service.status(), enabled = snapshot["enabled"] as? Bool == true
         state.stringValue = enabled ? "Autonomous local tools enabled · \(snapshot["runningProcesses"]!) running" : "Local tools paused"
         toggle.title = enabled ? "Pause all local tools" : "Enable local tools"
-        permissions.stringValue = "App control: \(snapshot["accessibility"] as? Bool == true ? "Allowed" : "Not allowed") · Screen: \(snapshot["screenCapture"] as? Bool == true ? "Allowed" : "Not allowed")\nFull Disk Access: check macOS settings. Automation requires per-app approval."
+        permissions.stringValue = LocalToolReadiness.summary(snapshot["capabilities"] as? [[String: Any]] ?? [])
+            + "\n\nFiles and apps may require additional access. These local checks do not verify your agent connection or model access."
+        let readiness = LocalHostReadiness.notice(host: agent, local: snapshot, connection: connection.connectionURL.path)
+        if hostIssue == nil, let readiness { hostState.stringValue = readiness }
+        // My Mac retains tool diagnostics; Conversation shows only blockers to
+        // the agent itself, without asking for unrelated computer permissions.
+        let conversation = LocalHostReadiness.conversationNotice(host: agent)
+        if conversation != lastReadiness { lastReadiness = conversation; onReadinessChange?(conversation) }
     }
     @objc private func copyConnection() {
-        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools").path
-        let config: [String:Any] = ["mcpServers":["project-room-mac":["command":executable,"args":[]]]]
-        if let data = try? JSONSerialization.data(withJSONObject:config,options:[.prettyPrinted,.sortedKeys]), let text = String(data:data,encoding:.utf8) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
+        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
+        if let text = try? LocalAgentConfiguration.json(executable: executable, connection: connection.connectionURL) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
     }
     @objc private func openPermissions() {
         let alert = NSAlert(); alert.messageText = "Choose what Project Room can access"

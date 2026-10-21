@@ -3,11 +3,11 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, s
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const METHODS = new Set(["initialize", "thread/start", "thread/read", "thread/resume", "thread/name/set", "turn/start", "turn/steer", "turn/interrupt"]);
+const METHODS = new Set(["initialize", "account/read", "thread/start", "thread/read", "thread/resume", "thread/name/set", "turn/start", "turn/steer", "turn/interrupt"]);
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
 
 export function validateCodexRuntimeConfig(config) {
-  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model"].includes(key)))
+  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model", "macTools"].includes(key)))
     throw new Error("Unknown runtime config field");
   for (const key of ["command", "cwd", "codexHome"]) if (!isAbsolute(config[key] ?? "")) throw new Error(`Runtime ${key} must be absolute`);
   if (!statSync(config.command).isFile() || !statSync(config.cwd).isDirectory()) throw new Error("Runtime executable/workspace unavailable");
@@ -31,12 +31,24 @@ export function validateCodexRuntimeConfig(config) {
     if (!Number.isInteger(value) || value < 100 || value > maximum) throw new Error(`Invalid ${key}`);
   }
   if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim() || config.model.length > 128)) throw new Error("Invalid model");
+  if (config.macTools !== undefined) {
+    const local = config.macTools;
+    if (process.platform !== "darwin" || !local || Object.keys(local).some(key => !["command", "connection", "inputApproval"].includes(key))
+      || local.inputApproval !== undefined && !["prompt", "approve"].includes(local.inputApproval)
+      || !isAbsolute(local.command ?? "") || !isAbsolute(local.connection ?? "")
+      || !statSync(local.command).isFile()) throw new Error("macTools requires the native MCP executable and explicit private connection path");
+    const connection = lstatSync(local.connection);
+    if (!connection.isFile() || connection.isSymbolicLink() || connection.uid !== process.getuid() || (connection.mode & 0o077))
+      throw new Error("macTools connection must be a private owner file");
+  }
   return { ...structuredClone(config), command, cwd, requestTimeoutMs: config.requestTimeoutMs ?? 30000, turnTimeoutMs: config.turnTimeoutMs ?? 300000 };
 }
 
 // A dedicated process, never the desktop daemon/proxy or the operator's HOME.
 // Runtime policy controls its model tools; clearing environment is not an OS sandbox.
-export function openCodexStdio(config, { allowedThreadIds = [], onAttention = () => {} } = {}) {
+export function openCodexStdio(config, { allowedThreadIds = [], onAttention = () => {}, authenticationOnly = false, onDisconnect = () => {} } = {}) {
+  const authMethods = new Set(["initialize", "account/read", "account/login/start", "account/login/cancel"]);
+  const loginIds = new Set();
   const settings = validateCodexRuntimeConfig(config);
   if (process.platform === "win32") throw new Error("This process transport currently requires macOS or Linux");
   const privateHome = join(settings.codexHome, "host-home");
@@ -48,7 +60,14 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
-    ...(settings.model ? ["-c", `model=${JSON.stringify(settings.model)}`] : [])];
+    ...(settings.model ? ["-c", `model=${JSON.stringify(settings.model)}`] : []),
+    ...(settings.macTools ? [
+      "-c", `mcp_servers.project_room_mac.command=${JSON.stringify(settings.macTools.command)}`,
+      "-c", `mcp_servers.project_room_mac.args=${JSON.stringify(["--connection", settings.macTools.connection])}`,
+      "-c", 'mcp_servers.project_room_mac.enabled_tools=["mac_status","mac_app_state","mac_screenshot","mac_input"]',
+      "-c", "mcp_servers.project_room_mac.required=true",
+      "-c", `mcp_servers.project_room_mac.tools.mac_input.approval_mode=${JSON.stringify(settings.macTools.inputApproval ?? "prompt")}`
+    ] : [])];
   const child = spawn(settings.command, args, { cwd: settings.cwd, detached: true, shell: false,
     env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin", LANG: "en_US.UTF-8" },
     stdio: ["pipe", "pipe", "pipe"] });
@@ -69,6 +88,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const fail = error => {
     if (closed) return;
     closed = true;
+    onDisconnect();
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); }
     pending.clear(); settle().catch(() => {});
   };
@@ -105,6 +125,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
           if (message.error) { const error = new Error("Runtime rejected request; reconcile original attempt"); error.code = message.error.code; entry.reject(error); }
           else {
             if (entry.method === "thread/start" && typeof message.result?.thread?.id === "string") threads.add(message.result.thread.id);
+            if (entry.method === "account/login/start" && typeof message.result?.loginId === "string") loginIds.add(message.result.loginId);
             entry.resolve(message.result);
           }
         } else if (message.method) for (const listener of listeners) listener(message);
@@ -118,8 +139,14 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
       // A successful handshake belongs only to this live process generation.
       if (closed) return Promise.reject(new Error("Runtime disconnected; reconcile original attempt"));
       if (method === "initialize" && initialization) return initialization;
-      if (!METHODS.has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
-      if (method !== "initialize" && method !== "thread/start" && !threads.has(params.threadId))
+      if (!(authenticationOnly ? authMethods : METHODS).has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
+      if (method === "account/read" && (params.refreshToken !== false || Object.keys(params).some(key => key !== "refreshToken")))
+        return Promise.reject(new Error("Account preflight requires refreshToken false"));
+      if (method === "account/login/start" && (params.type !== "chatgpt" || Object.keys(params).length !== 1))
+        return Promise.reject(new Error("Only explicit browser login is supported"));
+      if (method === "account/login/cancel" && (!loginIds.has(params.loginId) || Object.keys(params).length !== 1))
+        return Promise.reject(new Error("Login is outside this setup session"));
+      if (!authenticationOnly && !["initialize", "account/read", "thread/start"].includes(method) && !threads.has(params.threadId))
         return Promise.reject(new Error("Runtime thread is outside this Room journal"));
       if (pending.size >= 128) return Promise.reject(new Error("Too many pending runtime requests"));
       const result = new Promise((resolve, reject) => {
@@ -158,4 +185,18 @@ export async function checkCodexProtocol(rpc, config, { threadId } = {}) {
     if (resumed.thread?.id !== id) throw new Error("invalid resume");
     return { status: "protocol_ready", modelTurnExecuted: false, historyRead: true, resume: true };
   } catch { throw new Error("Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."); }
+}
+
+
+// Reads only the explicitly configured isolated profile. No proactive refresh,
+// model request, credential import, or account identity leaves this function.
+export async function checkCodexCredentials(rpc) {
+  try {
+    const result = await rpc.request("account/read", { refreshToken: false });
+    return { credentials: result?.account != null ? "present" : result?.requiresOpenaiAuth === false ? "not_required"
+      : result?.requiresOpenaiAuth === true ? "login_required" : "unknown", modelExecution: "not_tested" };
+  } catch (error) {
+    if (error.code === -32601) return { credentials: "unknown", modelExecution: "not_tested" };
+    throw error;
+  }
 }
