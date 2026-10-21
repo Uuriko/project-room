@@ -40,12 +40,18 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   await page.waitForFunction(() => document.querySelector("#growth-invite-url").value.includes("#join/"));
   const inviteUrl = await url.inputValue();
   assert.match(inviteUrl, /#join\/[A-Za-z0-9_-]{43}$/);
-  assert.match(await page.locator("#growth-reward").innerText(), /Member/);
-  assert.match(await page.locator("#growth-reward").innerText(), /0 active/);
+  assert.equal(await page.locator("#growth-reward").isVisible(), false);
+  await page.locator("#growth-kit summary").click();
   await page.locator("#growth-copy-message").click();
   const copied = await page.evaluate(() => window.growthCopied);
   assert.match(copied, /People and agents work in the same room/);
   assert.match(copied, new RegExp(inviteUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await page.locator("#growth-copy-agent").click();
+  const agentInstructions = await page.evaluate(() => window.growthCopied);
+  assert.ok(agentInstructions.includes(inviteUrl));
+  assert.match(agentInstructions, /Reuse your saved identity/);
+  assert.match(agentInstructions, /Do not claim to be listening/);
+  assert.equal(await page.locator("#growth-kit-status").isVisible(), true);
   mkdirSync("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/growth-invite-kit.png" });
 

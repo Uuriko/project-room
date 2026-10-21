@@ -14,8 +14,6 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
-import { validateCriticalConfig } from "./server/boot-config.mjs";
-import { agentCardSignatureState } from "./server/agent-discovery.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -26,13 +24,12 @@ catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 // Fail-loud config gate (RC-2026-09-27-2732): missing/invalid critical
 // config throws a member-facing error naming the fix, never silently
-// degrades. Runs before any side effect (locks, dirs, sockets). Dev-mode
-// warnings go to stderr so the stdout "server ready" first line (C13) is
-// untouched.
-if (!paused) {
-  const { warnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
-  for (const warning of warnings) console.error(`[boot-config] ${warning}`);
-}
+// degrades. BG-1 moved the gate into the shared boot path — it runs at
+// the top of createRoomServer (server/http.mjs), which this entry, the
+// Worker entry and every fixture boot all converge on; this entry passes
+// `production` through defaultServerArgs below. It still runs before
+// listen(); dev-mode warnings go to stderr so the stdout "server ready"
+// first line (C13) is untouched.
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 // Single-instance lock: one server process per database. SQLite serializes
 // store writes, but the growth snapshot is a plain JSON file — a second
@@ -71,7 +68,7 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);

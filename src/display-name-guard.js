@@ -158,7 +158,7 @@ function isReservedLabel(skeleton) {
   return decorations.some(decoration => reservedLabels.has(decoration));
 }
 
-function classifyMemberDisplayName(name, activeNames) {
+function classifyMemberDisplayName(name, activeNames, { firstWordRule = true } = {}) {
   if (typeof name !== 'string' || !name.trim() || name.length > 80) return { available: false, reason: 'invalid' };
   if (hasBlockedControls(name)) return { available: false, reason: 'control_characters' };
   const skeleton = displayNameSkeleton(name);
@@ -168,8 +168,10 @@ function classifyMemberDisplayName(name, activeNames) {
   if (names.some(other => normalizedName(other) === normalized)) return { available: false, reason: 'duplicate' };
   if (isReservedLabel(skeleton)) return { available: false, reason: 'reserved' };
   if (names.some(other => displayNameSkeleton(other) === skeleton)) return { available: false, reason: 'confusable' };
-  // G16b: names whose first word collides with an existing member
-  const firstWord = normalized.split(/\s+/)[0];
+  // G16b: names whose first word collides with an existing member. Display-name
+  // policy v1 events were admitted before this rule existed, so replay of a v1
+  // stamp skips it (firstWordRule false); live writes stamp v2 and keep it.
+  const firstWord = firstWordRule ? normalized.split(/\s+/)[0] : '';
   if (firstWord && names.some(other => {
     const otherNorm = normalizedName(other);
     const otherFirst = otherNorm.split(/\s+/)[0];
@@ -199,9 +201,9 @@ function visibleBase(name) {
   return base.length > 70 ? base.slice(0, 70).trim() || 'Member' : base;
 }
 
-function suggestionFor(name, activeNames) {
+function suggestionFor(name, activeNames, options) {
   const base = visibleBase(name);
-  const candidate = value => classifyMemberDisplayName(value, activeNames).available;
+  const candidate = value => classifyMemberDisplayName(value, activeNames, options).available;
   if (candidate(base)) return base;
   for (let suffix = 2; suffix <= 20; suffix += 1) {
     const next = `${base} ${suffix}`;
@@ -229,15 +231,15 @@ function unavailableMessage(reason, suggestion) {
 // members do not block the name. `invalid` means the caller still owns the
 // empty/length error; the four admission reasons throw from
 // assertMemberDisplayNameAvailable.
-export function assessMemberDisplayName(name, activeNames = []) {
-  const verdict = classifyMemberDisplayName(name, activeNames);
+export function assessMemberDisplayName(name, activeNames = [], options = {}) {
+  const verdict = classifyMemberDisplayName(name, activeNames, options);
   if (verdict.available || verdict.reason === 'invalid') return { ...verdict, suggestion: null, message: null };
-  const suggestion = suggestionFor(name, activeNames);
+  const suggestion = suggestionFor(name, activeNames, options);
   return { ...verdict, suggestion, message: unavailableMessage(verdict.reason, suggestion) };
 }
 
-export function assertMemberDisplayNameAvailable(name, activeNames = []) {
-  const verdict = assessMemberDisplayName(name, activeNames);
+export function assertMemberDisplayNameAvailable(name, activeNames = [], options = {}) {
+  const verdict = assessMemberDisplayName(name, activeNames, options);
   if (verdict.available || verdict.reason === 'invalid') return;
   const error = new Error(verdict.message);
   error.status = 422;

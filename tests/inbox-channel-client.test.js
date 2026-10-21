@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AccountClient } from "../src/client.js";
-import { InboxClient, inboxTextVersion, validConnection } from "../src/inbox-client.js";
+import { InboxClient, inboxTextVersion, validConnection } from "../archive/deferred-email/src/inbox-client.js";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 
 const session = { authenticated: true, account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "a".repeat(64), csrf: "csrf" };
@@ -68,7 +68,7 @@ test("the Telegram reading view and send preview are accepted only in their nego
   }
 });
 test("the channel send route response and connection commands are validated in the browser client", async () => {
-  const { validConnectionCommand, validChannelSend } = await import("../src/inbox-client.js");
+  const { validConnectionCommand, validChannelSend } = await import("../archive/deferred-email/src/inbox-client.js");
   assert.equal(validChannelSend(null), true); assert.equal(validChannelSend({ provider: "telegram-bot", mode: "live" }), true);
   assert.equal(validChannelSend({ provider: "telegram-bot" }), false);
   const profile = record(); delete profile.state;
