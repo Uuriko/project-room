@@ -69,6 +69,14 @@ a { color: var(--blue); }
   background: radial-gradient(60rem 22rem at 20% -4rem, rgb(47 99 199 / 22%), transparent 70%), var(--bg);
   padding: clamp(2.5rem, 7vw, 5rem) clamp(1.25rem, 5vw, 3rem);
 }
+/* Choose the first paint without waiting for the application download.
+   Browsers without scripting media support retain the readable fallback. */
+@media (scripting: enabled) {
+  #static-hero { display: none; }
+}
+@media (scripting: none) {
+  .app-shell > :not(#static-hero) { display: none; }
+}
 .static-hero-inner { max-width: 44rem; margin: 0 auto; }
 .static-hero-kicker {
   margin: 0 0 .75rem;
