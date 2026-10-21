@@ -744,6 +744,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
+  // #3924: rate()'s bump and throw halves, named so the public-work
+  // doors can peek (rateWouldRefuse), refuse without charging
+  // (rateRefuse), and charge only on admission (rateCharge). bumpRate
+  // is main's original rate() body up to the throw; rateError builds
+  // the exact ServiceError it threw. Composed, rate() is unchanged.
+  function bumpRate(id, maximum) {
+    const now = Date.now();
+    for (const [k, v] of rates) if (v.until <= now) dropRate(k);
+    const family = rateFamily(id);
+    const durable = ABUSE_RATE_FAMILIES.has(family);
+    let entry = rates.get(id);
+    if (entry) rates.delete(id);
+    else {
+      if (durable) entry = loadAbuseRateBucket(store.db, id, now);
+      if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
+        for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
+      rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
+      if (!entry) entry = { n: 0, until: now + 60000 };
+    }
+    entry.n++;
+    rates.set(id, entry);
+    if (durable) {
+      const stride = Math.max(1, Math.floor(maximum / 4));
+      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+    }
+    return entry;
+  }
+  function rateError(id, maximum, entry) {
+    return new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil((entry?.until ?? Date.now() + 60000) / 1000), "X-RateLimit-Bucket": rateFamily(id) });
+  }
   function rate(id, maximum) {
     const entry = bumpRate(id, maximum);
     if (entry.n > maximum) throw rateError(id, maximum, entry);
