@@ -335,3 +335,29 @@ test("linked OAuth provider is represented as connected, not offered for linking
   assert.match(html, /Google connected/);
   assert.doesNotMatch(html, /href="\/api\/auth\/google\/link\/start"/);
 });
+
+test("a guest who reopens the code email resumes the code step (QA 2026-10-20)", async () => {
+  const client = stubClient({ "/api/auth/methods": { methods: [], providers: { mail: { configured: true } } } });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = fakeContainer();
+  await ui.mount(container);
+  assert.ok(container.innerHTML.includes('data-form="guest-upgrade"'), "a fresh page starts at the email step");
+  assert.equal(container.innerHTML.includes('data-form="guest-upgrade-confirm"'), false);
+  assert.equal(ui.resumeGuestUpgrade("  guest@example.com "), true);
+  assert.ok(container.innerHTML.includes('data-form="guest-upgrade-confirm"'), "the code step is back");
+  assert.ok(container.innerHTML.includes('value="guest@example.com"'));
+  assert.ok(container.innerHTML.includes('autocomplete="one-time-code"'));
+  await ui.refresh();
+  assert.ok(container.innerHTML.includes('data-form="guest-upgrade-confirm"'), "a later refresh keeps the code step");
+  assert.equal(ui.resumeGuestUpgrade(""), false);
+});
+
+test("an account that already has an email does not get the guest code step", async () => {
+  const methods = [{ id: "m1", type: "password", label: "Password", email: "a@b.c", createdAt: 1, lastUsedAt: null, disabled: false }];
+  const client = stubClient({ "/api/auth/methods": { methods, providers: null } });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = fakeContainer();
+  await ui.mount(container);
+  assert.equal(ui.resumeGuestUpgrade("a@b.c"), false);
+  assert.equal(container.innerHTML.includes('data-form="guest-upgrade-confirm"'), false);
+});

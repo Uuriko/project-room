@@ -209,7 +209,7 @@ function methodRowHtml(method) {
 // step 1 the same way whether or not the email is free, so this copy never
 // says whether someone else uses it.
 
-const isGuestLike = methods => !methods.some(method => method.email || method.type === "password");
+export const isGuestLike = methods => !methods.some(method => method.email || method.type === "password");
 
 function guestUpgradeHtml(pendingEmail = null) {
   if (!pendingEmail) {
@@ -749,5 +749,15 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
   };
 
   const reset = () => { viewEpoch++; container?.replaceChildren(); };
-  return { mount, refresh, reset, html: () => settingsHtml(state) };
+  // A guest who opens the code email (?verify=email) in a new tab, or after a
+  // reload, lost the in-memory pending email and landed on a dead end with no
+  // code field (QA 2026-10-20). Reopen the code step for that address.
+  const resumeGuestUpgrade = email => {
+    const value = typeof email === "string" ? email.trim() : "";
+    if (!value || !isGuestLike(state.methods)) return false;
+    state = { ...state, pendingEmail: value };
+    paint();
+    return true;
+  };
+  return { mount, refresh, reset, resumeGuestUpgrade, html: () => settingsHtml(state) };
 }
