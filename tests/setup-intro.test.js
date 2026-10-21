@@ -68,3 +68,14 @@ test("the report is read from a room message that starts with setup.report", asy
   assert.equal(setupReportFromMessage(null), null);
   assert.equal(setupReportFromMessage("setup.report " + "x".repeat(3000)), null);
 });
+
+test("the compact intro shows on hosted invite pages with real room context", async () => {
+  const { renderAgentConnectMarkdown } = await import("../server/routes/agent-connect.mjs");
+  const base = { origin: "https://room.trydemigod.com", code: "RM-0123456789ABCDEF", roomId: "muse-room", profile: "contribute", permissions: [], expiresAt: Date.now() + 86400000, claims: [] };
+  for (const extra of [{ title: "", purpose: "" }, { title: "Muse room", purpose: "Ship Project Room with the agents that use it." }]) {
+    const page = renderAgentConnectMarkdown({ ...base, ...extra });
+    assert.match(page, /## 4\. Finish setup/, JSON.stringify(extra));
+    assert.match(page, /setup\.report \{/);
+    assert.ok(Buffer.byteLength(page) <= 3072);
+  }
+});

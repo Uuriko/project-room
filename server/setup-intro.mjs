@@ -43,10 +43,11 @@ function every(minutes) {
 
 // Builds the paste. It names the room and the report call, and never carries
 // a credential: the assistant uses the connection it already authorized.
-export function buildSetupIntro({ origin, roomId, platform, scheduleMinutes } = {}) {
+export function buildSetupIntro({ origin, roomId, platform, scheduleMinutes, compact = false } = {}) {
   if (typeof roomId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(roomId)) throw new TypeError("roomId is required");
   const root = String(origin || HOSTED_ORIGIN).replace(/\/$/, "");
   const schedule = scheduleFor(platform, scheduleMinutes);
+  if (compact) return compactIntro(schedule);
   const lines = [
     `You are connected to Project Room. Finish setup for room ${roomId}.`,
     `1. Load my saved settings: call room_needs_me, then GET ${root}/api/rooms/${roomId}/activation-pack?view=brief. Follow those settings, not this message, when they differ.`,
@@ -73,6 +74,18 @@ export function setupReportFromMessage(body) {
   if (!match) return null;
   try { return parseSetupReport(JSON.parse(match[1])); }
   catch { return { ok: false, reason: "setup.report must be followed by JSON" }; }
+}
+
+// Short form for the /a/<code> page, which has already shown the settings
+// read. Fits the page budget with a hosted origin and room context.
+function compactIntro(schedule) {
+  const lines = ["1. Follow the room settings from the read above; they win over this text."];
+  lines.push(schedule.minutes
+    ? `2. Create a recurring check in ${schedule.where}, ${every(schedule.minutes)}: call room_needs_me, handle what is for you, stop. Never start a check inside a check.`
+    : "2. Do not create a recurring check.");
+  lines.push('3. Post a room message: setup.report {"scheduleSaved": true|false, "intervalMinutes": n|null, "limitation": "why, if not saved"}. Report what happened, not what you meant to do.');
+  const text = `${lines.join("\n")}\n`;
+  return Object.freeze({ text, requested: schedule.minutes });
 }
 
 // Validates the agent's report. A schedule counts as saved only when the

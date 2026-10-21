@@ -202,7 +202,7 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
 }
 
 function setupIntroText(origin, roomId) {
-  try { return buildSetupIntro({ origin, roomId, platform: "other" }).text; }
+  try { return buildSetupIntro({ origin, roomId, platform: "other", compact: true }).text; }
   catch { return ""; }
 }
 
