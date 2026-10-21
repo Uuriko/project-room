@@ -104,18 +104,43 @@ test("H2: the round binding survives lease expiry and fresh assignment", () => {
   const digest = updateRequestDigest(body);
   // Same round: the recorded outcome still replays (exact retry intact).
   assert.equal(requestReplayVerdict(delivered.requestOutcomes, body.requestId, digest, delivered.claimRound), "replay");
-  // Lease-expiry path: send the delivered claim back, let its lease lapse,
-  // then re-claim — the new round answers the old record with null.
-  const item = updateWork(delivered, "bob", { state: "in_progress", authority: true, now: now() });
-  const [lapsed] = releaseExpired([item], Date.parse(item.leaseExpiresAt) + 1);
-  const reclaimed = updateWork(claimWork(lapsed, "alice", { now: now() }), "alice", { state: "in_progress", now: now() });
+  // Composition with #3753 (TRAIN-W25-A refresh repair, 2026-10-21): the
+  // pre-composition version of this test ended the delivered round by
+  // letting its lease lapse after a send-back — the exact shape #3753
+  // abolishes (a sent-back claim carries its delivery, so its lease
+  // never lapses and the sweep cannot end that round). Both intents
+  // compose: the delivered round below ends by the holder's explicit
+  // release (the round-ending path #3753 leaves), and the lease-expiry
+  // leg is exercised on the shape the sweep still reclaims — a
+  // never-started claim carrying a recorded request outcome.
+  const sentBack = updateWork(delivered, "bob", { state: "in_progress", authority: true, now: now() });
+  const [held] = releaseExpired([sentBack], Date.parse(sentBack.leaseExpiresAt) + 1);
+  assert.equal(held.state, "in_progress", "#3753: the sent-back claim's lease does not lapse");
+  assert.equal(held.owner, "alice");
+  const released = releaseWork(held, "alice", { expectedClaimedAt: held.claimedAt,
+    expectedHistoryLength: claimHistoryLength(held), now: now() });
+  const reclaimed = reclaimAndStart(released);
   assert.equal(requestReplayVerdict(reclaimed.requestOutcomes, body.requestId, digest, reclaimed.claimRound), null,
+    "after the round ends + re-claim, round 1's outcome neither replays nor conflicts");
+  // Lease-expiry path: an idle claim (never started, no delivery, no
+  // review) with a round-1 recorded outcome lapses at its lease time;
+  // the re-claim opens a new round that answers the old record null.
+  let idle = createWork({ id: "w-g4-lease" }, { agentId: "alice", now: now() });
+  idle = claimWork(idle, "alice", { now: now() });
+  idle = updateWork(idle, "alice", { note: "queued", requestId: "lease-leg-1", now: now() });
+  const idleDigest = updateRequestDigest({ note: "queued" });
+  assert.equal(requestReplayVerdict(idle.requestOutcomes, "lease-leg-1", idleDigest, idle.claimRound), "replay");
+  const [lapsed] = releaseExpired([idle], Date.parse(idle.leaseExpiresAt) + 1);
+  assert.equal(lapsed.state, "unclaimed", "the idle claim's lease lapses and the sweep reclaims it");
+  const leaseReclaimed = claimWork(lapsed, "alice", { now: now() });
+  assert.equal(leaseReclaimed.claimRound, reclaimed.claimRound, "lease expiry + re-claim advances the round like a release + re-claim");
+  assert.equal(requestReplayVerdict(leaseReclaimed.requestOutcomes, "lease-leg-1", idleDigest, leaseReclaimed.claimRound), null,
     "after lease expiry + re-claim, round 1's outcome neither replays nor conflicts");
   // Fresh-assignment path: an unclaimed row assigned fresh opens a new
   // round too, with the same verdict.
   const assigned = reassignWork(lapsed, "alice", "carol", { authority: true, now: now() });
-  assert.equal(assigned.claimRound, reclaimed.claimRound, "fresh assignment advances the round like a claim");
-  assert.equal(requestReplayVerdict(assigned.requestOutcomes, body.requestId, digest, assigned.claimRound), null);
+  assert.equal(assigned.claimRound, leaseReclaimed.claimRound, "fresh assignment advances the round like a claim");
+  assert.equal(requestReplayVerdict(assigned.requestOutcomes, "lease-leg-1", idleDigest, assigned.claimRound), null);
 });
 
 test("H2: requestId parts differing only past the 40-char truncation stay distinct", () => {
