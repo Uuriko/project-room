@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { doingFromToolAction } from "../client/doing-status.mjs";
 import { checkHostContext } from "../server/agent-heartbeats.mjs";
-import { doingCommand } from "../cli/commands/doing.mjs";
+import { doingCommand, repoContext, repoFromRemote } from "../cli/commands/doing.mjs";
 
 test("tool actions become short doing lines without paths or arguments", () => {
   assert.equal(doingFromToolAction({ tool_name: "Edit", tool_input: { file_path: "/home/me/src/math.js" } }), "Edit math.js");
@@ -18,6 +22,33 @@ test("heartbeat context accepts a doing line and rejects bad ones", () => {
   assert.deepEqual(checkHostContext({ doing: " Edit math.js " }), { doing: "Edit math.js" });
   assert.throws(() => checkHostContext({ doing: "x".repeat(81) }), /doing/);
   assert.throws(() => checkHostContext({ doing: "a\nb" }), /doing/);
+});
+
+test("repoFromRemote never carries remote userinfo into presence", () => {
+  // FAKE tokens only — these specimens pin the seq 16450 leak shapes.
+  assert.equal(repoFromRemote("https://oauth2:FAKE_TOKEN@git.example.com/project.git"), "project");
+  assert.equal(repoFromRemote("https://FAKE_TOKEN@git.example.com/project.git"), "project");
+  assert.equal(repoFromRemote("https://oauth2:FAKE_TOKEN@git.example.com:8443/project.git"), "project");
+  assert.equal(repoFromRemote("https://git.example.com/project.git"), "project");
+  // Plain remotes are byte-unchanged.
+  assert.equal(repoFromRemote("https://github.com/Uuriko/project-room.git"), "Uuriko/project-room");
+  assert.equal(repoFromRemote("https://github.com/Uuriko/project-room"), "Uuriko/project-room");
+  assert.equal(repoFromRemote("git@github.com:Uuriko/project-room.git"), "Uuriko/project-room");
+  assert.equal(repoFromRemote("ssh://git@github.com/Uuriko/project-room.git"), "Uuriko/project-room");
+  assert.equal(repoFromRemote("https://gitlab.example.com/group/sub/project.git"), "sub/project");
+  assert.equal(repoFromRemote(""), undefined);
+  assert.equal(repoFromRemote(undefined), undefined);
+});
+
+test("repoContext on a token-bearing one-segment remote posts no credential", () => {
+  const dir = mkdtempSync(join(tmpdir(), "room-doing-remote-"));
+  try {
+    execFileSync("git", ["init", "-q", dir]);
+    execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://oauth2:FAKE_TOKEN@git.example.com/project.git"]);
+    const context = repoContext(dir);
+    assert.equal(context.repo, "project");
+    assert.ok(!JSON.stringify(context).includes("FAKE_TOKEN"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("room doing posts the line from hook JSON as presence context", async () => {

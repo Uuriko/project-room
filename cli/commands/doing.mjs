@@ -12,9 +12,35 @@ const git = (args, cwd) => {
   return run.status === 0 ? run.stdout.trim() : "";
 };
 
+// Presence shows repo as a plain owner/name. A git remote can carry
+// credentials in its authority (https://oauth2:TOKEN@host/repo.git), and a
+// segment capture over the raw URL reaches back into that authority when
+// the path has one segment — broadcasting the token to every room member.
+// So parse structurally: for a URL keep only the path (the authority, with
+// any userinfo, is dropped whole); for scp-style user@host:path drop
+// everything through the ":". Then keep the last two path segments.
+export function repoFromRemote(remote) {
+  const text = String(remote ?? "").trim();
+  if (!text) return undefined;
+  let path = text;
+  const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(text);
+  if (scheme) {
+    const rest = text.slice(scheme[0].length);
+    const slash = rest.indexOf("/");
+    path = slash === -1 ? "" : rest.slice(slash + 1);
+  } else {
+    const colon = text.indexOf(":");
+    const slash = text.indexOf("/");
+    if (colon !== -1 && (slash === -1 || colon < slash)) path = text.slice(colon + 1);
+  }
+  const segments = path.split("/").filter(Boolean);
+  if (!segments.length) return undefined;
+  return segments.slice(-2).join("/").replace(/\.git$/, "");
+}
+
 export function repoContext(cwd) {
   const remote = git(["remote", "get-url", "origin"], cwd);
-  const repo = /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(remote)?.[1];
+  const repo = repoFromRemote(remote);
   const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
   return { ...(repo ? { repo } : {}), ...(branch && branch !== "HEAD" ? { branch } : {}) };
 }
