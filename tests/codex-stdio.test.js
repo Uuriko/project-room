@@ -14,7 +14,7 @@ function setup(t, mode = "normal") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "room-stdio-"))), cwd = join(root, "workspace"), codexHome = join(root, "codex-home");
   mkdirSync(cwd); mkdirSync(codexHome, { mode: 0o700 });
   const command = join(root, "fake-codex");
-  writeFileSync(command, `#!${process.execPath}\nimport readline from 'node:readline';import {spawn} from 'node:child_process';\nconst mode=${JSON.stringify(mode)};\nconst stubborn=mode==='descendant'?spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}):null;\nconst send=v=>process.stdout.write(JSON.stringify(v)+'\\n');\nif(process.argv[2]!=='app-server'||process.argv[3]!=='--listen'||process.argv[4]!=='stdio://')process.exit(2);\nconst lines=readline.createInterface({input:process.stdin});\nlines.on('line',line=>{const m=JSON.parse(line);if(m.id===999){send({method:'approvalResponse',params:{error:m.error}});return;}if(!m.id)return;\nif(mode==='hang')return;if(mode==='invalid'){process.stdout.write('not JSON\\n');return;}if(mode==='exit')process.exit(3);\nif(m.method==='initialize'){send({id:m.id,result:{childPid:stubborn?.pid,home:process.env.HOME,codexHome:process.env.CODEX_HOME,secret:process.env.ROOM_AGENT_CONFIG??null,other:process.env.OPENAI_API_KEY??null}});return;}\nif(m.method==='thread/name/set'){send({id:m.id,result:{}});return;}\nif(m.method==='thread/start'){send({id:m.id,result:{thread:{id:'owned-thread'}}});return;}\nif(m.method==='turn/start'&&mode==='complete'){send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress',items:[]}}});setTimeout(()=>send({method:'turn/completed',params:{threadId:'owned-thread',turn:{id:'owned-turn',status:'completed',items:[{id:'answer',type:'agentMessage',phase:'final_answer',text:'Completed through the real subprocess host.'}]}}}),5);return;}\nif(m.method==='turn/start'){send({id:999,method:'item/commandExecution/requestApproval',params:{command:'secret command'}});send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress'}}});return;}\nif(m.method==='thread/read'||m.method==='thread/resume'){send({id:m.id,result:{thread:{id:m.params.threadId,turns:[]}}});return;}\nsend({id:m.id,error:{code:-32601,message:'unknown'}});});\n`);
+  writeFileSync(command, `#!${process.execPath}\nimport readline from 'node:readline';import {spawn} from 'node:child_process';\nconst mode=${JSON.stringify(mode)};\nconst stubborn=mode==='descendant'?spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}):null;\nconst send=v=>process.stdout.write(JSON.stringify(v)+'\\n');\nif(process.argv[2]!=='app-server'||process.argv[3]!=='--listen'||process.argv[4]!=='stdio://')process.exit(2);\nconst lines=readline.createInterface({input:process.stdin});\nlines.on('line',line=>{const m=JSON.parse(line);if(m.id===999){send({method:'approvalResponse',params:{error:m.error}});return;}if(!m.id)return;\nif(mode==='hang')return;if(mode==='invalid'){process.stdout.write('not JSON\\n');return;}if(mode==='exit')process.exit(3);\nif(m.method==='initialize'){send({id:m.id,result:{childPid:stubborn?.pid,home:process.env.HOME,codexHome:process.env.CODEX_HOME,secret:process.env.ROOM_AGENT_CONFIG??null,other:process.env.OPENAI_API_KEY??null}});return;}\nif(mode==='exit-after-init')process.exit(3);\nif(m.method==='thread/name/set'){send({id:m.id,result:{}});return;}\nif(m.method==='thread/start'){send({id:m.id,result:{thread:{id:'owned-thread'}}});return;}\nif(m.method==='turn/start'&&mode==='complete'){send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress',items:[]}}});setTimeout(()=>send({method:'turn/completed',params:{threadId:'owned-thread',turn:{id:'owned-turn',status:'completed',items:[{id:'answer',type:'agentMessage',phase:'final_answer',text:'Completed through the real subprocess host.'}]}}}),5);return;}\nif(m.method==='turn/start'){send({id:999,method:'item/commandExecution/requestApproval',params:{command:'secret command'}});send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress'}}});return;}\nif(m.method==='thread/read'||m.method==='thread/resume'){send({id:m.id,result:{thread:{id:m.params.threadId,turns:[]}}});return;}\nsend({id:m.id,error:{code:-32601,message:'unknown'}});});\n`);
   chmodSync(command, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return { root, config: { command, cwd, codexHome, policy: { approvalPolicy: "never", sandbox: "read-only" }, requestTimeoutMs: mode === "hang" ? 100 : 3000 } };
@@ -114,4 +114,29 @@ test("activation CLI runs through a symlink entrypoint", t => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /RUN_ID/);
   assert.match(result.stdout, /--check/);
+});
+
+test("closed transport cannot return a cached successful initialization", async t => {
+  const { config } = setup(t), rpc = openCodexStdio(config);
+  t.after(() => rpc.close());
+  const first = rpc.request("initialize", {});
+  await first;
+  assert.equal(rpc.request("initialize", {}), first, "live initialization remains coalesced");
+  await rpc.close();
+  await assert.rejects(rpc.request("initialize", {}), /disconnected/);
+  await assert.rejects(rpc.request("thread/start", {}), /disconnected/);
+  const next = openCodexStdio(config);
+  t.after(() => next.close());
+  const fresh = next.request("initialize", {});
+  assert.notEqual(fresh, first, "new process generation has its own handshake");
+  await fresh;
+});
+
+
+test("unexpected process exit invalidates a completed handshake", async t => {
+  const { config } = setup(t, "exit-after-init"), rpc = openCodexStdio(config);
+  t.after(() => rpc.close());
+  await rpc.request("initialize", {});
+  await assert.rejects(rpc.request("thread/start", {}), /disconnected/);
+  await assert.rejects(rpc.request("initialize", {}), /disconnected/);
 });
