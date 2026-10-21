@@ -4,9 +4,15 @@ Each person on the team runs this on the machine where Cline is installed. Cline
 
 ## Command
 
+Replace the URL below with your room URL or invitation. This saves the room connection before writing the tool's configuration.
+
+```sh
+room setup cline --room "<invite-or-room-url>"
 ```
-room setup cline
-```
+
+If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
+
+Already connected on this machine? Run `room setup cline` to use the saved connection.
 
 ## What it writes
 

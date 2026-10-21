@@ -1,9 +1,10 @@
 // The verdict block on the public receipt page (charter Workstream B,
 // P1/P2; server/receipts-page.mjs + server/receipt-verify.mjs through
 // server/http.mjs). Behavior protected:
-//   - the plain page shows a displayed "Not yet verified" state with the
-//     verify action — unverified is a state, never a blank, and the word
-//     "verified" appears nowhere on it as a claim;
+//   - the plain page verifies at read time by default (#4058) and renders
+//     the verdict; when no run can be produced it shows a displayed
+//     "Record not rechecked" state with the verify action — unverified is
+//     a state, never a blank;
 //   - ?verify=1 renders ONE graded verdict with its scope in the same
 //     first-screen block — checked / not checked / by whom / when — and
 //     the stored-values honesty note is replaced, not contradicted;
