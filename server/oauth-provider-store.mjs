@@ -176,7 +176,14 @@ export function createOAuthProviderSqlite(db) {
       }, saveClient);
     },
     set(_clientId, record) { touch(); saveClient(record); return this; },
-    delete(clientId) { touch(); db.prepare("DELETE FROM oauth_provider_clients WHERE client_id=?").run(clientId); }
+    delete(clientId) { touch(); db.prepare("DELETE FROM oauth_provider_clients WHERE client_id=?").run(clientId); },
+    // AGENT-DOOR-AUTH stage 3: dynamic registration scans live clients to
+    // recognise an identical re-registration (mirrors the token stores).
+    values() {
+      touch();
+      return db.prepare("SELECT client_id FROM oauth_provider_clients").all()
+        .map(row => clients.get(row.client_id));
+    }
   };
   const codes = {
     get(codeHash) {

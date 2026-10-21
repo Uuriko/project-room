@@ -27,7 +27,8 @@
 //   five scopes granted;
 // - non-member account -> 403 access_denied at the binding; unknown /
 //   expired / revoked token -> -32001 MCP_AUTH_REQUIRED with the exact
-//   WWW-Authenticate challenge (no resource_metadata; that is stage 3);
+//   WWW-Authenticate challenge (stage 3 added the resource_metadata
+//   parameter the stage-1 pin reserved to it);
 // - a hosted MCP constructed WITHOUT the verifier rejects oat_ exactly
 //   as before stage 1 (the verifier is optional and injected).
 import test from "node:test";
@@ -46,7 +47,9 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { createWork } from "../server/work-claims.mjs";
 
 const ALL_SCOPES = ["rooms:read", "chat:read", "chat:write", "work:read", "work:write"];
-const WWW_AUTHENTICATE_TODAY = 'Bearer realm="project-room", charset="UTF-8"';
+// AGENT-DOOR-AUTH stage 3: the challenge gained the RFC 9728 §5.1
+// resource_metadata parameter, exactly as the stage-1 pin anticipated.
+const wwwAuthenticateStage3 = origin => `Bearer realm="project-room", resource_metadata="${origin}/.well-known/oauth-protected-resource", charset="UTF-8"`;
 const ANON_MCP_TOOLS = [
   "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet",
   "public_work_recommend", "public_work_read_task", "room_identity_mint",
@@ -154,7 +157,7 @@ async function serve(t) {
     });
     return mintWith(past, userId, scopes);
   };
-  return { store, rpc, call, mint, mintExpired, provider, identity };
+  return { store, origin, rpc, call, mint, mintExpired, provider, identity };
 }
 
 test("oauth catalog: tools/list shows exactly the callable subset narrowed by the grant's scopes", async t => {
@@ -320,8 +323,8 @@ test("oauth door failures: non-member binds 403; expired, revoked and unknown to
     assert.equal(listed.body.error.message, "Hosted room tools require a live identity or room token", label);
     assert.equal(listed.body.error.data, undefined, label);
     const challenge = listed.headers.get("www-authenticate");
-    assert.equal(challenge, WWW_AUTHENTICATE_TODAY, label);
-    assert.equal(challenge.includes("resource_metadata"), false, label);
+    assert.equal(challenge, wwwAuthenticateStage3(f.origin), label);
+    assert.equal(challenge.includes("resource_metadata"), true, label);
   }
 });
 

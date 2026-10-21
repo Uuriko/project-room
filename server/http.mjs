@@ -115,7 +115,7 @@ import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: ope
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
-import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { createOAuthProvider, OAUTH_SCOPES, OAuthProviderError } from "./oauth-provider.mjs";
 import { createGrantAgentResolver } from "./oauth-grant-agents.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -877,6 +877,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!granted) reject(403, "insufficient_scope", `OAuth token lacks the ${scope} scope`);
     }
   }
+  // AGENT-DOOR-AUTH stage 3 (RFC 9728 §5.1): a 401 for an OAuth bearer
+  // token carries the resource_metadata challenge pointer so a client
+  // can discover the protected-resource metadata (and, through it, this
+  // authorization server + the registration door). Only the OAuth-token
+  // 401 sites use it — every other 401 consumer keeps its exact shape.
+  const oauthChallengeHeaders = () => ({
+    "WWW-Authenticate": `Bearer realm="project-room", resource_metadata="${expectedOrigin()}/.well-known/oauth-protected-resource", charset="UTF-8"`,
+  });
   function roomAuth(selected, roomId, fence) {
     if (selected.mode === "account") return store.authenticateAccountSession(selected.token, roomId, fence);
     if (selected.mode === "oauth") {
@@ -886,7 +894,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // store then proves membership only. No session binding, no CSRF
       // token — an OAuth grant is not a session.
       const grant = selected.oauthGrant ?? oauthProvider.verifyAccessToken(selected.token);
-      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       // AGENT-DOOR-AUTH stage 2 (REV-4092-S1 note N1, seam 2 of 3): the
       // grant's principal decides the binding. Connector grants bind to
       // the owned AGENT member; account-principal grants (the first-party
@@ -899,7 +907,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } else if (grant.principal === "account") {
         bound = store.authenticateOAuthAccount(grant.userId, roomId);
       } else {
-        reject(401, "unauthenticated", "Session or key expired or revoked");
+        reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       }
       return { ...bound, credentialHash: rateHash(selected.token), credentialScope: "oauth", kind: "oauth",
         oauthClientId: grant.clientId, oauthScopes: grant.scopes,
@@ -915,7 +923,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Unknown/expired/revoked/deactivated-account tokens all verify as
       // null and fail with the same 401 shape as any other bad credential.
       const grant = oauthProvider.verifyAccessToken(bearerToken);
-      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       const selected = { token: bearerToken, bearer: true, mode: "oauth", oauthGrant: grant };
       enforceOAuthRouteScope(req, url, grant.scopes);
       return selected;
@@ -1691,11 +1699,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           authorization_endpoint: issuer + "/oauth/authorize",
           token_endpoint: issuer + "/oauth/token",
           revocation_endpoint: issuer + "/oauth/revoke",
+          registration_endpoint: issuer + "/oauth/register",
           response_types_supported: ["code"],
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
           scopes_supported: [...OAUTH_SCOPES],
           token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
+        });
+      }
+      // GET /.well-known/oauth-protected-resource — protected-resource
+      // metadata (RFC 9728). The resource is the whole API on this
+      // origin, so the bare well-known form is the applicable one (the
+      // path-suffixed form exists for resources identified by a path).
+      // Unauthenticated like the other well-known metadata on this door;
+      // the 401 challenges on both resource doors point here (§5.1).
+      if (url.pathname === "/.well-known/oauth-protected-resource" && req.method === "GET") {
+        const resource = expectedOrigin();
+        return json(res, 200, {
+          resource,
+          authorization_servers: [resource],
+          scopes_supported: [...OAUTH_SCOPES],
+          bearer_methods_supported: ["header"],
+          resource_documentation: resource + "/llms.txt",
         });
       }
       // GET /.well-known/feedback — /feedback standard discovery metadata.
@@ -1927,6 +1952,65 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         oauthProvider.revoke(data.token);
         return json(res, 200, {});
+      }
+      // POST /oauth/register — dynamic client registration (RFC 7591),
+      // AGENT-DOOR-AUTH stage 3. Public door for public clients: the
+      // server mints the client_id (never client-proposed, so a dynamic
+      // registration cannot claim a provisioned client's identity), no
+      // secret is issued (token_endpoint_auth_method "none" + PKCE,
+      // exactly as the RFC 8414 document advertises), and the registered
+      // client still faces the human consent screen before any token
+      // exists. Errors use the RFC 7591 §3.2.2 names. Rate limited per
+      // address under the same rate() discipline as the other OAuth
+      // endpoints: registration writes a durable client, so it takes
+      // the authorize family's tighter budget, not the token family's.
+      if (url.pathname === "/oauth/register" && req.method === "POST") {
+        rate(`oauth-register:${remoteAddress}`, 30);
+        const data = await body(req);
+        const invalidMetadata = message => json(res, 400, { error: "invalid_client_metadata", error_description: message });
+        if (data.grant_types !== undefined
+          && (!Array.isArray(data.grant_types) || data.grant_types.length === 0
+            || !data.grant_types.every(g => g === "authorization_code" || g === "refresh_token")
+            || !data.grant_types.includes("authorization_code"))) {
+          return invalidMetadata("grant_types must include authorization_code (refresh_token optional); no other grant types are supported");
+        }
+        if (data.response_types !== undefined
+          && (!Array.isArray(data.response_types) || data.response_types.length === 0
+            || !data.response_types.every(r => r === "code"))) {
+          return invalidMetadata("response_types must be [\"code\"]");
+        }
+        if (data.token_endpoint_auth_method !== undefined && data.token_endpoint_auth_method !== "none") {
+          return invalidMetadata("token_endpoint_auth_method must be \"none\" (public clients with PKCE)");
+        }
+        let scopes = [...OAUTH_SCOPES];
+        if (data.scope !== undefined) {
+          if (typeof data.scope !== "string") return invalidMetadata("scope must be a space-separated string");
+          scopes = data.scope.split(" ").filter(Boolean);
+          const unknown = scopes.filter(s => !OAUTH_SCOPES.includes(s));
+          if (unknown.length > 0) return invalidMetadata(`unknown scopes: ${unknown.join(", ")}`);
+        }
+        let registered;
+        try {
+          registered = oauthProvider.registerDynamicClient({
+            name: data.client_name === undefined ? "Dynamic client" : data.client_name,
+            redirectUris: data.redirect_uris,
+          });
+        } catch (error) {
+          if (error instanceof OAuthProviderError) {
+            return json(res, 400, { error: error.code, error_description: error.message });
+          }
+          throw error;
+        }
+        return json(res, 201, {
+          client_id: registered.clientId,
+          client_id_issued_at: Math.floor(registered.issuedAt / 1000),
+          client_name: registered.name,
+          redirect_uris: [...registered.redirectUris],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+          scope: scopes.join(" "),
+        });
       }
       // GET /api/oauth/sessions — list the signed-in account's active OAuth
       // sessions (F-02). One entry per live token family: client, issued-at,

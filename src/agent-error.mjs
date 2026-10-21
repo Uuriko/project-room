@@ -298,6 +298,8 @@ const AX_NAMED_RECOVERIES = {
   invalid_assistant_action: ["Choose an assistant action and a stable request ID, then resend.", "Resend with an assistant action and a stable request ID."],
   invalid_assistant_config: ["Choose a name and an active room agent, or disconnect, then resend.", "Resend with a name and an active room agent, or disconnect."],
   invalid_assistant_report: ["Report a short public activity summary and a supported state, then resend.", "Resend with a short public summary and a supported state."],
+  invalid_client_metadata: ["The OAuth client registration metadata was refused — the message names the field. Fix it and resend the registration.", "Fix the metadata field named in the message and resend the registration."],
+  invalid_redirect_uri: ["The OAuth redirect_uri was refused: it must be https (http only for localhost) with no fragment. Fix it and resend the registration.", "Fix the redirect_uri (https, or http on localhost; no fragment) and resend the registration."],
   invalid_desktop_provider: ["Choose a supported sign-in provider and resend.", "Resend with a supported sign-in provider."],
   invalid_referral: ["The referrer is not an active member. Use an active member as referrer.", "Resend with an active member as the referrer."],
   invalid_reply_attempt: ["Choose an exact reply operation against current state, then resend.", "Re-read the reply state and choose the exact operation."],

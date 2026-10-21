@@ -9,6 +9,8 @@
 // - RFC 6749 authorization code flow with PKCE (S256 required)
 // - RFC 7009 token revocation
 // - RFC 8414 authorization server metadata (served by http.mjs)
+// - RFC 7591 dynamic client registration (registerDynamicClient;
+//   http.mjs serves the door and the RFC 9728 metadata that points to it)
 //
 // Scopes map to Project Room capabilities:
 //   rooms:read   list and read rooms the user belongs to
@@ -113,6 +115,64 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const client = { clientId, name, redirectUris: Object.freeze([...redirectUris]), expiresAt: now() + CLIENT_TTL_MS };
     clientStore.set(clientId, client);
     return Object.freeze({ clientId, name, redirectUris: Object.freeze([...redirectUris]) });
+  };
+
+  // AGENT-DOOR-AUTH stage 3 (RFC 7591): dynamic client registration.
+  // The server mints the client_id (public door: no client-proposed ids),
+  // always under the `dcr_` prefix, so a dynamic registration can never
+  // hand out — or collide with — a provisioned client's id (a provisioned
+  // first-party client keeps its own principal treatment at approval).
+  // Dynamic clients inherit the provisioned-client TTL exactly: 30 days,
+  // refreshed when an identical registration (same name + same redirect
+  // URIs, order-sensitive like registerClient) arrives while the client
+  // is live — the repeat registration returns the same client instead of
+  // minting a duplicate. Validation failures carry the RFC 7591 error
+  // names; the HTTP door maps them verbatim.
+  const DYNAMIC_CLIENT_PREFIX = "dcr_";
+  const registerDynamicClient = ({ name, redirectUris } = {}) => {
+    const invalidMetadata = message => fail("invalid_client_metadata", message);
+    if (typeof name !== "string" || name.length === 0 || name.length > 80) {
+      invalidMetadata("client_name must be a non-empty string up to 80 chars");
+    }
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+      invalidMetadata("redirect_uris must be a non-empty array");
+    }
+    for (const uri of redirectUris) {
+      if (typeof uri !== "string") invalidMetadata("every redirect_uri must be a string");
+      let parsed;
+      try { parsed = new URL(uri); } catch { fail("invalid_redirect_uri", `redirect_uri is not a URL: ${uri}`); }
+      const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if (!(parsed.protocol === "https:" || (parsed.protocol === "http:" && isLocalhost))) {
+        fail("invalid_redirect_uri", "redirect_uri must be https (http allowed only for localhost)");
+      }
+      if (parsed.hash) fail("invalid_redirect_uri", "redirect_uri must not contain a fragment");
+    }
+    if (typeof clientStore.values === "function") {
+      for (const existing of clientStore.values()) {
+        if (!existing || typeof existing.clientId !== "string") continue;
+        if (!existing.clientId.startsWith(DYNAMIC_CLIENT_PREFIX)) continue;
+        if (isExpired(existing, now)) continue;
+        const sameName = existing.name === name;
+        const sameUris = existing.redirectUris.length === redirectUris.length
+          && existing.redirectUris.every((uri, index) => uri === redirectUris[index]);
+        if (!sameName || !sameUris) continue;
+        const issuedAt = existing.issuedAt ?? (existing.expiresAt - CLIENT_TTL_MS);
+        existing.expiresAt = now() + CLIENT_TTL_MS;
+        clientStore.set(existing.clientId, existing);
+        return Object.freeze({
+          clientId: existing.clientId, name, redirectUris: Object.freeze([...redirectUris]), issuedAt,
+        });
+      }
+    }
+    let clientId;
+    do { clientId = DYNAMIC_CLIENT_PREFIX + newSecret(18); } while (clientStore.get(clientId));
+    const issuedAt = now();
+    const client = {
+      clientId, name, redirectUris: Object.freeze([...redirectUris]),
+      expiresAt: issuedAt + CLIENT_TTL_MS, issuedAt,
+    };
+    clientStore.set(clientId, client);
+    return Object.freeze({ clientId, name, redirectUris: client.redirectUris, issuedAt });
   };
 
   const getClient = clientId => {
@@ -497,6 +557,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
 
   return Object.freeze({
     registerClient,
+    registerDynamicClient,
     getClient,
     validateAuthorizationRequest,
     issueCode,
