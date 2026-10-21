@@ -135,10 +135,23 @@ test("outside identity gets the packet's seven public-work tools plus four join 
 
 test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
+  // Packet: "18 essential tools ... plus the 4 public join readers, 22 total".
   assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
   assert.deepEqual(names.slice(0, 18), CORE_18);
   assert.deepEqual(names.slice(18), JOIN_READERS);
+});
+
+test("packet prose states exact core and total counts that match the served list", async () => {
+  const names = await toolsList(undefined, memberSecret);
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    const stated = packet.match(/core profile \((\d+) tools plus the (\d+) public join readers, (\d+) total/);
+    assert.ok(stated, `${label} must state exact core/join/total counts in the tools profile prose`);
+    const [, core, join, total] = stated.map(Number);
+    assert.equal(core, CORE_18.length, `${label} prose core count must equal the enumerated core tools`);
+    assert.equal(join, JOIN_READERS.length, `${label} prose join-reader count must equal the enumerated join readers`);
+    assert.equal(total, names.length, `${label} prose total must equal the served member tools/list length`);
+    assert.equal(core + join, total, `${label} prose counts must add up`);
+  }
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {

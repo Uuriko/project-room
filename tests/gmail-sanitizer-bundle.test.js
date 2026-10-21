@@ -36,6 +36,18 @@ test('Room HTML policy removes active elements and keeps safe links protected', 
   assert.match(value, /href="https:\/\/example.test\/"/);
 });
 
+test('Room HTML policy discards noscript contents instead of promoting them to live markup', () => {
+  const value = safeGmailHtml('<div><noscript><p>inside-para</p></noscript></div><p>tail</p>');
+  assert.doesNotMatch(value, /inside-para/);
+  assert.match(value, /<p>tail<\/p>/);
+});
+
+test('Room HTML policy discards template and iframe fallback contents instead of promoting them to live markup', () => {
+  const value = safeGmailHtml('<p>real</p><template><p>tmpl-para</p><a href="https://example.test/t">tmpl-link</a></template><iframe src="https://example.test"><p>fallback-para</p></iframe>');
+  assert.doesNotMatch(value, /tmpl-para|tmpl-link|fallback-para/);
+  assert.match(value, /<p>real<\/p>/);
+});
+
 // The advisory concerns namespace-prefixed tags, not only bare <animate>.
 test('vendored sanitizer blocks namespace-prefixed SMIL URL retargeting', () => {
   for (const tag of ['animate', 'animateColor', 'animateMotion', 'animateTransform', 'set']) {
