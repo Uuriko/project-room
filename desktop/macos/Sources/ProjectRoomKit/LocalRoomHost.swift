@@ -35,6 +35,7 @@ public final class LocalRoomHost {
     private var pid: pid_t = 0
     private var ownerFD: Int32 = -1
     private var stopping = false
+    private var receivingEnabled = false
     private var launchTime = Date.distantPast
     private var lastMessage = "Connect an agent to this room"
     private var scope: [String: String] = [:]
@@ -47,7 +48,12 @@ public final class LocalRoomHost {
         try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.directory.path)
         let saved = self.directory.appendingPathComponent("selected-host.json")
-        if FileManager.default.fileExists(atPath: saved.path) { try? configure(saved) }
+        if FileManager.default.fileExists(atPath: saved.path) { try? configure(saved, restoring: true) }
+        let preference = self.directory.appendingPathComponent("receiving.json")
+        if manifest != nil, let data = try? Data(contentsOf: preference),
+            let saved = try? JSONDecoder().decode(ReceivingPreference.self, from: data), saved.scope == scope {
+            receivingEnabled = saved.enabled
+        }
     }
     private static func connectionIdentity(_ selected: RoomHostManifest) throws -> [String: String] {
         let connectionURL = URL(fileURLWithPath: selected.roomConnection).appendingPathComponent("connection.json")
@@ -57,12 +63,25 @@ public final class LocalRoomHost {
             !origin.isEmpty, !roomId.isEmpty, !memberId.isEmpty else { throw LocalToolFailure("invalid_room_connection") }
         return ["origin": origin, "roomId": roomId, "memberId": memberId]
     }
-    public func configure(_ url: URL) throws {
+    private struct ReceivingPreference: Codable {
+        let enabled: Bool
+        let scope: [String: String]
+    }
+    // Caller holds lock. Desired receiving survives app shutdown, never a user disconnect.
+    private func saveReceiving(_ enabled: Bool) throws {
+        let url = directory.appendingPathComponent("receiving.json")
+        try JSONEncoder().encode(ReceivingPreference(enabled: enabled, scope: scope)).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        receivingEnabled = enabled
+    }
+    public func configure(_ url: URL) throws { try configure(url, restoring: false) }
+    private func configure(_ url: URL, restoring: Bool) throws {
         let selected = try RoomHostManifest.read(url)
         let identity = try Self.connectionIdentity(selected)
         let key = SHA256.hash(data: Data(URL(fileURLWithPath: selected.roomConnection).resolvingSymlinksInPath().path.utf8)).map { String(format: "%02x", $0) }.joined()
         lock.lock(); defer { lock.unlock() }
-        guard pid == 0 else { throw LocalToolFailure("host_already_running") }
+        guard pid == 0, !stopping else { throw LocalToolFailure("host_already_running") }
+        if !restoring { try saveReceiving(false) }
         let saved = directory.appendingPathComponent("selected-host.json")
         try JSONEncoder().encode(selected).write(to: saved, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saved.path)
@@ -129,8 +148,10 @@ public final class LocalRoomHost {
         guard code == 0 else { throw LocalToolFailure("host_could_not_start") }
         return child
     }
-    public func start() throws {
+    public func start() throws { try start(onlyIfEnabled: false) }
+    private func start(onlyIfEnabled: Bool) throws {
         lock.lock(); defer { lock.unlock() }
+        if onlyIfEnabled && (!receivingEnabled || pid != 0 || stopping) { return }
         guard pid == 0, !stopping else { throw LocalToolFailure("host_already_running") }
         guard let manifest, let journalURL else { throw LocalToolFailure("host_not_configured") }
         guard (try? Self.connectionIdentity(manifest)) == scope else { throw LocalToolFailure("room_connection_changed") }
@@ -138,7 +159,7 @@ public final class LocalRoomHost {
         let fd = Darwin.open(directory.appendingPathComponent("desktop-owner.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LocalToolFailure("host_lock_unavailable") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw LocalToolFailure("another_desktop_host_running") }
-        do { pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
+        do { try saveReceiving(true); pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
         catch { close(fd); throw error }
         ownerFD = fd; stopping = false; session = nil; launchTime = Date(); lastMessage = "Starting agent…"
         lastExit = "none"
@@ -184,6 +205,17 @@ public final class LocalRoomHost {
         if ownerFD >= 0 { close(ownerFD); ownerFD = -1 }
         lock.unlock()
     }
+    public func resumeReceiving() throws {
+        try start(onlyIfEnabled: true)
+    }
+    public func disconnect() throws {
+        lock.lock()
+        defer {
+            if pid != 0 { stopping = true; lastMessage = "Stopping agent…" }
+            lock.unlock()
+        }
+        try saveReceiving(false)
+    }
     public func requestStop() { lock.lock(); if pid != 0 { stopping = true; lastMessage = "Stopping agent…" }; lock.unlock() }
     @discardableResult public func stopAndWait(timeout: Double = 14) -> Bool {
         requestStop(); return finished.wait(timeout: .now() + timeout) == .success
@@ -211,7 +243,7 @@ public final class LocalRoomHost {
         return value
     }
     public func snapshot() -> [String: Any] {
-        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit; lock.unlock()
+        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit, receiving = receivingEnabled; lock.unlock()
         var text = message
         var evidence: [String: Any] = ["statusFresh": false, "phase": "unknown", "protocol": "unverified", "credentials": "unknown"]
         if child != 0 && !isStopping {
@@ -232,7 +264,7 @@ public final class LocalRoomHost {
                 }
             } else { text = "Connecting · current status unavailable" }
         }
-        return evidence.merging(["configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
+        return evidence.merging(["receivingEnabled": receiving, "configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
             "macTools": selectedTools, "lastExit": exitState, "modelExecution": "not_tested", "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]) { _, new in new }
     }
 }

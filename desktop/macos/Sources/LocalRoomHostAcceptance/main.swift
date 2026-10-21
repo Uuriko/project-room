@@ -13,6 +13,7 @@ func stamp() -> String { let f = ISO8601DateFormatter(); f.formatOptions = [.wit
 if CommandLine.arguments.count > 3, CommandLine.arguments[2].hasPrefix("--") {
     let args = CommandLine.arguments, journal = args[3]
     if args[2] == "--stop-watch" { fm.createFile(atPath: journal + ".stop", contents: Data()); exit(0) }
+    try? fm.removeItem(atPath: journal + ".stop")
     let mode = String(data: try Data(contentsOf: URL(fileURLWithPath: args[4])), encoding: .utf8)!
     let directory = journal + ".watch"
     let pinned = ProcessInfo.processInfo.environment["ROOM_HOST_SCOPE"] ?? "missing"
@@ -176,6 +177,33 @@ let pinnedScope = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fi
 check(pinnedScope == ["origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent"], "child receives exact selected room identity without a token")
 check(host.stopAndWait(), "graceful stop waits for child")
 check(host.snapshot()["message"] as? String == "Agent stopped", "terminal status and exit both confirm stop")
+// App shutdown preserves intent; explicit disconnect survives a new app instance.
+let resumed = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
+check(resumed.snapshot()["receivingEnabled"] as? Bool == true, "shutdown preserves receiving preference")
+try resumed.resumeReceiving()
+check(until { resumed.snapshot()["statusFresh"] as? Bool == true }, "saved receiver starts without opening controls")
+try resumed.disconnect()
+check(resumed.stopAndWait(), "explicit disconnect stops receiver")
+let disconnected = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
+try disconnected.resumeReceiving()
+check(disconnected.snapshot()["running"] as? Bool == false && disconnected.snapshot()["receivingEnabled"] as? Bool == false, "disconnect persists across relaunch")
+let preference = dir.appendingPathComponent("managed/receiving.json")
+let preferenceAttributes = try fm.attributesOfItem(atPath: preference.path)
+check((preferenceAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "receiving preference private")
+try write(["enabled": true, "scope": ["origin": "https://fixture.invalid", "roomId": "other-room", "memberId": "agent"]], preference.path)
+let wrongScope = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
+try wrongScope.resumeReceiving()
+check(wrongScope.snapshot()["running"] as? Bool == false, "another room cannot inherit receiving intent")
+try disconnected.start()
+check(disconnected.stopAndWait(), "restart can reenable receiving")
+try disconnected.configure(saved)
+let reconfigured = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
+try reconfigured.resumeReceiving()
+check(reconfigured.snapshot()["running"] as? Bool == false, "reconfiguration requires explicit start")
+try Data("invalid".utf8).write(to: preference)
+let corrupt = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
+try corrupt.resumeReceiving()
+check(corrupt.snapshot()["running"] as? Bool == false, "corrupt preference never starts receiver")
 for mode in ["wrongpid","stale","unverified","exit"] {
     let (other,_) = try fixture(mode); try other.start(); Thread.sleep(forTimeInterval:0.4)
     check(!(other.snapshot()["message"] as? String ?? "").hasPrefix("Listening"), "\(mode) status cannot claim listening")

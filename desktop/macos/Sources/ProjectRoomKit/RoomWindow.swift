@@ -134,7 +134,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
         open(url)
         if !isolated {
-            do { try prepareLocalStatus() }
+            do { try prepareLocalStatus(); localTools?.resumeReceiving() }
             catch { updateLocalAgentNotice("This Mac’s agent status is unavailable. Open My Mac to check its connection.") }
         }
     }

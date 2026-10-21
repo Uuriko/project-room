@@ -58,6 +58,11 @@ import CoreGraphics
             self.refresh()
         } }
     }
+    public func resumeReceiving() {
+        do { try host.resumeReceiving() }
+        catch { hostIssue = "Could not reconnect. Check agent setup or another running host." }
+        refresh()
+    }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     public func stop() { setupWindow?.stop(); timer?.invalidate(); host.stopAndWait(); connection.stop() }
     @objc private func toggleAdvanced(_ sender: NSButton) {
@@ -71,7 +76,11 @@ import CoreGraphics
     }
     @objc private func setupHost() {
         setupWindow = LocalRoomHostSetupWindow(host: host) { [weak self] in
-            self?.setupWindow = nil; self?.hostIssue = nil; self?.refresh()
+            guard let self else { return }
+            self.setupWindow = nil; self.hostIssue = nil
+            do { try self.host.start() }
+            catch { self.hostIssue = "Setup saved. Check the connection and start the agent again." }
+            self.refresh()
         }
         setupWindow?.show(on: window)
     }
@@ -103,7 +112,10 @@ import CoreGraphics
     }
     @objc private func toggleHost() {
         hostIssue = nil
-        if host.snapshot()["running"] as? Bool == true { host.requestStop() }
+        if host.snapshot()["running"] as? Bool == true || host.snapshot()["receivingEnabled"] as? Bool == true {
+            do { try host.disconnect() }
+            catch { hostIssue = "Agent stopping, but disconnect could not be saved. Check folder access before reopening Project Room." }
+        }
         else { do { try host.start() } catch { hostIssue = (error as? LocalToolFailure)?.code == "room_connection_changed"
             ? "The room connection changed. Choose Set up agent to review its setup before starting."
             : "Could not start. Check setup or another running host." } }
@@ -112,7 +124,7 @@ import CoreGraphics
     private func refresh() {
         let agent = host.snapshot(), running = agent["running"] as? Bool == true, stopping = agent["stopping"] as? Bool == true
         hostState.stringValue = hostIssue ?? (agent["message"] as? String ?? "Agent status unavailable")
-        hostToggle.title = stopping ? "Stopping…" : running ? "Stop agent" : "Start agent"
+        hostToggle.title = stopping ? "Stopping…" : (running || agent["receivingEnabled"] as? Bool == true) ? "Disconnect agent" : "Start agent"
         hostToggle.isEnabled = agent["configured"] as? Bool == true && !stopping
         hostConnect.isEnabled = !running
         macConnect.isEnabled = agent["configured"] as? Bool == true && !running && !stopping
