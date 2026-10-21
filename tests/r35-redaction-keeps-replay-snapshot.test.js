@@ -105,11 +105,11 @@ test("the kept replay snapshot holds none of the deleted text", async t => {
   cmd(T.MESSAGE_POSTED, { messageId: "reply", body: "r35-deleted-needle-6a3", replyToId: "root", alsoSendToChannel: true });
   cmd(T.MESSAGE_EDITED, { messageId: "secret", body: "r35-deleted-needle-6a2", expectedMessageRevision: 0 });
   assert.equal(backfillAll(store).done, true);
-  const before = store.db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id='commons'").get().state_json;
+  const before = store.db.prepare("SELECT state_json FROM messages_backfill_cursor LEFT JOIN message_replay_snapshots USING(room_id) WHERE room_id='commons'").get().state_json;
   assert.ok(before.includes("r35-deleted-needle-6a2"), "positive control: the snapshot carries the live text");
   cmd(T.MESSAGE_DELETED, { messageId: "secret", expectedMessageRevision: 1, reason: "remove" });
   cmd(T.MESSAGE_DELETED, { messageId: "reply", expectedMessageRevision: 0, reason: "remove" });
-  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor LEFT JOIN message_replay_snapshots USING(room_id) WHERE room_id='commons'").get();
   assert.equal(typeof cursor.state_json, "string", "the snapshot is kept, redacted, instead of discarded");
   for (const needle of ["r35-deleted-needle-6a1", "r35-deleted-needle-6a2", "r35-deleted-needle-6a3"]) {
     assert.equal(String(cursor.state_json ?? "").includes(needle), false, `snapshot still holds ${needle}`);
@@ -127,7 +127,7 @@ test("a short deleted text does not discard the snapshot by matching unrelated s
   assert.equal(backfillAll(store).done, true);
   ageIntoLegacyShape(store, "old");
   cmd(T.MESSAGE_DELETED, { messageId: "short", expectedMessageRevision: 0, reason: "remove" });
-  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  const cursor = store.db.prepare("SELECT state_json FROM messages_backfill_cursor LEFT JOIN message_replay_snapshots USING(room_id) WHERE room_id='commons'").get();
   assert.equal(typeof cursor.state_json, "string");
   const result = backfillAll(store);
   assert.deepEqual(result.blocked, []);
@@ -140,7 +140,7 @@ test("a deleted text still present elsewhere in the snapshot discards it, as bef
   cmd(T.MESSAGE_POSTED, { messageId: "quote", body: "someone said r35-quoted-needle-7c1 earlier" });
   assert.equal(backfillAll(store).done, true);
   cmd(T.MESSAGE_DELETED, { messageId: "secret", expectedMessageRevision: 0, reason: "remove" });
-  const cursor = store.db.prepare("SELECT state_json, state_seq FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  const cursor = store.db.prepare("SELECT state_json, state_seq FROM messages_backfill_cursor LEFT JOIN message_replay_snapshots USING(room_id) WHERE room_id='commons'").get();
   assert.equal(cursor.state_json, null);
   assert.equal(cursor.state_seq, 0);
   assert.equal(backfillAll(store).done, true);

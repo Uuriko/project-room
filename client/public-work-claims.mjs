@@ -1,7 +1,7 @@
 // Explicit public-task actions. No admission, automatic renewal or model launch.
 import { createHash } from 'node:crypto';
 import { assertServiceOrigin, RoomClientError } from './room-agent.mjs';
-import { edgeDoorApiPath } from '../server/agent-discovery.mjs';
+import { edgeDoorApiPath } from '../src/service-origin.js';
 import { validId } from '../src/events.js';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported public work response');

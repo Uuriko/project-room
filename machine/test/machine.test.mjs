@@ -146,8 +146,9 @@ test.describe("room-machine", { concurrency: false }, () => {
       const caller = lease("claim-desk", "desk");
       relay.send({ type: "call", id: "boot", tool: "desktop.screenshot", args: {}, caller });
       await waitFor(() => relay.results.some(result => result.id === "boot" && result.ok));
-      await new Promise(resolve => setTimeout(resolve, 1300));
-      assert.match(readFileSync(join(home, "argv-log"), "utf8"), /lume "suspend" "desk"/);
+      // Suspension includes an asynchronous guest command; scheduler load can
+      // delay it beyond a fixed sleep. Keep the existing bounded wait contract.
+      await waitFor(() => /lume "suspend" "desk"/.test(readFileSync(join(home, "argv-log"), "utf8")));
       relay.send({ type: "call", id: "late", tool: "machine.status", args: {}, caller });
       await waitFor(() => relay.results.some(result => result.id === "late"));
       const late = relay.results.find(result => result.id === "late");
