@@ -60,8 +60,12 @@ export function supportExportBundle({ roomId, roomTitle, service, diagnostics, s
   };
 }
 
-function setupSummary({ agentId, events, setupReport }) {
-  const state = setupMilestones(events, { agentId, setupReport });
+// nextStep can quote the agent's own limitation text; bound and flatten it
+// like the other fields in this bundle.
+const flat = (value, max) => String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/[^\P{C}]/gu, "").trim().slice(0, max);
+
+function setupSummary({ agentId, events, setupReport, heartbeats }) {
+  const state = setupMilestones(events, { agentId, setupReport, heartbeats });
   const step = name => ({ done: state[name].done, at: state[name].at });
   return {
     agentId,
@@ -69,6 +73,6 @@ function setupSummary({ agentId, events, setupReport }) {
     firstExchange: step("firstExchange"),
     backgroundRun: step("backgroundRun"),
     scheduleSaved: state.scheduleSaved,
-    nextStep: state.next.text,
+    nextStep: state.next.text === null ? null : flat(state.next.text, 400),
   };
 }
