@@ -33,12 +33,11 @@ import { createRoomServer } from "../server/http.mjs";
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
 // The 18 essential tools the packet names for the member core profile.
-const CORE_18 = [
-  "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
-  "room_list_requests", "room_read_request", "room_respond_to_request",
-  "dm_posted", "room_check_access", "room_create", "room_join",
-  "room_put_file", "room_commit_file", "add_land_item", "list_land_queue",
-  "wake_pause", "wake_resume", "bond_propose",
+const CORE_20 = [
+  "room_needs_me", "room_read_messages", "room_post_message", "room_reply", "room_list_work",
+  "room_acquire_claim", "room_release_claim", "room_read_work", "room_begin_work",
+  "room_submit_text_result", "room_record_handoff", "room_propose_work", "room_search", "room_read_many",
+  "room_who", "room_read_request", "room_respond_to_request", "room_check_access", "room_create", "room_join"
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
@@ -126,19 +125,17 @@ test("anonymous catalog is exactly the packet's seven tools", async () => {
     "packet must name room_mcp_snippet among the four join tools");
 });
 
-test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+test("outside identity gets the same default list as a member; public work is one focus away", async () => {
   const names = await toolsList(undefined, outsiderSecret);
-  // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  assert.deepEqual(names, [...CORE_20, ...JOIN_READERS]);
+  assert.deepEqual(await toolsList({ focus: "public_work" }, outsiderSecret), [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member core profile is the packet's 20 tools plus the 4 join readers", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  assert.equal(names.length, 24, `core profile must be 24 tools, got ${names.length}`);
+  assert.deepEqual(names.slice(0, 20), CORE_20);
+  assert.deepEqual(names.slice(20), JOIN_READERS);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
@@ -162,13 +159,13 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
-test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
+test("Routes compact core set names the same tools as the 20-tool paragraph", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     const match = packet.match(/Their compact core set: ([^.]+)\./);
     assert.ok(match, `${label} must have a compact core set list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
-    const missing = CORE_18.filter(n => !listed.includes(n));
+    const missing = CORE_20.filter(n => !listed.includes(n));
     assert.deepEqual(missing, [],
-      `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
+      `${label} compact core set is missing tools the 20-tool paragraph promises: ${missing.join(",")}`);
   }
 });
