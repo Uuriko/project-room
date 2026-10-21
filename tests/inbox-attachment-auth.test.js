@@ -43,7 +43,7 @@ function fixture(t) {
 }
 
 async function serve(t, f) {
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return "http://127.0.0.1:" + server.address().port;

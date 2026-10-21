@@ -1,3 +1,4 @@
+import { workStatus } from "./work-status.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
@@ -324,6 +325,85 @@ export function currentApprovalFor(item, memberId) {
   return attested ? review : null;
 }
 
+// Whether the board offers Verify on a delivered claim — policy-aware,
+// mirroring canCloseWork (the route re-checks on POST):
+// - self_attested (#3887): the OWNER is the verifier (reviewerId ===
+//   owner) and can never hold an approval on their own claim, so the
+//   approval-gated condition was unsatisfiable for exactly the person
+//   the kernel authorizes; the owner gets the control, nobody else does.
+// - reviewed policies: the viewer must hold a current approval, and
+//   under independent_principal (#3885) must additionally hold the
+//   verify permission (canCloseWork's verifyMembers) — approvers
+//   without it were offered a Verify the kernel always refuses.
+export function canVerifyFromBoard(item, viewer, members, roomPolicy = null) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
+  if (policy === "self_attested") return item.owner === viewer.id;
+  if (item.owner === viewer.id) return false;
+  if (!currentApprovalFor(item, viewer.id)) return false;
+  if (policy === "independent_principal") {
+    const member = members?.[viewer.id];
+    return Boolean(member && member.active !== false && (member.permissions ?? []).includes("verify"));
+  }
+  return true;
+}
+
+// Whether the board offers the send-back control on a delivered claim
+// (H1 / #3888). The update route authorizes the delivered ->
+// in_progress transition for the owner, a claim manager, or the
+// reviewer who recorded changes_requested; the board shows the control
+// to the owner outright, and to a manager or reviewer when a CURRENT
+// changes_requested review stands on the claim (basisCurrent, the same
+// currency test approvals use). The route re-checks on POST.
+export function canSendBackClaim(item, viewer, members) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  if (item.owner === viewer.id) return true;
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  const standing = (item.reviews ?? []).filter(entry => entry?.verdict === "changes_requested" && basisCurrent(entry, item));
+  if (!standing.length) return false;
+  if (viewer.manage) return true;
+  return standing.some(entry => entry.memberId === viewer.id);
+}
+
+const sendBackRequestId = (item, memberId) =>
+  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+
+// The send-back POST body, pure like claimVerifyBody: the transition
+// plus its operation identity (#3829's replay binding covers reviewer
+// send-backs) and the round basis the board read, so a stale card
+// cannot send back a newer round.
+export function claimSendBackBody(item, memberId) {
+  const basis = typeof item?.claimedAt === "string"
+    ? { expectedClaimedAt: item.claimedAt,
+      expectedHistoryLength: (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0) }
+    : {};
+  return { state: "in_progress", requestId: sendBackRequestId(item, memberId), ...basis };
+}
+
+// The review POST body (#3889): the reviewer names the basis they
+// actually read — the board holds every field of the kernel's
+// reviewBasisFor — so an identical re-review after the basis moved is a
+// deliberate refresh where the kernel allows one (a sole CI head move),
+// instead of a silent no-op the board announces as "Reviewed". A basis
+// that no longer matches is refused as a conflict by the kernel.
+export function claimReviewBody(item, verdict, summary) {
+  return { verdict, summary, expectedBasis: { version: 1, owner: item?.owner ?? null,
+    claimedAt: item?.claimedAt ?? null, revision: item?.revision ?? null,
+    headSha: item?.ci?.headSha ?? null, deliveryDigest: item?.delivery?.digest ?? null,
+    deliveryGeneration: item?.deliveryGeneration ?? 0 } };
+}
+
+// #3889 readback: after the board reloads, the submitted review counts
+// as recorded only when the reviewer's standing review on the refreshed
+// claim carries the submitted verdict + summary AND its basis is still
+// current — a stale-basis no-op leaves the old, stale review in place,
+// which this refuses to call success.
+export function reviewOutcomeConfirmed(item, memberId, verdict, summary) {
+  const review = (item?.reviews ?? []).find(entry => entry?.memberId === memberId);
+  return Boolean(review && review.verdict === verdict && review.summary === summary && basisCurrent(review, item));
+}
+
 // Review controls for a claim card. Every label comes from the strings
 // catalog via uiText, and each literal holds only complete HTML tags, so the
 // i18n harness sees no new hardcoded copy. The form posts to
@@ -355,15 +435,56 @@ export function claimReviewForm(item) {
 // carrying a requestId records its outcome server-side, and the identical
 // retry replays that outcome instead of applying twice. The id is derived
 // from the operation itself — claim, delivery round, actor — so a retry of
-// the same click re-sends the same id, while a new round (a re-delivery
-// advances deliveryGeneration, #3684) or a different actor is a new
-// operation with a new id. Sanitized to the route's requestId shape.
-const requestIdPart = value => String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40);
+// the same click re-sends the same id, while a new round or a different
+// actor is a new operation with a new id. Sanitized to the route's
+// requestId shape.
+//
+// B4/H2: the round is bound explicitly, not only through
+// deliveryGeneration. A release resets the generation to 0, so a
+// same-owner re-claim used to derive the IDENTICAL deliver id as round 1
+// and the kernel replayed round 1's recorded outcome — the round-2
+// delivery was silently swallowed (identical bundle) or refused as a
+// conflict (changed bundle). The id now carries a fingerprint of the
+// round basis (claimedAt + lifetime history length, the same basis the
+// release/reassign posts bind), which every new round changes. The
+// kernel also clears recorded outcomes when a round ends, so the two
+// fixes are independent locks on the same door.
+// Two independent 32-bit string hashes combined into 16 hex chars: not a
+// security digest, just a stable fingerprint a browser can compute
+// synchronously for id derivation.
+const fingerprint = value => {
+  const text = String(value ?? "");
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) ^ code) >>> 0;
+  }
+  return [h1.toString(16).padStart(8, "0"), h2.toString(16).padStart(8, "0")].join("");
+};
+// Parts were truncated to 40 chars, so two ids sharing a 40-char prefix
+// collided into one operation. A long part now keeps a readable prefix
+// plus a fingerprint of the FULL value, so distinct values stay distinct.
+const requestIdPart = value => {
+  const clean = String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-");
+  return clean.length <= 40 ? clean : [clean.slice(0, 23), fingerprint(clean)].join("-");
+};
+const historyLengthOf = item => (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0);
+const roundPart = item => fingerprint([item?.claimedAt ?? "", historyLengthOf(item)].join("|"));
 export function verifyRequestId(item, memberId) {
-  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 }
 const deliverRequestId = (item, memberId) =>
-  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+
+// The round basis a first Verify/Deliver submission is fenced by (H3):
+// the kernel's existing preconditions, computed exactly as the board's
+// release/reassign posts compute them, so a stale form held across a
+// release + re-claim is refused as a conflict instead of replaying into
+// the new round. Only a claimed round carries a basis worth posting.
+const roundBasis = item => typeof item?.claimedAt === "string"
+  ? { expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyLengthOf(item) }
+  : {};
 
 // The reviewer's verify as a pure body, so the requestId wiring is
 // unit-testable at this boundary (the newItemCreateBody precedent). Before
@@ -371,7 +492,7 @@ const deliverRequestId = (item, memberId) =>
 // a lost response could only be retried as a brand-new update against a
 // claim that was already done.
 export function claimVerifyBody(item, memberId) {
-  return { state: "done", requestId: verifyRequestId(item, memberId) };
+  return { state: "done", requestId: verifyRequestId(item, memberId), ...roundBasis(item) };
 }
 
 const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
@@ -468,7 +589,23 @@ export function claimDeliverBody(item, data, memberId) {
   }
   return { state: "delivered",
     delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
-    requestId: deliverRequestId(item, memberId) };
+    requestId: deliverRequestId(item, memberId), ...roundBasis(item) };
+}
+
+// H4 readback for the Deliver submit: the refreshed claim confirms the
+// delivery only when it is actually delivered, by this member, carrying
+// the submitted bundle. The kernel's delivery digest is a pure function
+// of exactly { artifact, checks, criteria } (deliveryDigest in
+// work-claims.mjs), so field equality with the submitted bundle is
+// equality with the submitted bundle's digest — a claim delivered with
+// any other bundle does not confirm this submit.
+export function deliverOutcomeConfirmed(item, body, memberId) {
+  if (!item || item.state !== "delivered" || !item.delivery || !body?.delivery) return false;
+  if (item.delivery.deliveredBy !== memberId) return false;
+  const same = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  return same(item.delivery.artifact, body.delivery.artifact)
+    && same(item.delivery.checks, body.delivery.checks)
+    && same(item.delivery.criteria, body.delivery.criteria);
 }
 
 // One anchor literal for both record targets, so the board's link shape
@@ -620,24 +757,36 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
+  if (item.workItemId) {
+    const work = workItems?.[item.workItemId];
+    actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
+  }
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
   // reviewers now get the verdict form right on the card.
-  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  if (!item.workItemId && canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
   // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
   // approval is still current against the delivered bundle verifies it to
   // done from the same card. The update route re-runs canCloseWork on POST;
-  // this only renders the control when the approval could close the claim.
-  if (item.state === "delivered" && currentApprovalFor(item, viewer.id)) {
+  // this only renders the control when the claim could actually close for
+  // this viewer — policy-aware since B4 (#3885/#3887, canVerifyFromBoard).
+  if (!item.workItemId && canVerifyFromBoard(item, viewer, members, roomPolicy)) {
     actions.push(button("verify", uiText("board.action.verify"), "primary"));
+  }
+  // H1 (#3888): the send-back control. After a changes_requested review
+  // the delivered claim used to sit with Close as the holder's only
+  // offered exit; the route-authorized actors (owner, claim manager,
+  // that reviewer) now get the delivered -> in_progress transition.
+  if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
+    actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
-  if (mine && item.state === "in_progress") {
+  if (!item.workItemId && mine && item.state === "in_progress") {
     // Under a reviewed policy the single-step finish is refused
     // (work_not_delivered): the holder finishes to delivered with the
     // delivery bundle, and the reviewer verifies from there — so the card
@@ -645,8 +794,15 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     // form, not a bare button: a first finish without the bundle is
     // refused delivery_incomplete, so the form composes it.
     const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
-    if (policy === "self_attested") actions.push(button("done", "Done", "primary"));
-    else actions.push(claimDeliverForm(item));
+    // H5 (#3886): under self_attested a criteria-bearing claim's bare
+    // Done is a guaranteed refusal — the kernel's finish requires a
+    // first delivery bundle whenever criteria exist — so the card
+    // offers the bundle-carrying deliver form for exactly that class;
+    // the claim then completes from delivered via the owner-verify
+    // control (#3887). Criteria-free self-attested claims keep Done.
+    if (policy === "self_attested" && !(Array.isArray(item.acceptanceCriteria) && item.acceptanceCriteria.length)) {
+      actions.push(button("done", "Done", "primary"));
+    } else actions.push(claimDeliverForm(item));
   }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
@@ -700,6 +856,7 @@ const PENDING_OUTCOME_KEYS = {
   done: "board.action.pending.done",
   deliver: "board.action.pending.deliver",
   verify: "board.action.pending.verify",
+  sendback: "board.action.pending.sendback",
   release: "board.action.pending.release",
   close: "board.action.pending.close",
   cancel: "board.action.pending.cancel",
@@ -895,6 +1052,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (action === "done") return `Done '${title}'`;
     if (action === "deliver") return uiText("board.action.outcome.deliver", { title });
     if (action === "verify") return uiText("board.action.outcome.verify", { title });
+    if (action === "sendback") return uiText("board.action.outcome.sendback", { title });
     if (action === "release") return `Released '${title}'`;
     if (action === "close" || action === "cancel") return uiText(action === "close" ? "board.claim.closed" : "board.claim.cancelled", { title });
     if (action === "reassign") return `Reassigned '${title}'`;
@@ -995,6 +1153,9 @@ export function installWorkBoard({ client, getState, getSession }) {
   // the node on success; if it survives (failed action, no repaint) it is
   // re-enabled here.
   function flyButton(button, run, focus, reconcile = null, unconfirmed = undefined) {
+    // Disabling the focused control moves focus to body. Preserve this
+    // action before the loading paint can restore an older navigation link.
+    stick = { key: focus?.key ?? null, id: focus?.id ?? null, status: stick?.status ?? "" };
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     act(run, focus, reconcile, unconfirmed).finally(() => {
@@ -1089,16 +1250,36 @@ export function installWorkBoard({ client, getState, getSession }) {
       flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimVerifyBody(item, me) }), focus, reconcile,
         uiText("board.action.verify.unconfirmed", { title }));
     }
+    // H1 (#3888): the send-back, with the Verify treatment — the same
+    // reconcile shape, announcing success only when the refreshed claim
+    // is actually back in progress (its verification fact names the
+    // send-back when this actor took it).
+    else if (action === "sendback") {
+      const item = items.find(entry => entry.id === id);
+      const me = viewerOf(getState(), getSession()).id;
+      const title = titleOf(id);
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (current?.state === "in_progress") {
+          return current.verification?.by === me
+            ? uiText("board.action.outcome.sendback", { title })
+            : uiText("board.action.sendback.already", { title });
+        }
+        return error?.message || uiText("board.action.sendback.unconfirmed", { title });
+      };
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimSendBackBody(item, me) }), focus, reconcile,
+        uiText("board.action.sendback.unconfirmed", { title }));
+    }
     else if (action === "renew") {
       flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
   });
   // Same in-flight treatment for form submits (BU-02): disable the submit
   // button with aria-busy; restore it only if the node survives the repaint.
-  function flySubmit(form, run, focus) {
+  function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }
@@ -1159,9 +1340,22 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
       if (!body) { note(uiText("board.deliver.invalid")); return; }
       const title = item.title || id;
+      // H4: the Deliver submit gets the Verify treatment — success is
+      // announced only when the refreshed claim is actually delivered
+      // with the submitted bundle (deliverOutcomeConfirmed). A replayed
+      // or lost response that left the claim undelivered reports
+      // unconfirmed instead of the canned "Delivered" text.
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (deliverOutcomeConfirmed(current, body, viewer.id)) {
+          return uiText("board.action.outcome.deliver", { title });
+        }
+        return error?.message || uiText("board.action.deliver.unconfirmed", { title });
+      };
       flySubmit(deliver,
         () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
-        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) });
+        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) },
+        reconcile, uiText("board.action.deliver.unconfirmed", { title }));
       return;
     }
     const review = event.target.closest("[data-claim-review]");
@@ -1180,9 +1374,22 @@ export function installWorkBoard({ client, getState, getSession }) {
         return;
       }
       const title = item.title || id;
+      // #3889: name the basis read (claimReviewBody) and reconcile the
+      // announcement — "Reviewed" only when the refreshed claim carries
+      // this review standing on the current basis; a stale-basis no-op
+      // (200, item unchanged) reports unconfirmed instead.
+      const me = viewerOf(state, getSession()).id;
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (reviewOutcomeConfirmed(current, me, verdict, summary)) {
+          return uiText("board.review.done", { title });
+        }
+        return error?.message || uiText("board.review.unconfirmed", { title });
+      };
       flySubmit(review,
-        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
-        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: claimReviewBody(item, verdict, summary) }),
+        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") },
+        reconcile, uiText("board.review.unconfirmed", { title }));
       return;
     }
     const created = event.target.closest("#board-new-item");
