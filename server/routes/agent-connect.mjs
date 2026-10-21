@@ -6,6 +6,7 @@
 // module lands.
 
 import { createHash } from "node:crypto";
+import { buildSetupIntro } from "../setup-intro.mjs";
 
 const PAGE_BUDGET = 3072;
 export const UNAVAILABLE = "Ask the room owner for a new link.\nAlready redeemed it? Resend the same redeem request with the same requestId, or with your saved identity secret as the Bearer token, to get your connection again.\n";
@@ -170,7 +171,12 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     lines.push("");
   }
   let text = `${lines.join("\n").trim()}\n`;
-  if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
+  if (Buffer.byteLength(text) <= PAGE_BUDGET) {
+    // Optional one-paste setup intro: shed first when the page is full.
+    const intro = setupIntroText(base, roomId);
+    const withIntro = `${text}\n## 4. Finish setup\n\n${intro}`;
+    return intro && Buffer.byteLength(withIntro) <= PAGE_BUDGET ? withIntro : text;
+  }
   const shorter = lines.filter(line => !line.startsWith("curl ") || line.includes("/agent-invites/redeem") || line.includes("/activation-pack"));
   text = `${shorter.join("\n").trim()}\n`;
   if (Buffer.byteLength(text) <= PAGE_BUDGET) return text;
@@ -193,6 +199,11 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     "Read the room before choosing work. A connection does not start a listener.",
     "",
   ].join("\n");
+}
+
+function setupIntroText(origin, roomId) {
+  try { return buildSetupIntro({ origin, roomId, platform: "other", compact: true }).text; }
+  catch { return ""; }
 }
 
 function escapeHtml(value) {
