@@ -56,6 +56,49 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
+// CURE-4445-SCOPE: the normal form for the reserved client-name
+// comparison in registerDynamicClient. One function, applied to BOTH
+// sides (candidate and provisioned names), so a provisioned name can
+// never become unmatchable by its own normalisation:
+//   1. NFKC — folds compatibility forms (fullwidth ＣｈａｔＧＰＴ reads
+//      as ChatGPT) and composes decomposed accents (Cafe + U+0301
+//      reads as Café) without stripping legitimate letters;
+//   2. strip Unicode format characters (category Cf — zero-width
+//      space/joiners, bidi controls, soft hyphen, tag characters) and
+//      the remaining default-ignorable code points (combining grapheme
+//      joiner U+034F, the Hangul fillers, Khmer inherent marks,
+//      variation selectors), so "ChatGPT" + U+200B reads as "ChatGPT";
+//   3. fold Cyrillic/Greek letters that are visual confusables of
+//      Latin letters (UTS #39 confusables) to the Latin letter, so a
+//      homoglyph "СhatGPT" (Cyrillic Es) reads as "ChatGPT" — NFKC
+//      alone folds none of these;
+//   4. the pre-cure trim + lowercase.
+// The form is comparison-only: names are stored exactly as given.
+const NAME_IGNORABLE_PATTERN =
+  /[\p{Cf}\u034F\u115F\u1160\u17B4\u17B5\u3164\uFE00-\uFE0F\uFFA0\u{E0100}-\u{E01EF}]/gu;
+const NAME_CONFUSABLES = new Map([
+  // Cyrillic lookalikes of Latin letters.
+  ["А", "A"], ["а", "a"], ["В", "B"], ["Е", "E"], ["е", "e"],
+  ["К", "K"], ["к", "k"], ["М", "M"], ["м", "m"], ["Н", "H"],
+  ["н", "h"], ["О", "O"], ["о", "o"], ["Р", "P"], ["р", "p"],
+  ["С", "C"], ["с", "c"], ["Т", "T"], ["т", "t"], ["У", "Y"],
+  ["у", "y"], ["Х", "X"], ["х", "x"], ["і", "i"], ["ј", "j"],
+  ["ѕ", "s"], ["һ", "h"], ["ԁ", "d"],
+  // Greek lookalikes of Latin letters.
+  ["Α", "A"], ["Β", "B"], ["Ε", "E"], ["Ζ", "Z"], ["Η", "H"],
+  ["Ι", "I"], ["Κ", "K"], ["Μ", "M"], ["Ν", "N"], ["Ο", "O"],
+  ["Ρ", "P"], ["Τ", "T"], ["Χ", "X"], ["α", "a"], ["ι", "i"],
+  ["κ", "k"], ["μ", "u"], ["ν", "v"], ["ο", "o"], ["ρ", "p"],
+  ["χ", "x"],
+]);
+const clientNameNormalForm = value => {
+  let folded = "";
+  for (const ch of value.normalize("NFKC").replace(NAME_IGNORABLE_PATTERN, "")) {
+    folded += NAME_CONFUSABLES.get(ch) ?? ch;
+  }
+  return folded.trim().toLowerCase();
+};
+
 export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
@@ -175,12 +218,16 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     // (no `dcr_` prefix) is a provisioned client, registered by the
     // operator through registerClient — so the set can never drift from
     // the provisioned registry the way a hand-typed list would. Matching
-    // is case-insensitive and ignores surrounding whitespace. The check
-    // runs over the whole registry before any identical-re-registration
-    // is honoured, so a pre-cure copycat record cannot refresh its way
-    // past the reservation.
-    const normalizeName = value => value.trim().toLowerCase();
+    // is on the CURE-4445-SCOPE normal form (clientNameNormalForm:
+    // NFKC + ignorable-stripped + confusable-folded + trim/lowercase),
+    // applied to both sides. The check runs over the whole registry
+    // before any identical-re-registration is honoured, so a pre-cure
+    // copycat record cannot refresh its way past the reservation.
+    const normalizeName = clientNameNormalForm;
     const wantedName = normalizeName(name);
+    if (wantedName.length === 0) {
+      invalidMetadata("client_name is empty once formatting and ignorable characters are removed");
+    }
     let identical = null;
     if (typeof clientStore.values === "function") {
       for (const existing of clientStore.values()) {
@@ -257,6 +304,21 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(typeof redirectUri === "string" && client.redirectUris.includes(redirectUri),
       "redirect_uri must exactly match a registered redirect URI");
     const validScopes = validateScopes(scopes);
+    // CURE-4445-SCOPE: a client with a stored registration set — the
+    // dynamic (dcr_) clients whose accepted scopes CURE-4445-DCR stored
+    // on the record; getClient returns null scopes for provisioned
+    // clients, which keep the pre-cure behaviour exactly — may not be
+    // authorized beyond that set. The cap is enforced here, at
+    // validation, so the consent screen only ever lists within-set
+    // scopes, and the code -> token -> refresh chain (which only ever
+    // carries the validated/record scopes forward) has no widening
+    // path around the consent screen.
+    if (Array.isArray(client.scopes)) {
+      const beyond = validScopes.filter(scope => !client.scopes.includes(scope));
+      if (beyond.length > 0) {
+        fail("invalid_scope", `scopes beyond this client's registered set: ${beyond.join(", ")}`);
+      }
+    }
     // state is optional per RFC but recommended; pass through opaque.
     check(state === undefined || (typeof state === "string" && state.length <= 1024),
       "state must be a string up to 1024 chars if given");

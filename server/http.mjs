@@ -1774,7 +1774,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
           }
         } catch (error) {
-          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          // CURE-4445-SCOPE: provider errors carry their RFC 6749 error
+          // name (invalid_scope for a beyond-registration-set ask) —
+          // pass them through like the registration door does, instead
+          // of flattening every refusal to invalid_request.
+          const code = error instanceof ServiceError || error instanceof OAuthProviderError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
         }
         const scopeLabels = {
@@ -1886,7 +1890,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
           }
         } catch (error) {
-          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          const code = error instanceof ServiceError || error instanceof OAuthProviderError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
         }
         const decision = data.decision;

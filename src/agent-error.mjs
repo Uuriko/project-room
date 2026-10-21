@@ -309,6 +309,7 @@ const AX_NAMED_RECOVERIES = {
   invalid_reply_update: ["Choose the exact dispatched update, then resend.", "Re-read the updates and choose the exact dispatched one."],
   invalid_request: ["The request could not be processed as sent — the message names why. Fix it and resend; for a stored access request, ask a room owner to review it.", "Fix the problem named in the message and resend."],
   invalid_request_run: ["Choose one request, attempt, and supported action, then resend.", "Resend with one request, one attempt, and a supported action."],
+  invalid_scope: ["The authorization request asked for scopes beyond this client's registered set. Request only the registered scopes, or re-register the client with the wider set.", "Request only the scopes the client registered for, or re-register it with the wider set."],
   invalid_url: ["The url must be a non-empty string up to 2048 characters. Fix it and resend.", "Fix the url (non-empty, up to 2048 characters) and resend."],
   invitation_conflict: ["An active invitation already reserves that Room identity. Wait for it to resolve or ask an administrator to revoke it.", "Ask an administrator to revoke the active invitation, or wait for it to resolve."],
   invitation_not_pending: ["Only a pending invitation can be revoked. Read the invitation's current state; nothing was revoked.", "Re-read the invitation; only a pending one can be revoked."],
