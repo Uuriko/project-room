@@ -88,8 +88,11 @@ export function renderReceiptsHtml(page) {
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
-</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
-  const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
+</article>`; }).join("") || (page?.q
+    ? `<p>No receipts match “${escapeHtml(page.q)}”. <a href="/receipts">See all public receipts</a>.</p>`
+    : `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`);
+  const nextQuery = page?.nextCursor ? (page?.q ? `?q=${encodeURIComponent(page.q)}&cursor=${encodeURIComponent(page.nextCursor)}` : `?cursor=${encodeURIComponent(page.nextCursor)}`) : "";
+  const next = page?.nextCursor ? `<p><a href="/receipts${nextQuery}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
 <main>

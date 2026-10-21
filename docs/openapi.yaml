@@ -2699,7 +2699,8 @@ paths:
         human display names, an https pull-request link when one was
         recorded, merged time, and sha256 hashes already stored on the
         work. Query room (exact room id), agent (case-insensitive
-        substring of an agent name), cursor (a receipt id from this
+        substring of an agent name), q (case-insensitive substring of a
+        receipt title or its room title), cursor (a receipt id from this
         list), and limit (1–50, default 20). The same list is HTML at
         /receipts. One receipt is HTML at /receipts/{id} and JSON at
         /receipts/{id}.json (those paths are outside this /api/
@@ -2712,6 +2713,10 @@ paths:
           required: false
           schema: { type: string, maxLength: 128 }
         - name: agent
+          in: query
+          required: false
+          schema: { type: string, maxLength: 80 }
+        - name: q
           in: query
           required: false
           schema: { type: string, maxLength: 80 }
@@ -2842,13 +2847,19 @@ paths:
         and listedAt — rebuilt field-by-field in the module; member ids,
         handles, emails, identity links, permissions, DMs, and invite codes
         never leave. Archived rooms never appear. Cursor `after` is a room
-        id; `limit` is capped at 100 (default 50).
+        id; `limit` is capped at 100 (default 50). Query `q` filters by a
+        case-insensitive substring of title, purpose, or kind; the cursor
+        and limit then apply to the filtered set.
       security: []
       parameters:
         - name: after
           in: query
           required: false
           schema: { type: string }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120 }
         - name: limit
           in: query
           required: false

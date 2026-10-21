@@ -794,26 +794,34 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
 // visibility package); the claim that it did was false before it.
 const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 
-const receiptFilter = (room, needle) => {
+const receiptFilter = (room, needle, qNeedle) => {
   const clauses = [];
   const params = [];
   if (room) { clauses.push("room_id=?"); params.push(room); }
   if (needle) { clauses.push("instr(lower(agents_json), ?) > 0"); params.push(needle); }
+  // q searches the receipt's own text — its title and its room's title —
+  // case-insensitively, the same fields the list page shows (QA-SEARCH-1:
+  // q was accepted and silently ignored before this clause existed).
+  if (qNeedle) { clauses.push("(instr(lower(title), ?) > 0 OR instr(lower(coalesce(room_title, '')), ?) > 0)"); params.push(qNeedle, qNeedle); }
   return { clauses, params };
 };
 
-export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
+export function queryPublicReceipts(store, { room = null, agent = null, q = null, cursor = null, limit = 20 } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "room filter must be a room id" } };
   }
   if (agent != null && (typeof agent !== "string" || !agent.trim() || agent.length > 80)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "agent filter must be a name" } };
   }
+  if (q != null && (typeof q !== "string" || !q.trim() || q.trim().length > 80)) {
+    return { error: { status: 422, code: "invalid_receipt_query", message: "q filter must be a search term" } };
+  }
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "limit must be an integer from 1 to 50" } };
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
-  const filter = receiptFilter(room, needle);
+  const qNeedle = q ? q.trim().toLowerCase() : null;
+  const filter = receiptFilter(room, needle, qNeedle);
   // The rows this list could serve: filter matches, minus both kinds of
   // hidden (operator-unpublished, owner-toggled-off). The page query and
   // the cursor lookup apply the same set, so a served nextCursor always
@@ -846,7 +854,9 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     .all(...filter.params, ...afterParams, limit + 1);
   const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
   const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
-  return { receipts: page, nextCursor };
+  // q rides the result so the HTML page can say a search matched nothing
+  // (instead of claiming no receipts exist) and keep q in its cursor link.
+  return { receipts: page, nextCursor, q: qNeedle };
 }
 
 export function publicReceiptById(store, id) {

@@ -152,6 +152,42 @@ test("pagination cursors and limit clamping", () => {
   assert.ok(DIRECTORY_PAGE_LIMIT >= 100);
 });
 
+test("q filters the listing over title, purpose, and kind (QA-SEARCH-1)", () => {
+  const store = makeStore({
+    r1: stateFor("r1", { title: "Bounty board", purpose: "Paid work here", kind: "work" }),
+    r2: stateFor("r2", { title: "Quiet room", purpose: "Bounty hunters welcome", kind: "social" }),
+    r3: stateFor("r3", { title: "Garden club", purpose: "Tomatoes", kind: "hobby" }),
+  });
+  const dir = new RoomDirectory(store);
+  for (const id of ["r1", "r2", "r3"]) dir.set(id, "owner", true);
+  // Title match, case-insensitive.
+  assert.deepEqual(dir.list({ q: "BOUNTY BOARD" }).rooms.map(r => r.roomId), ["r1"]);
+  // Purpose-only match.
+  assert.deepEqual(dir.list({ q: "hunters" }).rooms.map(r => r.roomId), ["r2"]);
+  // One term can match different rooms on different fields.
+  assert.deepEqual(dir.list({ q: "bounty" }).rooms.map(r => r.roomId), ["r1", "r2"]);
+  // Kind match.
+  assert.deepEqual(dir.list({ q: "hobby" }).rooms.map(r => r.roomId), ["r3"]);
+  // Nonsense term: honestly empty, never the unfiltered page.
+  const none = dir.list({ q: "zzzznotpresent" });
+  assert.deepEqual(none.rooms, []);
+  assert.equal(none.nextCursor, null);
+  // Pagination applies to the filtered set.
+  const page1 = dir.list({ q: "bounty", limit: 1 });
+  assert.deepEqual(page1.rooms.map(r => r.roomId), ["r1"]);
+  assert.equal(page1.nextCursor, "r1");
+  const page2 = dir.list({ q: "bounty", limit: 1, after: page1.nextCursor });
+  assert.deepEqual(page2.rooms.map(r => r.roomId), ["r2"]);
+  assert.equal(page2.nextCursor, null);
+  // A present-but-unusable q is refused loudly, naming the parameter.
+  assert.equal(errOf(() => dir.list({ q: "   " })).code, "invalid_query");
+  assert.equal(errOf(() => dir.list({ q: "x".repeat(121) })).code, "invalid_query");
+  assert.match(errOf(() => dir.list({ q: "" })).message, /q must be a search term/);
+  // No q: the unfiltered listing, unchanged.
+  assert.equal(dir.list().rooms.length, 3);
+  assert.equal(dir.list({ q: null }).rooms.length, 3);
+});
+
 // ---- HTTP surface: owner toggle + public listing through the real server ----
 
 import { mkdtempSync, rmSync } from "node:fs";
