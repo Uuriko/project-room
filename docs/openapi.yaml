@@ -14137,6 +14137,81 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/outbound-policy:
+    get:
+      summary: Which members may send out of Room without a draft
+      description: Every active member with allowSend (false unless the owner allowed it).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, policies: [{ memberId, allowSend }] }" }
+    put:
+      summary: Allow or stop an agent sending without a draft
+      x-room-permission: owner
+      description: "Body: `{ requestId, agentId, allowSend }`. Room owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, allowSend }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_outbound_policy }
+  /api/rooms/{roomId}/outbound:
+    get:
+      summary: List outbound draft cards
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: state, in: query, required: false, schema: { type: string, enum: [draft, approved, discarded, sent] } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, drafts }" }
+        '422': { description: invalid_draft_state }
+    post:
+      summary: Ask to send something out of Room
+      x-room-permission: member
+      description: >-
+        Body: `{ requestId, channel, to, subject?, body }`. When the owner
+        allowed this agent to send, answers 200 `{ mode: "send" }` and the
+        agent sends it. Otherwise answers 201 `{ mode: "draft", draft }`
+        and nothing leaves Room until the owner approves.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: send allowed, or the existing draft for this requestId }
+        '201': { description: a new draft card }
+        '422': { description: invalid_outbound }
+  /api/rooms/{roomId}/outbound/{draftId}/decision:
+    post:
+      summary: Approve or discard an outbound draft
+      x-room-permission: owner
+      description: "Body: `{ decision: approve|discard, body? }`. body replaces the text when the owner edits it."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: draftId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the decided draft }
+        '403': { description: owner_required }
+        '404': { description: draft_not_found }
+        '409': { description: draft_already_decided }
+        '422': { description: invalid_decision }
+  /api/rooms/{roomId}/outbound/{draftId}/sent:
+    post:
+      summary: Record an approved draft as sent
+      x-room-permission: member
+      description: The draft's author, after sending it. Approved drafts only; repeating is a no-op.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: draftId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: the sent draft }
+        '403': { description: author_required }
+        '404': { description: draft_not_found }
+        '409': { description: draft_not_approved }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
