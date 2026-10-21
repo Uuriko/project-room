@@ -69,3 +69,36 @@ test("join page ignores an off-origin next and follows a relative one", { timeou
   assert.equal(new URL(page.url()).origin, new URL(origin).origin);
   assert.deepEqual(errors, []);
 });
+
+test("signed-out mobile visitors can read agent instructions and paste shared invitations", { timeout: 60000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), "join-mobile-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(`${origin}/#join-agent`);
+  await page.locator("#connect-guide-dialog").waitFor({ state: "visible" });
+  assert.ok(await page.locator("#join-agent-prompt").isVisible());
+  await page.locator("#connect-guide-close").click();
+  await page.evaluate(() => { location.hash = ""; });
+  await page.waitForURL(url => !url.hash);
+  await page.evaluate(() => { location.hash = "#join-agent"; });
+  await page.locator("#connect-guide-dialog").waitFor({ state: "visible" });
+  await page.goto(`${origin}/docs/agents/paste`);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "paste instructions fit a phone");
+  await page.goto(`${origin}/join`);
+  const token = "a".repeat(43);
+  await page.locator("#join-enter-code").fill(`${origin}/#join/${token}`);
+  await page.locator("#join-enter-submit").click();
+  await page.waitForURL(url => url.hash === `#join/${token}`);
+  assert.equal(new URL(page.url()).origin, origin);
+});

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AccountClient } from "../src/client.js";
-import { InboxClient } from "../src/inbox-client.js";
+import { InboxClient } from "../archive/deferred-email/src/inbox-client.js";
 
 const session = { authenticated: true, account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "a".repeat(64), csrf: "csrf" };
 const viewer = { accountId: "owner", authEpoch: 2, sessionRevision: 4, sessionBinding: session.sessionBinding };

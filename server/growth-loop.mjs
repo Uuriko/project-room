@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Referral growth: a join is recorded immediately, and it counts toward a
 // reward only after the new member posts a message and 24 hours pass from
 // that message. Rewards are room-founding credits (a guest room, or one
@@ -248,14 +249,7 @@ export function settleActivations(store, roomId) {
      FROM referrals WHERE room_id=? AND activated_at IS NULL ORDER BY completed_at ASC, referee_member_id ASC`
   ).all(roomId);
   if (!pending.length) return 0;
-  const firstByAuthor = new Map();
-  for (const message of store.room(roomId).state.messages ?? []) {
-    if (!message?.authorId || typeof message.createdAt !== "string") continue;
-    const at = Date.parse(message.createdAt);
-    if (!Number.isFinite(at)) continue;
-    const prior = firstByAuthor.get(message.authorId);
-    if (prior === undefined || at < prior) firstByAuthor.set(message.authorId, at);
-  }
+  const firstByAuthor = messageRepository(store, roomId).firstPostedAtByAuthor();
   const now = store.now();
   const activate = store.db.prepare(
     "UPDATE referrals SET activated_at=? WHERE room_id=? AND referee_member_id=? AND activated_at IS NULL AND payout_block IS NULL"

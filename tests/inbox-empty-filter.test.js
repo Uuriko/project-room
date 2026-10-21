@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const ui = readFileSync(new URL("../src/inbox-ui.js", import.meta.url), "utf8");
+const ui = readFileSync(new URL("../archive/deferred-email/src/inbox-ui.js", import.meta.url), "utf8");
 const NEXT_STEP = "No messages match these filters. Change the filters to see more messages.";
 
 test("filtered-empty copy states the next step at every site", () => {

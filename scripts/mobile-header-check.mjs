@@ -49,7 +49,7 @@ async function assertMoreLabel(page) {
   assert.equal(new Set(lines).size, 1, `More must remain one readable line, not stacked characters (line tops: ${lines})`);
 }
 
-const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#topbar-catchup", "#room-more > summary", "#session-menu-button"];
+const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#room-more > summary", "#session-menu-button"];
 const longRoomName = "Project Room — A deliberately long research and delivery room name";
 
 async function assertReadableWords(page, selectors) {
@@ -73,7 +73,7 @@ async function assertReadableWords(page, selectors) {
 
 async function assertHeader(page, count) {
   await assertMoreLabel(page);
-  assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true }).count(), 1, "the full count meaning remains in the accessible name");
+  assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true, includeHidden: true }).count(), 1, "the full count meaning remains in the accessible name");
   const layout = await page.evaluate(selectors => ({
     name: document.querySelector("#mobile-room-name").textContent,
     boxes: selectors.map(selector => {
@@ -111,7 +111,7 @@ async function assertHeader(page, count) {
   }
   // Independently measure words, not CSS declarations: overflow can remain
   // contained even when a label or count has become a stack of characters.
-  await assertReadableWords(page, ["#topbar-updates", "#topbar-catchup"]);
+  await assertReadableWords(page, ["#topbar-updates"]);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, "no horizontal document overflow");
 }
 
@@ -129,6 +129,7 @@ async function exerciseHeader(page) {
       else await target.tap();
     };
     for (const [trigger, dialog] of [["#topbar-updates", "#updates-dialog"], ["#topbar-catchup", "#catchup-dialog"]]) {
+      if (trigger === "#topbar-catchup") await activate("#topbar-updates");
       await activate(trigger); await page.locator(dialog).waitFor({ state: "visible" });
       await page.keyboard.press("Escape"); await page.locator(dialog).waitFor({ state: "hidden" });
     }
@@ -140,7 +141,7 @@ async function exerciseHeader(page) {
     const menu = await page.locator(".room-more-actions").boundingBox();
     assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
     if (mode === "keyboard") {
-      for (const selector of ["#topbar-activity", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
+      for (const selector of ["#topbar-later", "#room-actions-open", "#topbar-settings"]) {
         await page.keyboard.press("Tab");
         assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `More menu Tab reaches ${selector}`);
       }
