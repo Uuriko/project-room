@@ -459,7 +459,7 @@ export default {
   "result.copied": "Copied",
   "result.copyFailed": "Could not copy. Retry or download the text.",
   "result.discuss": "Reply",
-  "result.replyBlocked": "This conversation has a private draft or an unresolved send. Open the conversation to finish it before replying.",
+  "result.replyBlocked": "Finish or clear the existing reply in this conversation first.",
   "record.invalidView": "Choose a supported record view.",
   "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
   "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>",
@@ -520,5 +520,10 @@ export default {
   "result.collapse": "Collapse result",
   "activity.recent": "Recent activity",
   "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text.",
-  "clipboard.pending": "Clipboard is still busy. You can keep working."
+  "clipboard.pending": "Clipboard is still busy. You can keep working.",
+  "result.closePreview": "Close preview",
+  "result.backConversation": "Back to conversation",
+  "result.resize": "Resize preview",
+  "result.searchCount": "{count} results",
+  "result.previewActions": "Preview actions"
 };

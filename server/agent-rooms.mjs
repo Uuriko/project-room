@@ -90,7 +90,7 @@ export function roomCreateNext(roomId) {
       description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
     { action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
       description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." },
-    { action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    { action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." },
   ];
 }
