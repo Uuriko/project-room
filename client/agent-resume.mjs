@@ -156,6 +156,36 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       out.observedThroughBySource.openRequests = { evaluatedThrough: listing.evaluatedThrough, selection: { direction: 'incoming', status: 'open' } };
       for (const request of out.openRequests) out.nextReads.push({ source: 'openRequests', ...request.nextRead });
     } catch (error) { incomplete('openRequests', error); }
+    // Observe only runs belonging to current incoming open requests. This is
+    // service metadata, not a read of a host's local journal or permission to retry.
+    if (out.observedThroughBySource.openRequests && out.openRequests.length === 0) {
+      out.pendingReconciliations = { status: 'observed', source: 'open_requests', localJournalRead: false, items: [] };
+    } else if (out.observedThroughBySource.openRequests) {
+      try {
+        // This endpoint authorizes the read itself; the compact context reads
+        // before/after fence identity without downloading the entire room.
+        const path = `/api/rooms/${encodeURIComponent(connection.roomId)}/request-runs`;
+        const response = await boundedFetch(connection.origin + edgeDoorApiPath(connection.origin, path), {
+          method: 'GET', headers: { Authorization: `Bearer ${connection.token}`, Accept: 'application/json' }
+        });
+        if (!response.ok) throw new RoomClientError(response.status, 'request_failed', 'Request runs unavailable');
+        const listing = await response.json();
+        if (listing?.contractVersion !== 1 || listing.roomId !== connection.roomId || listing.viewerId !== connection.memberId
+          || !isObject(listing.runs) || Object.entries(listing.runs).some(([id, run]) => !validId(id)
+          || !isObject(run) || !['working', 'unknown', 'needs_attention', 'result_ready', 'delivered'].includes(run.state)
+          || !count(run.updatedAt))) throw invalid();
+        const items = out.openRequests.flatMap(request => {
+          const run = listing.runs[request.id];
+          return run && ['unknown', 'needs_attention', 'result_ready'].includes(run.state)
+            ? [{ requestMessageId: request.id, state: run.state, updatedAt: run.updatedAt,
+              action: 'inspect_original_attempt_before_retry', nextRead: request.nextRead }] : [];
+        });
+        out.pendingReconciliations = { status: 'observed', source: 'request_runs', localJournalRead: false, items };
+      } catch (error) {
+        out.pendingReconciliations = { status: 'unavailable' };
+        incomplete('pendingReconciliations', error);
+      }
+    }
   }
   // Fresh compact read, not a cached grant. Changed context replaces the earlier projection.
   try {
@@ -171,6 +201,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     out.contextVersion = null; out.authoritySummary = null; out.observedThroughBySource = {};
     if (focus === 'replies') { out.openRequests = []; out.optionalConversations = []; }
     out.attention = []; out.obligations = []; out.ownClaims = []; out.nextReads = [];
+    out.pendingReconciliations = { status: 'not_read' };
     incomplete('connection', error);
   }
   // Service text is untrusted; a response must never echo the bearer, even through IDs/cursors.
