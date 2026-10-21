@@ -102,7 +102,7 @@
     "src/needs-attention.js": "sha256:ff73fd3cbb5fddba851ff8c7cb970c07879224ebae31f3aadb8cecd5a30a3ba2",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
-    "src/owner-cockpit.js": "sha256:5114ee14b04ca104c33883ca5040345ed5e7d593c0578c78e3c09f8c747140df",
+    "src/owner-cockpit.js": "sha256:43e5fce004ce09d8440148ad5956fce74d30c993568907457a421bb80c1eccdd",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:88d9325a8cbb698ced48b9eb2ba594606b093a443d21939ca3a7fbee62e49c24",

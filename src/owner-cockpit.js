@@ -15,6 +15,9 @@ const KIND_LABEL = {
   dispute: "Dispute",
   claim_lease: "Claim lease",
   spend: "Spend",
+  board_review: "Board review",
+  bounty_review: "Bounty review",
+  bounty_challenge: "Bounty challenge",
 };
 
 const SEVERITY_LABEL = { critical: "Critical", warn: "Warning", info: "Note" };
@@ -29,29 +32,57 @@ export function formatAge(ageMs) {
   return `waiting ${days}d ${hours % 24}h`;
 }
 
+// The stakes line renders the item's own currency field verbatim — the
+// document never mixes currencies, so neither does the rendering: no
+// conversion, no shared total.
+export function formatStakes(item) {
+  if (typeof item?.amountMillis === "number") return `${item.amountMillis} milli-credits at stake`;
+  if (typeof item?.amountCents === "number") return `${item.amountCents} cents at stake`;
+  return "";
+}
+
+export function formatCountdown(timeToConsequenceMs) {
+  if (typeof timeToConsequenceMs !== "number" || !Number.isFinite(timeToConsequenceMs)) return "";
+  if (timeToConsequenceMs <= 0) return "deadline passed";
+  const minutes = Math.floor(timeToConsequenceMs / 60000);
+  if (minutes < 60) return `deadline in ${Math.max(1, minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `deadline in ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `deadline in ${days}d ${hours % 24}h`;
+}
+
+// Only approve/deny POST templates are one-tap decisions the cockpit
+// executes inline. Any other POST (e.g. spend's adjust, which needs an
+// amount) renders as a link — a button labelled Deny that posts a body
+// it cannot succeed with is worse than a link (fig-06 G7).
+const DECIDE_ACTIONS = new Set(["approve", "deny"]);
+
+export function cockpitItemHtml(item) {
+  const label = KIND_LABEL[item.kind] ?? item.kind;
+  const age = formatAge(item.ageMs);
+  const stakes = formatStakes(item);
+  const countdown = formatCountdown(item.timeToConsequenceMs);
+  const actions = (item.actions ?? []).map(action => {
+    if (action.method === "POST" && DECIDE_ACTIONS.has(action.action)) {
+      return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
+    }
+    return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
+  }).join(" ");
+  return `<article class="cockpit-item" data-kind="${esc(item.kind)}">
+    <header><strong>${esc(label)}</strong> <span>${esc(item.title)}</span></header>
+    <p class="form-hint">${esc(item.roomName ?? item.roomId)}${age ? ` · ${esc(age)}` : ""}${stakes ? ` · ${esc(stakes)}` : ""}${countdown ? ` · ${esc(countdown)}` : ""}</p>
+    ${item.consequence ? `<p class="form-hint">${esc(item.consequence)}</p>` : ""}
+    <div class="cockpit-actions">${actions}</div>
+  </article>`;
+}
+
 export function createOwnerCockpit({ accountClient, section, decide }) {
   const summary = section.querySelector("#cockpit-summary");
   const decisionsBox = section.querySelector("#cockpit-decisions");
   const exceptionsBox = section.querySelector("#cockpit-exceptions");
   const stubsBox = section.querySelector("#cockpit-room-stubs");
   let epoch = 0, busy = false;
-
-  function renderItem(item) {
-    const label = KIND_LABEL[item.kind] ?? item.kind;
-    const age = formatAge(item.ageMs);
-    const actions = (item.actions ?? []).map(action => {
-      if (action.method === "POST") {
-        return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
-      }
-      return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
-    }).join(" ");
-    return `<article class="cockpit-item" data-kind="${esc(item.kind)}">
-      <header><strong>${esc(label)}</strong> <span>${esc(item.title)}</span></header>
-      <p class="form-hint">${esc(item.roomName ?? item.roomId)}${age ? ` · ${esc(age)}` : ""}</p>
-      ${item.consequence ? `<p class="form-hint">${esc(item.consequence)}</p>` : ""}
-      <div class="cockpit-actions">${actions}</div>
-    </article>`;
-  }
 
   function renderException(item) {
     const where = item.roomName ?? item.roomId ?? "Deployment";
@@ -77,7 +108,7 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     summary.textContent = decisions.total ? parts.join(" · ") : "";
     decisionsBox.innerHTML = decisions.total === 0
       ? ""
-      : decisions.items.map(renderItem).join("");
+      : decisions.items.map(cockpitItemHtml).join("");
     exceptionsBox.innerHTML = exceptions.total === 0
       ? ""
       : (actionable.length ? `<h4>Exceptions</h4>` + actionable.map(renderException).join("") : "")
