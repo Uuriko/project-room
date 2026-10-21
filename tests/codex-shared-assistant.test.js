@@ -467,6 +467,44 @@ test("observed failed turn remains failed if the transport disconnects immediate
 });
 
 
+test("completed response with a tool approval refusal asks for attention without publishing success", async t => {
+  const f = await setup(t, ({ event, finish }) => {
+    event("item/completed", { threadId: "shared-thread", turnId: "shared-turn-1",
+      item: { id: "blocked", type: "mcpToolCall", status: "failed",
+        error: { message: "MCP tool call requires approval, but approval policy is never" } } });
+    finish("completed");
+  });
+  assert.equal((await f.run()).result.status, "needs_input");
+  const run = (await f.api("owner")).runs[0];
+  assert.equal(run.resultMessageId ?? null, null);
+  assert.ok(run.inputs.every(input => input.status === "pending"));
+  assert.equal(f.calls.filter(x => x.method === "turn/start").length, 1);
+});
+
+test("a tool-blocked shared request resolves and resumes its original thread without repeating the blocked turn", async t => {
+  const f = await setup(t, ({ event, finish, turnNumber }) => {
+    if (turnNumber === 1) event("item/completed", { threadId: "shared-thread", turnId: "shared-turn-1",
+      item: { id: "blocked-input", type: "mcpToolCall", status: "failed",
+        error: { message: "MCP tool call requires approval, but approval policy is never" } } });
+    finish("completed");
+  });
+  assert.equal((await f.run()).result.status, "needs_input");
+  f.f.store.command(f.f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "permission-resolved", body: "The device owner fixed the host configuration. Continue from the observed prior result." } });
+  let run = (await f.api("owner")).runs[0];
+  await f.api("owner", { action: "resolve", runId: "shared", sourceMessageId: "permission-resolved", expectedRevision: run.revision });
+  assert.equal((await f.run()).result.status, "paused");
+  run = (await f.api("owner")).runs[0];
+  await f.api("owner", { action: "resume", runId: "shared", expectedRevision: run.revision });
+  assert.equal((await f.run()).result.status, "done");
+  assert.equal(f.calls.filter(x => x.method === "thread/start").length, 1);
+  assert.equal(f.calls.filter(x => x.method === "thread/resume").length, 1);
+  assert.equal(f.calls.filter(x => x.method === "turn/start").length, 2);
+  const continued = JSON.parse(f.calls.filter(x => x.method === "turn/start")[1].params.input[0].text).context;
+  assert.equal(continued.continuation.previousTurnCompleted, true);
+  assert.match(continued.continuation.instruction, /Do not blindly repeat/);
+});
+
 test("direct reply context is bounded, attributed and never expands private or unrelated messages", async () => {
   const source = { id: "followup", replyToId: "result", channelId: "general" };
   const result = { id: "result", authorId: "producer", revision: 3, body: "😀".repeat(8001) };

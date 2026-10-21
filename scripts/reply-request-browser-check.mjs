@@ -1,5 +1,7 @@
 import { openComposerOptions } from "./room-chrome.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
+import { join } from "node:path";
+import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import { hostReplyBody } from "../client/host-result.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,7 +32,7 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
   }
   const send = (who, type, data) => fixture.store.command(fixture.keys[who], "commons", { id: crypto.randomUUID(), type, data });
   const request = (id, toMemberId = "guest") => send("owner", "message.posted", { messageId: id, body: `Question ${id}?`, toMemberId, requestKind: "reply" });
-  return { ...fixture, login, errors, send, request, state: () => fixture.store.room("commons").state };
+  return { ...fixture, origin: `http://127.0.0.1:${server.address().port}`, login, errors, send, request, state: () => fixture.store.room("commons").state };
 }
 const record = (page, id) => page.locator(`[data-message-record-id="${id}"]`);
 const input = page => page.locator("#message-input");
@@ -43,7 +45,7 @@ async function mode(page, id, kind) {
   assert.equal(await page.locator("#composer-status").textContent(), "");
 }
 
-for (const width of [1280, 390]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
+for (const width of [1280, 390, 320]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
@@ -66,11 +68,26 @@ for (const width of [1280, 390]) test(`request journey at ${width}px: request, c
   await record(guest, id).getByRole("button", { name: "Answer request", exact: true }).click();
   await guest.getByRole("button", { name: "Send answer", exact: true }).waitFor();
   await idle(guest);
+  assert.equal(await guest.locator("#request-refresh").isVisible(), false, "unchanged context needs no refresh control");
+  assert.equal(await guest.locator("#ask-room").isVisible(), false, "private request mode does not offer a public assistant action");
+  if (width <= 390) {
+    const geometry = await guest.evaluate(() => {
+      const bar = document.querySelector('#request-mode-bar').getBoundingClientRect();
+      const exit = document.querySelector('#request-exit').getBoundingClientRect();
+      const assistant = document.querySelector('#room-assistant').getBoundingClientRect();
+      return { barHeight: bar.height, exitHeight: exit.height, assistantHeight: assistant.height, overflow: document.documentElement.scrollWidth > innerWidth + 1 };
+    });
+    assert.ok(geometry.barHeight < 100, JSON.stringify(geometry));
+    assert.ok(geometry.exitHeight >= 44, "request exit keeps a touch-sized target");
+    assert.ok(geometry.assistantHeight <= 48, JSON.stringify(geometry));
+    assert.equal(geometry.overflow, false);
+  }
   await input(guest).fill("Use the short agenda, including the review.");
   await guest.screenshot({ path: `test-results/request-answer-${width}.png`, fullPage: true });
   await input(guest).press("Shift+Enter");
   assert.match(await input(guest).inputValue(), /\n$/);
   await input(guest).press("Enter"); await saved(guest);
+  assert.equal(await guest.locator("#ask-room").isVisible(), true, "ordinary conversation restores the assistant action");
   assert.equal(f.state().replyRequests[id].status, "answered");
   assert.deepEqual(f.state().workItems, before);
   await record(owner, id).locator(".request-state").filter({ hasText: "Answered" }).waitFor();
@@ -238,3 +255,43 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     assert.deepEqual(f.errors, []);
   });
 }
+
+
+test("host answer survives closing the requester and returning in an independent browser session", { timeout: 60000 }, async t => {
+  const f = await setup(t, { width: 390, height: 844 });
+  const owner = await f.login("owner");
+  await openComposerOptions(owner); await owner.locator("#request-reply").click();
+  await input(owner).fill("Summarize the local reference task.");
+  await owner.locator("#message-to-select").selectOption("producer");
+  await input(owner).press("Enter"); await saved(owner);
+  const id = Object.keys(f.state().replyRequests)[0];
+  assert.ok(id);
+  // The real runner, journal and HTTP delivery are exercised. Model/tool output
+  // is deterministic here; native broker execution has its own acceptance suite.
+  const db = openRequestJournal(join(f.directory, "return-host.sqlite"));
+  t.after(() => db.close());
+  let executions = 0;
+  const args = { connection: { version: 1, origin: f.origin, roomId: "commons", memberId: "producer", token: f.keys.producer },
+    requestMessageId: id, db, execute: async prepared => {
+      executions++;
+      assert.equal(prepared.request.id, id);
+      return { body: "Reference task complete. One shared answer survives return." };
+    } };
+  const result = await runRequestOnce(args);
+  assert.equal(result.status, "delivered");
+  const answer = f.state().messages.find(message => message.id === f.state().replyRequests[id].responseMessageId);
+  assert.ok(answer);
+  await record(owner, id).locator('[data-message-action="reply"]').click();
+  await record(owner, answer.id).waitFor();
+  await owner.context().close();
+  const returning = await f.login("owner");
+  await record(returning, id).locator('[data-message-action="reply"]').click();
+  await record(returning, answer.id).waitFor();
+  assert.match(await record(returning, answer.id).textContent(), /One shared answer survives return/);
+  assert.equal(f.state().replyRequests[id].status, "answered");
+  const retry = await runRequestOnce(args);
+  assert.equal(retry.hostExecuted, false);
+  assert.equal(executions, 1);
+  assert.equal(f.state().messages.filter(message => message.id === answer.id).length, 1);
+  assert.deepEqual(f.errors, []);
+});
