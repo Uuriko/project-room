@@ -62,9 +62,15 @@ for (const touch of [false, true]) test(`human help ${touch ? "touch" : "desktop
   await page.locator("#message-input").fill("Keep this unsent note");
   assert.equal((await f.list()).length, 0);
   await f.open();
+  const timing = page.locator('#help-timing');
+  assert.equal(await timing.evaluate(node => node.open), false);
+  assert.match(await timing.locator('summary').textContent(), /1 day/);
+  await timing.locator('summary').focus();
+  await page.keyboard.press('Enter');
   const text = "Suggest two guide examples. Keep edits in this room. 🪷";
   await scope.fill(text);
   await page.locator("#action-fields [name=duration]").selectOption("3600000");
+  assert.match(await timing.locator('summary').textContent(), /1 hour/);
   mkdirSync("test-results", { recursive: true });
   const prefix = `test-results/human-help-${touch ? "touch" : "desktop"}`;
   await page.screenshot({ path: prefix + "-publish.png" });
@@ -94,6 +100,30 @@ for (const touch of [false, true]) test(`human help ${touch ? "touch" : "desktop
     helpRevision: f.item().helpWanted.revision, composerPreserved: true, invitationBoundOffers: false }, null, 2));
 });
 
+for (const touch of [false, true]) test(`human help ${touch ? 'touch' : 'desktop'}: default timing needs no setup`, async t => {
+  const f = await setup(t, touch);
+  await f.open();
+  await f.scope.fill('Check the examples.');
+  const timing = f.page.locator('#help-timing');
+  for (const theme of ['light', 'dark']) {
+    await f.page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    assert.equal(await timing.evaluate(node => node.open), false);
+    assert.equal(await f.page.locator('#action-fields [name=duration]').isVisible(), false);
+    assert.equal(await f.dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    mkdirSync('test-results', { recursive: true });
+    await f.page.screenshot({ path: `test-results/help-default-${touch ? 'touch' : 'desktop'}-${theme}.png` });
+  }
+  const before = Date.now();
+  await f.save.click(); await f.dialog.waitFor({ state: 'hidden' });
+  assert.ok(Date.parse(f.item().helpWanted.expiresAt) >= before + 86400000);
+  assert.ok(Date.parse(f.item().helpWanted.expiresAt) <= Date.now() + 86400000);
+  assert.equal(f.item().helpWanted.scope, 'Check the examples.');
+  assert.equal(f.item().accountableMemberId, 'owner');
+  assert.equal(f.item().receipt, null);
+  assert.equal(f.traffic.filter(command => command.type === 'work.help_updated').length, 1);
+  assert.deepEqual(f.errors, []);
+});
+
 test("human help stale scope is pinned and explicit refresh preserves a draft for comparison", async t => {
   const f = await setup(t); f.help(); await f.card.locator(".work-help").waitFor();
   await f.open(); await f.scope.fill("My unsent scope");
@@ -105,6 +135,7 @@ test("human help stale scope is pinned and explicit refresh preserves a draft fo
   assert.match(await f.page.locator("#help-current").textContent(), /New scope from another owner session/);
   assert.equal(await f.scope.inputValue(), "My unsent scope");
   assert.equal(await f.page.locator("#action-fields [name=duration]").inputValue(), "");
+  assert.equal(await f.page.locator('#help-timing').evaluate(node => node.open), true);
   await f.page.locator("#action-fields [name=duration]").selectOption("3600000");
   await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   assert.equal(f.item().helpWanted.scope, "My unsent scope"); assert.equal(f.item().helpWanted.revision, 3);
