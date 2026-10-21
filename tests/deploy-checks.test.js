@@ -517,6 +517,25 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(steps.find(step => step.name === "Summary").run, /Code schemas/);
 });
 
+test("bodies-at-rest is carried by wrangler config for both production Workers and any deploy flag agrees", () => {
+  // ROOM_BODIES_AT_REST lived only as --var flags on the two deploy-prod
+  // wrangler commands: any deploy that did not copy those flags (a manual
+  // `wrangler deploy`) silently shipped with bodies-at-rest OFF. The setting
+  // now also lives in cloudflare/wrangler.jsonc, which every deploy path
+  // uploads, so the config is the floor. The workflow flags are retained —
+  // they predate the config entry and agree with it — and this test fails
+  // if the config loses the setting or any flag's value drifts from it
+  // (a --var wins for the run that carries it, so disagreement is a silent
+  // off switch).
+  const config = JSON.parse(readFileSync(new URL("../cloudflare/wrangler.jsonc", import.meta.url), "utf8"));
+  assert.equal(config.vars.ROOM_BODIES_AT_REST, "1");
+  assert.equal(config.env.production.vars.ROOM_BODIES_AT_REST, "1");
+  const workflow = readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8");
+  for (const [, value] of workflow.matchAll(/--var ROOM_BODIES_AT_REST:(\S+)/g)) {
+    assert.equal(value, "1");
+  }
+});
+
 import { createServer } from "node:http";
 test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
