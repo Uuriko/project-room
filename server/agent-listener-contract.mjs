@@ -36,7 +36,7 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null,
     // #3345: delivery accounting attributes the page to its door (the
     // REST heartbeat route and the MCP heartbeat_set tool share this path).
-    door });
+    door, context: data.context });
   // CX5-FIX: lease acquisition rides the same transaction as the
   // heartbeat, keyed by the queue the listener drains — the store's
   // leases are per-room scopes ('' for the roomless identity queue),
