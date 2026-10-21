@@ -47,8 +47,18 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // not normalised away — they still mismatch and fail the sweep.
   else if ([1, 2, 3].includes(joined?.data?.displayNamePolicyVersion)) expected.data.displayNamePolicyVersion = joined.data.displayNamePolicyVersion;
   // A rejoin's joined event names the self-left record it superseded; that
-  // field is part of the event's own shape, so the expected event takes it.
-  if (typeof joined?.data?.rejoinOfMemberId === "string") expected.data.rejoinOfMemberId = joined.data.rejoinOfMemberId;
+  // field is part of the event's own shape, so the expected event takes it —
+  // but only after cross-checking the member record (MICRO-4348 N2): the
+  // named record must be a distinct, inactive member of this room. A stored
+  // event naming a nonexistent, still-active, or self record is not a
+  // legitimate rejoin shape; leaving the field out of the expected event
+  // makes the canonical comparison refuse it instead of blessing it.
+  if (typeof joined?.data?.rejoinOfMemberId === "string") {
+    const superseded = room?.state?.members?.[joined.data.rejoinOfMemberId];
+    if (superseded && superseded.id !== record.intended_member_id && superseded.active === false) {
+      expected.data.rejoinOfMemberId = joined.data.rejoinOfMemberId;
+    }
+  }
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)
