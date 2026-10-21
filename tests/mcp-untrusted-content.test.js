@@ -171,8 +171,9 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     if (!["room_search", "room_read_many", "room_who"].includes(name)) assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
   }
   const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
-  assert.ok(existingTools.length <= 115,
-    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget remains 115 tools`);
+  // 116: room_land (merge train) joined the full profile; it is not in core.
+  assert.ok(existingTools.length <= 116,
+    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget remains 116 tools`);
   for (const name of ["room_read_messages", "room_read_request", "room_needs_me"]) {
     assert.equal(coreTools.find(tool => tool.name === name).annotations.openWorldHint, true, name);
   }
