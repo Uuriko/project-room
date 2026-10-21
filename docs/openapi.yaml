@@ -14137,6 +14137,38 @@ paths:
         '200': { description: "{ roomId, memberId, threadId, muted } plus the viewer ownership envelope" }
         '404': { description: message_not_found }
         '422': { description: invalid_thread_mute }
+  /api/rooms/{roomId}/permission-modes:
+    get:
+      summary: Each member's permission mode in this room
+      description: ask (default, every change waits for the owner), safe (safe actions run on their own) or all. Also lists the safe actions.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, modes: [{ memberId, mode }], safeActions }" }
+    put:
+      summary: Set an agent's permission mode
+      x-room-permission: owner
+      description: "Body: `{ requestId, agentId, mode }`. Room owner only."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, mode }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_permission_mode }
+  /api/rooms/{roomId}/permission-modes/check:
+    post:
+      summary: May the caller do this action without asking?
+      x-room-permission: member
+      description: "Body: `{ action }`. Returns decision allow or ask; on ask, next points at the approval-card route."
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, mode, action, decision, next }" }
+        '422': { description: invalid_action }
   /api/rooms/{roomId}/activity:
     get:
       summary: List the caller's personal activity feed
