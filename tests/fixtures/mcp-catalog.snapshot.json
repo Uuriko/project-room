@@ -1255,6 +1255,15 @@
         "openWorldHint": false
       }
     },
+    "team_skill": {
+      "inputSchema": "9b5ce8c38eda1b43",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
     "wake_clear": {
       "inputSchema": "d7850eb6972d3488",
       "annotations": {
