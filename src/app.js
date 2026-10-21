@@ -47,7 +47,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
-import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
+import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE, isGuestLike } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
@@ -993,6 +993,16 @@ async function resumeEmailVerificationOnce() {
   if (!owned?.authenticated) return false;
   const methods = await accountClient.request("/api/auth/methods", { session: owned });
   if (accountClient.session !== owned) return false;
+  // A guest upgrade mails the same ?verify=email link, but the guest has no
+  // email method yet: reopen the guest code step instead of dropping the link.
+  if (Array.isArray(methods.methods) && isGuestLike(methods.methods)) {
+    showAccountWorkspace();
+    await openAccountSettings();
+    if (accountClient.session !== owned || !accountSettingsUI.resumeGuestUpgrade(intent.email)) return false;
+    $("#account-settings-body").querySelector('[data-form="guest-upgrade-confirm"] [name="code"]')?.focus();
+    clear();
+    return true;
+  }
   // A link is navigation intent, never proof or permission to change accounts.
   if (!methods.methods?.some(method => method.email?.toLowerCase() === intent.email.toLowerCase())
     || methods.emailVerification?.status !== "unverified") { clear(); return false; }
