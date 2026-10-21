@@ -2760,6 +2760,19 @@ paths:
                             state: { type: string, enum: [verified, self_attested] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
+                        wait:
+                          type: object
+                          description: >-
+                            Present only on an undecided public-work receipt
+                            (MONEY-LEGIBILITY P6): the waiting age derived at
+                            read time from `at` and the receipt's composed
+                            decision state, so the queue and the submitter
+                            can render "submitted N days ago · awaiting
+                            decision". Decided receipts carry no `wait`.
+                          properties:
+                            submittedAt: { type: string, format: date-time }
+                            days: { type: integer, minimum: 0 }
+                            awaitingDecision: { type: boolean, enum: [true] }
         '422':
           description: Invalid room, agent, cursor, or limit (error.code invalid_receipt_query)
           content:
@@ -17452,6 +17465,20 @@ components:
             completedBounties: { type: integer }
             earnedCredits: { type: number }
             earnedCredits30d: { type: number }
+        endowment:
+          type: object
+          description: |
+            The room's member endowment (MONEY-LEGIBILITY P5), stated on
+            every balances read so it is visible before the first
+            transaction: the genesis grant each member of this room
+            receives, its per-room scope (it exists only in this room and
+            does not transfer), whether this lane's endowment is already
+            included in the figures above, and a plain-language note.
+          properties:
+            credits: { type: number }
+            scope: { type: string, enum: [per-room] }
+            issued: { type: boolean }
+            note: { type: string }
     CreditReceipt:
       type: object
       description: One zero-sum credit movement (debit + credit pair), actor-attributed with before/after lot states.
