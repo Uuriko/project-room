@@ -28,6 +28,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { ownMember } from "../src/events.js";
 import { githubAccessToken, parseRepo, parsePrNumber } from "./land-queue.mjs";
+import { githubAppCredentials, installationToken } from "./github-app/auth.mjs";
 import { MERGE_TRAIN_PATH_RULES } from "./merge-train-paths.mjs";
 import { appendRoomEvent, ROOM_GUIDE_ID } from "./receipt-cards.mjs";
 
@@ -306,15 +307,30 @@ export class MergeTrain {
     this.rules = MERGE_TRAIN_PATH_RULES;
     this.busy = new Set();
     this.baseBranch = BASE_BRANCH;
+    this.appEnv = null;
   }
 
   configure({ env = null, token = undefined, fetchImpl = undefined, rules = undefined, baseBranch = undefined } = {}) {
     if (typeof baseBranch === "string" && /^[A-Za-z0-9._\/-]{1,100}$/.test(baseBranch)) this.baseBranch = baseBranch;
     if (token !== undefined) this.token = token || null;
-    else if (env) this.token = githubAccessToken(env);
+    else if (env) {
+      this.token = githubAccessToken(env);
+      // No static token: mint short-lived GitHub App installation tokens
+      // (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_WEBHOOK_SECRET +
+      // MERGE_TRAIN_INSTALLATION_ID) before each tick instead of a PAT.
+      const installationId = typeof env.MERGE_TRAIN_INSTALLATION_ID === "string" ? env.MERGE_TRAIN_INSTALLATION_ID.trim() : "";
+      this.appEnv = !this.token && /^\d{1,20}$/.test(installationId) && githubAppCredentials(env) ? { env, installationId } : null;
+    }
     if (fetchImpl) this.fetchImpl = fetchImpl;
     if (rules) this.rules = rules;
     return this;
+  }
+
+  async refreshToken() {
+    if (!this.appEnv) return this.token;
+    const minted = await installationToken(this.appEnv.installationId, { env: this.appEnv.env, fetchFn: this.fetchImpl });
+    this.token = typeof minted === "string" ? minted : (minted?.token ?? null);
+    return this.token;
   }
 
   get gh() { return githubClient({ token: this.token, fetchImpl: this.fetchImpl }); }
@@ -519,6 +535,7 @@ export class MergeTrain {
     if (this.busy.has(roomId)) return { skipped: "busy" };
     this.busy.add(roomId);
     try {
+      await this.refreshToken();
       const repos = this.db.prepare(`SELECT DISTINCT repo FROM merge_train_entries WHERE room_id=? AND state IN ('queued','in_batch','landed')
         UNION SELECT repo FROM merge_train_batches WHERE room_id=? AND state IN (${ACTIVE_BATCH_STATES.map(() => "?").join(",")})`)
         .all(roomId, roomId, ...ACTIVE_BATCH_STATES).map(r => r.repo);
