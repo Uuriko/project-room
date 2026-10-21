@@ -2895,6 +2895,8 @@ function syncRequestComposer() {
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
+  // QA 2026-10-20: an archived room shows one line instead of a dead composer.
+  $("#message-form").hidden = archived; $("#archived-composer-note").hidden = !archived;
   input.readOnly = Boolean(mode && pendingMessage);
   input.disabled = busy || requestReading || archived;
   select.disabled = busy || requestReading || Boolean(assistantDraft) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));

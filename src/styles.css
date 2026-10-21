@@ -1163,6 +1163,8 @@ summary { overflow-wrap: anywhere; }
 /* UI calming #10: the duplicate .room-kind-badge rule lived here; consolidated above. */
 .room-archived-note { margin: .5rem 0 0; padding: .4rem .75rem; border-left: 2px solid currentColor; color: var(--muted); font-size: .875rem; max-width: 46rem; }
 .room-archived #message-form { opacity: .6; }
+#message-form[hidden] { display: none; }
+.archived-composer-note { margin: 0; padding: .75rem 1.25rem; color: var(--muted, inherit); font-size: .9rem; background: var(--bg); }
 .room-lifecycle-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
 
 /* C2: read-only access preview inside a work card's details. */
