@@ -207,13 +207,14 @@ function writeSecurityTxt(req, res) {
   res.end(req.method === "HEAD" ? undefined : body);
 }
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
-// the llms packet, the skills catalog, and the public HTML door.
+// the AI catalog, the llms packet, the skills catalog, and the public HTML door.
 const discoveryLinks = url => {
   // The shared entry host serves other products at its apex. Hosted discovery
   // must lead to Room; local and independently hosted instances stay local.
   const base = url.origin === ROOM_ORIGIN || EDGE_DOOR_HOSTS.includes(url.hostname) ? ROOM_ORIGIN : "";
   return [
     `<${base}/.well-known/agent-card.json>; rel="alternate"; type="application/json"`,
+    `<${base}/.well-known/ai-catalog.json>; rel="ai-catalog"`,
     `<${base}/llms.txt>; rel="help"`,
     `<${base}/skills>; rel="describedby"`,
     `<${base}/room>; rel="alternate"; type="text/html"`
