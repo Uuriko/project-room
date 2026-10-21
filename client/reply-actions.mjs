@@ -22,6 +22,8 @@ const definitions = [
     { direction, cursor: token, checkpoint: token, limit }, []],
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
     { requestId: id, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["requestId", "toMemberId", "body"]],
+  ["room_ask_user", null, "Ask a person in this room a question and wait for their answer on an ask card. toMemberId defaults to the room owner on the hosted server. Optional options (2 to 5 short choices) are listed under the question. Same request as room_request_reply: read the answer with room_read_request. Does not start a model or grant permission." + retry,
+    { requestId: id, question: { ...text, maxLength: 3000 }, toMemberId: id, options: { type: "array", minItems: 2, maxItems: 5, items: { type: "string", minLength: 1, maxLength: 200, pattern: "\\S" } }, workItemId: id }, ["requestId", "question"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
     { requestId: id, replyToId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
@@ -40,7 +42,20 @@ export function validReplyArguments(name, args) {
   return actions.has(name) && conforms(args, actions.get(name).tool.inputSchema)
     && !(Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint"));
 }
+// room_ask_user is room_request_reply with a question, optional numbered
+// choices and a person as the default recipient. The hosted server fills the
+// room owner in as toMemberId before this runs; a local caller must pass it.
+export function askUserBody(question, options) {
+  if (!Array.isArray(options) || options.length === 0) return question;
+  return `${question}\n\nOptions:\n${options.map((option, index) => `${index + 1}. ${option}`).join("\n")}\nReply with a number or your own answer.`;
+}
+export function askUserAsRequest(args) {
+  if (!validId(args?.toMemberId)) throw Object.assign(new Error("room_ask_user needs toMemberId here: pass the person to ask (room_who lists members)"), { code: "ask_user_needs_member" });
+  const { question, options, ...rest } = args;
+  return { ...rest, body: askUserBody(question, options) };
+}
 export function buildReplyCommand(identity, name, args) {
+  if (name === "room_ask_user" && validReplyArguments(name, args)) return buildReplyCommand(identity, "room_request_reply", askUserAsRequest(args));
   if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null) {
     // G-H2: room_reply mints its command id (the idempotency key) from
     // requestId, so a missing requestId meant every retry posted a duplicate
@@ -63,6 +78,7 @@ export function buildReplyCommand(identity, name, args) {
   return command;
 }
 export function recordedReplyAction(name, args, command, receipt) {
+  if (name === "room_ask_user") name = "room_request_reply";
   const requestMessageId = name === "room_request_reply" ? command.data.messageId
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
   return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,

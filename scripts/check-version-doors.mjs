@@ -14,16 +14,25 @@
 //   other         neither door reports sha (a different revision, or unreachable)
 //
 // CLI: node scripts/check-version-doors.mjs --origin URL --sha SHA [--wait-ms 0] [--poll-ms 10000]
+// Confirm live after a deploy: npm run confirm-live -- <sha> [--wait-ms 600000]
+// (origin defaults to production, a bare first argument is the sha, and the
+// sha may be a 7+ hex prefix).
 // Waits up to --wait-ms for "converged", prints JSON, exits 0 converged,
 // 3 do-stale, 4 worker-stale, 5 other.
 import { fileURLToPath } from "node:url";
 
 export const DOORS = Object.freeze({ do: "/api/version", worker: "/api/version/worker" });
 
+// sha may be the full 40-hex revision or a prefix of at least 7 hex digits
+// (the short form a PR page or `git log --oneline` shows).
+export const matchesRevision = (rev, sha) => typeof rev === "string" && typeof sha === "string"
+  && /^[0-9a-f]{7,40}$/i.test(sha) && rev.toLowerCase().startsWith(sha.toLowerCase());
+
 export function classifyDoors({ sha, doRev, workerRev }) {
-  if (doRev === sha && workerRev === sha) return "converged";
-  if (workerRev === sha) return "do-stale";
-  if (doRev === sha) return "worker-stale";
+  const onDo = matchesRevision(doRev, sha), onWorker = matchesRevision(workerRev, sha);
+  if (onDo && onWorker) return "converged";
+  if (onWorker) return "do-stale";
+  if (onDo) return "worker-stale";
   return "other";
 }
 
@@ -62,10 +71,10 @@ const EXIT = { converged: 0, "do-stale": 3, "worker-stale": 4, other: 5 };
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = process.argv.slice(2);
   const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
-  const origin = opt("--origin");
-  const sha = opt("--sha");
-  if (!origin || !/^[0-9a-f]{40}$/.test(sha ?? "")) {
-    console.error("usage: check-version-doors.mjs --origin URL --sha <40-hex> [--wait-ms N] [--poll-ms N]");
+  const origin = opt("--origin", "https://room.trydemigod.com");
+  const sha = (opt("--sha") ?? (args[0] && !args[0].startsWith("--") ? args[0] : "")).toLowerCase();
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) {
+    console.error("usage: check-version-doors.mjs [--origin URL] --sha <7-40 hex> [--wait-ms N] [--poll-ms N]");
     process.exit(2);
   }
   const result = await waitDoors({ origin: origin.replace(/\/$/, ""), sha, waitMs: Number(opt("--wait-ms", 0)), pollMs: Number(opt("--poll-ms", 10000)) });

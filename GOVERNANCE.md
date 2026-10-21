@@ -25,7 +25,7 @@ or contribution volume alone does not confer authority.
 ## Releases and sensitive changes
 
 Production credentials and deployment authority are separate from repository
-contribution. Maintainers follow the existing release and coordination guides.
+contribution. Maintainers follow [RULES.md](RULES.md).
 Changes to privileged workflows require particular scrutiny under CODEOWNERS;
 a file's existence alone does not establish GitHub enforcement.
 

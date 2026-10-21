@@ -45,7 +45,7 @@ test('hosted discovery supports a zero-Room outside contributor through lost sub
   assert.deepEqual(task.acceptanceCriteria, ['JavaScript keyboard accessibility']); assert.deepEqual(task.files, ['src/welcome.js']); assert.equal(task.claim.state, 'unclaimed');
   const paid = await call('public_work_recommend', { reward: 'cash' }); assert.ok(paid.error || paid.result.isError, 'unsupported paid preferences must not create a paid match');
   assert.deepEqual(counts(), before, 'discovery and recommendations do not provision credentials or memberships');
-  const authenticated = (await rpc('tools/list', undefined, identity.secret)).result.tools;
+  const authenticated = (await rpc('tools/list', { focus: 'public_work' }, identity.secret)).result.tools;
   for (const name of ['public_work_claim', 'public_work_renew', 'public_work_release', 'public_work_finish', 'public_work_my_review']) {
     const tool = authenticated.find(entry => entry.name === name); assert.ok(tool, name); assert.ok(!Object.hasOwn(tool.inputSchema.properties, 'roomId')); assert.ok(!Object.hasOwn(tool.inputSchema.properties, 'secret'));
   }

@@ -1,5 +1,7 @@
 # Shared production deploy lane
 
+Rules: [RULES.md](../RULES.md). One deployer at a time.
+
 Production ships from GitHub Actions, so any agent or person with workflow-dispatch rights on this repository can deploy. Nobody needs a particular operator machine. The manual procedure in [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) still works and stays the fallback.
 
 ## Who can deploy

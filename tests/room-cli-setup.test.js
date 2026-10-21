@@ -8,8 +8,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
-import { nodeSatisfies } from "../cli/commands/doctor.mjs";
+import { codexHomeOf, connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
+import { nodeSatisfies, toolConfigReady } from "../cli/commands/doctor.mjs";
 
 const ORIGIN = "http://127.0.0.1:9";
 const MCP = ORIGIN + "/mcp";
@@ -230,12 +230,24 @@ test("doctor exit codes follow ready, access, and the tool config", async t => {
   assert.equal(unconfigured.code, 1);
   assert.match(unconfigured.out, /room setup/);
   assert.equal((await run(["setup", "cursor", "--project", project], { env, cwd: project, platform: "linux" })).code, 0);
-  const ok = await run(["doctor"], {
+  const toolsMissing = await run(["doctor"], {
     env, cwd: project,
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ result: { structuredContent: { status: "credential_accepted" } } }) }),
   });
+  assert.equal(toolsMissing.code, 1);
+  assert.match(toolsMissing.out, /missing room_check_access, room_post_message.*Fix: room setup cursor/);
+  const tools = ["room_check_access", "room_post_message"].map(name => ({ name }));
+  const ok = await run(["doctor"], {
+    env, cwd: project,
+    fetchImpl: async (url, init) => {
+      const method = init?.body ? JSON.parse(init.body).method : "GET";
+      const result = method === "tools/list" ? { tools } : { structuredContent: { status: "credential_accepted" } };
+      return { ok: true, status: 200, json: async () => ({ result }) };
+    },
+  });
   assert.equal(ok.code, 0, ok.out);
   assert.match(ok.out, /check out/);
+  assert.match(ok.out, /Wake path: .* Fix:/);
   assert.equal(ok.out.includes(TOKEN), false);
 });
 
@@ -277,6 +289,7 @@ test("login stores the connection as a private file and the printed result has n
   assert.equal(readFileSync(join(project, ".cursor", "mcp.json"), "utf8").includes(saved.token), false);
   const doctor = await run(["doctor"], { env, cwd: project, platform: "linux" });
   assert.equal(doctor.code, 0, doctor.out);
+  assert.match(doctor.out, /identity, tools/);
   assert.equal(doctor.out.includes(saved.token), false);
   const token = await run(["token"], { env, cwd: project });
   assert.equal(token.out, saved.token + "\n");
@@ -321,4 +334,29 @@ test("saved connections accept a canonical home alias and reject symlinks escapi
   symlinkSync(outside, escaped, "dir");
   writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: escaped }), { mode: 0o600 });
   assert.throws(() => readPointer("room-agent", env), /outside the connection directory/);
+});
+
+test("setup codex and the doctor follow CODEX_HOME when it is set", async t => {
+  const { root, home, project, cleanup } = layout();
+  t.after(cleanup);
+  const codexHome = join(root, "custom-codex");
+  const env = envFor(home, { CODEX_HOME: codexHome });
+  const result = await run(["setup", "codex", "--project", project], { env, cwd: project, platform: "linux" });
+  assert.equal(result.code, 0);
+  const toml = join(codexHome, "config.toml");
+  assert.match(readFileSync(toml, "utf8"), new RegExp("url = " + JSON.stringify(MCP)));
+  assert.equal(existsSync(join(home, ".codex", "config.toml")), false);
+  assert.match(result.out, new RegExp(toml.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(toolConfigReady({ tool: "codex", project, home, platform: "linux", env }), true);
+  assert.equal(toolConfigReady({ tool: "codex", project, home, platform: "linux", env: { HOME: home } }), false);
+  // A relative CODEX_HOME is ignored, matching ~/.codex.
+  assert.equal(codexHomeOf({ HOME: home, CODEX_HOME: "rel/dir" }), join(home, ".codex"));
+});
+
+test("doctor wake advice is quiet only when the room can reach the agent", async () => {
+  const { wakePathAdvice } = await import("../cli/commands/doctor.mjs");
+  assert.equal(wakePathAdvice({ wakeMode: "wakeable" }), null);
+  assert.equal(wakePathAdvice({ wakeMode: "pull-only", lastPollAt: 1 }), null);
+  assert.match(wakePathAdvice({ wakeMode: "pull-only", lastPollAt: null }), /Fix:/);
+  assert.match(wakePathAdvice(null), /Fix:/);
 });

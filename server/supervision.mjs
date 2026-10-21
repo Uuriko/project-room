@@ -56,7 +56,7 @@ export const MAX_SNOOZE_MS = 30 * 24 * 3600 * 1000;
 export const ROUTER_CONFIDENCE_FLOOR = 0.35; // below this the router broadcasts — no lane-naming
 
 const RETRACTABLE_BADGE = "↩ retractable — ~6s to take back";
-const CONFIRM_BADGE = "⚠ confirm — cannot be undone";
+const CONFIRM_BADGE = "Confirm: cannot be undone";
 
 export const cardIdOf = dedupeKey =>
   `sv_${createHash("sha256").update(String(dedupeKey)).digest("hex").slice(0, 16)}`;

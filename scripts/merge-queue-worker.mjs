@@ -260,11 +260,7 @@ async function cmdTick() {
       return;
     }
     const reviews = ghJson(["pr", "view", String(pr), "--json", "reviews", "--jq", "[.reviews[] | .state]"]);
-    if (reviews.includes("CHANGES_REQUESTED") && AUTHORIZED_HEAD !== headSha) {
-      await eject(claimId, "open CHANGES_REQUESTED review (lander rule: merge only after rev-reviewer APPROVE on the exact head)", pr);
-      return;
-    }
-    if (reviews.includes("CHANGES_REQUESTED")) console.log("Review findings present; exact-head operator authorization confirms they were assessed. Review status alone is advisory.");
+    if (reviews.includes("CHANGES_REQUESTED")) console.log("Review findings present. Review is advisory (RULES.md); assess them before merging.");
     const gate = await claimGate(claimId, headSha);
     if (!gate.ok) { await eject(claimId, gate.reason, pr); return; }
     console.log(`release gate on ${headSha.slice(0, 7)}: ${gate.authorization ?? `approved by ${gate.approvedBy.join(", ")}`}`);

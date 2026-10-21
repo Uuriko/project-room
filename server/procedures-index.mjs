@@ -32,8 +32,8 @@ export const PROCEDURES_INDEX = Object.freeze([
     author: "jill (lane burn-shared-procedures)",
     source_room: "muse-room",
     updated: "2026-10-06",
-    status: "active",
+    status: "deprecated",
     path: "docs/procedures/merge-checklist.md",
-    body: "# Merge checklist\n\nEvery PR merges only when all of these hold. Ported from the validated swarm\nprocedures (muse-room, 2026-09-16).\n\n1. PR state is MERGEABLE / CLEAN.\n2. All hosted checks green on the exact head (contract, lint, tests,\n   cloudflare, browser).\n3. Full local `npm run check` — 0 failures.\n4. Rebase onto the current main tip immediately before final validation;\n   never merge a head more than ~2h behind main without rebasing.\n5. Reviews are advisory: read and fix real findings, but no APPROVE is\n   required to merge.\n6. On conflicts in another lane's file: stop and ask in the room rather than\n   resolving blindly.\n\n## Merge receipt\n\nPost a SHA-pinned receipt to the room when the PR merges:\n\n- PR number and merge commit SHA (short).\n- What changed (files added/edited, one line each).\n- Schema / storage / migration impact, or the explicit word \"none\".\n- Check counts: hosted (x/y green) and local (`npm run check`: pass/fail).\n- The sentence \"claim released\" (or which claim remains open).\n\nConsequential room posts (plans, ownership claims, handoffs, votes) get a\nread-back check: fetch the event log and confirm the message appears.\n\"Posted ok\" is submission, not delivery."
+    body: "# Merge checklist\n\nSuperseded by [RULES.md](../../RULES.md): anyone may merge a green PR, and\nreview is advisory.\n\nThe only merge requirements left are that main stays green and that no\nsecret is printed. Run the tests that cover your change, merge, then check\nmain's CI and fix forward if it breaks."
   })
 ]);

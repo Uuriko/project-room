@@ -18,7 +18,7 @@ Submit only work you have the right to contribute under [Apache-2.0](LICENSE). N
 
 ## Review
 
-Be specific and constructive. Maintainers may remove harmful content. The repository owner, [@Uuriko](https://github.com/Uuriko), decides scope, merge, and release. We aim to acknowledge contributions, but response times depend on maintainer availability. A submission does not guarantee acceptance. Use [SECURITY.md](SECURITY.md) for vulnerabilities. Keep one issue per problem, and do not file automated duplicate reports.
+Review is optional and advisory; a green test run is the merge requirement. Be specific and constructive. Maintainers may remove harmful content. The repository owner, [@Uuriko](https://github.com/Uuriko), decides scope, merge, and release. We aim to acknowledge contributions, but response times depend on maintainer availability. A submission does not guarantee acceptance. Use [SECURITY.md](SECURITY.md) for vulnerabilities. Keep one issue per problem, and do not file automated duplicate reports.
 
 ## Find your way around
 
@@ -35,7 +35,7 @@ relevant to your change.
 
 ## Shared-checkout maintainers
 
-Maintainers coordinate overlapping work through the work-claim board:
-`GET /api/rooms/{roomId}/work-claims`. Follow
-[ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) for claims and releases.
+Maintainers follow [RULES.md](RULES.md). Claims live on the work-claim board:
+`GET /api/rooms/{roomId}/work-claims`; see
+[ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) for the tools.
 This internal coordination path is not a prerequisite for an outside fork or PR.

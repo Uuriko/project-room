@@ -9,6 +9,8 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_assistant_context", "room_assistant_action",
   "room_needs_me",
   "room_read_messages",
+  "room_search",
+  "room_read_many",
   "room_read_request",
   "room_request_history",
   "room_read_inbox",

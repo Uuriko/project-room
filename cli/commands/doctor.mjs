@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECRET_ENV, SERVER_NAME } from "../../server/connect-snippets.mjs";
-import { checkAccess, checkReady, loadSecret } from "../auth.mjs";
+import { checkAccess, checkReady, loadSecret, mcpRequest } from "../auth.mjs";
 import { BEGIN } from "../files.mjs";
-import { homeOf, loadConnection, readProject } from "../paths.mjs";
+import { codexHomeOf, homeOf, loadConnection, readProject } from "../paths.mjs";
 import { commandOnPath } from "../which.mjs";
 
 export function nodeSatisfies(version, minimum = "24.19.0") {
@@ -30,7 +30,7 @@ export function toolConfigReady({ tool, via, project, home, platform, env }) {
   if (!tool || tool === "generic") return true;
   if (tool === "claude-code" && via === "command") return Boolean(commandOnPath("claude", env));
   if (tool === "claude-code") return containsServer(join(project, ".mcp.json"));
-  if (tool === "codex") return containsServer(join(home, ".codex", "config.toml"));
+  if (tool === "codex") return containsServer(join(codexHomeOf({ ...env, HOME: home }), "config.toml"));
   if (tool === "cursor") return containsServer(join(project, ".cursor", "mcp.json"));
   if (tool === "cline") return containsServer(clinePath(home, platform));
   if (tool === "vscode") return containsServer(join(project, ".vscode", "mcp.json"));
@@ -75,6 +75,39 @@ export async function doctorCommand(argv, { env = process.env, cwd = process.cwd
     out("room setup " + tool);
     return 1;
   }
-  out("Node, the saved connection, /api/ready, room_check_access, and the " + tool + " config check out. " + SECRET_ENV + " stays out of the tool config.");
+  const origin = loaded.config.origin, roomId = loaded.config.roomId;
+  // Identity: the credential must belong to the saved room.
+  const rooms = Array.isArray(access.check?.rooms) ? access.check.rooms : null;
+  const membership = rooms && roomId ? rooms.find(row => row.roomId === roomId) : null;
+  if (rooms && roomId && !membership) {
+    out("This agent identity is not a member of room " + roomId + ". Fix: room login --room <invite-for-that-room> --accept");
+    return 1;
+  }
+  // Tools: the hosted catalog must offer what an agent needs to talk and read.
+  const listed = await mcpRequest({ origin, secret, method: "tools/list", fetchImpl });
+  const names = new Set((listed?.tools ?? []).map(tool => tool?.name));
+  const missing = DOCTOR_REQUIRED_TOOLS.filter(name => !names.has(name));
+  if (!listed || missing.length) {
+    out((listed ? "The room's tool list is missing " + missing.join(", ") + "." : "The room did not answer tools/list.")
+      + " Fix: room setup " + tool + " to refresh the config, then restart " + tool + ".");
+    return 1;
+  }
+  // Wake path: can the room wake this agent? Advisory: a pull-only agent still works.
+  const card = membership?.memberId
+    ? await mcpRequest({ origin, secret, method: "tools/call", params: { name: "room_member_card", arguments: { roomId, memberId: membership.memberId } }, fetchImpl })
+    : null;
+  const reach = card?.structuredContent?.reach ?? card?.structuredContent?.card?.reach ?? null;
+  const wakeLine = wakePathAdvice(reach);
+  out("Node, the saved connection, /api/ready, room_check_access, identity, tools, and the " + tool + " config check out. " + SECRET_ENV + " stays out of the tool config.");
+  if (wakeLine) out(wakeLine);
   return 0;
+}
+
+export const DOCTOR_REQUIRED_TOOLS = Object.freeze(["room_check_access", "room_post_message"]);
+
+// null when the room can wake the agent; otherwise one line with the fix.
+export function wakePathAdvice(reach) {
+  if (reach?.wakeMode === "wakeable") return null;
+  if (reach?.wakeMode === "pull-only" && reach.lastPollAt) return null;
+  return "Wake path: the room has not heard from this agent's listener, so @mentions will wait until it next checks in. Fix: start your agent with the room listener (room setup again if unsure), then run room doctor.";
 }

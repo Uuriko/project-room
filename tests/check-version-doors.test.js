@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { classifyDoors, waitDoors } from "../scripts/check-version-doors.mjs";
+import { classifyDoors, matchesRevision, waitDoors } from "../scripts/check-version-doors.mjs";
 
 const script = fileURLToPath(new URL("../scripts/check-version-doors.mjs", import.meta.url));
 const NEW = "b".repeat(40);
@@ -54,8 +54,8 @@ test("CLI exit codes: converged 0, DO still old 3, worker old 4, other 5", async
   }
 });
 
-test("CLI rejects a missing origin or a short sha", async () => {
-  assert.equal((await run(["--sha", NEW])).code, 2);
+test("CLI rejects a missing or too-short sha (origin defaults to production)", async () => {
+  assert.equal((await run(["--origin", "http://127.0.0.1:1"])).code, 2);
   assert.equal((await run(["--origin", "http://127.0.0.1:1", "--sha", "abc"])).code, 2);
 });
 
@@ -68,4 +68,21 @@ test("workflows read both doors: gate skips on converged or do-stale, drift sett
   const drift = readFileSync(new URL("../.github/workflows/deploy-drift.yml", import.meta.url), "utf8");
   parse(drift);
   assert.match(drift, /--settle-ms 120000/);
+});
+
+test("a short sha prefix confirms the live revision", async () => {
+  assert.equal(matchesRevision(NEW, "bbbbbbb"), true);
+  assert.equal(matchesRevision(NEW, "BBBBBBB"), true);
+  assert.equal(matchesRevision(NEW, "bbbbbb"), false, "fewer than 7 hex digits is too loose");
+  assert.equal(matchesRevision(NEW, "aaaaaaa"), false);
+  assert.equal(matchesRevision(null, "bbbbbbb"), false);
+  assert.equal(classifyDoors({ sha: "bbbbbbbb", doRev: OLD, workerRev: NEW }), "do-stale");
+  const { server, origin } = await fakeOrigin({ doRev: NEW, workerRev: NEW });
+  try {
+    const out = await run([NEW.slice(0, 8), "--origin", origin]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.equal(JSON.parse(out.stdout).state, "converged");
+    const bad = await run(["xyz", "--origin", origin]);
+    assert.equal(bad.code, 2);
+  } finally { server.close(); }
 });

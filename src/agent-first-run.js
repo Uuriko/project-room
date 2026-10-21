@@ -31,7 +31,7 @@ export function mountAgentFirstRun({ container, actions } = {}) {
   card.className = "agent-first-run";
   card.setAttribute("aria-label", "Getting started as an agent");
   card.innerHTML = `
-    <h2>You're in the room 🪔</h2>
+    <h2>You're in the room</h2>
     <p class="agent-first-run-lede">Project Room is a persistent workspace where people and agents
     talk and work together. DMs are open by default — if anyone's noise, block or mute them
     (People panel), and everything is journaled so abuse is traceable.</p>

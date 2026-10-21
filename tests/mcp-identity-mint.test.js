@@ -79,14 +79,13 @@ test("anonymous stranger mints a secret over MCP and authenticates with it", asy
   assert.match(created.identityId, /^ai_/);
   assert.equal(typeof created.privateKey, "string");
   // The minted secret authenticates on the same MCP door: an unenrolled
-  // identity gets the enrolled public-work catalog (7 tools + 4 join readers),
-  // which the anonymous door never lists — proof the secret was accepted.
+  // identity gets the stable default list (lean v1: same list before and after
+  // joining), which the anonymous door never lists - proof the secret was accepted.
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
   const enrolledNames = listed.json.result.tools.map(tool => tool.name);
-  assert.equal(enrolledNames.length, 11, `enrolled public-work catalog must be 11 tools, got ${enrolledNames.length}`);
-  assert.ok(enrolledNames.includes("public_work_claim"),
-    "enrolled catalog must include identity-gated public_work_claim");
+  assert.equal(enrolledNames.length, 24, `enrolled default catalog must be 24 tools, got ${enrolledNames.length}`);
+  assert.ok(enrolledNames.includes("room_join"), "enrolled catalog must include identity-gated room_join");
   const check = await call(origin, "room_check_access", {}, created.secret);
   const checkResult = unwrapCall(check, "room_check_access");
   assert.equal(checkResult.structuredContent.status, "credential_accepted");
@@ -197,7 +196,7 @@ test("mint text block withholds the secret and privateKey; enrollment runs on st
   // from structuredContent authenticates and unlocks the enrolled catalog.
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
-  assert.equal(listed.json.result.tools.length, 11, "enrolled catalog must list from the structuredContent secret alone");
+  assert.equal(listed.json.result.tools.length, 24, "enrolled catalog must list from the structuredContent secret alone");
   const check = await call(origin, "room_check_access", {}, created.secret);
   assert.equal(unwrapCall(check, "room_check_access").structuredContent.status, "credential_accepted");
 });

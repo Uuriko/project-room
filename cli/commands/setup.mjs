@@ -7,7 +7,7 @@ import {
 import { mcpUrl } from "../auth.mjs";
 import { loginCommand } from "./login.mjs";
 import { planJson, planMarked, unifiedDiff } from "../files.mjs";
-import { homeOf, loadConnection, readProject, safeName, writeProject } from "../paths.mjs";
+import { codexHomeOf, homeOf, loadConnection, readProject, safeName, writeProject } from "../paths.mjs";
 import { commandOnPath } from "../which.mjs";
 
 export const SETUP_TOOLS = Object.freeze(["claude-code", "codex", "cursor", "cline", "vscode", "aider", "generic"]);
@@ -43,7 +43,7 @@ function serverEntry(url, { type, header }) {
   return { ...(type ? { type } : {}), url, headers: { Authorization: header } };
 }
 
-export function planTool(tool, { project, home, url, platform, claude }) {
+export function planTool(tool, { project, home, url, platform, claude, codexHome = join(home, ".codex") }) {
   const files = [];
   let command = null;
   let next = "";
@@ -60,10 +60,10 @@ export function planTool(tool, { project, home, url, platform, claude }) {
       next = "Wrote .mcp.json. Install the claude command, or open this repo in Claude Code. Set " + SECRET_ENV + " from room token.";
     }
   } else if (tool === "codex") {
-    const path = join(home, ".codex", "config.toml");
+    const path = join(codexHome, "config.toml");
     const block = `[mcp_servers.${SERVER_NAME}]\nurl = ${JSON.stringify(url)}\nbearer_token_env_var = ${JSON.stringify(SECRET_ENV)}\n`;
     files.push({ path, contents: planMarked(readOrNull(path), block) });
-    next = "Codex reads ~/.codex/config.toml. Export " + SECRET_ENV + " from room token, then start Codex.";
+    next = "Codex reads " + path + ". Export " + SECRET_ENV + " from room token, then start Codex.";
   } else if (tool === "cursor") {
     const path = join(project, ".cursor", "mcp.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
@@ -139,7 +139,7 @@ export async function setupCommand(argv, { env = process.env, cwd = process.cwd(
     }
   }
   const claude = commandOnPath("claude", env);
-  const plan = planTool(tool, { project, home, url, platform, claude });
+  const plan = planTool(tool, { project, home, url, platform, claude, codexHome: codexHomeOf(env) });
   if (flags["dry-run"]) {
     let text = "";
     for (const file of plan.files) text += unifiedDiff(file.path, readOrNull(file.path), file.contents);

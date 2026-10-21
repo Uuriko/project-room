@@ -294,6 +294,41 @@ export function convergeWakeSignalRoomScope(db) {
   for (const indexDdl of indexDdls) db.exec(indexDdl);
 }
 
+// Presence context (Reason-style presence): what the host is on right now.
+// Kept in its own lazily created table so the verified heartbeat schema is
+// unchanged. Every field is optional, short, and shown to room members, so
+// it must never carry a secret: plain names only.
+export const HOST_CONTEXT_ACTIVITIES = Object.freeze(["busy", "idle"]);
+const CONTEXT_FIELDS = Object.freeze(["machine", "repo", "branch", "activity", "doing"]);
+const hostContextSchema = `CREATE TABLE IF NOT EXISTS agent_host_context (
+  agent_id TEXT NOT NULL, host_id TEXT NOT NULL, context_json TEXT NOT NULL, updated_at INTEGER NOT NULL,
+  PRIMARY KEY(agent_id, host_id))`;
+export function checkHostContext(value) {
+  if (value === undefined || value === null) return null;
+  check(typeof value === "object" && !Array.isArray(value), 422, "invalid_heartbeat", "context must be an object");
+  check(Object.keys(value).every(key => CONTEXT_FIELDS.includes(key)), 422, "invalid_heartbeat",
+    `context fields are ${CONTEXT_FIELDS.join(", ")}`);
+  const out = {};
+  for (const key of ["machine", "repo", "branch"]) {
+    if (value[key] === undefined || value[key] === null) continue;
+    check(typeof value[key] === "string" && value[key].trim().length > 0 && value[key].length <= 120
+      && !/[\u0000-\u001f]/.test(value[key]), 422, "invalid_heartbeat", `context.${key} must be 1 to 120 printable characters`);
+    out[key] = value[key].trim();
+  }
+  // doing: a short live status line from the agent's last tool action,
+  // like "Edit math.js". Plain words only, never command arguments.
+  if (value.doing !== undefined && value.doing !== null) {
+    check(typeof value.doing === "string" && value.doing.trim().length > 0 && value.doing.length <= 80
+      && !/[\u0000-\u001f]/.test(value.doing), 422, "invalid_heartbeat", "context.doing must be 1 to 80 printable characters");
+    out.doing = value.doing.trim();
+  }
+  if (value.activity !== undefined && value.activity !== null) {
+    check(HOST_CONTEXT_ACTIVITIES.includes(value.activity), 422, "invalid_heartbeat", "context.activity must be busy or idle");
+    out.activity = value.activity;
+  }
+  return out;
+}
+
 export class AgentHeartbeats {
   constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {
     this.store = store;
@@ -318,6 +353,32 @@ export class AgentHeartbeats {
   }
 
   now() { return this.store.now(); }
+
+  // Omitted context keeps the stored one; null or {} clears it.
+  setHostContext(agentId, hostId, context, at = this.now()) {
+    this.db.exec(hostContextSchema);
+    if (!context || Object.keys(context).length === 0) {
+      this.db.prepare("DELETE FROM agent_host_context WHERE agent_id=? AND host_id=?").run(agentId, hostId);
+      return;
+    }
+    this.db.prepare(`INSERT INTO agent_host_context (agent_id, host_id, context_json, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(agent_id, host_id) DO UPDATE SET context_json=excluded.context_json, updated_at=excluded.updated_at`)
+      .run(agentId, hostId, JSON.stringify(context), at);
+  }
+
+  // The context of the agent's most recently seen host, or null. Read-only
+  // opens that never saw a context have no table: read as null.
+  contextOf(agentId) {
+    try {
+      const row = this.db.prepare(`SELECT c.context_json AS json, c.updated_at AS at FROM agent_host_context c
+        JOIN agent_hosts h ON h.agent_id=c.agent_id AND h.host_id=c.host_id
+        WHERE c.agent_id=? ORDER BY h.last_seen_at DESC LIMIT 1`).get(agentId);
+      return row ? Object.freeze({ ...JSON.parse(row.json), updatedAt: row.at }) : null;
+    } catch (error) {
+      if (isMissingTable(error)) return null;
+      throw error;
+    }
+  }
 
   // Read-only never migrates: verify the additive tables only when present.
   verifySchema({ allowAbsent = false } = {}) {
@@ -511,9 +572,10 @@ export class AgentHeartbeats {
   // erased a declared cadence — collapsing the presence window, and
   // with #3592 the wakeability window too — for a host that had
   // declared its cadence once and then heartbeated bare.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat", context = undefined }) {
     checkAgentId(agentId);
     checkHostId(hostId);
+    const hostContext = context === undefined ? undefined : checkHostContext(context);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
     // RC-2026-09-28-3602: wakeable is the default; mode may be null when the
     // caller omits it. An explicitly invalid value still fails.
@@ -544,6 +606,7 @@ export class AgentHeartbeats {
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
+    if (hostContext !== undefined) this.setHostContext(agentId, hostId, hostContext, at);
     // plan-wake-live: heartbeat activity proves the host is listening.
     // CX5-FIX: a room-scoped credential's heartbeat (activityRoomId set by
     // the route) stamps room activity only — never the global stamp.

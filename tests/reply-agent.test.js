@@ -149,7 +149,7 @@ test("read validators refuse changed identity, window, body, lineage and answer 
 });
 
 test("reply tool schemas are finite and partial/null bundles cannot be silently converted", () => {
-  assert.equal(replyTools.length, 7);
+  assert.equal(replyTools.length, 8);
   for (const name of ["room_respond_to_request", "room_request_reply", "room_cancel_request"]) {
     assert.equal(validReplyArguments(name, {}), false);
     assert.equal(validReplyArguments(name, { token: "secret" }), false);

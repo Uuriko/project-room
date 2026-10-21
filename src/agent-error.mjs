@@ -472,6 +472,10 @@ const AX_NAMED_RECOVERIES = {
   work_claim_terminal: ["This work claim is in a terminal state — the action cannot apply. Read the current item; do not retry the action.", "Re-read the work item; its claim is terminal."],
   work_not_delivered: ["Under a reviewed policy a claim cannot jump from in_progress to done. The holder first finishes it to delivered with its delivery bundle; the reviewer then verifies it to done from their own session.", "Finish the claim to delivered first (state \"delivered\" with the delivery bundle), then have the reviewer verify it to done."],
   work_resolved: ["This work is resolved; no reminder was scheduled. Nothing to do.", "Treat it as done; the work is resolved."],
+  device_code_used: ["That sign-in code was already approved.", "Start a fresh sign-in with room login; do not approve the same code again."],
+  approval_not_approved: ["This approval card is not approved yet.", "Wait for the owner to approve the card, then read the ready list again."],
+  draft_not_approved: ["This draft is not approved yet.", "Wait for the owner to approve the draft before sending it."],
+  playbook_version_conflict: ["The playbook changed since you read it.", "Reload the playbook and make your edit against its current version."],
 };
 
 // #3055: idempotency-family codes whose correct handling mirrors
