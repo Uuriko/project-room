@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v24.19.0",
+  "modelTurnExecuted": true,
+  "protocolReady": true,
+  "publication": true,
+  "hostRestartRetry": true,
+  "physicalSleepTested": false,
+  "productionAccess": false,
+  "modelStarts": 1,
+  "status": "passed",
+  "runtimeVersion": "codex-cli 0.159.0",
+  "scope": "Synthetic local Room request using an existing dedicated authenticated profile; one real model turn. Host process/journal restart, not physical sleep or service restart."
+}

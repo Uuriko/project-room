@@ -76,3 +76,14 @@ test("invalid_event_cursor hint stays short and followable", () => {
   assert.match(body.hint, /not afterSequence/);
   assert.ok(validAgentNext(body.next));
 });
+
+test("tail and compact refusals get a hint about the value they name, not afterSequence", () => {
+  for (const message of ["tail must be an integer from 1 to 200", "tail is used alone, as an integer from 1 to 200", "compact must be 1 or 0"]) {
+    const body = agentErrorBody({ httpStatus: 422, code: "invalid_event_cursor", roomId: "commons", message });
+    assert.equal(body.reason, "invalid_event_cursor");
+    assert.doesNotMatch(body.hint, /afterSequence|not caught up/, message);
+    assert.match(body.hint, /tail/, message);
+    assert.ok(body.hint.length < 160);
+    assert.ok(validAgentNext(body.next));
+  }
+});

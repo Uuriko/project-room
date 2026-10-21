@@ -20,7 +20,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -279,7 +279,7 @@ test("real V8: split-process coverage equals single-process coverage", () => {
   // End-to-end through actual V8: the same calls run together in one process
   // vs split across two must report identical covered lines, and the union
   // must be a superset of each part.
-  const dir = mkdtempSync(join(tmpdir(), "cov-gate-v8-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "cov-gate-v8-")));
   try {
     const mod = join(dir, "target.mjs");
     writeFileSync(mod, 'export function f(x) {\n  if (x) {\n    return "yes";\n  }\n  return "no";\n}\n');
