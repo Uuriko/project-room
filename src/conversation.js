@@ -645,9 +645,3 @@ export function emptyTimelineHtml({ historyHidden = false, canInvite = false } =
   return `<li class="empty-note">${lead} <button type="button" class="text-button" data-empty-write>Write the first one</button>${invite}</li>`;
 }
 
-// Recipient picker and work selects: people read names, not member ids.
-// displayNames (member-display-names.js) already adds the id only when two
-// members share a name.
-export function memberOptionLabel(displayName, kind, { revoked = false } = {}) {
-  return `${displayName} · ${kind}${revoked ? " · access revoked" : ""}`;
-}

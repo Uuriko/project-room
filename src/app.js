@@ -12,7 +12,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, emptyTimelineHtml, memberOptionLabel } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, emptyTimelineHtml } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -1324,7 +1324,6 @@ function renderDirectoryCard(card) {
     + `<p class="form-hint">${esc(reachLine)}</p>`;
 }
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
-const pickerName = id => displayNames ? displayNames(id) : memberLabel(id);
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", state.members[id].displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
@@ -1822,7 +1821,7 @@ function selectOptions(selector, members, blank) {
   const select = $(selector), previous = select.value;
   const signature = JSON.stringify(members.map(m => [m.id, m.displayName]));
   if (select.dataset.signature === signature) return;
-  select.innerHTML = `<option value="">${esc(blank)}</option>${members.map(m => `<option value="${esc(m.id)}">${esc(memberOptionLabel(pickerName(m.id), kindLabel(m.kind)))}</option>`).join("")}`;
+  select.innerHTML = `<option value="">${esc(blank)}</option>${members.map(m => `<option value="${esc(m.id)}">${esc(memberLabel(m.id))} · ${esc(kindLabel(m.kind))}</option>`).join("")}`;
   if (previous && !members.some(m => m.id === previous)) select.insertAdjacentHTML("beforeend", `<option value="${esc(previous)}" disabled>Previously selected member unavailable — choose again</option>`);
   if (previous) select.value = previous;
   select.dataset.signature = signature;
@@ -6059,7 +6058,7 @@ function producerField() {
   const members = Object.values(state.members).sort((a, b) => a.displayName.localeCompare(b.displayName));
   const self = members.find(member => member.id === session.member.id);
   const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
-  const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberOptionLabel(pickerName(member.id), kindLabel(member.kind), { revoked: member.active === false }))}</option>`).join("");
+  const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(kindLabel(member.kind))}${member.active === false ? " · access revoked" : ""}</option>`).join("");
   return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
