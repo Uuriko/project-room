@@ -6,6 +6,7 @@ import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CA
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "./governance.mjs";
+import { CONNECT_SKILL_PATH, AGENT_SKILLS_INDEX_PATH, connectSkillMd, agentSkillsIndexJson } from "./connect-skill.mjs";
 import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
 import { ROOM_ORIGIN, EDGE_DOOR_HOSTS } from "../src/service-origin.js";
@@ -1573,6 +1574,11 @@ const CANONICAL = Object.freeze({
   // the served policy cannot drift from what the code enforces.
   "/.well-known/governance.json": Object.freeze({ type: "application/json; charset=utf-8",
     body: governanceJson({ origin: ROOM_ORIGIN, revision: deployedInfo().revision, buildId: deployedInfo().buildId }) }),
+  // Agent-skills well-known namespace: the discovery index + the one-paste
+  // connect skill (2026-10-19 slice 1). Bodies generated from the live route
+  // inventory by server/connect-skill.mjs, so they cannot drift.
+  [AGENT_SKILLS_INDEX_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentSkillsIndexJson() }),
+  [CONNECT_SKILL_PATH]: Object.freeze({ type: "text/markdown; charset=utf-8", body: connectSkillMd() }),
   [MCP_SERVER_CARD_PATH]: MCP_SERVER_CARD_DOC,
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
   // JWKS key-discovery document for the A2A v1.0 JWS card signature
