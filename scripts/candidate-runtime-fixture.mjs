@@ -70,6 +70,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+  paths.add('server/routes/wake-health.mjs'); // MIG-WAKE S7: per-agent wake-health RT route (imported by server/routes/table.mjs)
+  paths.add('server/wake-health.mjs'); // MIG-WAKE S7: per-agent wake-health read (imported by server/routes/wake-health.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)

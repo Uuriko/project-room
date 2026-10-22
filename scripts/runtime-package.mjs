@@ -272,6 +272,7 @@ optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes 
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/wake-metrics.mjs"); // #3345: wake-reliability accounting — emission-attempt outcomes + loss-class journal (imported by server/agent-heartbeats.mjs, server/store.mjs, server/work-wakes.mjs, server/work-claim-events.mjs, server/inbox-collab-routes.mjs; pure, no imports)
+optional.push("server/wake-health.mjs"); // MIG-WAKE S7: per-agent wake-health read (imported by server/routes/wake-health.mjs; imports wake-metrics.mjs)
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware identity->seats enumeration for read surfaces (imported by server/needs-me.mjs, server/agent-rooms.mjs and server/capability-visibility.mjs; pure, no imports)
@@ -342,6 +343,7 @@ optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code 
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+optional.push("server/routes/wake-health.mjs"); // MIG-WAKE S7: per-agent wake-health RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/front-door.mjs"); // EXP-7 Variant B: /about front-door live facts RT route (imported by server/routes/table.mjs)
 optional.push("src/front-door.js"); // EXP-7 Variant B: /about live-facts script (loaded by about.html, registered in server/public-assets.mjs)

@@ -11349,6 +11349,41 @@ paths:
         '403': { description: 'insufficient scope, room mismatch, or not a member of the room' }
         '422': { description: invalid_heartbeat }
         '429': { description: rate_limited }
+  /api/wake-health:
+    get:
+      summary: One agent's wake health (pending stock, ages, last ack, journaled failures)
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read`. Returns the target agent's wake health from the
+        stores the server already keeps: pending signal count, oldest
+        pending age, last emitted and last acked stamps, wakeability, and
+        the agent's journaled wake failures (loss classes from the #3345
+        accounting journal). With no query params returns your own
+        health; with `agentId` returns that agent's — another agent's
+        health requires a shared room (identity credentials must be
+        linked into a room the target is linked into; a room access key
+        reads only members of its bound room). Exact signal stamps are
+        served inside that permission shape only. `counters` and
+        `failureRate` are null and `gaps` names why: the wake counters
+        are keyed by room/store/event/door/kind with no per-agent
+        dimension, a signal's page inclusion is not stamped per signal
+        on this build (delivered_at is written at ack; wake spec S3 adds
+        the pickup stamp), and capped / 429-degraded are client-bridge
+        states the server does not count. 120 requests per identity per
+        minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: query
+          schema: { type: string }
+          description: Agent (identity id) whose wake health to read (shared room required); omit for your own health.
+      responses:
+        '200': { description: "{ agentId, asOf, wakeable, windowMs, lastPolledAt, signals, failures, counters: null, failureRate: null, gaps }" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: 'insufficient scope, or the target shares no room with the caller (or is outside a room key''s bound room)' }
+        '422': { description: invalid_heartbeat }
+        '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
       summary: Acknowledge handled wake signals
