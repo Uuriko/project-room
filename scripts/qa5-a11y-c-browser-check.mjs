@@ -104,6 +104,63 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   assert.equal(created?.note, "context for whoever picks this up", "note survived the form wiring");
 });
 
+// #4532: text typed into the New-item form before the board's first read
+// completes must survive the completion paint — paint() replaces the form
+// node, and the typed values used to vanish silently. The claims list
+// response is gated so the typing provably lands before that paint; a
+// live update arriving while the form is dirty must also repaint the
+// board without discarding the draft; the submit after the paints must
+// create the claim with the typed values.
+test("new-item input typed before the completion paint survives it and submits", { timeout: 90000 }, async t => {
+  const { fixture, origin, page } = await boot(t);
+  let releaseClaims;
+  const claimsGate = new Promise(resolve => { releaseClaims = resolve; });
+  await page.route(/\/work-claims\?/, async route => {
+    if (route.request().method() === "GET") await claimsGate;
+    await route.continue();
+  });
+  await page.goto(origin);
+  const session = await signInFixture(page, fixture.keys.owner);
+  // On current main the human-experience layer hides the Tasks nav from
+  // non-advanced human sessions (human-experience.css), so the shared
+  // openBoard cannot reach the button; flip the app's own advanced toggle
+  // through its change handler when that layer is active. Sessions
+  // without the layer already show the nav.
+  await page.evaluate(() => {
+    const box = document.querySelector("#human-advanced");
+    if (box && !box.checked) box.click();
+  });
+  await openBoard(page);
+  const title = page.locator('#board-new-item input[name="title"]');
+  const note = page.locator('#board-new-item input[name="note"]');
+  await title.fill("Typed before the paint");
+  await note.fill("draft note survives the repaint");
+  releaseClaims();
+  // The completion paint is the one that removes the loading skeleton.
+  await page.waitForFunction(() => !document.querySelector(".board-skeleton"), null, { timeout: 15000 });
+  assert.equal(await title.inputValue(), "Typed before the paint", "title typed before the completion paint survives it");
+  assert.equal(await note.inputValue(), "draft note survives the repaint", "note typed before the completion paint survives it");
+  // A live update landing while the form is dirty repaints the board: the
+  // new claim's card must appear and the draft must survive that paint too.
+  const created = await page.context().request.post(`${origin}/api/rooms/commons/work-claims`, {
+    headers: { Origin: origin, "X-CSRF-Token": session.csrf }, data: { id: "live-update-probe", title: "Live update probe claim" }
+  });
+  assert.ok(created.ok(), `live-update create answered ${created.status()}`);
+  await page.locator('article[data-claim-id="live-update-probe"]').waitFor({ state: "visible", timeout: 15000 });
+  assert.equal(await title.inputValue(), "Typed before the paint", "title survives a live-update repaint while dirty");
+  await page.locator('#board-new-item button[type="submit"]').click();
+  let claim = null;
+  for (let i = 0; i < 60 && !claim; i += 1) {
+    const res = await page.request.get(`${origin}/api/rooms/commons/work-claims?limit=50`);
+    const body = await res.json();
+    claim = (body.claims ?? []).find(c => c.title === "Typed before the paint");
+    if (!claim) await page.waitForTimeout(500);
+  }
+  assert.ok(claim, "claim was created through the form after the repaints");
+  const createdEntry = (claim.history ?? []).find(entry => entry.action === "created");
+  assert.equal(createdEntry?.note, "draft note survives the repaint", "note typed before the paints reached the created claim");
+});
+
 // D-c: a malformed invite code renders the error screen with the sign-in
 // fallback — the client boot() fail path, not just the server markup.
 test("malformed invite code shows the error screen with the sign-in fallback", { timeout: 60000 }, async t => {

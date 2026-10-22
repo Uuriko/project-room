@@ -134,6 +134,9 @@ async function completionFixture(t) {
       listeners.get(type).push(listener);
     },
     contains(node) { return node === button || node === form || node === field; },
+    // #4532: paint() snapshots in-progress form drafts via querySelectorAll;
+    // this fake models no live form elements, so the list is empty.
+    querySelectorAll(selector) { assert.equal(selector, "form"); return []; },
     querySelector(selector) {
       if (selector === "#board-status") return line;
       if (selector === '[data-focus-key="board-filter-q"]') return field;
@@ -262,6 +265,9 @@ function focusDom(t) {
   const root = {
     addEventListener(type, listener) { assert.ok(["input", "click", "submit"].includes(type)); listeners.set(type, listener); },
     contains: node => nodes.includes(node),
+    // #4532: paint() enumerates forms for its draft snapshot; these parsed
+    // nodes model no form controls, so the snapshot reads them as empty.
+    querySelectorAll: selector => nodes.filter(node => matches(node, selector)),
     querySelector: query,
     set innerHTML(html) {
       if (nodes.includes(active)) active = body;

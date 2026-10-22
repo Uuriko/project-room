@@ -990,11 +990,84 @@ export function installWorkBoard({ client, getState, getSession }) {
   let filter = { q: "", mine: false };
   let pendingCaret = null;
 
+  // Form drafts (#4532): paint() replaces every node under root, so a form
+  // the user has started filling loses its input on the completion paint
+  // and on every live-update repaint — typed text simply vanished. The
+  // snapshot below records only the fields the user actually changed
+  // (value differs from the rendered default) keyed by form + field name
+  // + occurrence, and paint() writes them back into the fresh nodes.
+  // Untouched fields keep following the fresh render, so server state
+  // (a deliver form's prefill, the claims cap) still lands everywhere the
+  // user has not started typing. The filter form is excluded: its values
+  // ride the `filter` state and its caret has its own restore. A form
+  // whose submit is in flight is excluded too (see submittedForms): the
+  // fresh paint after a submit shows server state, not the sent draft.
+  const submittedForms = new WeakSet();
+  const formDraftKey = form => {
+    if (form.id) return `#${form.id}`;
+    if (typeof form.hasAttribute !== "function" || typeof form.getAttribute !== "function") return null;
+    for (const attr of ["data-claim-review", "data-claim-deliver", "data-claim-link-pr", "data-claim-reassign"])
+      if (form.hasAttribute(attr)) return `${attr}=${form.getAttribute(attr)}`;
+    if (form.hasAttribute("data-claim-cap")) return "data-claim-cap";
+    return null;
+  };
+  function snapshotFormDrafts() {
+    const drafts = new Map();
+    for (const form of root.querySelectorAll("form")) {
+      const key = formDraftKey(form);
+      // A form whose controls cannot be read carries no readable draft;
+      // the filter form's values ride the `filter` state instead.
+      if (!key || !form.elements || form.hasAttribute("data-board-filter") || submittedForms.has(form)) continue;
+      const seen = new Map();
+      const fields = [];
+      for (const field of form.elements) {
+        if (!field.name) continue;
+        const occurrence = seen.get(field.name) ?? 0;
+        seen.set(field.name, occurrence + 1);
+        let draft = null;
+        if (field.type === "checkbox" || field.type === "radio") {
+          if (field.checked !== field.defaultChecked) draft = { checked: field.checked };
+        } else if (field.tagName === "SELECT") {
+          const fallback = [...field.options].findIndex(option => option.defaultSelected);
+          if (field.selectedIndex !== (fallback === -1 ? 0 : fallback)) draft = { value: field.value };
+        } else if (typeof field.value === "string" && typeof field.defaultValue === "string" && field.value !== field.defaultValue) {
+          draft = { value: field.value };
+        }
+        if (draft) fields.push({ name: field.name, occurrence, ...draft });
+      }
+      if (fields.length) drafts.set(key, fields);
+    }
+    return drafts;
+  }
+  function restoreFormDrafts(drafts) {
+    if (!drafts.size) return;
+    for (const form of root.querySelectorAll("form")) {
+      const saved = drafts.get(formDraftKey(form) ?? "");
+      if (!saved) continue;
+      const seen = new Map();
+      for (const field of form.elements) {
+        if (!field.name) continue;
+        const occurrence = seen.get(field.name) ?? 0;
+        seen.set(field.name, occurrence + 1);
+        const draft = saved.find(entry => entry.name === field.name && entry.occurrence === occurrence);
+        if (!draft) continue;
+        if ("checked" in draft) field.checked = draft.checked;
+        else field.value = draft.value;
+      }
+    }
+  }
+
   function paint() {
     const state = getState();
     const session = getSession();
     const active = document.activeElement;
     const restoreFocus = !active || active === document.body || root.contains(active);
+    const drafts = snapshotFormDrafts();
+    // The caret of a draft field rides along with its focus key, so a
+    // repaint mid-word does not jump the typist to the end of the field.
+    const draftSelection = active && root.contains(active) && !active.closest?.("[data-board-filter]")
+      && active.dataset?.focusKey && typeof active.selectionStart === "number"
+      ? { key: active.dataset.focusKey, start: active.selectionStart, end: active.selectionEnd } : null;
     if (pendingFocus) stick = { key: pendingFocus.key ?? null, id: pendingFocus.id ?? null, status: pendingStatus };
     else if (restoreFocus) {
       const key = active?.closest?.("[data-focus-key]")?.dataset.focusKey ?? null;
@@ -1008,6 +1081,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
+    restoreFormDrafts(drafts);
     if (stick?.status) {
       const line = root.querySelector("#board-status");
       if (line) line.textContent = stick.status;
@@ -1019,6 +1093,9 @@ export function installWorkBoard({ client, getState, getSession }) {
     const same = stick.key ? root.querySelector(`[data-focus-key="${CSS.escape(stick.key)}"]`) : null;
     const heading = !same && stick.id ? root.querySelector(`article[data-claim-id="${CSS.escape(stick.id)}"] h4`) : null;
     (same || heading)?.focus();
+    if (draftSelection && same && stick.key === draftSelection.key) {
+      try { same.setSelectionRange(draftSelection.start, draftSelection.end); } catch { /* non-text input */ }
+    }
     if (pendingCaret) restoreFilterCaret();
   }
 
@@ -1269,8 +1346,12 @@ export function installWorkBoard({ client, getState, getSession }) {
   function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
+    // The submitted values are consumed: the repaint that follows shows
+    // server state, not this draft (#4532). If the form node survives
+    // (a failed action with no repaint) the draft is live again.
+    submittedForms.add(form);
     act(run, focus, reconcile, unconfirmed).finally(() => {
-      if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
+      if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); submittedForms.delete(form); }
     });
   }
 
@@ -1306,6 +1387,7 @@ export function installWorkBoard({ client, getState, getSession }) {
         if (linked) return `PR linked to '${item.title || id}'`;
         return error?.message || "Could not confirm the PR link. Check the refreshed claim before trying again.";
       };
+      submittedForms.add(linkForm);
       void act(() => {
         linkForm.setAttribute("aria-busy", "true");
         linkForm.querySelector("input").readOnly = true;
@@ -1313,6 +1395,7 @@ export function installWorkBoard({ client, getState, getSession }) {
         return client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data });
       }, { id, key: `link-pr:${id}`, pending: "Linking PR and checking the current claim…" }, reconcile).finally(() => {
         if (!root.contains(linkForm)) return;
+        submittedForms.delete(linkForm);
         linkForm.removeAttribute("aria-busy");
         linkForm.querySelector("input").readOnly = false;
         linkForm.querySelector("button").disabled = false;
