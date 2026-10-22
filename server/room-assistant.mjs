@@ -91,12 +91,17 @@ export class RoomAssistant {
     const row = this.store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
     return row ? JSON.parse(row.value) : { name: 'Room', coordinatorMemberId: null, revision: 0 };
   }
+  cursor(roomId, config, runs) {
+    // Hash persisted, viewer-visible state, not time-derived display labels.
+    // This is a reconciliation cursor, not an event-log acknowledgement.
+    return `a1:${createHash('sha256').update(JSON.stringify([this.store.headSequence(roomId), config, runs])).digest('hex')}`;
+  }
   list(roomId, authorize) {
     return this.store.readTransaction(() => {
       const auth = authorize();
       // Fresh installations have no configuration; reads must not mutate storage.
       if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get())
-        return { contractVersion: 1, roomId, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
+        return { contractVersion: 1, roomId, changeCursor: this.cursor(roomId, null, []), assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
       const state = this.store.room(roomId).state;
       const records = messageRepository(this.store, roomId, state);
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
@@ -104,15 +109,16 @@ export class RoomAssistant {
       // Keep unfinished requests discoverable by their host and controllers;
       // newer terminal history must not push pending work out of this window.
       const runs = this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId)
-        .map(row => visibleRun(JSON.parse(row.value), state, auth.member, floor, records)).filter(Boolean)
-        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
+        .map(row => visibleRun(JSON.parse(row.value), state, auth.member, floor, records)).filter(Boolean);
+      const changeCursor = this.cursor(roomId, config, runs);
+      const displayRuns = runs.map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       // R366-1: a coordinator under an owner (or self) pause cannot claim, so
       // say paused instead of implying the host is offline.
       const connected = coordinator?.active && coordinator.permissions.includes('accept_work');
       const paused = connected && Boolean(this.store.wakeQueue?.pauseStatus?.(roomId, coordinator.id));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs };
+      return { contractVersion: 1, roomId, changeCursor, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs: displayRuns };
     });
   }
   // postToken is the caller's credential, threaded from the route or MCP.
@@ -376,7 +382,62 @@ export class RoomAssistant {
       }
       const response = { contractVersion: 1, roomId, action: input.action, result, ...(receipt ? { receipt } : {}) };
       if (input.action !== 'draft') this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
+      // Hints run after the synchronous transaction stack has committed or
+      // rolled back. The durable cursor, never a hint, determines progress.
+      notifyAssistantChange(this.store, roomId);
       return response;
     });
   }
+}
+
+// Assistant writes do not append room events. Keep their transport hints
+// separate; all delivery re-reads the authorized durable projection.
+const listeners = new WeakMap();
+const waits = new WeakMap();
+function notifyAssistantChange(store, roomId) {
+  queueMicrotask(() => {
+    for (const listener of listeners.get(store) ?? []) listener(roomId);
+  });
+}
+export function waitForAssistantChange(assistant, roomId, authorize, after, { signal, timeoutMs = 10000, credentialHash } = {}) {
+  if (typeof after !== 'string' || !/^a1:[a-f0-9]{64}$/.test(after) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000)
+    throw Object.assign(new Error('Choose a valid assistant cursor and wait duration'), { status: 422, code: 'invalid_assistant_cursor' });
+  const store = assistant.store;
+  const active = waits.get(store) ?? new Map();
+  waits.set(store, active);
+  const count = active.get(credentialHash) ?? 0;
+  if (count >= 3 || [...active.values()].reduce((a, b) => a + b, 0) >= 100)
+    throw Object.assign(new Error('Close another assistant wait before opening more'), { status: 429, code: 'stream_limit' });
+  active.set(credentialHash, count + 1);
+  return new Promise((resolve, reject) => {
+    let timer, unsubscribe, finished = false;
+    const local = listeners.get(store) ?? new Set();
+    listeners.set(store, local);
+    const cleanup = () => {
+      finished = true;
+      clearTimeout(timer); local.delete(wake); unsubscribe?.();
+      signal?.removeEventListener('abort', abort);
+      const remaining = (active.get(credentialHash) ?? 1) - 1;
+      if (remaining) active.set(credentialHash, remaining); else active.delete(credentialHash);
+    };
+    const check = (expired = false) => {
+      if (finished) return;
+      try {
+        const snapshot = assistant.list(roomId, authorize);
+        if (expired || snapshot.changeCursor !== after) { cleanup(); resolve(snapshot); }
+      } catch (error) { cleanup(); reject(error); }
+    };
+    // Event callbacks may occur during a nested transaction. Defer reads until
+    // its synchronous outer stack completes, including rollback.
+    const wake = changed => { if (changed === roomId) queueMicrotask(() => check()); };
+    const abort = () => { if (!finished) { cleanup(); reject(signal.reason ?? new Error('Assistant wait aborted')); } };
+    local.add(wake);
+    unsubscribe = store.onEventAppended(wake);
+    signal?.addEventListener('abort', abort, { once: true });
+    timer = setTimeout(() => check(true), timeoutMs);
+    // Subscribe BEFORE the read: changes between the caller's snapshot and
+    // subscription cannot strand work. Timeout reconciles cross-process writes
+    // and credential revocations even if no local hint was delivered.
+    if (signal?.aborted) abort(); else check();
+  });
 }

@@ -24,8 +24,8 @@ export function scopedCodexThreads(db, connection) {
     .map(row => row.thread_id);
 }
 
-// Shared asks are not AssignmentWatcher reply requests. Poll their authoritative
-// projection: generic room-event wakes alone miss assistant-only changes.
+// Shared asks have their own durable cursor: generic room-event wakes alone
+// miss assistant-only changes. Older servers retain the bounded polling fallback.
 // Reuse the watcher lifetime ownership lock and stop control; execution ownership
 // remains the existing shared-attempt journal and server claim, never a new lease.
 export async function superviseCodexRoom({ connection, db, directory, connect, cwd, policy,
@@ -36,7 +36,7 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
-  let rpc, control, monitorError, authError, failures = 0;
+  let rpc, control, monitorError, authError, nextSnapshot, failures = 0;
   const scope = JSON.stringify([connection.origin, connection.roomId, connection.memberId]);
   let lastStatus;
   const state = (status, extra = {}) => {
@@ -62,7 +62,8 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
     state("watching_room", { providerAuthentication: "unverified" });
     while (!controller.signal.aborted) {
       try {
-        const snapshot = await client.assistant(undefined, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+        const snapshot = nextSnapshot ?? await client.assistant(undefined, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+        nextSnapshot = undefined;
         owner.health("watching");
         if (connectOnStart && !rpc) {
           rpc = await connect(scopedCodexThreads(db, connection));
@@ -78,7 +79,16 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         const candidates = recovering.length ? recovering : assigned.filter(run => run.status === "queued" && !run.attemptId && !run.sourceDeleted);
         candidates.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.id.localeCompare(b.id));
         const run = candidates.find(row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now());
-        if (!run) { if (!candidates.length) state("watching_room"); await pause(pollMs); continue; }
+        if (!run) {
+          if (!candidates.length) state("watching_room");
+          if (snapshot.changeCursor) {
+            const retryAt = Math.min(...candidates.map(row => db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? Date.now()));
+            nextSnapshot = await client.waitForAssistantChange(snapshot.changeCursor, {
+              signal: controller.signal, timeoutMs: Math.max(1, Math.min(10000, retryAt - Date.now()))
+            });
+          } else await pause(pollMs);
+          continue;
+        }
         try {
           if (!rpc) { rpc = await connect(scopedCodexThreads(db, connection)); state("protocol_qualified", { providerAuthentication: "unverified" }); }
           if (controller.signal.aborted) break;

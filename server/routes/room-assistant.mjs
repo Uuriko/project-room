@@ -1,4 +1,4 @@
-import { RoomAssistant } from '../room-assistant.mjs';
+import { RoomAssistant, waitForAssistantChange } from '../room-assistant.mjs';
 import { validId, MAX_MESSAGE_COMMAND_BYTES } from '../../src/events.js';
 const id={type:'string',minLength:1,maxLength:128};
 const params={type:'object',required:['roomId'],properties:{roomId:id}};
@@ -30,6 +30,19 @@ export async function roomAssistantRoute(ctx) {
   const input=write ? await ctx.body(ctx.req,{limit:MAX_MESSAGE_COMMAND_BYTES}) : null;
   if(write) ctx.rate(`${input?.action==='draft'?'assistant-draft':'write'}:${auth.credentialHash}`,input?.action==='draft'?120:60);
   const assistant=new RoomAssistant(ctx.store);
+  if (ctx.req.method === 'GET' && ctx.url.searchParams.has('after')) {
+    const controller = new AbortController();
+    const closed = () => controller.abort();
+    ctx.res.once('close', closed);
+    try {
+      const value = await waitForAssistantChange(assistant, roomId, authorize, ctx.url.searchParams.get('after'), {
+        signal: controller.signal, credentialHash: auth.credentialHash,
+        timeoutMs: Number(ctx.url.searchParams.get('waitMs') ?? 10000)
+      });
+      if (!ctx.res.destroyed) return ctx.json(ctx.res, 200, value);
+      return;
+    } finally { ctx.res.off('close', closed); }
+  }
   // Message writes authenticate as the caller for both submit and publish.
   const value=write ? assistant.apply(roomId,input,authorize,selected.token) : assistant.list(roomId,authorize);
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
