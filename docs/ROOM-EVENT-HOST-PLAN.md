@@ -179,3 +179,51 @@ connector timeout behavior; distinguish queue acceptance from chat availability;
 measure fresh versus backlog versus restart cohorts; bounded missing-wake catchup.
 Do not optimize the metric by dropping safety checks, losing messages, moving
 work outside the timed interval, changing models, or shrinking retries blindly.
+
+## Remove stages before shrinking waits
+
+Highest-value sequence:
+1. Recover definitely unstarted work. Readiness/fence/source rejection now occurs
+   before durable dispatch intent. It leaves no ambiguous receipt. Unknown CLI
+   outcomes and historical unknown receipts remain non-replayable. Peer's supplied
+   missing-wake regression failed before this change and passes afterward.
+2. Attribute wake latency. Record reported server wait separately from complete
+   polling/preflight duration. A live v6 cycle observed28.923s in wake.wait and
+   <1ms elsewhere after replay suppression. This does not prove28.923s is wasted:
+   the25s requested long poll and server scheduling must be separated first.
+3. Collapse repeated identity reads within a single authenticated server operation,
+   preserving identity checks before/after waits and lease fencing. Prefer one
+   bounded server response containing capability, source and lease evidence over
+   seven serial client requests. Needs server design, explicit freshness contract,
+   revocation tests and a separate coordinated source lane.
+4. Separate short coordination from long execution. An already busy coding chat
+   should not be the only place a room can process incoming requests. Use the
+   existing host/supervisor with durable work ownership and bounded independent
+   tasks, not concurrent writers in one checkout. Measure busy-queue delay first.
+5. Coalesce redundant state refresh notifications by resource/version; preserve
+   distinct human requests and formal reply obligations. Require evidence that
+   superseded notifications cannot carry unique work before dropping any.
+6. Run independent reads concurrently with bounded pools; retain sequential
+   mutation/lease checks. Cache immutable artifacts by digest. Reuse authenticated
+   network connections and repository/dependency caches. Avoid refetching whole
+   room context when a selected thread/version suffices.
+7. Partition compile/test work across Macs only when scheduling/transfer overhead
+   is smaller than work saved. Track useful completion time, not CPU utilization.
+8. Prefer push/change notification plus durable cursor catchup over repeated scans.
+   Keep bounded retry/backoff and a recovery path; a fast fragile listener is worse.
+
+Research: AWS queue-backlog guidance emphasizes bounded processing and isolating
+workloads (https://d1.awsstatic.com/builderslibrary/pdfs/avoiding-insurmountable-queue-backlogs.pdf).
+NSDI2021 'When to Hedge in Interactive Services'
+(https://www.usenix.org/conference/nsdi21/presentation/primorac) explains that
+redundant requests may worsen congestion. Do not hedge commands or launch two
+agents to perform the same mutation. Author-hosted 'The Tail at Scale'
+(https://barroso.org/publications/TheTailAtScale.pdf) motivates measuring slow
+request paths, not just means. These are design inputs, not evidence that our
+specific deployment will achieve their improvements.
+
+Success means same accepted work and correctness with less elapsed time and
+fewer calls/bytes/tokens, reported by cold/warm, idle/busy, fresh/backlog and
+healthy/recovery cohorts. Report sample counts, median and ranges now; tail
+percentiles require sufficient samples. Record cancelled/failed/stuck jobs too.
+No end-to-end10x result is established by the controlled7.945x benchmark.

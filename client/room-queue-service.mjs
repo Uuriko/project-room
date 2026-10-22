@@ -37,7 +37,7 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
   emit({ status: 'connecting', execution: 'not_observed' });
   try {
     while (!signal.aborted) {
-      let pages = 0, dispatched = 0, replaySkipped = 0, pollMs = 0, contended = false;
+      let pages = 0, dispatched = 0, replaySkipped = 0, pollMs = 0, serverWaitMs = 0, contended = false;
       const cycleStarted = performance.now();
       try {
         do {
@@ -45,6 +45,7 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
           const page = await wake.wait({ hostId, cadenceSeconds: 60, deliveryOnly: true,
             waitMs: started && cursor === null ? 25000 : 0, cursor });
           pollMs += performance.now() - pollStarted;
+          serverWaitMs += Number.isFinite(page.waitedMs) ? Math.max(0, page.waitedMs) : 0;
           if (signal.aborted) break;
           started = true;
           if (page.status === 'listener_contended') {
@@ -66,13 +67,17 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
             if (!await eligible(pointer)) continue;
             const receipt = await queueRoomPointer({ binding, pointer, journal,
               authorize: async () => { await client.checkConnection(); return !signal.aborted; },
-              run: async args => {
+              ready: async () => {
                 const current = await wake.wait({ hostId, cadenceSeconds: 60, waitMs: 0, cursor, deliveryOnly: true });
                 if (signal.aborted || current.status === 'listener_contended'
                   || !current.pendingWakes.some(row => JSON.stringify(roomEventPointer(row, binding.roomId)) === JSON.stringify(pointer))
-                  || !await eligible(pointer)) return 'unknown';
-                return run(args);
-              } });
+                  || !await eligible(pointer)) return false;
+                return !signal.aborted;
+              }, run });
+            if (receipt.status === 'deferred') {
+              emit({ status: 'waiting_for_source', execution: 'not_started', signalId: pointer.signalId });
+              continue;
+            }
             seenReceipts.set(pointer.signalId, fingerprint);
             if (seenReceipts.size > 2048) seenReceipts.delete(seenReceipts.keys().next().value);
             if (!receipt.duplicate) dispatched++;
@@ -88,7 +93,7 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
         } while (cursor && pages < maxPages && dispatched < maxDispatches && !signal.aborted);
         failures = 0;
         emit({ status: contended ? 'contended' : 'listening', execution: 'not_observed', metrics: {
-          cycleMs: performance.now() - cycleStarted, pollMs, pages, dispatched,
+          cycleMs: performance.now() - cycleStarted, pollMs, serverWaitMs, pages, dispatched,
           replaySkipped, cachedReceipts: seenReceipts.size } });
         // A bounded backlog batch yields the event loop, not a full second.
         // Idle/backoff pacing stays intact to avoid hammering pending wakes.

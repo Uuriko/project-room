@@ -66,7 +66,7 @@ test('lost fence immediately before queue prevents execution', async t => {
   const f = fixture(t); let calls = 0;
   f.wake.wait = async () => ++calls === 1 ? page([entry]) : ({ status: 'listener_contended' });
   f.run = async () => assert.fail('queued'); await runRoomQueueService(f);
-  assert.ok(f.events.some(e => e.status === 'attention_required'));
+  assert.ok(f.events.some(e => e.status === 'waiting_for_source'));
 });
 test('pagination reaches a later eligible message', async t => {
   const f = fixture(t); let calls = 0;
@@ -195,4 +195,16 @@ test('changed pointer cannot hide behind suppression cache', async t => {
   f.wake.wait = async () => page([{...entry, messageId: round ? 'changed' : entry.messageId}]);
   f.wait = async () => { round++; };
   await assert.rejects(runRoomQueueService(f), /pointer_conflict/);
+});
+
+test('missing source before dispatch is deferred and recovers after restart', async t => {
+  const f = fixture(t); let polls = 0, runs = 0;
+  f.wake.wait = async () => page(++polls === 1 ? [entry] : []);
+  f.run = async () => { runs++; return 'accepted'; };
+  await runRoomQueueService(f);
+  assert.equal(runs, 0);
+  assert.ok(f.events.some(e => e.status === 'waiting_for_source'));
+  const second = new AbortController();
+  await runRoomQueueService({...f, signal:second.signal, wake:{wait:async()=>page([entry])}, wait:async()=>second.abort()});
+  assert.equal(runs, 1);
 });
