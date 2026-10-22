@@ -62,9 +62,10 @@ async function doors(t, failure) {
     let body = { sourceRevision: revision }, code = 200;
     if (match[3] === 'version/worker') body = { ...body, status: 'ok', servedBy: 'worker' };
     if (match[3] === "health") body = { status: "ok" };
-    if (match[3] === "ready") body = { status: "ready" };
+    if (match[3] === "ready") body = { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" };
+    if (failure?.ready && match[1] === failure.door && match[3] === "ready") body = failure.body;
     if (!match[3]) body = "<!doctype html><title>Room</title>";
-    if (failure && match[1] === failure.door && match[3] === (failure.worker ? 'version/worker' : 'version')) {
+    if (failure && !failure.ready && match[1] === failure.door && match[3] === (failure.worker ? 'version/worker' : 'version')) {
       code = failure.status ?? 200;
       body = failure.body ?? body;
     }
@@ -228,6 +229,17 @@ test("workflow preserves a failed Wrangler read, without a verified receipt", as
   assert.notEqual(result.code, 0, "Wrangler failure must survive shell pipelines");
   assert.match(result.http.receipts[0].data.body, /readback not verified/);
 });
+for (const door of ["canonical", "room"]) {
+  for (const policy of [
+    { status: "ready" },
+    { status: "ready", emailVerification: "enforced", emailVerificationScope: "worker" },
+    { status: "ready", emailVerification: "relaxed-no-mailer", emailVerificationScope: "durable-object" },
+  ]) test(`workflow refuses unauthoritative readiness on ${door}: ${JSON.stringify(policy)}`, async t => {
+    const result = await workflow(t, { failure: { door, ready: true, body: policy } });
+    assert.equal(result.code, 1, "a successful allocation cannot bypass authoritative authentication policy");
+    assert.match(result.http.receipts[0].data.body, /failure/);
+  });
+}
 for (const door of ["canonical", "room"]) test(`workflow preserves ${door} HTTP 503 through tee`, async t => {
   const result = await workflow(t, { failure: { door, status: 503 } });
   assert.equal(result.code, 1);

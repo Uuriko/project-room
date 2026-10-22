@@ -62,13 +62,15 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   const requestAndRedeem = async () => {
     await openMagicSignin(page);
     await form().locator('[name=email]').fill(email);
-    await form().locator('button[type=submit]').click();
+    await form().locator('[name=password]').fill('unused-for-email-link');
+    await form().getByRole('button', { name: 'Email me a sign-in link' }).click();
     await redeemDeliveredLink();
   };
   await page.goto(origin + "/");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
-  assert.equal(await page.locator("#google-signin").isVisible(), true);
+  await page.waitForFunction(() => document.querySelector("#google-signin").hidden);
+  assert.equal(await page.locator("#google-signin").isVisible(), false);
   assert.equal(await page.locator("#email-auth-panel").isVisible(), false);
   assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
 

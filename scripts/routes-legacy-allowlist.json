@@ -2207,10 +2207,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/rooms/{id}/orient"
-    },
-    {
-      "method": "GET",
       "path": "/api/rooms/{id}/outside-agents"
     },
     {
@@ -3119,11 +3115,27 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/receipts"
     },
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/{id}"
     },
     {
       "method": "GET",
@@ -5813,10 +5825,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/rooms/{id}/orient"
-    },
-    {
-      "method": "GET",
       "path": "/api/rooms/{id}/outside-agents"
     },
     {
@@ -6749,6 +6757,14 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/receipts"
     },
     {
@@ -6757,11 +6773,11 @@
     },
     {
       "method": "GET",
-      "path": "/receipts/{id}/og.png"
+      "path": "/receipts/{id}/{id}"
     },
     {
       "method": "HEAD",
-      "path": "/receipts/{id}/og.png"
+      "path": "/receipts/{id}/{id}"
     },
     {
       "method": "GET",
