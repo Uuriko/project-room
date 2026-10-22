@@ -29,11 +29,12 @@ test("the formerly orphaned suites are wired into the derived list", () => {
 
 test("known-failing suites stay excluded until their issues close", () => {
   // Wiring a red suite would merge a permanently red required gate; the
-  // exclusions name the tracking issues instead (#3842, #3837).
-  assert.match(BROWSER_SUITE_EXCLUSIONS["qa5-a11y-c-browser-check.mjs"], /#3842/);
+  // exclusions name the tracking issues instead (#3837). #3842 closed, so
+  // qa5-a11y-c is wired like every other suite.
   assert.match(BROWSER_SUITE_EXCLUSIONS["manual-owner-exercise-check.mjs"], /#3837/);
+  assert.equal(BROWSER_SUITE_EXCLUSIONS["qa5-a11y-c-browser-check.mjs"], undefined);
   const suites = deriveBrowserSuites(new URL("../scripts", import.meta.url).pathname);
-  assert.ok(!suites.includes("scripts/qa5-a11y-c-browser-check.mjs"));
+  assert.ok(suites.includes("scripts/qa5-a11y-c-browser-check.mjs"));
   assert.ok(!suites.includes("scripts/manual-owner-exercise-check.mjs"));
 });
 
@@ -42,7 +43,7 @@ test("derivation: a new check file joins the suite unless explicitly excluded", 
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const scriptsDir = join(dir, "scripts");
   mkdirSync(scriptsDir);
-  for (const name of ["a-check.mjs", "b-browser-check.mjs", "qa5-a11y-c-browser-check.mjs", "helper.mjs"])
+  for (const name of ["a-check.mjs", "b-browser-check.mjs", "manual-owner-exercise-check.mjs", "helper.mjs"])
     writeFileSync(join(scriptsDir, name), "// fixture\n");
   assert.deepEqual(deriveBrowserSuites(scriptsDir), ["scripts/a-check.mjs", "scripts/b-browser-check.mjs"]);
 });

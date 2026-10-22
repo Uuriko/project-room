@@ -17,6 +17,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { enableHumanAdvanced } from "./room-chrome.mjs";
 
 async function boot(t, { viewport = { width: 1280, height: 800 }, coarse = false } = {}) {
   const fixture = createAcceptanceFixture();
@@ -38,6 +39,16 @@ async function boot(t, { viewport = { width: 1280, height: 800 }, coarse = false
 
 async function openBoard(page) {
   await page.locator("#main").waitFor({ state: "visible" });
+  // Human-experience sessions keep the Tasks nav (Board / New work) behind
+  // the member's Advanced opt-in: src/human-experience.css hides
+  // #tasks-destination until body.human-advanced. This check timing out on
+  // the hidden button was #3842 — the entry point moved, the board did not.
+  // Take the member's actual path (Settings → Advanced), the way the
+  // sibling checks do (room-chrome.mjs enableHumanAdvanced).
+  if (!(await page.locator("#tasks-board-open").isVisible())) {
+    await page.locator("#human-advanced").waitFor({ state: "attached", timeout: 5000 }).catch(() => {});
+    if (await page.locator("#human-advanced").count()) await enableHumanAdvanced(page);
+  }
   // Below 940px the sidebar (which holds the Board button) sits behind the
   // sidebar toggle by design; open it first when the toggle is the visible one.
   const toggle = page.locator("#sidebar-toggle");
@@ -106,12 +117,17 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
 
 // D-c: a malformed invite code renders the error screen with the sign-in
 // fallback — the client boot() fail path, not just the server markup.
+// The code travels as a claimed code: /join/<segment> is a claim the
+// server preview judges (#3267), and a wrong-format code lands here on
+// the error screen. A segment outside the token shape altogether
+// ("/join/!!!") is by design "no code claimed" and gets the entry form
+// instead (#1608), so it no longer exercises this path.
 test("malformed invite code shows the error screen with the sign-in fallback", { timeout: 60000 }, async t => {
   const { origin, page } = await boot(t);
-  await page.goto(`${origin}/join/!!!`);
+  await page.goto(`${origin}/join/RM-BOGUS123`);
   const error = page.locator("#join-error");
   await error.waitFor({ state: "visible" });
-  assert.match(await page.locator("#join-error-title").textContent(), /Invite link problem/);
+  assert.match(await page.locator("#join-error-title").textContent(), /Invite not found/);
   const home = page.locator("#join-home-link");
   assert.equal(await home.count(), 1, "back-to-sign-in link is present");
   assert.ok(await home.isVisible(), "back-to-sign-in link is visible");
