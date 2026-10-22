@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runRoomQueueService } from '../client/room-queue-service.mjs';
@@ -110,4 +110,33 @@ test('expired deadline never creates an orphan rejected fetch', async () => {
   const fetch=serviceFetch(host.signal,()=>{calls++;return Promise.reject(new Error('orphan'));});
   assert.throws(()=>fetch('https://room.example',{signal:request.signal}),/expired/);
   assert.equal(calls,0);
+});
+
+test('delivery evidence survives polling, retry, restart, and a later accepted delivery', async t => {
+  const { createStatusPublisher } = await import('../scripts/run-room-queue-service.mjs');
+  const f = fixture(t), file = join(f.journal, 'status.json');
+  let clock = 100;
+  let publish = createStatusPublisher(f.journal, binding, () => clock);
+  publish({ status: 'attention_required', transportStatus: 'unknown', signalId: 'uncertain' });
+  clock++;
+  publish({ status: 'queued', transportStatus: 'accepted', signalId: 'accepted' });
+  publish({ status: 'listening' });
+  publish = createStatusPublisher(f.journal, binding, () => clock);
+  publish({ status: 'retrying' });
+  const state = JSON.parse(readFileSync(file));
+  assert.equal(state.status, 'retrying');
+  assert.equal(state.lastUncertainDelivery.signalId, 'uncertain');
+  assert.equal(state.lastUncertainDelivery.observedAt, 100);
+  assert.equal(state.lastAcceptedDelivery.signalId, 'accepted');
+  assert.equal(state.execution, 'not_observed');
+  publish = createStatusPublisher(f.journal, { ...binding, memberId: 'different' }, () => clock);
+  publish({ status: 'connecting' });
+  assert.equal(JSON.parse(readFileSync(file)).lastAcceptedDelivery, null);
+});
+test('damaged diagnostic status cannot block startup or invent execution', async t => {
+  const { createStatusPublisher } = await import('../scripts/run-room-queue-service.mjs');
+  const f = fixture(t), file = join(f.journal, 'status.json');
+  writeFileSync(file, '{broken', { mode: 0o600 });
+  createStatusPublisher(f.journal, binding)({ status: 'listening', execution: 'finished' });
+  assert.equal(JSON.parse(readFileSync(file)).execution, 'not_observed');
 });

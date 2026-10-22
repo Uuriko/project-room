@@ -63,12 +63,10 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
                   || !await eligible(pointer)) return 'unknown';
                 return run(args);
               } });
-            if (!receipt.duplicate) {
-              dispatched++;
-              emit({ ...receipt, transportStatus: receipt.status,
+            if (!receipt.duplicate) dispatched++;
+            emit({ ...receipt, transportStatus: receipt.status,
                 status: receipt.status === 'accepted' ? 'queued' : 'attention_required',
                 signalId: pointer.signalId });
-            }
           }
           if (page.more && !page.nextCursor) throw new Error('wake_pagination_unavailable');
           // Carry bounded pagination across cycles. If dispatch exhausted the

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, lstatSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -16,6 +17,41 @@ export function serviceFetch(signal, fetchImpl = fetch) {
     options.signal?.throwIfAborted();
     return fetchImpl(url, { ...options,
       signal: options.signal ? AbortSignal.any([options.signal, signal]) : signal });
+  };
+}
+
+// Connection health is independent of transport receipts. Neither establishes
+// execution. Retain accepted and uncertain evidence separately across restarts.
+export function createStatusPublisher(directory, binding, now = Date.now) {
+  const target = join(directory, 'status.json');
+  const bindingKey = createHash('sha256').update(JSON.stringify(binding)).digest('hex');
+  let accepted = null, uncertain = null;
+  const valid = row => row && /^[A-Za-z0-9._:-]{1,128}$/.test(row.signalId ?? '')
+    && Number.isSafeInteger(row.observedAt) && row.observedAt >= 0
+    && row.observedAt <= now() && row.execution === 'not_observed';
+  try {
+    const stat = lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16384
+      || stat.uid !== process.getuid?.() || stat.mode & 0o077) throw new Error('invalid_status');
+    const previous = JSON.parse(readFileSync(target, 'utf8'));
+    if (previous.version === 2 && previous.bindingKey === bindingKey) {
+      if (valid(previous.lastAcceptedDelivery)) accepted = previous.lastAcceptedDelivery;
+      if (valid(previous.lastUncertainDelivery)) uncertain = previous.lastUncertainDelivery;
+    }
+  } catch { /* Diagnostic state is recoverable; receipt journal owns replay. */ }
+  return event => {
+    if (event.signalId && ['accepted', 'unknown'].includes(event.transportStatus)) {
+      const prior = event.transportStatus === 'accepted' ? accepted : uncertain;
+      const row = { signalId: event.signalId, observedAt: prior?.signalId === event.signalId
+        ? prior.observedAt : now(), execution: 'not_observed' };
+      if (event.transportStatus === 'accepted') accepted = row;
+      else uncertain = row;
+    }
+    const temp = target + '.tmp';
+    writeFileSync(temp, JSON.stringify({ version: 2, bindingKey, at: now(), ...event,
+      execution: 'not_observed', lastAcceptedDelivery: accepted,
+      lastUncertainDelivery: uncertain }), { mode: 0o600 });
+    renameSync(temp, target);
   };
 }
 
@@ -38,11 +74,8 @@ export async function main(argv = process.argv.slice(2)) {
   const stop = () => controller.abort();
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
   const boundedFetch = serviceFetch(controller.signal);
-  const publish = event => {
-    const target = join(config.directory, 'status.json'), temp = target + '.tmp';
-    writeFileSync(temp, JSON.stringify({ version: 1, at: Date.now(), ...event }), { mode: 0o600 });
-    renameSync(temp, target);
-  };
+  const publish = createStatusPublisher(config.directory,
+    [config.scope.origin, config.scope.roomId, config.scope.memberId, config.threadId, config.hostId]);
   const monitor = setInterval(() => { try { if (owner.shouldStop()) stop(); } catch { stop(); } }, 1000);
   try {
     await runRoomQueueService({ binding: { ...config.scope, threadId: config.threadId },

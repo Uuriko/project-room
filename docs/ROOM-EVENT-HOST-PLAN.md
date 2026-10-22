@@ -122,3 +122,19 @@ It is not a production release or a clean single-commit build. The launchd servi
 starts after login and restarts signal crashes; transient network errors retry in
 process. Permanent failures exit and need repair. Full reboot and actual queued
 reply remain acceptance gates, not claims established by installation.
+
+## Delivery qualification checkpoint (2026-10-22)
+
+The live peer qualification message was stored at 17:38:45.113Z; its matching
+queue receipt was accepted with filesystem mtime 17:39:23.731Z. This is transport
+acceptance, not proof of chat execution: the active chat read the inbox manually.
+The peer independently passed 22 candidate suite checks and three extra fault
+checks. Full automatic reply remains unqualified.
+
+Status now keeps connection state separate from last accepted and last uncertain
+delivery evidence, including first observed timestamps. Diagnostic evidence is
+bound to the exact room/member/chat/host and survives restart. It never clears an
+uncertain outcome merely because another delivery succeeds. These are latest
+observations, not a complete outstanding-work list; the receipt journal remains
+replay authority. No timestamp is presented as execution or original acceptance.
+Missing wake reconciliation and actual chat-start/reply receipts remain open.
