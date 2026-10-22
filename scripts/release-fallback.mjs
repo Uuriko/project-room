@@ -23,7 +23,6 @@ const login = value => (typeof value === "string" && LOGIN.test(value.toLowerCas
 
 // facts: {
 //   fallback: { memberId, githubLogin },
-//   approvedFallbacks: [memberId],      // defaults to APPROVED_FALLBACKS
 //   ask: { head, base, postedAt, releaseSeatRepliedAt|null },
 //   pr: { number, head, base, authorLogin, authorMemberId?, state },
 //   checks: { head, status, includesCommitStatuses },   // check runs AND commit statuses
@@ -31,8 +30,25 @@ const login = value => (typeof value === "string" && LOGIN.test(value.toLowerCas
 //   holdObservation: { prNumber, head, observedAt, complete, holds: [{ head?, prNumber?, active }] },
 //   nowMs
 // }
+// Policy (who may fall back, and the owner's confirming record) is compiled in
+// and never read from facts (review 17556/17558). Facts that try to carry it
+// refuse. fallbackEligibilityUnderPolicy exists for tests only; an issuer must
+// call fallbackEligibility.
+const POLICY_KEYS = ["approvedFallbacks", "ownerConfirmationSeq", "policy"];
+const prNo = value => Number.isSafeInteger(value) && value > 0;
+
 export function fallbackEligibility(facts) {
-  const { fallback, approvedFallbacks = APPROVED_FALLBACKS, ownerConfirmationSeq = OWNER_CONFIRMATION_SEQ, ask, pr, checks, reads, holdObservation, nowMs } = facts ?? {};
+  return evaluate(facts, { approvedFallbacks: APPROVED_FALLBACKS, ownerConfirmationSeq: OWNER_CONFIRMATION_SEQ });
+}
+
+export function fallbackEligibilityUnderPolicy(policy) {
+  const frozen = Object.freeze({ approvedFallbacks: Object.freeze([...(policy?.approvedFallbacks ?? [])]), ownerConfirmationSeq: policy?.ownerConfirmationSeq });
+  return facts => evaluate(facts, frozen);
+}
+
+function evaluate(facts, { approvedFallbacks, ownerConfirmationSeq }) {
+  if (facts && typeof facts === "object" && POLICY_KEYS.some(key => Object.hasOwn(facts, key))) return refuse("policy_in_facts");
+  const { fallback, ask, pr, checks, reads, holdObservation, nowMs } = facts ?? {};
   const fallbackLogin = login(fallback?.githubLogin);
   if (!nonEmpty(fallback?.memberId) || !fallbackLogin || !Array.isArray(approvedFallbacks) || !approvedFallbacks.includes(fallback.memberId))
     return refuse("not_approved_fallback");
@@ -61,7 +77,13 @@ export function fallbackEligibility(facts) {
   if (!obs || obs.complete !== true || obs.head !== pr.head || obs.prNumber !== pr.number || !Array.isArray(obs.holds)
       || !Number.isFinite(observed) || observed > nowMs || nowMs - observed > HOLD_OBSERVATION_MAX_AGE_MS)
     return refuse("holds_unobserved");
-  if (obs.holds.some(h => !h || typeof h !== "object" || (h.head === undefined && h.prNumber === undefined))) return refuse("holds_malformed");
-  if (obs.holds.some(h => h.active !== false && (h.head === pr.head || h.prNumber === pr.number))) return refuse("held");
+  // Each hold row must carry a typed locator and a boolean active flag; a
+  // mistyped row is malformed, never absent.
+  if (obs.holds.some(h => !h || typeof h !== "object" || typeof h.active !== "boolean"
+      || (h.head === undefined && h.prNumber === undefined)
+      || (h.head !== undefined && !(typeof h.head === "string" && SHA.test(h.head)))
+      || (h.prNumber !== undefined && !prNo(h.prNumber))))
+    return refuse("holds_malformed");
+  if (obs.holds.some(h => h.active === true && (h.head === pr.head || h.prNumber === pr.number))) return refuse("held");
   return { eligible: true, prNumber: pr.number, head: pr.head, base: pr.base, fallback: fallback.memberId };
 }

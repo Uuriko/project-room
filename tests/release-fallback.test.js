@@ -1,16 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { APPROVED_FALLBACKS, OWNER_CONFIRMATION_SEQ, fallbackEligibility, FALLBACK_SILENCE_MS } from "../scripts/release-fallback.mjs";
+import { APPROVED_FALLBACKS, OWNER_CONFIRMATION_SEQ, fallbackEligibility as defaultEligibility, fallbackEligibilityUnderPolicy, FALLBACK_SILENCE_MS } from "../scripts/release-fallback.mjs";
 
 const JILL = "ai_rNH_kQLusyE2Y0sj";
 const HEAD = "a".repeat(40);
+// Synthetic confirmed policy; the shipped default stays unconfirmed.
+const fallbackEligibility = fallbackEligibilityUnderPolicy({ approvedFallbacks: [JILL], ownerConfirmationSeq: 17999 });
 const BASE = "b".repeat(40);
 const T0 = Date.parse("2026-10-22T05:00:00.000Z");
 const NOW = T0 + FALLBACK_SILENCE_MS;
 const iso = ms => new Date(ms).toISOString();
 const base = (over = {}) => ({
   fallback: { memberId: JILL, githubLogin: "jill-2" },
-  ownerConfirmationSeq: 17999,
   ask: { head: HEAD, base: BASE, postedAt: iso(T0), releaseSeatRepliedAt: null },
   pr: { number: 4490, head: HEAD, base: BASE, authorLogin: "codex-bot", state: "open" },
   checks: { head: HEAD, status: "green", includesCommitStatuses: true },
@@ -41,7 +42,7 @@ test("timeout: too soon, a release-seat reply, NaN or future times all refuse", 
 test("holds: an active hold blocks; a missing, partial, stale or unbound observation refuses", () => {
   const held = obs => base({ holdObservation: { prNumber: 4490, head: HEAD, observedAt: iso(NOW - 1000), complete: true, ...obs } });
   assert.equal(fallbackEligibility(held({ holds: [{ head: HEAD, active: true }] })).reason, "held");
-  assert.equal(fallbackEligibility(held({ holds: [{ prNumber: 4490 }] })).reason, "held");
+  assert.equal(fallbackEligibility(held({ holds: [{ prNumber: 4490 }] })).reason, "holds_malformed");
   assert.equal(fallbackEligibility(held({ holds: [{ head: HEAD, active: false }] })).eligible, true);
   assert.equal(fallbackEligibility(base({ holdObservation: undefined })).reason, "holds_unobserved");
   assert.equal(fallbackEligibility(held({ holds: [], complete: false })).reason, "holds_unobserved");
@@ -73,14 +74,21 @@ test("reads must be verified, non-author, and at the head", () => {
 test("the owner-approved fallback list names Jill 2 only", () => {
   assert.deepEqual([...APPROVED_FALLBACKS], [JILL]);
   assert.equal(fallbackEligibility(base({ fallback: { memberId: "ai_NiIvggYi1S2wfYN_", githubLogin: "grok-bot" } })).reason, "not_approved_fallback");
-  assert.equal(fallbackEligibility(base({ approvedFallbacks: [] })).reason, "not_approved_fallback");
+  assert.equal(fallbackEligibilityUnderPolicy({ approvedFallbacks: [], ownerConfirmationSeq: 17999 })(base()).reason, "not_approved_fallback");
   assert.equal(fallbackEligibility(null).reason, "not_approved_fallback");
 });
 
 test("the relayed decision refuses until the owner's own room record is set", () => {
   assert.equal(OWNER_CONFIRMATION_SEQ, null);
-  assert.equal(fallbackEligibility(base({ ownerConfirmationSeq: undefined })).reason, "owner_unconfirmed");
-  assert.equal(fallbackEligibility(base({ ownerConfirmationSeq: 0 })).reason, "owner_unconfirmed");
+  assert.equal(defaultEligibility(base()).reason, "owner_unconfirmed");
+  assert.equal(fallbackEligibilityUnderPolicy({ approvedFallbacks: [JILL], ownerConfirmationSeq: 0 })(base()).reason, "owner_unconfirmed");
+});
+
+test("facts cannot carry policy (17556)", () => {
+  for (const over of [{ ownerConfirmationSeq: 17999 }, { approvedFallbacks: [JILL] }, { approvedFallbacks: ["ai_other"] }, { policy: {} }]) {
+    assert.equal(defaultEligibility(base(over)).reason, "policy_in_facts");
+    assert.equal(fallbackEligibility(base(over)).reason, "policy_in_facts");
+  }
 });
 
 test("logins compare case-insensitively and malformed hold rows refuse (17501)", () => {
@@ -90,6 +98,10 @@ test("logins compare case-insensitively and malformed hold rows refuse (17501)",
   const bad = base();
   bad.holdObservation.holds = [null];
   assert.equal(fallbackEligibility(bad).reason, "holds_malformed");
-  bad.holdObservation.holds = [{ active: true }];
-  assert.equal(fallbackEligibility(bad).reason, "holds_malformed");
+  for (const row of [{ active: true }, { prNumber: "4490", active: true }, { head: "AAA", active: true }, { prNumber: 4490 }, { prNumber: 4490, active: "yes" }, { prNumber: -1, active: false }]) {
+    bad.holdObservation.holds = [row];
+    assert.equal(fallbackEligibility(bad).reason, "holds_malformed", JSON.stringify(row));
+  }
+  bad.holdObservation.holds = [{ prNumber: 4490, active: false }];
+  assert.equal(fallbackEligibility(bad).eligible, true);
 });
