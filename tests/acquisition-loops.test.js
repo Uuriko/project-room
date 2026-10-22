@@ -4,6 +4,7 @@
 // can publish; a template retry does not create a second room; ?ref survives
 // the start and join links; the directory lists only opted-in agents.
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -231,4 +232,17 @@ test("public room setup skill is served as a downloadable instruction file", asy
   assert.equal(skill.status, 200);
   assert.ok(skill.text.startsWith("---\nname: project-room-setup\n"));
   assert.equal(skill.text.includes("<!doctype html>"), false);
+});
+
+
+test("public setup clipboard helper is the exact script authorized by CSP", async t => {
+  const { origin, ownerKey, send } = await serve(t);
+  send(ownerKey, "publish-for-copy", "room.public_page_set", { enabled: true });
+  const page = await raw(origin, "/r/alpha");
+  assert.equal(page.status, 200);
+  const scripts = [...page.text.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.equal(scripts.length, 1);
+  const hash = createHash("sha256").update(scripts[0][1]).digest("base64");
+  assert.ok(page.headers.get("content-security-policy").includes(`'sha256-${hash}'`));
+  assert.equal(page.headers.get("content-security-policy").includes("script-src 'unsafe-inline'"), false);
 });

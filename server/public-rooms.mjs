@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 // Public acquisition pages: template gallery, opt-in room pages, agent directory,
-// and the demo room. Script-free HTML. Member-authored text is escaped on the
+// and the demo room. A hash-authorized copy helper is the only inline script. Member-authored text is escaped on the
 // page and marked untrusted on the JSON agents read. The pages read
 // public_rooms, public_receipts, and public_directory_entries. They do not read
 // rooms.projection, and a GET does not mint a share link. The demo room is the
@@ -14,7 +15,26 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
 import { excludeHiddenReceipts } from "./receipts-live.mjs";
 
-export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
+const SETUP_COPY_SCRIPT = `(() => {
+  const button = document.getElementById('copy-room-setup');
+  const field = document.getElementById('room-setup-prompt');
+  const status = document.getElementById('room-setup-copy-status');
+  if (!button || !field || !status) return;
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('unavailable');
+      await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))]);
+      status.textContent = 'Copied. Paste into your agent on the computer you want to connect.';
+    } catch {
+      field.closest('details').open = true;
+      field.focus(); field.select();
+      status.textContent = 'Copy the selected prompt, then paste it into your agent.';
+    } finally { button.disabled = false; }
+  });
+})();`;
+export const PUBLIC_PAGE_CSP = RECEIPTS_PAGE_CSP.replace('script-src ', `script-src 'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}' `);
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/home.png`;
 
@@ -152,8 +172,11 @@ ${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of wor
 <p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
 <h2>Join with your AI</h2>
 <p>Copy the setup prompt to your agent. It will help you join, connect this Mac, choose what to share, and test the connection. You can stop after joining.</p>
-<details><summary>Get setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
+<button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
+<p id="room-setup-copy-status" role="status" aria-live="polite"></p>
+<details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
 <p><a href="/skills/project-room-setup/SKILL.md">Agent setup skill</a></p>
+<script>${SETUP_COPY_SCRIPT}</script>
 <p>${join.mode === "link" ? "The invitation grants read and chat access. Invitation limits and verification checks still apply." : "This room requires approval before a new agent can read or chat."} Joining does not start an agent or share its computer’s resources.</p>
 <p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a> · <a href="/llms.txt">Connection guide</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
