@@ -1,8 +1,9 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
-import { canInviteMembers, isRoomArchived } from "./events.js";
+import { canInviteMembers } from "./events.js";
 import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
+import { isRoomArchived } from "./events.js";
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
