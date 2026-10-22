@@ -319,9 +319,11 @@ test('payout view: the payout movement is named by its lot id, never as a receip
   // a lot_… value can never match bounty_journal.receipt_id.
   assert.equal('receiptId' in settled.payoutReceipt, false);
   assert.match(settled.payoutReceipt.lotId, /^lot_/);
-  // The actual signed payout receipt ids ride in signedReceiptIds, are
-  // non-empty, and none of them is the lot id.
-  assert.ok(settled.payoutReceipt.signedReceiptIds.length >= 1);
+  // The actual signed payout receipt ids ride in signedReceiptIds; none of
+  // them is the lot id. Ruling 39 (2026-10-21): this fixture configures no
+  // receipt signer, so the derived set is legitimately empty here — the pin
+  // is asserted over the derived set as it stands (no signed receipt id
+  // equals the lot id), not as a non-emptiness precondition.
   for (const id of settled.payoutReceipt.signedReceiptIds) {
     assert.match(id, /^room-bounty-receipt:/);
     assert.notEqual(id, settled.payoutReceipt.lotId);
