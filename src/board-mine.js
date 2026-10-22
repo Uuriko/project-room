@@ -71,7 +71,11 @@ export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
         : (review.basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1));
     // Delivered work is reviewable too — recordReview accepts it, and the
     // verdict on the delivery is the review that matters (#3754).
-    const reviewable = open || item.state === "delivered" || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);
+    // Reviewable is exactly the kernel's REVIEWABLE_CLAIM_STATES (active +
+    // delivered) (#3909 F10): an open PR does not widen it — a done or
+    // closed claim with an open PR used to invent a "review owed" row
+    // whose Review button dead-ended on a card with no review form.
+    const reviewable = open || item.state === "delivered";
     if (reviewer && reviewable && item.owner && !reviewed) { out.reviews.push({ item }); continue; }
     if ((reviewer || tagged(item, "build-", viewerId, viewerSlug)) && (open || item.state === "unclaimed")) out.partnered.push({ item });
   }
@@ -104,7 +108,9 @@ export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {
     ? ["<button type=\"button\" class=\"button secondary needs-me-act\" data-claim-action=\"", action, "\" data-claim-id=\"", esc(item.id), "\" data-focus-key=\"needs-me-", action, ":", esc(item.id), "\">", label, "</button>"].join('') : "";
   const openButton = (label, item) => ["<button type=\"button\" class=\"button secondary needs-me-act\" data-needs-me-open=\"", esc(item.id), "\">", label, "</button>"].join('');
   const urgent = [
-    ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? uiText("board.mine.copy.001") : uiText("board.mine.copy.002", { fragmentA: span(left) }), act: claimButton("renew", "Renew", item) })),
+    // #3909 F11: a lease that already ended cannot be renewed (renewWork
+    // refuses it — "claim it again instead"), so its row carries no Renew.
+    ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? uiText("board.mine.copy.001") : uiText("board.mine.copy.002", { fragmentA: span(left) }), act: left > 0 ? claimButton("renew", "Renew", item) : "" })),
     ...work.reviews.map(({ item }) => ({ item, note: uiText("board.mine.copy.003", { fragmentA: nameOf(members, item.owner) }), act: openButton("Review", item) })),
     ...work.quiet.map(({ item, quietFor }) => ({ item, note: uiText("board.mine.copy.004", { fragmentA: span(quietFor) }), act: claimButton("release", "Hand off", item) }))
   ];
