@@ -12,6 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { START_ROOM_URL } from "../server/room-entry.mjs";
 import { PUBLIC_START_URL, backfillPublicReadModel } from "../server/public-read-model.mjs";
+import { compactSummary, jobHealthView, sanitizeFailureDetail } from "../cloudflare/job-heartbeat.mjs";
 
 const SENTINEL = "SENTINEL-private-9f3a-not-public";
 
@@ -332,4 +333,71 @@ test("public receipts JSON allows any origin and the public pages allow the anal
     assert.match(csp, /https:\/\/static\.cloudflareinsights\.com/);
     assert.match(csp, /https:\/\/cloudflareinsights\.com/);
   }
+});
+
+test("backfill names the records it skips instead of swallowing them (#4088)", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-public-backfill-skips-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  // One healthy opted-in room, plus one unprocessable record per phase: a
+  // room whose stored projection is corrupt JSON, a public-work receipt
+  // whose stored body is corrupt JSON, and a public directory card whose
+  // projection cannot be written because the entries table is gone.
+  store.initialize(initialRoom("room-good"));
+  const key = store.issueAccessKey("room-good", "owner");
+  command(store, key, "room-good", "page-room-good", "room.public_page_set", { enabled: true });
+  store.db.prepare("DELETE FROM public_rooms").run();
+  store.db.prepare("DELETE FROM public_read_model_backfill").run();
+  store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES ('room-bad', 0, '{corrupt', NULL)").run();
+  store.db.prepare(`INSERT INTO public_work_receipts
+    (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+    VALUES ('pwr_badbadbadbadbad1', 'offer-1', 'ns', 1, 'ai_bad', '', '', 0, '{corrupt', 0)`).run();
+  store.db.prepare(`INSERT INTO agent_directory_cards
+    (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn)
+    VALUES ('agent-bad', '{"name":"Bad Card"}', 'public', 'ai_bad', 0, 0, 0)`).run();
+  store.db.exec("DROP TABLE public_directory_entries");
+
+  const ticks = [];
+  for (let i = 0; i < 10; i += 1) {
+    const result = backfillPublicReadModel(store, { limit: 20 });
+    ticks.push(result);
+    if (result.done) break;
+  }
+  const final = ticks.at(-1);
+  assert.equal(final.done, true, "skips do not stall the backfill: the cursor still completes");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM public_rooms WHERE slug='room-good'").get().n, 1,
+    "the healthy room still publishes");
+
+  // The channel: every tick counts its skips, the records are named with
+  // their phase, and a tick that skipped records is graded as failed.
+  assert.equal(ticks.reduce((total, tick) => total + (tick.skipped ?? 0), 0), 3);
+  const named = ticks.flatMap(tick => tick.skippedRecords ?? []);
+  assert.deepEqual(named.map(skip => [skip.phase, skip.id, skip.errorClass]), [
+    ["rooms", "room-bad", "parse"],
+    ["receipts", "pwr_badbadbadbadbad1", "parse"],
+    ["directory", "agent-bad", "schema"],
+  ]);
+  for (const tick of ticks.filter(tick => (tick.skipped ?? 0) > 0)) {
+    assert.equal(tick.errors, tick.skipped, "a tick that skipped a record fails the tick");
+    assert.equal(tick.failureDetail.code, "backfill_record_skipped");
+    assert.equal(tick.failureDetail.subcheck, tick.skippedRecords[0].phase);
+    assert.equal(tick.failureDetail.recordId, tick.skippedRecords[0].id);
+  }
+
+  // The exposure discipline (cloudflare/job-heartbeat.mjs): the count rides
+  // the numeric summary, the ids never reach the public health view, and
+  // the first id survives only in the stored failure detail operators read.
+  const failing = ticks.find(tick => (tick.skipped ?? 0) > 0);
+  assert.equal(compactSummary(failing).skipped, failing.skipped);
+  assert.equal(JSON.stringify(compactSummary(failing)).includes("room-bad"), false);
+  assert.equal(sanitizeFailureDetail(failing.failureDetail).recordId, "room-bad");
+  const view = jobHealthView({ "public-read-model": { lastFailure: sanitizeFailureDetail(failing.failureDetail) } }, Date.now());
+  assert.equal(JSON.stringify(view.jobs.find(job => job.name === "public-read-model")).includes("room-bad"), false,
+    "the public health view must not carry a skipped record's id");
+
+  // A completed backfill reports a clean, skip-free tick shape.
+  const after = backfillPublicReadModel(store, { limit: 20 });
+  assert.equal(after.done, true);
+  assert.equal(after.skipped, 0);
+  assert.equal(after.errors, undefined);
 });
