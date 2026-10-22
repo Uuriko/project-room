@@ -12,7 +12,6 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
-import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
@@ -298,7 +297,7 @@ const SIGNUP_NEXT = Object.freeze([
     description: "Ask to join a room without an invite code. Send this identity secret as the bearer token. The room owner decides; poll the request status." }),
   Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest",
     description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface." }),
-  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
     description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   // Burs-IA steal A1: the mint response names the tools-list surface so a
   // cold agent learns its capabilities without reading llms.txt.
@@ -651,7 +650,7 @@ export class AgentIdentities {
   link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration required: room owner, a member with manage_members, or a membership administration grant");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");
@@ -762,12 +761,15 @@ export class AgentIdentities {
     ).run(this.store.now(), decidedBy, "closed because this identity was linked directly", roomId, identityId).changes;
   }
 
-  // Owner-only: unlink an identity; the room member is deactivated but its
-  // history stays in the event log.
+  // Membership administration, matching link(): unlink an identity; the
+  // room member is deactivated but its history stays in the event log.
+  // IR-5: the gate is canAdministerMembership, not plain manage_members —
+  // a delegate who can link a wrong or compromised identity in must be
+  // able to take it out again (SEC2-C-C containment asymmetry).
   unlink(token, roomId, identityId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration required: room owner, a member with manage_members, or a membership administration grant");
     return this.store.transaction(() => {
       const link = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (!link) fail(404, "identity_not_found", "This identity is not linked to this room");
@@ -1150,13 +1152,15 @@ export class AgentIdentities {
     if (changed.changes !== 1) proofFailed();
     return { identityId, consumedAt: now };
   }
-  // Owner-only, like the sibling audit lists (agent-invites, agent-connections,
-  // share-links): which identities are plugged into a room is membership
-  // administration data, not something every member should enumerate.
+  // Membership administration, matching link(), like the sibling audit
+  // lists (agent-invites, agent-connections, share-links): which identities
+  // are plugged into a room is membership administration data, not
+  // something every member should enumerate. IR-5: the gate is
+  // canAdministerMembership, so a delegate can audit what it linked.
   list(token, roomId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration required: room owner, a member with manage_members, or a membership administration grant");
     return this.db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
         i.display_name AS identityDisplayName FROM identity_links l
         JOIN agent_identities i ON i.identity_id=l.identity_id WHERE l.room_id=? ORDER BY l.linked_at`).all(roomId);

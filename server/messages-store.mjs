@@ -524,7 +524,9 @@ function diagnoseBlock(db, roomId) {
 function diagnoseFromCursor(db, roomId, upTo) {
   const cursor = readCursor(db, roomId, true);
   if (!cursor || typeof cursor.state_json !== "string" || !Number.isInteger(cursor.state_seq) || cursor.state_seq <= 0 || cursor.state_seq < cursor.applied_seq) return undefined;
-  if (!(Number.isInteger(upTo) && upTo > cursor.state_seq) || !cursorMatches(db,roomId,cursor,upTo)) return undefined;
+  // A quiet room can already be at its replay head. Still validate the anchor
+  // and decode the snapshot before treating that empty suffix as healthy.
+  if (!(Number.isInteger(upTo) && upTo >= cursor.state_seq) || !cursorMatches(db,roomId,cursor,upTo)) return undefined;
   let state;
   try { state = decodeMessageReplaySnapshot(db, roomId, cursor.state_json); } catch { return undefined; }
   const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
@@ -553,11 +555,22 @@ function diagnoseFreshBlock(db, roomId) {
   return diagnoseBlock(db, roomId);
 }
 
+// r71: a standing park can name an event at or below the cursor snapshot.
+// A from-zero diagnosis recorded such parks before diagnoseFreshBlock: an
+// event the backfill applied under an earlier reducer and will never read
+// again. Replaying "through the blocked sequence" from the snapshot is then
+// empty, so the old code fell back to the full replay, found the same event
+// and kept the park on every re-diagnosis. Ask the backfill's own question
+// instead: does the next chunk after the snapshot replay?
 function rediagnoseBlock(db, roomId, blockedSeq) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
   if (maxSeq >= head && Number.isInteger(blockedSeq) && blockedSeq > 0) {
-    const resumed = diagnoseFromCursor(db, roomId, Math.min(blockedSeq, head));
+    const stateSeq = readCursor(db, roomId)?.state_seq;
+    const upTo = Number.isInteger(stateSeq) && blockedSeq <= stateSeq
+      ? Math.min(stateSeq + BACKFILL_COMMIT, head)
+      : Math.min(blockedSeq, head);
+    const resumed = diagnoseFromCursor(db, roomId, upTo);
     if (resumed !== undefined) return resumed;
   }
   return diagnoseBlock(db, roomId);
