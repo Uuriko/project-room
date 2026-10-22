@@ -1948,6 +1948,16 @@ paths:
         `mine=1` lists only the caller's claims.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [active, released, expired, superseded] }
+          description: Only claims in this state
+        - name: mine
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Only the caller's claims (mine=true; mine=1 also accepted)
       responses:
         '200':
           description: Surface claim list

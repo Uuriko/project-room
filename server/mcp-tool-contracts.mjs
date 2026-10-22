@@ -61,7 +61,12 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
-  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
+  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
+  // CLAIM-PRIM: surface claims (room-scoped coordination claims).
+  room_claim_surface: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/surface-claims" },
+  room_list_surface_claims: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/surface-claims and GET /api/rooms/{roomId}/surface-claims/{claimId}" },
+  room_release_surface_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/surface-claims/{claimId}/release" },
+  room_amend_surface_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/surface-claims/{claimId}/amend" }
 });
 
 export function mcpToolContractLine(name) {
