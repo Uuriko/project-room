@@ -366,7 +366,6 @@ export const OAUTH_ROUTE_SCOPES = Object.freeze([
   // Multi-class bundles: room metadata + pinned message bodies (chat) +
   // open work in one inseparable payload — ALL three read scopes required.
   { method: "GET", template: "/api/rooms/{roomId}/activation-pack", scopes: ["rooms:read", "chat:read", "work:read"] },
-  { method: "GET", template: "/api/rooms/{roomId}/orient", scopes: ["rooms:read", "chat:read", "work:read"] },
   // work:read / work:write — the route-table work-claims family, whose
   // handlers act on auth.member and reauthorize through roomAuth.
   { method: "GET", template: "/api/rooms/{roomId}/work-claims-read", scopes: ["work:read"] },
