@@ -20,6 +20,40 @@ export function serviceFetch(signal, fetchImpl = fetch) {
   };
 }
 
+// Fixed route categories keep cardinality bounded and never retain URLs,
+// headers, tokens, bodies, identifiers or server error messages.
+export function requestMetrics(fetchImpl, now = () => performance.now()) {
+  const buckets = new Map();
+  const category = url => {
+    let path; try { path = new URL(url).pathname; } catch { return 'other'; }
+    if (path.endsWith('/api/agent-wakes/poll')) return 'wake_poll';
+    if (path.endsWith('/api/agent-heartbeats')) return 'lease';
+    if (/\/api\/rooms\/[^/]+$/.test(path)) return 'identity_snapshot';
+    if (/\/messages\/[^/]+\/thread$/.test(path)) return 'message';
+    if (path.endsWith('/reply-context')) return 'reply_context';
+    return 'other';
+  };
+  const record = (key, start, failed) => {
+    const ms = Math.max(0, now() - start);
+    const row = buckets.get(key) ?? { count: 0, errors: 0, totalMs: 0, maxMs: 0 };
+    row.count++; row.errors += Number(failed); row.totalMs += ms; row.maxMs = Math.max(row.maxMs, ms);
+    buckets.set(key, row);
+  };
+  return {
+    fetch: (url, options) => {
+      const start = now(), key = category(url);
+      let pending;
+      try { pending = fetchImpl(url, options); }
+      catch (error) { record(key, start, true); throw error; }
+      return Promise.resolve(pending).then(response => {
+        record(key, start, !response.ok); return response;
+      }, error => { record(key, start, true); throw error; });
+    },
+    snapshot: () => ({ scope: 'process_lifetime_response_headers',
+      routes: Object.fromEntries([...buckets].map(([key, row]) => [key, { ...row }])) })
+  };
+}
+
 // Connection health is independent of transport receipts. Neither establishes
 // execution. Retain accepted and uncertain evidence separately across restarts.
 export function createStatusPublisher(directory, binding, now = Date.now) {
@@ -77,7 +111,8 @@ export async function main(argv = process.argv.slice(2)) {
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
-  const boundedFetch = serviceFetch(controller.signal);
+  const measured = requestMetrics(fetch);
+  const boundedFetch = serviceFetch(controller.signal, measured.fetch);
   const publish = createStatusPublisher(config.directory,
     [config.scope.origin, config.scope.roomId, config.scope.memberId, config.threadId, config.hostId]);
   const monitor = setInterval(() => { try { if (owner.shouldStop()) stop(); } catch { stop(); } }, 1000);
@@ -87,7 +122,7 @@ export async function main(argv = process.argv.slice(2)) {
       minCreatedAt: config.minCreatedAt, allowedSenders: config.allowedSenders,
       wake: new AgentWakeClient({ connection, fetchImpl: boundedFetch }),
       client: new RoomAgentClient({ ...connection, fetchImpl: boundedFetch }),
-      signal: controller.signal, emit: publish,
+      signal: controller.signal, emit: event => publish({ ...event, requests: measured.snapshot() }),
       run: args => runCodexQueue(args, { executable: config.codexExecutable }) });
   } catch (error) {
     publish({ status: 'attention_required', code: error.code ?? 'service_stopped', execution: 'not_observed' });

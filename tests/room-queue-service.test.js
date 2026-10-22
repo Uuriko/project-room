@@ -208,3 +208,24 @@ test('missing source before dispatch is deferred and recovers after restart', as
   await runRoomQueueService({...f, signal:second.signal, wake:{wait:async()=>page([entry])}, wait:async()=>second.abort()});
   assert.equal(runs, 1);
 });
+
+test('request metrics are bounded, private, detached and preserve fetch errors', async () => {
+  const { requestMetrics } = await import('../scripts/run-room-queue-service.mjs');
+  let clock = 0;
+  const tracker = requestMetrics(async () => { clock += 10; return { ok: true }; }, () => clock);
+  for(let i=0;i<100;i++) await tracker.fetch(`https://room.example/api/rooms/private-${i}?token=SECRET`);
+  const first=tracker.snapshot();
+  assert.deepEqual(Object.keys(first.routes), ['identity_snapshot']);
+  assert.equal(first.routes.identity_snapshot.count,100);
+  assert.equal(first.routes.identity_snapshot.totalMs,1000);
+  first.routes.identity_snapshot.count=0;
+  assert.equal(tracker.snapshot().routes.identity_snapshot.count,100);
+  assert.ok(!JSON.stringify(tracker.snapshot()).includes('SECRET'));
+  const error=new Error('SECRET');
+  const broken=requestMetrics(()=>{throw error;});
+  assert.throws(()=>broken.fetch('https://room.example/secret'), e=>e===error);
+  assert.equal(broken.snapshot().routes.other.errors,1);
+  const failed=requestMetrics(async()=>{throw error;});
+  await assert.rejects(failed.fetch('https://room.example/api/agent-wakes/poll'),e=>e===error);
+  assert.equal(failed.snapshot().routes.wake_poll.errors,1);
+});
