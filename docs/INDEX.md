@@ -86,7 +86,7 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 
 ## Reference shelf
 
-Specialized references that are current but narrow: [WORKITEMS-BOARD-STEP0.md](WORKITEMS-BOARD-STEP0.md) (the workItems → board claims Step 0 characterization: census, field fates, and the kill-criterion record), [CODE-DROPS.md](CODE-DROPS.md) (code drops), [CODEX-EVIDENCE-CONTRACT.md](CODEX-EVIDENCE-CONTRACT.md) (the offline Codex evidence inspector), [I18N-HARNESS.md](I18N-HARNESS.md) (the i18n harness), [ROOM-ASSISTANT-SCRATCH.md](ROOM-ASSISTANT-SCRATCH.md) (the scratch-room assistant host). The weekly learning loop is scored by [lesson-scorer.md](lesson-scorer.md) and run from the cron definition in [weekly-learnings-cron.md](weekly-learnings-cron.md).
+Specialized references that are current but narrow: [WORKITEMS-BOARD-STEP0.md](WORKITEMS-BOARD-STEP0.md) (the workItems → board claims Step 0 characterization: census, field fates, and the kill-criterion record), [CODE-DROPS.md](CODE-DROPS.md) (code drops), [CODEX-EVIDENCE-CONTRACT.md](CODEX-EVIDENCE-CONTRACT.md) (the offline Codex evidence inspector), [I18N-HARNESS.md](I18N-HARNESS.md) (the i18n harness), [ROOM-ASSISTANT-SCRATCH.md](ROOM-ASSISTANT-SCRATCH.md) (the scratch-room assistant host), [RELEASE-LEASE-CONTRACT.md](RELEASE-LEASE-CONTRACT.md) (release-lease invariants and the inactive fallback proposal). The weekly learning loop is scored by [lesson-scorer.md](lesson-scorer.md) and run from the cron definition in [weekly-learnings-cron.md](weekly-learnings-cron.md).
 
 ## History
 
