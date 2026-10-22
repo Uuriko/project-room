@@ -205,7 +205,9 @@ export function mergeSlot(claims, nowMs = Date.now()) {
 // Hosted checks at one exact head: counts plus the names still pending or failed.
 // Commit statuses (for example room/release-lease) are not check runs, so a
 // summary without them is never green.
-export function checkSummary(head, runs, statuses = null) {
+export const REQUIRED_CONTEXTS = Object.freeze(["room/release-lease"]);
+
+export function checkSummary(head, runs, statuses = null, requiredContexts = REQUIRED_CONTEXTS) {
   if (!runs || !Array.isArray(runs.check_runs)) return { head, unavailable: "checks_unreadable" };
   const pending = [];
   const failed = [];
@@ -221,7 +223,11 @@ export function checkSummary(head, runs, statuses = null) {
     else if (c === "failure" || c === "timed_out" || c === "cancelled" || c === "action_required" || c === "startup_failure") { counts.failure++; failed.push(name); }
     else { counts.other++; unknown.push(name); }
   }
-  const statusRows = Array.isArray(statuses?.statuses) ? statuses.statuses : null;
+  // A status read counts only when it is bound to this head and complete
+  // (review 17513); otherwise it is treated as missing, never as green.
+  const statusRows = Array.isArray(statuses?.statuses) && statuses.sha === head
+    && Number.isSafeInteger(statuses.total_count) && statuses.total_count === statuses.statuses.length
+    ? statuses.statuses : null;
   for (const row of statusRows ?? []) {
     const name = typeof row?.context === "string" ? row.context : "unnamed";
     if (row?.state === "success") counts.success++;
@@ -230,15 +236,17 @@ export function checkSummary(head, runs, statuses = null) {
     else { counts.other++; unknown.push(name); }
   }
   const includesCommitStatuses = statusRows !== null;
+  const seen = new Set((statusRows ?? []).filter(row => row?.state === "success").map(row => row.context));
+  const missingRequired = requiredContexts.filter(context => !seen.has(context)).sort();
   const total = Number.isSafeInteger(runs.total_count) ? runs.total_count : runs.check_runs.length;
   const truncated = total > runs.check_runs.length;
   let status = "green";
   // A stale, null or unrecognized conclusion is never read as green.
-  if (truncated || counts.other > 0 || !includesCommitStatuses) status = "incomplete";
+  if (truncated || counts.other > 0 || !includesCommitStatuses || missingRequired.length > 0) status = "incomplete";
   if (counts.failure > 0) status = "failing";
   else if (counts.pending > 0) status = "pending";
   else if (runs.check_runs.length === 0 && (statusRows ?? []).length === 0) status = "none";
-  return { head, status, total, truncated, includesCommitStatuses, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
+  return { head, status, total, truncated, includesCommitStatuses, missingRequired, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
 }
 
 export async function landingFacts({
