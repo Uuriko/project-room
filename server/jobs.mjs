@@ -377,7 +377,11 @@ export const JOBS = Object.freeze([
         return { ...out, autolink: { discovered: found, deployed } };
       } catch (error) {
         console.error("claim autolink follow-up failed:", error?.message ?? error);
-        return out;
+        // #3911 F-8: the follow-up still may not fail the linked-PR poll
+        // above, but its failure must not be invisible either. Name it on
+        // the tick result's failure channel so the heartbeat records a
+        // failed tick instead of a success while linking fails every tick.
+        return { ...out, autolinkFailed: 1, scanError: "claim autolink follow-up failed" };
       }
     }
   }),
@@ -539,7 +543,10 @@ export const JOBS = Object.freeze([
     disabledReason: () => "Neither ROOM_BACKUPS (R2) nor ROOM_BACKUPS_KV is configured; no backups are being taken, see docs/BACKUP-DR.md",
     async run(_store, ctx) {
       if (!ctx.room) return { skipped: 1 };
-      try { return await writeDailyBackup(ctx.env, ctx.room); }
+      // #3911 F-10: hand the writer this job's deadline so a growing full
+      // export stops cooperatively instead of running to completion
+      // inside the single Durable Object that also serves all traffic.
+      try { return await writeDailyBackup(ctx.env, ctx.room, undefined, { deadline: ctx.deadline }); }
       catch (error) {
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };
