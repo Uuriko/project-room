@@ -37,6 +37,13 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // liveness, wakeability measures listener recency — the room must tell a
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
+// #3910 F3: acked wake signals (delivered_at set) and their listener-claim
+// rows are history, not queue state — pruneWakeSignals reaps them once they
+// are older than this window, the same treatment the webhook journal got
+// (pruneWebhookDeliveries). Unacked signals are never pruned: they are the
+// durable queue a host has yet to pull.
+export const WAKE_SIGNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const WAKE_SIGNAL_PRUNE_BATCH = 500;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -1203,6 +1210,39 @@ export class AgentHeartbeats {
       lastSeenAt: withState[0].lastSeenAt,
       hosts: Object.freeze(withState),
     });
+  }
+
+  // #3910 F3: time-based retention for the wake fabric. Deletes acked
+  // signals (delivered_at set) whose delivery is older than the retention
+  // window, together with their agent_wake_signal_claims rows, at most
+  // WAKE_SIGNAL_PRUNE_BATCH signals per call; the retention job calls it
+  // every tick and later ticks continue. Pending (unacked) signals and
+  // recently acked ones stay. Returns what was reaped.
+  pruneWakeSignals({ now = this.now(), retentionMs = WAKE_SIGNAL_RETENTION_MS, limit = WAKE_SIGNAL_PRUNE_BATCH } = {}) {
+    if (!Number.isSafeInteger(now) || !Number.isSafeInteger(retentionMs) || retentionMs < 0
+      || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new TypeError("pruneWakeSignals requires a timestamp, a non-negative retention window and a positive limit");
+    }
+    const cutoff = now - retentionMs;
+    const doomed = this.db.prepare(`SELECT signal_id FROM agent_wake_signals
+      WHERE delivered_at IS NOT NULL AND delivered_at < ?
+      ORDER BY delivered_at ASC, signal_id ASC LIMIT ?`).all(cutoff, limit);
+    if (doomed.length === 0) return Object.freeze({ deleted: 0, claimsDeleted: 0, moreMayRemain: false });
+    const ids = doomed.map(row => row.signal_id);
+    // The claims table is lazy DDL: a store that never ran a listener lease
+    // has no claims to reap.
+    const claimsTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_wake_signal_claims'").get();
+    let claimsDeleted = 0;
+    if (claimsTable) {
+      const dropClaim = this.db.prepare("DELETE FROM agent_wake_signal_claims WHERE signal_id=?");
+      for (const id of ids) claimsDeleted += dropClaim.run(id).changes;
+    }
+    const dropSignal = this.db.prepare(
+      "DELETE FROM agent_wake_signals WHERE signal_id=? AND delivered_at IS NOT NULL AND delivered_at < ?");
+    let deleted = 0;
+    for (const id of ids) deleted += dropSignal.run(id, cutoff).changes;
+    return Object.freeze({ deleted, claimsDeleted, moreMayRemain: doomed.length === limit });
   }
 
   // Queue a wake for every agent that has registered at least one host.

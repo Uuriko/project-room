@@ -233,12 +233,15 @@ async function runNodeRetention(store, ctx) {
   let webhookDeliveries = { deleted: 0 };
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
+  let wakeSignals = { deleted: 0, claimsDeleted: 0 };
   try {
     webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
     oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
     abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
+    // #3910 F3: acked wake signals + their claim rows past retention.
+    wakeSignals = store.agentHeartbeats.pruneWakeSignals({ now: ctx.now?.() ?? Date.now() });
   } catch { /* a room that has never stored these caches has no table */ }
-  return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets, wakeSignals };
 }
 
 function defineJob(job) {
