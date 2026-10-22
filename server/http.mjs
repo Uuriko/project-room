@@ -250,7 +250,7 @@ const gr2PublicPath = pathname => {
 };
 // --- end GR2 ---
 const canonicalLink = pathname => {
-  const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/faq.html" ? "/faq" : pathname === "/offers.html" ? "/offers" : pathname;
+  const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/offers.html" ? "/offers" : pathname;
   return `<${ROOM_ORIGIN}${path}>; rel="canonical"`;
 };
 const publicPageLinks = (url, pathname) => `${discoveryLinks(url)}, ${canonicalLink(pathname)}`;
