@@ -1,3 +1,5 @@
+import { clipboard } from "./clipboard.js";
+import { uiText } from "./strings.js";
 import { workPacket, packetMarkdown, parseWorkReturn, nativeWorkDraft, resultDraft, resultDraftText } from "./work-packet.js";
 import { draftCommand, retryUnconfirmed } from "./client.js";
 import { EVENT_TYPES as T } from "./events.js";
@@ -14,8 +16,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     && client.session === ticket.session && client.ownsAccountSession() && getState()?.room?.id === ticket.session.roomId);
   const status = text => { $("portable-status").textContent = text; $("portable-status").classList.toggle("visible", Boolean(text)); };
   function clearView() {
-    // Closing a dialog or clearing identity cannot cancel an issued OS copy.
-    // Retain its latch until settlement so a new prompt cannot race that write.
+    // Shared clipboard ownership survives closing and identity changes.
     version++; entry = null; pending = null; saving = uncertain = false;
     $("packet-preview").value = ""; $("portable-result").value = ""; $("portable-work-title").textContent = "";
     $("portable-progress").checked = false; $("portable-progress-label").hidden = true;
@@ -38,6 +39,8 @@ export function installPortableWork({ client, getState, onSaved }) {
     (opener?.isConnected ? opener : replacement)?.focus({ preventScroll: true });
   }
   function controls() {
+    if (owns(entry) && !$("portable-export").hidden && clipboard.busy && (!copying || clipboard.slow)) status(uiText("clipboard.pending"));
+    if (!clipboard.busy && $("portable-status").textContent === uiText("clipboard.pending")) status("");
     const current = getState()?.workItems?.[entry?.workId];
     const older = entry?.native && current && current.revision > entry.basisRevision;
     const unavailable = entry?.native && (!current || current.revision < entry.basisRevision);
@@ -47,9 +50,9 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-result").readOnly = saving || uncertain;
     $("portable-older").disabled = saving || uncertain;
     $("portable-submit").textContent = uncertain ? "Retry draft" : "Post draft";
-    $("packet-copy").disabled = copying || !$("packet-preview").value;
+    $("packet-copy").disabled = clipboard.busy || copying || !$("packet-preview").value;
     $("packet-copy").textContent = copying ? "Copying…" : "Copy";
-    $("portable-source").disabled = copying; $("portable-progress").disabled = copying;
+    $("portable-source").disabled = copying && !clipboard.slow; $("portable-progress").disabled = copying && !clipboard.slow;
     $("portable-form").setAttribute("aria-busy", String(saving));
   }
   function preview() {
@@ -70,7 +73,10 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-return-note").textContent = entry?.source ? "Posts a new draft linked to the original. Work status stays unchanged."
       : "Posts to chat; work status stays unchanged. Reload or sign-out clears unsent drafts.";
     status(result && uncertain ? "Save not confirmed. Retry the same draft." : ""); (result ? $("portable-result") : $("packet-copy")).focus();
-    if (!result) $("packet-preview").scrollTop = 0;
+    if (!result) {
+      $("packet-preview").scrollTop = 0;
+      if (clipboard.busy) status(uiText("clipboard.pending"));
+    }
   }
   document.addEventListener("click", event => {
     const button = event.target.closest("[data-portable-work]");
@@ -97,6 +103,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     const item = state.workItems[workId];
     $("portable-progress-label").hidden = !(item.handoff || item.receipt || item.blocker || item.claim || item.attempt_count);
     $("portable-source-label").hidden = !state.workItems[workId].sourceMessageId;
+    $("portable-progress").checked = button.dataset.portableProgress === "true" && !$("portable-progress-label").hidden;
     controls(); if (!entry.native) preview(); dialog.showModal(); mode(entry.native || button.dataset.portableMode === "result");
   });
   $("portable-close").addEventListener("click", close);
@@ -107,11 +114,12 @@ export function installPortableWork({ client, getState, onSaved }) {
   $("portable-add-result").addEventListener("click", () => mode(true));
   $("packet-copy").addEventListener("click", async () => {
     const ticket = entry;
-    if (!owns(ticket) || copying || !$("packet-preview").value) return;
+    if (!owns(ticket) || clipboard.busy || copying || !$("packet-preview").value) return;
     copying = true; controls();
     try {
-      await navigator.clipboard.writeText($("packet-preview").value);
-      if (owns(ticket) && !$("portable-export").hidden) status("Copied. Paste into your AI.");
+      const outcome = await clipboard.copy($("packet-preview").value);
+      if (outcome === "failed") throw new Error("clipboard_failed");
+      if (owns(ticket) && !$("portable-export").hidden) status(outcome === "copied" ? "Copied. Paste into your AI." : uiText("clipboard.pending"));
     } catch {
       if (owns(ticket) && !$("portable-export").hidden) { status("Select the prompt and copy it manually."); $("packet-preview").focus(); $("packet-preview").select(); }
     } finally {
@@ -168,6 +176,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     if (!owns(entry)) return reset();
     controls();
   }
+  clipboard.subscribe(controls);
   return { reset, hasDraft, sync };
 }
 
@@ -185,13 +194,15 @@ export function installResultCopy({ client, getState }) {
   const status = text => { $("result-copy-status").textContent = text; $("result-copy-status").classList.toggle("visible", Boolean(text)); };
   const valid = () => Boolean(input.value.trim()) && input.value.length <= 16000;
   function controls() {
+    if (owns(entry) && clipboard.busy && (!flight || clipboard.slow)) status(uiText("clipboard.pending"));
+    if (!clipboard.busy && $("result-copy-status").textContent === uiText("clipboard.pending")) status("");
     const current = work(), older = Boolean(entry && basis(current) !== entry.basis);
-    input.readOnly = Boolean(flight);
+    input.readOnly = Boolean(flight) && !clipboard.slow;
     $("result-copy-wait").hidden = !entry || !flight || flight.ticket === entry;
-    copy.disabled = Boolean(flight) || !valid() || !current?.receipt;
+    copy.disabled = clipboard.busy || Boolean(flight) || !valid() || !current?.receipt;
     copy.textContent = older ? "Copy older draft" : "Copy";
     $("result-copy-fresh").hidden = !older || !current?.receipt;
-    $("result-copy-fresh").disabled = Boolean(flight);
+    $("result-copy-fresh").disabled = Boolean(flight) && !clipboard.slow;
     $("result-copy-changed").hidden = !older;
     $("result-copy-changed").textContent = current?.receipt ? "Work changed. Your draft is unchanged." : "This result is no longer available.";
     dialog.setAttribute("aria-busy", String(Boolean(flight)));
@@ -201,7 +212,7 @@ export function installResultCopy({ client, getState }) {
     input.value = ""; $("result-copy-source").textContent = "";
     dialog.querySelector("details").open = false;
     status(""); dialog.close(); controls();
-    // An issued system clipboard write cannot be cancelled. Keep its flight latch.
+    // The shared clipboard controller retains any issued OS write.
   }
   function reset() { drafts.clear(); retire(); }
   function close() {
@@ -249,6 +260,7 @@ export function installResultCopy({ client, getState }) {
     if (draft) { Object.assign(entry, draft); input.value = draft.text; $("result-copy-source").textContent = draft.source; status(""); controls(); }
     else seed(item);
     dialog.showModal(); input.focus();
+    if (clipboard.busy) status(uiText("clipboard.pending"));
   });
   input.addEventListener("input", () => { textRevision++; status(""); controls(); });
   $("result-copy-close").addEventListener("click", close);
@@ -266,15 +278,16 @@ export function installResultCopy({ client, getState }) {
   });
   copy.addEventListener("click", async () => {
     const ticket = entry, offeredOlder = copy.textContent === "Copy older draft";
-    if (!owns(ticket) || flight) return;
+    if (!owns(ticket) || flight || clipboard.busy) return;
     sync();
     if (copy.disabled || (basis(work()) !== ticket.basis && !offeredOlder)) return;
     const attempt = { ticket, text: input.value, revision: textRevision, basis: basis(work()), focus: document.activeElement };
     flight = attempt; controls(); status("Copying…");
     const current = () => owns(ticket) && textRevision === attempt.revision && input.value === attempt.text && basis(work()) === attempt.basis;
     try {
-      await navigator.clipboard.writeText(attempt.text);
-      if (current()) status("Copied. Paste where you choose.");
+      const outcome = await clipboard.copy(attempt.text);
+      if (outcome === "failed") throw new Error("clipboard_failed");
+      if (current()) status(outcome === "copied" ? "Copied. Paste where you choose." : uiText("clipboard.pending"));
     } catch {
       if (current()) {
         status("Select the text and copy it manually.");
@@ -285,5 +298,6 @@ export function installResultCopy({ client, getState }) {
       controls();
     }
   });
+  clipboard.subscribe(controls);
   return { reset, sync, hasDraft: () => drafts.size > 0 || dirty() };
 }

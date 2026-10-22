@@ -76,7 +76,7 @@ test("every ground citation resolves: file exists, fragment present", () => {
   assert.deepEqual(failures, [], `unresolvable ground citations:\n${failures.join("\n")}`);
 });
 
-const REQUIRED_BEATS = ["hook", "the room", "claims", "inbox", "connect", "close"];
+const REQUIRED_BEATS = ["hook", "the room", "claims", "rooms", "connect", "close"];
 
 test("script covers every required beat section", () => {
   const text = scriptText().toLowerCase();

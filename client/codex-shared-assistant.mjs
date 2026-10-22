@@ -7,11 +7,29 @@ import { withAttachmentReferences, withAttachmentText } from "./shared-attachmen
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const stops = new Set(["pause_requested", "cancel_requested"]);
 
+// A direct reply is an explicit context selection, not permission to crawl a room.
+export async function sharedReplyContext(message, readMessage) {
+  if (!message.replyToId) return undefined;
+  const unavailable = { messageId: message.replyToId, contentStatus: "unavailable" };
+  let referenced;
+  try { referenced = await readMessage(message.replyToId); }
+  catch (error) {
+    if ([403, 404].includes(error.status)) return unavailable;
+    throw error; // A transient failure must not silently change the execution basis.
+  }
+  if (!referenced || referenced.deletedAt || referenced.toMemberId || referenced.id !== message.replyToId
+    || (referenced.channelId ?? "general") !== (message.channelId ?? "general")) return unavailable;
+  const characters = Array.from(referenced.body ?? "");
+  return { messageId: referenced.id, memberId: referenced.authorId, revision: referenced.revision ?? 0,
+    channelId: referenced.channelId ?? "general", contentStatus: "quoted", body: characters.slice(0, 8000).join(""),
+    truncated: characters.length > 8000 };
+}
+
 // Best-effort public answer previews. The final result still uses atomic publish.
 // Full snapshots are bounded/throttled; no tool arguments or private reasoning.
 export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds, isCurrent = async () => true, emit = () => {}, intervalMs = 500 }) {
   if (!Number.isSafeInteger(intervalMs) || intervalMs < 500 || intervalMs > 2147483647) throw new Error("Draft interval must be at least 500ms and fit a timer");
-  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", checkedRevision = null, dirty = false, nextAt = 0;
+  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", dirty = false, nextAt = 0;
   const text = () => [...parts.values()].join("\n").slice(0, 65536).toWellFormed();
   const send = async () => {
     dirty = false;
@@ -20,10 +38,8 @@ export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds,
       const current = await read();
       if (current.attemptId !== attemptId || current.status !== "working" || current.sourceDeleted
         || JSON.stringify(current.inputs.map(item => item.sourceMessageId)) !== JSON.stringify(typeof inputIds === "function" ? inputIds() : inputIds)) return;
-      if (current.revision !== checkedRevision) {
-        if (!await isCurrent(current)) return;
-        checkedRevision = current.revision;
-      }
+      // Quoted references and attachments can change without a run revision.
+      if (!await isCurrent(current)) return;
       // Include tokens received while checking authority without a second read.
       const body = text();
       sequence = Math.max(sequence, current.answerDraftSequence ?? current.answerDraft?.sequence ?? 0) + 1;
@@ -108,7 +124,20 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     }
   }
   if (run.attemptId && run.attemptId !== attemptId) throw new Error("Another host owns this shared attempt");
-  if (!run.attemptId) run = (await act({ action: "claim", requestId: `codex-claim-${key}`, expectedRevision: run.revision })).result;
+  if (!run.attemptId) {
+    try { run = (await act({ action: "claim", requestId: `codex-claim-${key}`, expectedRevision: run.revision })).result; }
+    catch (error) {
+      // Older hosts use the same member/run claim ID with different attempt IDs.
+      // Classify only a confirmed foreign owner as a race, not every retry conflict.
+      if (error.code === "assistant_retry_conflict") {
+        const current = await read();
+        if (current.attemptId && current.attemptId !== attemptId) {
+          throw Object.assign(new Error("Another host owns this shared attempt"), { code: "assistant_run_owned" });
+        }
+      }
+      throw error;
+    }
+  }
   if (run.status !== "working" && !(record.inputs && ["unknown", "resume_requested", ...stops].includes(run.status)))
     throw new Error("Shared attempt is not working");
   const binding = { kind: "shared-assistant", origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
@@ -120,7 +149,8 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   const runtime = createCodexRuntimeHost({ db, rpc, cwd, policy, emit: event => draft.emit(event), timeoutMs, scope: connection,
     authorize: async (bound, action) => {
       const current = await read();
-      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt || current.sourceDeleted)
+      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt
+        || current.sourceDeleted && !(stops.has(current.status) && ["read", "interrupt"].includes(action)))
         throw new Error("Shared runtime attempt was revoked");
       if (["start", "steer"].includes(action)) {
         if (current.status !== "working") throw new Error("Shared runtime is stopping");
@@ -130,18 +160,28 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
           state: "working", summary: "Working on the shared request." });
       }
     } });
-  const inputs = async current => withAttachmentReferences(await Promise.all(current.inputs.map(async entry => {
-    const message = await room.message(entry.sourceMessageId);
-    if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
-    // Preserve the conversation links a human sees when replying. References
-    // are context, not authority: do not expand them into ambient room history
-    // or treat a linked work item as permission to act on it.
-    return { messageId: entry.sourceMessageId, memberId: entry.memberId, body: message.body,
-      ...Object.fromEntries(["replyToId", "workItemId", "channelId"]
-        .filter(field => typeof message[field] === "string" && message[field])
-        .map(field => [field, message[field]])),
-      conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
-  })), await room.files());
+  const inputs = async current => {
+    // Reuse reads within this observation, but never across observations: a
+    // changed or withdrawn reference must invalidate the execution basis.
+    const reads = new Map();
+    const readMessage = id => {
+      if (!reads.has(id)) reads.set(id, room.message(id));
+      return reads.get(id);
+    };
+    for (const entry of current.inputs) readMessage(entry.sourceMessageId);
+    const selected = await Promise.all(current.inputs.map(async entry => {
+      const message = await readMessage(entry.sourceMessageId);
+      if (!message || message.deletedAt) throw new Error("Shared input is unavailable");
+      const replyContext = await sharedReplyContext(message, readMessage);
+      return { messageId: entry.sourceMessageId, memberId: entry.memberId, body: message.body,
+        ...(replyContext ? { replyContext } : {}),
+        ...Object.fromEntries(["replyToId", "workItemId", "channelId"]
+          .filter(field => typeof message[field] === "string" && message[field])
+          .map(field => [field, message[field]])),
+        conflict: Boolean(entry.conflict), resolution: Boolean(entry.resolution) };
+    }));
+    return withAttachmentReferences(selected, await room.files());
+  };
   if (run.status === "resume_requested") {
     const prior = record.prior_result ? JSON.parse(record.prior_result) : null;
     if (prior?.resumeRevision !== run.revision) {
@@ -204,7 +244,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
         result = await runtime(await preparedInput(), { binding, previousBinding });
       else {
         if (recovered.status !== "completed") throw new Error("Shared runtime recovery required; original turn is not completed");
-        result = { body: recovered.body };
+        result = { body: recovered.body, ...(recovered.attention ? { attention: recovered.attention } : {}) };
       }
     } else result = await runtime(await preparedInput(), { binding, previousBinding });
   } catch (error) {
@@ -227,6 +267,10 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
       state: current.status === "cancel_requested" ? "cancelled" : "paused", summary: "Execution stopped." });
   if (current.attemptId !== attemptId || !["working", "unknown"].includes(current.status) || current.sourceDeleted)
     throw new Error("Shared result is withheld: attempt stopped or changed");
+  if (result.attention === "tool_approval_required")
+    return act({ action: "report", requestId: `codex-tool-blocked-${key}-${record.continuation ?? 0}-${current.revision}`,
+      expectedRevision: current.revision, state: "needs_input",
+      summary: "A tool was blocked by the host approval policy. Review the agent response and host permissions before continuing; completion is not confirmed." });
   const currentInputs = await inputs(current);
   if (basis !== digest(currentInputs)) {
     const round = Number(record.continuation ?? 0) + 1;
@@ -242,7 +286,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     return runCodexSharedAssistant({ connection, db, rpc, cwd, policy, runId, emit, signal, pollMs, timeoutMs, maxContinuations });
   }
   const publish = { action: "publish", requestId: `codex-publish-${key}-${record.continuation ?? 0}`, expectedRevision: current.revision,
-    body: result.body, summary: "Completed the shared request.", appliedInputMessageIds: selected.map(item => item.messageId) };
+    body: result.body, summary: "The agent returned a response.", appliedInputMessageIds: selected.map(item => item.messageId) };
   db.prepare("UPDATE codex_shared_runs SET publish=? WHERE id=?").run(JSON.stringify(publish), key);
   try { return await act(publish); } // Server transaction fences Stop, changed inputs and replacement attempts.
   catch (error) {
