@@ -525,5 +525,8 @@ export default {
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
-  "result.previewActions": "Preview actions"
+  "result.previewActions": "Preview actions",
+  "work.prepareContinuation": "Prepare continuation",
+  "work.savedProgress": "Saved progress",
+  "work.stopUnconfirmed": "Stop requested. Confirm the worker stopped before starting another run."
 };

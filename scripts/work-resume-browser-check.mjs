@@ -23,7 +23,7 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   send(T.SESSION_STOPPED, { workItemId: 'test-handoff', expectedRevision: 2, status: 'failed' });
   send(T.WORK_ACCEPTED, { workItemId: 'test-handoff', expectedRevision: 3 });
   send(T.WORK_HANDOFF_RECORDED, { workItemId: 'test-handoff', expectedRevision: 4,
-    doneSummary: 'Parser built; escaped separators still need testing.', nextAction: 'Check escaped separators.', limitReason: '<script>window.handoffExecuted=true</script>Session ended.' });
+    haltAll: true, doneSummary: 'Parser built; escaped separators still need testing.', nextAction: 'Check escaped separators.', limitReason: '<script>window.handoffExecuted=true</script>Session ended.' });
   const before = f.store.snapshot(f.keys.owner, 'commons');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -37,6 +37,7 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   const card = page.locator('[data-work-record-id="test-handoff"]');
   const handoff = card.locator('[data-work-handoff]'); await handoff.waitFor({ state: 'visible' });
   assert.match(await handoff.innerText(), /Check escaped separators/);
+  await handoff.getByText('Stop requested. Confirm the worker stopped before starting another run.', { exact: true }).waitFor({ state: 'visible' });
   assert.equal(await card.getByRole("link", { name: "From this conversation" }).count(), 1);
   assert.equal(await card.getByRole("link", { name: "From this conversation" }).isVisible(), true, "source conversation is available without opening Details");
   const colors = await handoff.evaluate(node => ({ background: getComputedStyle(node).backgroundColor,
@@ -49,7 +50,9 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   assert.equal(await handoff.getByText('Session ended.', { exact: false }).isVisible(), false);
   await handoff.getByText('Why work paused', { exact: true }).click();
   assert.equal(await page.evaluate(() => window.handoffExecuted), undefined);
-  await card.getByRole('button', { name: 'Continue with saved context' }).click();
+  assert.equal(await card.locator('.work-recovery').count(), 0, 'handoff and interrupted run share one recovery section');
+  const prepare = handoff.getByRole('button', { name: 'Prepare continuation', exact: true });
+  await prepare.focus(); await page.keyboard.press('Enter');
   assert.equal(await page.locator('#portable-progress').isChecked(), true);
   assert.match(await page.locator('#packet-preview').inputValue(), /Parser built/);
   assert.equal((await page.locator('#packet-preview').inputValue()).includes('Please prepare an agenda'), false);
@@ -74,6 +77,9 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   assert.deepEqual(f.store.snapshot(f.keys.owner, 'commons').state.workItems, before.state.workItems);
   assert.deepEqual(errors, []);
   // A subsequent real transition closes the handoff; its urgent card disappears.
+  const halt = f.store.snapshot(f.keys.owner, 'commons').state.agentHalts.producer;
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: T.WORK_HALT_CLEARED,
+    data: { memberId: 'producer', haltEventId: halt.eventId } });
   send(T.WORK_STARTED, { workItemId: 'test-handoff', expectedRevision: 5 });
   await handoff.waitFor({ state: 'detached' });
   send(T.WORK_BLOCKED, { workItemId: 'test-handoff', expectedRevision: 6, reason: 'Need the agreed input format', nextAction: 'Confirm the format' });
