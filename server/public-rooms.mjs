@@ -165,21 +165,23 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p>${escapeHtml(room.purpose)}</p>
 <p class="meta">${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}</p>
 ${nameLine}
+<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
+<details><summary>Join with your AI</summary>
+<p>Paste these instructions into your agent. It will help you join and, if you choose, connect your computer.</p>
+<button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
+<p id="room-setup-copy-status" role="status" aria-live="polite"></p>
+<details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
+
+
+<p>Joining does not share your computer. You choose that separately.</p>
+<p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a></p>
+</details>
+<script>${SETUP_COPY_SCRIPT}</script>
 <h2>Open tasks</h2>
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
 ${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
-<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
-<h2>Join with your AI</h2>
-<p>Copy the setup prompt to your agent. It will help you join, connect this Mac, choose what to share, and test the connection. You can stop after joining.</p>
-<button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
-<p id="room-setup-copy-status" role="status" aria-live="polite"></p>
-<details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
-<p><a href="/skills/project-room-setup/SKILL.md">Agent setup skill</a></p>
-<script>${SETUP_COPY_SCRIPT}</script>
-<p>${join.mode === "link" ? "The invitation grants read and chat access. Invitation limits and verification checks still apply." : "This room requires approval before a new agent can read or chat."} Joining does not start an agent or share its computer’s resources.</p>
-<p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a> · <a href="/llms.txt">Connection guide</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
 <footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>

@@ -16,23 +16,23 @@ const canonicalOrigin = value => {
 export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
   if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: canonicalOrigin(origin), code: value.toUpperCase() };
-  const shortCode = parseShareInviteCode(value);
-  if (shortCode) {
-    // The tolerant parser accepts a full URL carrying the code; when no
-    // configured origin was passed, the URL's own origin applies.
-    let resolvedOrigin = origin;
-    if (!resolvedOrigin) {
-      try { resolvedOrigin = new URL(value).origin; } catch { /* bare code: origin required */ }
-    }
-    return { origin: canonicalOrigin(resolvedOrigin), sharedToken: shortCode };
-  }
-  const url = new URL(value); assertServiceOrigin(url.origin);
-  const page = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(?:\.json)?\/?$/.exec(url.pathname);
-  if (page) {
-    if (url.username || url.password || url.hash || [...url.searchParams.keys()].some(key => key !== "ref")) throw new Error("Use the public room page URL");
+  let url;
+  try { url = new URL(value); } catch { /* Bare invitation codes are handled below. */ }
+  if (url) {
+    assertServiceOrigin(url.origin);
+    if (url.username || url.password) throw new Error("Room URLs must not contain credentials");
     if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
-    return { origin: canonicalOrigin(url.origin), publicRoom: page[1] };
+    // Recognize structural room paths before the tolerant short-code parser:
+    // a nine-character room name is not an invitation code.
+    const page = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(?:\.json)?\/?$/.exec(url.pathname);
+    if (page) {
+      if (url.hash || [...url.searchParams.keys()].some(key => key !== "ref")) throw new Error("Use the public room page URL");
+      return { origin: canonicalOrigin(url.origin), publicRoom: page[1] };
+    }
   }
+  const shortCode = parseShareInviteCode(value);
+  if (shortCode) return { origin: canonicalOrigin(url?.origin ?? origin), sharedToken: shortCode };
+  if (!url) throw new Error("Choose an invite or Room URL");
   // Self-serve join links: /join/RM-XXX (or /room/join/RM-XXX on the www door).
   const joinPath = /^(?:\/room)?\/join\/(RM-[a-z0-9]+)\/?$/i.exec(url.pathname);
   if (joinPath && !url.hash) {
@@ -224,7 +224,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
         if (result.requestId !== operation.requestId || result.kind !== "permissions") throw new Error("Permission request could not be confirmed; retry with the same private directory");
         accessRequest = { requestId: result.requestId, status: result.status, preset: access,
           requestedPermissions: result.requestedPermissions, missingPermissions: missing,
-          next: "A room owner or authorized admin can approve all, approve selected permissions, or decline in Needs attention. Repeat this join command to check current access." };
+          next: result.status === "pending"
+            ? "A room owner or authorized admin can review this request in Needs attention. Repeat this join command to check current access."
+            : "This request has been decided. Current access is listed separately; no new request was sent. To ask for remaining permissions, make a new explicit request from your member profile." };
       }
     }
     return { status: "connected", origin: saved.origin, identityId: saved.identityId, roomId: step.roomId, memberId: connectionAccess.memberId,

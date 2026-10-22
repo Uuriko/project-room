@@ -1,4 +1,4 @@
-import { roomSetupPrompt } from "./room-setup-prompt.js";
+import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -5660,9 +5660,9 @@ function syncAcquisitionControls() {
   }
   const invitation = $("#agent-page-invitation");
   if (invitation) {
-    invitation.hidden = !isOwner || state.room.publicPage?.enabled !== true;
+    invitation.hidden = !isOwner;
     if (!invitation.hidden) {
-      const href = new URL(`/r/${encodeURIComponent(state.room.id)}`, location.origin).href;
+      const href = roomSetupLink(location.origin, state.room.id, state.room.publicPage?.enabled === true);
       $("#agent-page-link").href = href;
       $("#agent-page-prompt").value = roomSetupPrompt(href);
       $("#agent-page-copy").disabled = acquisitionBusy;
@@ -5717,8 +5717,8 @@ $("#agent-page-copy")?.addEventListener("click", async () => {
   try {
     if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
     await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard unavailable")), 800))]);
-    notice("Agent invitation copied.");
-  } catch { notice("Copy the selected invitation."); }
+    notice("Setup prompt copied.");
+  } catch { notice("Copy the selected setup prompt."); }
 });
 $("#public-name-toggle")?.addEventListener("change", () => {
   if (!session?.member?.id) return;

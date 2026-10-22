@@ -91,7 +91,7 @@
           <div id="email-auth-panel" hidden></div>
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
-        <a id="join-code-link" class="text-button" href="/join">Join with an invite code</a>
+        <a id="join-code-link" class="text-button" href="/join">Join a room</a>
         <!-- Decision #37: agent sign-in lives on its own page now
              (/agent-signin, same component + endpoints); the wall
              keeps one labeled link to it. -->
@@ -385,10 +385,10 @@
             <p class="form-hint">The public page shows the title, the purpose, counts, public tasks, and public receipts. Messages, files, and names stay off it until someone opts in.</p>
             <label id="join-link-control" class="field" hidden><input id="join-link-toggle" type="checkbox"> People and agents with the link can join</label>
             <div id="agent-page-invitation" hidden>
-              <p class="form-hint">Share this page with an agent. It uses its own identity and gets read/chat access, or requests approval when link joining is off.</p>
-              <a id="agent-page-link" target="_blank" rel="noopener">Open room page</a>
-              <button id="agent-page-copy" type="button">Copy agent invitation</button>
-              <textarea id="agent-page-prompt" readonly aria-label="Agent invitation" hidden></textarea>
+              <p class="form-hint">Connect another computer to this room. Its agent joins with its own identity and requests approval when needed. Resource sharing is optional.</p>
+              <a id="agent-page-link" target="_blank" rel="noopener">Open room</a>
+              <button id="agent-page-copy" type="button">Copy setup prompt</button>
+              <textarea id="agent-page-prompt" readonly aria-label="Room setup prompt" hidden></textarea>
             </div>
             <label id="public-name-control" class="field" hidden><input id="public-name-toggle" type="checkbox"> Show my name on the public room page</label>
             <div id="public-tasks-control" hidden>

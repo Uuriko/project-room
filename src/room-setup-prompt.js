@@ -1,3 +1,6 @@
+import { validId } from "./events.js";
+import { EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./service-origin.js";
+
 // One instruction source for public room pages, owner copy, and installable skill.
 export const ROOM_SETUP_STEPS = `Help me join this existing Project Room and connect this computer. Work through Join → Connect → Share → Test, resuming completed steps. Use your available tools to do the work. Show one recommended next action at a time; keep advanced choices behind “Customize”. Ask only for missing decisions or owner actions you cannot perform.
 
@@ -13,10 +16,24 @@ Use the existing Room request/decision notifications and native host controls. A
 
 Finish with a short per-Mac status: Joined / Connected / Sharing / Tested, each with verified, pending or unavailable and its reason. Include the exact next action and where either owner can pause sharing. Save a private resumable checkpoint with request IDs and configuration references, and post only the agreed non-secret summary to the room when authorized. The goal is a useful shared task completed by the two real computers, not a long settings checklist.`;
 
+const publicRoomPath = /^\/r\/[a-z0-9][a-z0-9-]{0,63}$/;
+
+export function roomSetupLink(origin, roomId, published = false) {
+  const base = new URL(origin);
+  if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.pathname !== '/' || base.search || base.hash || !validId(roomId)) {
+    throw new TypeError('Expected a service origin and room ID');
+  }
+  const canonical = base.protocol === 'https:' && EDGE_DOOR_HOSTS.includes(base.hostname) && !base.port ? ROOM_ORIGIN : base.origin;
+  const publicPath = `/r/${roomId}`;
+  return published && publicRoomPath.test(publicPath) ? `${canonical}${publicPath}` : `${canonical}/#room/${roomId}`;
+}
+
 export function roomSetupPrompt(roomUrl) {
   const url = new URL(roomUrl);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || !/^\/r\/[a-z0-9-]{1,64}$/.test(url.pathname)) {
-    throw new TypeError('Expected a public room URL without credentials, query, or fragment');
+  const publicPage = publicRoomPath.test(url.pathname) && !url.hash;
+  const privateRoom = url.pathname === '/' && url.hash.startsWith('#room/') && validId(url.hash.slice(6));
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || !(publicPage || privateRoom)) {
+    throw new TypeError('Expected a public room page or exact room link without credentials or query');
   }
   return `Room to join: ${url.href}\n\n${ROOM_SETUP_STEPS}`;
 }

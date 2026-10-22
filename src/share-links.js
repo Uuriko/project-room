@@ -1,6 +1,5 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
-import { canInviteMembers } from "./events.js";
 import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
 
@@ -324,9 +323,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function refreshAgentCode() {
     const code = $("#growth-agent-code");
     if (!code) return;
-    const state = getState();
-    const id = getSession()?.member?.id;
-    code.hidden = !(state && id && canInviteMembers(state, id));
+    // Invitations use the same link for people and agents. Legacy code
+    // redemption remains supported without a competing setup action.
+    code.hidden = true;
   }
   function applyKitChrome() {
     const form = $("#share-link-form");

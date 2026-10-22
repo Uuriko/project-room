@@ -395,3 +395,26 @@ test("maximum access is a retryable request, not a join grant, and approval is o
   assert.deepEqual([...approved.permissions].sort(), [...preview.requestedAccess.permissions].sort());
   assert.equal(approved.readiness.execution, "not_tested");
 });
+
+
+test("public room names that resemble short invitation codes remain room targets", () => {
+  assert.deepEqual(setupTarget("https://room.trydemigod.com/r/test-room1"), { origin: "https://room.trydemigod.com", publicRoom: "test-room1" });
+  assert.throws(() => setupTarget("https://elsewhere.example/#code/ABC-DEF-GHJ", "https://room.trydemigod.com"), /origin disagree/);
+  assert.throws(() => setupTarget("https://user:secret@room.trydemigod.com/#code/ABC-DEF-GHJ"), /credentials/);
+});
+
+
+test("resuming a partially approved or denied upgrade does not send a new request", async t => {
+  for (const decision of ['approve', 'deny']) {
+    const f = await fixture(t); publishEntrance(f);
+    const options = { target: `${f.origin}/r/commons`, access: 'maximum' };
+    const first = await f.connect(options);
+    new AccessRequests(f.store).decide(f.keys.commons, 'commons', first.accessRequest.requestId, { decision, ...(decision === 'approve' ? { permissions: ['accept_work'] } : {}) });
+    const again = await f.connect(options);
+    assert.equal(again.accessRequest.requestId, first.accessRequest.requestId);
+    assert.equal(again.accessRequest.status, decision === 'approve' ? 'approved' : 'denied');
+    assert.deepEqual(again.permissions, decision === 'approve' ? ['accept_work'] : []);
+    assert.match(again.accessRequest.next, /no new request was sent/);
+    assert.equal(f.store.db.prepare('SELECT count(*) n FROM access_requests').get().n, 1);
+  }
+});

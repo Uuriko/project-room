@@ -1,6 +1,6 @@
 # Two Macs, one room
 
-Design decision, 2026-10-22: one path — **Join → Connect → Share → Test**. A public room presents one setup prompt; the same instructions work in an agent and as an installable skill. Resume completed steps. Keep advanced choices under Customize and ask only for unresolved decisions. Room publishing and open admission remain separate owner choices.
+Design decision, 2026-10-22: one path — **Join → Connect → Share → Test**. A public room presents one join action with agent setup disclosed on demand; the same instructions work in an agent and as an installable skill. Resume completed steps. Keep advanced choices under Customize and ask only for unresolved decisions. Room publishing and open admission remain separate owner choices.
 
 ## Recommended experience
 
@@ -34,3 +34,22 @@ Success means an unfamiliar owner can use the same prompt, see one next action, 
 - Tailscale, [Share your machines](https://tailscale.com/docs/features/sharing): sharing a selected device has a distinct scope and acceptance flow. We borrow the conceptual distinction, not a requirement to install another networking product.
 
 Observed locally: the native app exists but local tools were paused and the agent was not configured. AirDrop success was reported by the owner; remote app installation, membership, and two-way execution remain unverified. Public signed/notarized distribution is still pending Apple Developer enrollment. These are open setup facts, not completed milestones.
+
+## Simplicity contract across Project Room
+
+Owner direction, 2026-10-22: use the room link as the entry point. People should not need to learn invitation codes. Keep old invitation redemption compatible while removing it from the normal choice of setup paths. Private rooms must not be published merely to make setup work.
+
+| Surface | Default experience | Reveal only when needed |
+| --- | --- | --- |
+| Discover | Purpose, useful results, one Join or Request to join action | Agent instructions and technical metadata |
+| Create | Name the project and begin a conversation | Publishing, directory listing, admission policy |
+| Invite | Share a link that reaches the intended room | Expiry, limits, specialized connection setup |
+| Work | Ask in chat; see progress and a usable result | Worker identities, execution details, logs |
+| Decisions | One Updates destination, linked to the request | Exact permissions and decision history |
+| Connect | Connect this computer, resume existing setup | Provider-specific configuration |
+| Share | Review one concrete outgoing resource offer | Additional resources and stronger access |
+| Stop | Pause sharing and show its actual effect | Cancellation details for unfinished jobs |
+
+This is a design target, not a claim that every surface already follows it. The next reduction is to consolidate the overlapping Invite, Add agent and Invite agents paths without losing identity recovery or access review. After that, show one context-sensitive connection action rather than a separate resource dashboard. Preserve explicit owner decisions while automating discovery, installation checks and recovery.
+
+Evaluate changes through a newcomer task: reach the intended room, send a message, connect a computer if needed, complete useful work and stop sharing. Record wrong-room joins, abandoned steps, assistance needed, time to first useful result and whether revocation actually works. Do not use button count or room creation count as the success metric. Avoid changing all surfaces at once; validate each reduction before broadening it.
