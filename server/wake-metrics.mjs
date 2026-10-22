@@ -32,6 +32,13 @@
 // outcomes are counted separately (doorbell_delivered / doorbell_failed,
 // failures journaled) and never enter the delivery rate.
 //
+// WAKE-S34 adds the two lifecycle legs the review seat's distinct-states
+// rule needs counted separately from both delivery and ack: "served" is
+// a host's FIRST pickup of a signal (first page inclusion per host —
+// re-serves are deliveries, not new pickups), and "started" is a
+// listener claim marking the signal as being handled under a lease.
+// Received (served) / started / acked now reconcile per door.
+//
 // failureRate = (failed + suppressed_no_identity)
 //             / (emitted + coalesced + failed + suppressed_no_identity)
 // Designed suppressions (no_host, policy) are excluded from both sides:
@@ -49,6 +56,7 @@ export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
   "suppressed_policy", "failed", "delivered", "acked", "invalidated",
   "doorbell_delivered", "doorbell_failed", "ack_unregistered",
+  "served", "started",
 ]);
 export const WAKE_FAILURE_REASONS = Object.freeze([
   "no_identity_link", "enqueue_error", "push_delivery_failed",
@@ -114,7 +122,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
 const emptyCounters = () => ({ emitted: 0, coalesced: 0, suppressed_no_host: 0,
   suppressed_no_identity: 0, suppressed_policy: 0, failed: 0, invalidated: 0,
   doorbell_delivered: 0, doorbell_failed: 0, ack_unregistered: 0,
-  deliveredByDoor: {}, ackedByDoor: {} });
+  deliveredByDoor: {}, ackedByDoor: {}, servedByDoor: {}, startedByDoor: {} });
 
 // Aggregate the counters + the stores' own stock into the accounting
 // view. One bounded read per table; safe on pre-metrics databases (every
@@ -137,6 +145,8 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
       if (!bucket) continue;
       if (row.event === "delivered") bucket.deliveredByDoor[row.door] = (bucket.deliveredByDoor[row.door] ?? 0) + row.n;
       else if (row.event === "acked") bucket.ackedByDoor[row.door] = (bucket.ackedByDoor[row.door] ?? 0) + row.n;
+      else if (row.event === "served") bucket.servedByDoor[row.door] = (bucket.servedByDoor[row.door] ?? 0) + row.n;
+      else if (row.event === "started") bucket.startedByDoor[row.door] = (bucket.startedByDoor[row.door] ?? 0) + row.n;
       else if (Object.hasOwn(bucket, row.event)) bucket[row.event] += row.n;
     }
     const journal = roomFilter === null

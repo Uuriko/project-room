@@ -8,6 +8,33 @@ export function validListenerLease(value) {
   return value === undefined || value === true || Boolean(value && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).length === 1 && typeof value.roomId === "string" && value.roomId.length > 0);
 }
+// WAKE-S34: the room scope a wake-claim call may act on, resolved with
+// exactly the rules lease acquisition uses in heartbeatWithListener
+// below: a room-scoped credential (room key or room-bound rak_) claims
+// only its bound room; an identity credential naming a room must be a
+// live agent member of it (identity link + live member recheck); no
+// roomId names the identity queue (the roomless lease scope). Shared by
+// POST /api/agent-heartbeats/claim and MCP heartbeat_claim so the claim
+// door can never widen past the lease door.
+export function claimRoomScope(store, auth, requestedRoomId) {
+  if (requestedRoomId !== null && requestedRoomId !== undefined
+      && (typeof requestedRoomId !== "string" || requestedRoomId.length === 0))
+    reject(422, "invalid_wake_claim", "roomId must be a non-empty string when present");
+  if (auth.roomId) {
+    if (requestedRoomId !== null && requestedRoomId !== undefined && requestedRoomId !== auth.roomId)
+      reject(403, "room_mismatch", "A room-scoped credential claims only its bound room");
+    return auth.roomId;
+  }
+  if (requestedRoomId !== null && requestedRoomId !== undefined) {
+    const link = store.db.prepare(
+      "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoomId, auth.identityId);
+    const member = link ? ownMember(store.room(requestedRoomId).state.members, link.memberId) : null;
+    if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
+      reject(403, "room_mismatch", "The identity is not a member of the requested claim room");
+    return requestedRoomId;
+  }
+  return null;
+}
 export function heartbeatWithListener(store, auth, data, { roomKey = false, door = "heartbeat" } = {}) {
   let hostId = data.hostId;
   if (roomKey) {

@@ -272,6 +272,11 @@ export const hostedWakeTools = [
     signalIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 128 } },
     fencingToken: { type: "string", minLength: 1, description: "Receiving-lease token; required when these signals are fenced. ACK is not task completion." }
   }, ["signalIds"]), false),
+  tool("heartbeat_claim", "Claim this identity's oldest pending wake signals as one atomic batch under your live listener lease, marking them started. Same call as POST /api/agent-heartbeats/claim. fencingToken (from a listenerLease heartbeat) is required; limit (1..50) and roomId are optional, and roomId must match the lease's room scope. Signals whose claiming lease died are replayed with redelivered true. Claiming is not completion and not acknowledgement: claimed signals stay queued until heartbeat_ack, and the started state expires with the lease.", schema({
+    fencingToken: { type: "string", minLength: 1, description: "Receiving-lease token from a listenerLease heartbeat. Required." },
+    limit: { type: "integer", minimum: 1, maximum: 50, description: "Batch size, oldest first. Default 50." },
+    roomId: { ...roomIdField, description: "Room queue to claim; must match the lease scope. Omit for the identity queue." }
+  }, ["fencingToken"]), false),
   tool("wake_pause", "Pause this member's queued wakes so new attempts do not start. Same call as POST /api/rooms/:roomId/agent-pause with action pause. An attempt already running finishes. requestId is the receipt key and is optional: the server mints one when it is omitted and returns it. memberId defaults to this identity's own member. reason is optional and may be null. An identity secret pauses its own member row. Pausing another member stays on the signed-in room-owner path, which this bearer is not.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id. Defaults to this identity. An identity secret can pause only its own member row." },
