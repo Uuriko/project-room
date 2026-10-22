@@ -26,6 +26,7 @@ export function requestMetrics(fetchImpl, now = () => performance.now()) {
   const buckets = new Map();
   const category = url => {
     let path; try { path = new URL(url).pathname; } catch { return 'other'; }
+    if (path.endsWith('/api/agent-wakes/receive')) return 'combined_delivery';
     if (path.endsWith('/api/agent-wakes/poll')) return 'wake_poll';
     if (path.endsWith('/api/agent-heartbeats')) return 'lease';
     if (/\/api\/rooms\/[^/]+$/.test(path)) return 'identity_snapshot';
@@ -120,7 +121,7 @@ export async function main(argv = process.argv.slice(2)) {
     await runRoomQueueService({ binding: { ...config.scope, threadId: config.threadId },
       hostId: config.hostId, journal: join(config.directory, 'receipts'),
       minCreatedAt: config.minCreatedAt, allowedSenders: config.allowedSenders,
-      wake: new AgentWakeClient({ connection, fetchImpl: boundedFetch }),
+      wake: new AgentWakeClient({ connection, fetchImpl: boundedFetch, deliveryProtocol: config.deliveryProtocol ?? 'auto' }),
       client: new RoomAgentClient({ ...connection, fetchImpl: boundedFetch }),
       signal: controller.signal, emit: event => publish({ ...event, requests: measured.snapshot() }),
       run: args => runCodexQueue(args, { executable: config.codexExecutable }) });

@@ -40,8 +40,10 @@ function signals(value) {
   });
 }
 export class AgentWakeClient {
-  #connection; #fetch; #room; #fencingToken = null; #listenerRequired = false;
-  constructor({ connection, fetchImpl = fetch }) {
+  #connection; #fetch; #room; #fencingToken = null; #listenerRequired = false; #deliveryProtocol;
+  constructor({ connection, fetchImpl = fetch, deliveryProtocol = 'legacy' }) {
+    if (!['legacy', 'combined', 'auto'].includes(deliveryProtocol)) throw usage();
+    this.#deliveryProtocol = deliveryProtocol;
     this.#room = new RoomAgentClient({ ...connection, fetchImpl });
     // CX5-FIX: two supported listener credentials — the pri_ identity
     // secret (identity-level listener), or the rak_ API key standard
@@ -122,10 +124,49 @@ export class AgentWakeClient {
     return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: listener && !listenerInfo.acquired ? [] : signals(value.pendingWakes),
       ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
+  async #receive({ hostId, cadenceSeconds, waitMs, cursor }) {
+    const value = await this.#request('/api/agent-wakes/receive', { roomId: this.#connection.roomId,
+      memberId: this.#connection.memberId, hostId, cadenceSeconds, waitMs, cursor }, waitMs + 15000);
+    const connection = value.connection;
+    const beforeConnection = value.beforeConnection;
+    if (value.contractVersion !== 1 || value.hostId !== hostId || !id(value.agentId)
+      || !['signals_received', 'wait_completed', 'listener_contended'].includes(value.status)
+      || connection?.status !== 'credential_accepted' || connection.roomId !== this.#connection.roomId
+      || connection.memberId !== this.#connection.memberId || connection.kind !== 'agent'
+      || beforeConnection?.status !== 'credential_accepted' || beforeConnection.roomId !== this.#connection.roomId
+      || beforeConnection.memberId !== this.#connection.memberId || beforeConnection.kind !== 'agent'
+      || !Array.isArray(beforeConnection.permissions)
+      || !Array.isArray(connection.permissions) || !object(value.listener)
+      || typeof value.listener.acquired !== 'boolean' || !Number.isFinite(value.waitedMs)
+      || typeof value.timedOut !== 'boolean' || value.acknowledged !== false
+      || value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
+    const pendingWakes = signals(value.pendingWakes);
+    this.#listenerRequired = true;
+    this.#fencingToken = null;
+    if (value.status !== 'listener_contended') {
+      if (!value.listener.acquired || typeof value.listener.fencingToken !== 'string' || !value.listener.fencingToken) throw invalid();
+      this.#fencingToken = value.listener.fencingToken;
+    } else if (pendingWakes.length) throw invalid();
+    const observation = { connection: { ...connection, origin: this.#connection.origin },
+      observedThroughBySource: {}, scope: 'delivery_only', contextRead: false };
+    return { version: 1, status: value.status, hostId, pendingWakes, more: value.more === true,
+      nextCursor: value.nextCursor ?? null, waitedMs: value.waitedMs, timedOut: value.timedOut,
+      acknowledged: false, observations: { before: { ...observation, connection: { ...beforeConnection, origin: this.#connection.origin } }, after: observation },
+      sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed', serverTiming: value.timing };
+  }
   async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null, deliveryOnly = false }) {
     hostOptions(hostId, cadenceSeconds);
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000 || typeof deliveryOnly !== 'boolean'
       || deliveryOnly && (attentionCursor !== undefined || sinceVersion !== undefined)) throw usage();
+    if (deliveryOnly && this.#deliveryProtocol !== 'legacy') {
+      try { return await this.#receive({ hostId, cadenceSeconds, waitMs, cursor }); }
+      catch (error) {
+        // Only an unsupported door permits compatibility fallback. Never turn
+        // denied access, timeouts or malformed responses into a second attempt.
+        if (this.#deliveryProtocol !== 'auto' || ![404, 405].includes(error.status)) throw error;
+        this.#deliveryProtocol = 'legacy';
+      }
+    }
     // Pointer-only hosts need current authority, not the full work/attention
     // projection. They must read selected context separately before acting.
     const deliveryObservation = async () => ({ connection: await this.#room.checkConnection(),

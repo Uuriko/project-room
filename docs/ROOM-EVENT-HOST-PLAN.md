@@ -227,3 +227,26 @@ fewer calls/bytes/tokens, reported by cold/warm, idle/busy, fresh/backlog and
 healthy/recovery cohorts. Report sample counts, median and ranges now; tail
 percentiles require sufficient samples. Record cancelled/failed/stuck jobs too.
 No end-to-end10x result is established by the controlled7.945x benchmark.
+
+## Integrated delivery protocol
+
+POST /api/agent-wakes/receive is the Room Host delivery operation. The host CLI
+uses protocol auto: combined on upgraded servers, legacy after a404/405. Denial,
+malformed responses and timeouts do not cause fallback. Operators can explicitly
+select deliveryProtocol legacy or combined in the existing private host config.
+No new setup button, credential, agent session or independent scheduler is needed.
+The endpoint keeps scoped-key host namespaces and room-specific filtering;
+authority and fencing are checked again after waits. No transaction spans a wait.
+Responses provide bounded connection metadata instead of a work snapshot, plus
+server authentication/lease/poll/wait/total timings. Transport acceptance still
+is not agent execution or successful completion. Metrics classify this route as
+combined_delivery without storing URLs, credentials or message bodies.
+
+Six alternating loopback pairs, injected20ms per HTTP request:5->1requests,
+median117.31->23.76ms (4.94x). This is a controlled protocol measurement, not
+production performance or an additional multiplier on unrelated benchmarks.
+Existing servers keep working; production benefits require server rollout and
+host reconnect. Deployment must pass full suite, storage benchmarks, CI and
+serialized release checks. The runtime package includes the queue host and its
+import dependencies. Native desktop status rendering and automatic supervisor
+startup remain separate integration points; do not claim them shipped here.

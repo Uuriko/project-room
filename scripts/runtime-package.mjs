@@ -88,6 +88,9 @@ optional.push("src/display-name-guard.js"); // Member display-name admission (im
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
 optional.push("client/room-digest.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
 optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "client/shared-attachment-context.mjs", "client/codex-stdio.mjs", "client/room-assistant-client.mjs", "scripts/run-codex-room.mjs", "docs/CODEX-ROOM-HOST.md");
+optional.push("client/agent-wake.mjs", "client/agent-resume.mjs", "client/grok-host.mjs", "client/wake-retry.mjs",
+  "client/claude-channel.mjs", "client/codex-queue.mjs", "client/room-queue-service.mjs",
+  "scripts/run-room-queue-service.mjs");
 optional.push("client/codex-host-status.mjs", "client/codex-supervisor.mjs");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
@@ -267,6 +270,7 @@ optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent we
 optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)
+optional.push("server/agent-delivery.mjs"); // Single-request authenticated Room Host delivery.
 optional.push("server/agent-listener-contract.mjs"); // Shared HTTP/MCP receiving lease authority.
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
