@@ -303,6 +303,11 @@ test("checkSummary reports exact-head status with pending and failed names", () 
   assert.equal(fail.status, "failing");
   assert.deepEqual(fail.failed, ["a"]);
   assert.equal(checkSummary(head, runs([ok], 120)).status, "incomplete");
+  for (const conclusion of ["stale", null, "something_new"]) {
+    const odd = checkSummary(head, runs([ok, { status: "completed", conclusion, name: "odd" }]));
+    assert.equal(odd.status, "incomplete");
+    assert.deepEqual(odd.unknown, ["odd"]);
+  }
   assert.equal(checkSummary(head, runs([])).status, "none");
   assert.deepEqual(checkSummary(head, {}), { head, unavailable: "checks_unreadable" });
 });

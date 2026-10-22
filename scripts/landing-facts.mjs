@@ -207,6 +207,7 @@ export function checkSummary(head, runs) {
   if (!runs || !Array.isArray(runs.check_runs)) return { head, unavailable: "checks_unreadable" };
   const pending = [];
   const failed = [];
+  const unknown = [];
   const counts = { success: 0, failure: 0, pending: 0, skipped: 0, neutral: 0, other: 0 };
   for (const run of runs.check_runs) {
     const name = typeof run?.name === "string" ? run.name : "unnamed";
@@ -216,16 +217,17 @@ export function checkSummary(head, runs) {
     else if (c === "skipped") counts.skipped++;
     else if (c === "neutral") counts.neutral++;
     else if (c === "failure" || c === "timed_out" || c === "cancelled" || c === "action_required" || c === "startup_failure") { counts.failure++; failed.push(name); }
-    else counts.other++;
+    else { counts.other++; unknown.push(name); }
   }
   const total = Number.isSafeInteger(runs.total_count) ? runs.total_count : runs.check_runs.length;
   const truncated = total > runs.check_runs.length;
   let status = "green";
-  if (truncated) status = "incomplete";
-  else if (counts.failure > 0) status = "failing";
+  // A stale, null or unrecognized conclusion is never read as green.
+  if (truncated || counts.other > 0) status = "incomplete";
+  if (counts.failure > 0) status = "failing";
   else if (counts.pending > 0) status = "pending";
   else if (runs.check_runs.length === 0) status = "none";
-  return { head, status, total, truncated, counts, pending: pending.sort(), failed: failed.sort() };
+  return { head, status, total, truncated, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
 }
 
 export async function landingFacts({
