@@ -140,3 +140,23 @@ test('damaged diagnostic status cannot block startup or invent execution', async
   createStatusPublisher(f.journal, binding)({ status: 'listening', execution: 'finished' });
   assert.equal(JSON.parse(readFileSync(file)).execution, 'not_observed');
 });
+
+test('alternating replay receipts do not refresh or replace delivery evidence', async t => {
+  const { createStatusPublisher } = await import('../scripts/run-room-queue-service.mjs');
+  const f = fixture(t), file = join(f.journal, 'status.json');
+  let clock = 100;
+  let publish = createStatusPublisher(f.journal, binding, () => clock);
+  publish({ status: 'queued', transportStatus: 'accepted', signalId: 'a' });
+  clock = 200;
+  publish({ status: 'queued', transportStatus: 'accepted', signalId: 'b' });
+  const original = JSON.parse(readFileSync(file)).lastAcceptedDelivery;
+  publish = createStatusPublisher(f.journal, binding, () => clock);
+  for (const signalId of ['a', 'b', 'a', 'b']) {
+    clock++;
+    publish({ status: 'queued', transportStatus: 'accepted', signalId, duplicate: true });
+  }
+  assert.deepEqual(JSON.parse(readFileSync(file)).lastAcceptedDelivery, original);
+  clock++;
+  publish({ status: 'queued', transportStatus: 'accepted', signalId: 'c', duplicate: false });
+  assert.equal(JSON.parse(readFileSync(file)).lastAcceptedDelivery.signalId, 'c');
+});

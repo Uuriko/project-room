@@ -138,3 +138,12 @@ uncertain outcome merely because another delivery succeeds. These are latest
 observations, not a complete outstanding-work list; the receipt journal remains
 replay authority. No timestamp is presented as execution or original acceptance.
 Missing wake reconciliation and actual chat-start/reply receipts remain open.
+
+A live restart retained both receipt files byte-for-byte. Replay exposed a status
+bug: alternating duplicate receipts refreshed observedAt. A failing regression
+reproduced it; duplicate observations now preserve existing evidence, while a new
+transport attempt may advance it. A recovered receipt only seeds empty diagnostic
+state; its observation time is never claimed as its original acceptance time.
+The review pointer subsequently triggered a chat turn and produced a verified
+Room reply at sequence17930. This is one end-to-end round trip, not a latency or
+outage reliability qualification.

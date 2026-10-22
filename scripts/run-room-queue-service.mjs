@@ -42,10 +42,14 @@ export function createStatusPublisher(directory, binding, now = Date.now) {
   return event => {
     if (event.signalId && ['accepted', 'unknown'].includes(event.transportStatus)) {
       const prior = event.transportStatus === 'accepted' ? accepted : uncertain;
-      const row = { signalId: event.signalId, observedAt: prior?.signalId === event.signalId
-        ? prior.observedAt : now(), execution: 'not_observed' };
-      if (event.transportStatus === 'accepted') accepted = row;
-      else uncertain = row;
+      // Replayed journal receipts are observations of old transport attempts.
+      // Alternating duplicates must not rotate the latest delivery or its age.
+      if (!event.duplicate || !prior) {
+        const row = { signalId: event.signalId, observedAt: prior?.signalId === event.signalId
+          ? prior.observedAt : now(), execution: 'not_observed' };
+        if (event.transportStatus === 'accepted') accepted = row;
+        else uncertain = row;
+      }
     }
     const temp = target + '.tmp';
     writeFileSync(temp, JSON.stringify({ version: 2, bindingKey, at: now(), ...event,
