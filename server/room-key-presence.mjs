@@ -2,8 +2,26 @@ import { ownMember } from "../src/events.js";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 
 const refuse = (code, message) => { throw new ServiceError(403, code, message); };
+
+// #3908 F-9: a guest seat's identity lives in guest_members, never
+// identity_links, yet guests hold exactly the ga1. access tokens this
+// door exists for. identityIdForMember stays link-only (the work-wake
+// boundary, decision #25); the presence door resolves the guest binding
+// itself, for non-revoked identities only.
+function guestIdentityIdForMember(store, roomId, memberId) {
+  try {
+    const row = store.db.prepare(
+      `SELECT g.guest_identity_id AS identityId FROM guest_members g
+       JOIN agent_identities i ON i.identity_id=g.guest_identity_id
+       WHERE g.room_id=? AND g.member_id=? AND i.revoked_at IS NULL`).get(roomId, memberId);
+    return row?.identityId ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // A saved room access key is the seat a host already uses to read and post.
 // It may report pull-only presence for that seat's linked identity so a
@@ -17,9 +35,17 @@ export function roomKeyPresenceAuth(store, secret) {
   if (auth.credentialScope !== "room" || auth.kind !== "access" || auth.member?.kind !== "agent") {
     refuse("room_key_heartbeat_refused", "A room access key can register pull-only presence only for its own agent member");
   }
-  const identityId = store.identities.identityIdForMember(auth.roomId, auth.member.id);
+  let identityId = store.identities.identityIdForMember(auth.roomId, auth.member.id);
+  let rooms;
+  if (identityId) {
+    rooms = store.identities.roomsForIdentity(identityId);
+  } else {
+    // Guest seat: the single-room rule reads every seat the identity
+    // holds (links and guest seats), exactly as for linked identities.
+    identityId = guestIdentityIdForMember(store, auth.roomId, auth.member.id);
+    rooms = identityId ? identityRoomSeats(store.db, identityId) : [];
+  }
   if (!identityId || auth.member.identityId !== identityId) refuse("room_key_heartbeat_refused", "This room member is not a linked identity");
-  const rooms = store.identities.roomsForIdentity(identityId);
   if (rooms.length !== 1 || rooms[0].roomId !== auth.roomId || rooms[0].memberId !== auth.member.id) {
     refuse("room_key_heartbeat_refused", "A room access key can register presence only for an identity linked to this room alone");
   }

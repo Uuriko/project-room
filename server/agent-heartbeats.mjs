@@ -614,6 +614,19 @@ export class AgentHeartbeats {
       if (!isMissingTable(error)) throw error;
       rows = [];
     }
+    // #3908 F-9: a trial seat's pauses bind its guest_members member, not
+    // an identity_links row — report them on the guest identity's poll too.
+    try {
+      const guestRows = this.db.prepare(`SELECT g.room_id AS roomId, p.paused_at AS pausedAt, p.reason AS reason, b.paused_role AS role
+        FROM guest_members g JOIN wake_queue_pause p ON p.room_id=g.room_id AND p.member_id=g.member_id
+        LEFT JOIN wake_queue_pause_by b ON b.room_id=g.room_id AND b.member_id=g.member_id
+        WHERE g.guest_identity_id=? ORDER BY g.room_id`).all(agentId);
+      const seen = new Set(rows.map(row => `${row.roomId}:${row.pausedAt}`));
+      for (const row of guestRows) if (!seen.has(`${row.roomId}:${row.pausedAt}`)) rows.push(row);
+      rows.sort((a, b) => (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0));
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+    }
     return rows.map(row => Object.freeze({ roomId: row.roomId, pausedAt: row.pausedAt, reason: row.reason ?? null,
       heldBy: row.role === "self" ? "self" : "owner",
       resume: row.role === "self" ? "wake_resume lifts your own pause" : "only the room owner or a member manager can resume" }));

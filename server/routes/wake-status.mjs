@@ -23,14 +23,21 @@ import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plu
 
 const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wakeable });
 
+// Membership is identity_links plus guest_members: trial seats are
+// seated through guest_members and never receive an identity_links row,
+// and the wake fabric does wake guests on mention — this surface must
+// agree with it about who is a member (#3908 F-8).
 function roomMemberIdentityIds(store, roomId) {
-  return store.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=?")
-    .all(roomId).map(row => row.identityId);
+  return store.db.prepare(`SELECT identity_id AS identityId FROM identity_links WHERE room_id=?
+    UNION SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=?`)
+    .all(roomId, roomId).map(row => row.identityId);
 }
 
 function isRoomMember(store, roomId, identityId) {
   return !!store.db.prepare(
-    "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, identityId);
+    `SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1`).get(roomId, identityId)
+    || !!store.db.prepare(
+      "SELECT 1 FROM guest_members WHERE room_id=? AND guest_identity_id=? LIMIT 1").get(roomId, identityId);
 }
 
 export function authenticateWakeStatus(ctx) {

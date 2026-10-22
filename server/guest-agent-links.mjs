@@ -122,8 +122,12 @@ export class GuestAgentLinks {
     const members = this.store.room(roomId).state.members;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
-      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
-      if (row && row.revoked === 0 && row.expires_at > this.store.now()) continue;
+      // #3908 F-7: judge the seat by whether ANY live unrevoked credential
+      // row exists — re-redemption leaves an expired unrevoked row beside
+      // a live one, and one arbitrary row's expiry must not end the seat.
+      const live = this.db.prepare("SELECT 1 AS one FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0 AND expires_at>? LIMIT 1").get(roomId, member.id, this.store.now());
+      if (live) continue;
+      const row = this.db.prepare("SELECT hash FROM credentials WHERE room_id=? AND member_id=? AND kind='access' ORDER BY expires_at DESC").get(roomId, member.id);
       this.store.command(token, roomId, {
         id: `guest-agent-end-${hash(`${member.id}:${row?.hash || "none"}`).slice(0, 40)}`,
         type: T.MEMBER_ACCESS_CHANGED,
@@ -148,8 +152,10 @@ export class GuestAgentLinks {
     let state = room.state, sequence = room.sequence, swept = 0;
     for (const member of Object.values(room.state.members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
-      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
-      if (row && row.revoked === 0 && row.expires_at > this.store.now()) continue;
+      // #3908 F-7: same any-live-row rule as sweepExpired above.
+      const live = this.db.prepare("SELECT 1 AS one FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0 AND expires_at>? LIMIT 1").get(roomId, member.id, this.store.now());
+      if (live) continue;
+      const row = this.db.prepare("SELECT hash FROM credentials WHERE room_id=? AND member_id=? AND kind='access' ORDER BY expires_at DESC").get(roomId, member.id);
       const eventId = `guest-agent-end-${hash(`${member.id}:${row?.hash || "none"}`).slice(0, 40)}`;
       const incoming = event({
         id: eventId,

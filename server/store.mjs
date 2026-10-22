@@ -5050,19 +5050,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      // #3908 F-9: resolve through the guest-aware wake resolver — a
+      // trial seat's identity lives in guest_members, never identity_links,
+      // and its host presence must still show.
       // #660: raw host status per member. status is "online"|"offline"|null
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
         const m = members[memberId];
         if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+        if (!identityId) return { identityId: null, status: null, lastSeenAt: null };
+        const status = this.agentHeartbeats.statusOf(identityId);
         // Unregistered (no host) stays null so RC-051 clients keep the
         // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+        if (status.status === "unregistered") return { identityId, status: null, lastSeenAt: null };
+        return { identityId, status: status.status, lastSeenAt: status.lastSeenAt };
       };
       const agentPresence = memberId => {
         const host = hostStatusOf(memberId);
@@ -5127,12 +5129,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      // #3908 F-9: guest-aware resolution, as in presence() above.
       const agentPresence = m => {
         if (!m || m.kind !== "agent" || m.active === false) return null;
-        const link = identityLinkOf.get(roomId, m.id);
-        if (!link) return null;
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        const identityId = identityIdForWakeMember(this.db, roomId, m.id);
+        if (!identityId) return null;
+        const status = this.agentHeartbeats.statusOf(identityId);
         return { status: status.status, lastSeenAt: status.lastSeenAt };
       };
       const listed = Object.values(members)

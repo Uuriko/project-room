@@ -176,11 +176,24 @@ export const mentionStateSchema = `
 // no identity aliases.
 export function identityNamesForRoom(db, roomId) {
   try {
-    const links = db.prepare(
+    const names = {};
+    // #3908 F-9: guest seats resolve through guest_members — a guest
+    // identity's display-name aliases must work for @mentions too.
+    // Guest rows are read first so an identity_links row for the same
+    // member (full membership supersedes the trial seat) wins.
+    for (const row of db.prepare(
+      `SELECT g.member_id AS memberId, i.display_name AS displayName FROM guest_members g
+       JOIN agent_identities i ON i.identity_id=g.guest_identity_id
+       WHERE g.room_id=? AND i.revoked_at IS NULL`).all(roomId)) {
+      names[row.memberId] = row.displayName;
+    }
+    for (const row of db.prepare(
       `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
        JOIN agent_identities i ON i.identity_id=l.identity_id
-       WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
-    return Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
+       WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId)) {
+      names[row.memberId] = row.displayName;
+    }
+    return names;
   } catch {
     return {};
   }

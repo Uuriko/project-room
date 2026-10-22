@@ -30,6 +30,9 @@ function getRow(db, sql, roomId, key) {
 }
 
 // member -> identity, for the mention fan-out and the reaction-ack path.
+// Also used by the host-presence reads (store.presence / store.capabilities,
+// #3908 F-9): presence is a wake-adjacent read, not a work wake, so the
+// decision #25 boundary is untouched.
 export function identityIdForWakeMember(db, roomId, memberId) {
   if (!db || !roomId || !memberId) return null;
   const link = getRow(db,
