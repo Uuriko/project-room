@@ -101,6 +101,13 @@ export class DurableDatabase {
       })
     };
   }
+  // Bytes the object's SQLite database occupies, from the platform's own
+  // counter (PRAGMA page_count is not allowed here). NaN when the runtime
+  // does not expose it, so callers can fall back.
+  databaseSize() {
+    const size = Number(this.storage?.sql?.databaseSize);
+    return Number.isFinite(size) ? size : NaN;
+  }
   close() { /* Durable Object owns the storage lifetime. */ }
 }
 

@@ -293,7 +293,13 @@ export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
     COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
   let dbBytes = 0;
-  try {
+  // The Durable Object runtime refuses PRAGMA page_count, so the worker
+  // read 0 here and the 10 GB SQLite line was never watched in production.
+  // A store that can name its own size (DurableDatabase: ctx.storage.sql
+  // .databaseSize) answers first; Node SQLite falls through to the pragmas.
+  const own = typeof store.db?.databaseSize === "function" ? Number(store.db.databaseSize()) : NaN;
+  if (Number.isFinite(own) && own > 0) dbBytes = own;
+  else try {
     const pages = store.db.prepare("PRAGMA page_count").get();
     const size = store.db.prepare("PRAGMA page_size").get();
     const count = Number(pages?.page_count);
