@@ -5,8 +5,8 @@
 // in the read model and a JS post-filter in receipts-live — whose
 // agreement was asserted by a comment and drifted in practice
 // (ATLAS-PUBLIC S-7). This corpus enumerates the switch-combination
-// space (operator unpublish × owner toggle × receipt shape; unpublish ×
-// recorded setting × toggle for lots) and pins three verdicts per cell
+// space (operator unpublish × owner toggle × recorded setting × receipt
+// shape; unpublish × recorded setting × toggle for lots) and pins three verdicts per cell
 // to the same answer: the SQL fragment's, the JS batch form's, and an
 // expectation written from the definition itself — not derived from
 // either implementation. A future edit that moves one twin must move
@@ -23,8 +23,10 @@ import {
   receiptVisibilitySqlFor,
   ownerToggleReadable,
   publicWorkTablesReadable,
+  recordedSettingReadable,
   hiddenReceiptIds,
   receiptVisible,
+  receiptVisibleFromFacts,
   lotReceiptVisible,
   lotVisibleFromFacts,
 } from "../server/public-visibility.mjs";
@@ -75,6 +77,12 @@ function setToggle(db, room, value) {
     VALUES (?, 0, NULL, 0, ?)`).run(room, value === "off" ? 0 : 1);
 }
 
+function setSetting(db, room, value) {
+  if (value === "absent" || room == null) return;
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, ?)")
+    .run(room, value === "on" ? 1 : 0);
+}
+
 // Receipt shapes (room attribution differs by source and era):
 //   board-listed    room_id = origin = the room
 //   board-unlisted  room_id = null, origin = the room
@@ -83,15 +91,22 @@ function setToggle(db, room, value) {
 const SHAPES = {
   "board-listed": cell => ({ roomId: cell.room, origin: cell.room, source: "work-claim" }),
   "board-unlisted": cell => ({ roomId: null, origin: cell.room, source: "work-claim" }),
+  "board-item-unlisted": cell => ({ roomId: null, origin: cell.room, source: "work-item" }),
   "pwr-resolved": cell => ({ roomId: cell.room, origin: cell.room, source: "public-work", work: true }),
   "pwr-legacy": cell => ({ roomId: cell.ns, origin: cell.ns, source: "public-work", work: true }),
 };
+
+// Room-source shapes carry the recorded-opt-in leg (Ruling 40): only a
+// recorded ON for the origin room serves them. Public-work rows are not
+// the room's opt-in projection and carry no such leg.
+const roomSourceShape = shape => shape.startsWith("board");
 
 // Whether a room unpublish on the cell's room reaches this shape: the
 // SQL checks room_id and origin_room_id, nothing else.
 const unpublishReaches = {
   "board-listed": () => true,
   "board-unlisted": () => true,
+  "board-item-unlisted": () => true,
   "pwr-resolved": () => true,
   "pwr-legacy": () => false, // both fields name the namespace, not the room
 };
@@ -101,6 +116,7 @@ const unpublishReaches = {
 const toggleReaches = {
   "board-listed": () => true,
   "board-unlisted": () => true,
+  "board-item-unlisted": () => true,
   "pwr-resolved": () => true,
   "pwr-legacy": () => true, // through the task record
 };
@@ -112,27 +128,31 @@ test("SQL and JS twins agree with the definition across the receipt switch space
   for (const [shape, build] of Object.entries(SHAPES)) {
     for (const unpublish of ["none", "receipt", "room"]) {
       for (const toggle of ["absent", "on", "off"]) {
-        n += 1;
-        const room = `cell-room-${n}`;
-        const cell = { room, ns: `cell-ns-${n}`, shape, unpublish, toggle };
-        const id = nextId("wcr", String(n % 10));
-        cell.id = id;
-        const fields = build(cell);
-        seedReceipt(db, { id, ...fields });
-        if (fields.work) seedWorkRows(db, { receiptId: id, offerId: `offer-${n}`, taskRoom: room });
-        if (unpublish === "receipt") {
-          db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 0, 'op')").run(id);
+        for (const setting of ["absent", "on", "off"]) {
+          n += 1;
+          const room = `cell-room-${n}`;
+          const cell = { room, ns: `cell-ns-${n}`, shape, unpublish, toggle, setting };
+          const id = nextId("wcr", String(n % 10));
+          cell.id = id;
+          const fields = build(cell);
+          seedReceipt(db, { id, ...fields });
+          if (fields.work) seedWorkRows(db, { receiptId: id, offerId: `offer-${n}`, taskRoom: room });
+          if (unpublish === "receipt") {
+            db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 0, 'op')").run(id);
+          }
+          if (unpublish === "room") {
+            db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', ?, 0, 'op')").run(room);
+          }
+          setToggle(db, room, toggle);
+          setSetting(db, fields.origin, setting);
+          const expectedVisible = !(
+            unpublish === "receipt"
+            || (unpublish === "room" && unpublishReaches[shape]())
+            || (toggle === "off" && toggleReaches[shape]())
+            || (roomSourceShape(shape) && setting !== "on")
+          );
+          cells.push({ ...cell, expectedVisible });
         }
-        if (unpublish === "room") {
-          db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', ?, 0, 'op')").run(room);
-        }
-        setToggle(db, room, toggle);
-        const expectedVisible = !(
-          unpublish === "receipt"
-          || (unpublish === "room" && unpublishReaches[shape]())
-          || (toggle === "off" && toggleReaches[shape]())
-        );
-        cells.push({ ...cell, expectedVisible });
       }
     }
   }
@@ -140,7 +160,7 @@ test("SQL and JS twins agree with the definition across the receipt switch space
   const sql = receiptVisibilitySql({ ownerToggle: ownerToggleReadable(db) });
   const hidden = hiddenReceiptIds(db, cells.map(cell => cell.id));
   for (const cell of cells) {
-    const label = `${cell.shape} / unpublish=${cell.unpublish} / toggle=${cell.toggle}`;
+    const label = `${cell.shape} / unpublish=${cell.unpublish} / toggle=${cell.toggle} / setting=${cell.setting}`;
     const sqlVisible = !!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(cell.id);
     assert.equal(sqlVisible, cell.expectedVisible, `SQL verdict — ${label}`);
     assert.equal(!hidden.has(cell.id), cell.expectedVisible, `JS batch verdict — ${label}`);
@@ -169,8 +189,42 @@ test("edge cells the cross product does not generate", () => {
   assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(nsKeyed), false, "SQL: origin-keyed toggle hides");
   assert.equal(receiptVisible(db, nsKeyed), false, "JS: origin-keyed toggle hides");
 
+  // A room-source row with no origin room has no recorded opt-in to
+  // consult: hidden in both twins, even with settings recorded elsewhere.
+  const noOrigin = nextId("wcr", "9");
+  seedReceipt(db, { id: noOrigin, roomId: null, origin: null, source: "work-claim" });
+  setSetting(db, "gone-room", "on");
+  const sqlFull = receiptVisibilitySql({ ownerToggle: true });
+  assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sqlFull}`).get(noOrigin), false, "SQL: origin-less room-source row hides");
+  assert.equal(receiptVisible(db, noOrigin), false, "JS: origin-less room-source row hides");
+
   // An id with no row at all is hidden to the JS form (fail closed).
   assert.equal(receiptVisible(db, nextId("wcr", "0")), false, "unknown id fails closed");
+});
+
+test("a store predating the recorded-setting table disables the recorded leg in both twins", () => {
+  const db = new DatabaseSync(":memory:");
+  // The legacy read-model schema is today's schema minus the setting
+  // table — derived from the real DDL so the two cannot drift apart.
+  const legacyReadModelSchema = PUBLIC_READ_MODEL_SCHEMA
+    .replace(/CREATE TABLE IF NOT EXISTS room_public_receipts_setting \([^)]*\);/, "");
+  assert.equal(legacyReadModelSchema.includes("room_public_receipts_setting"), false);
+  db.exec(legacyReadModelSchema);
+  db.exec(publicUnpublishSchema);
+  db.exec(roomDirectorySchema);
+  db.exec(publicWorkClaimsSchema);
+  assert.equal(recordedSettingReadable(db), false);
+  const sql = receiptVisibilitySqlFor(db);
+  assert.equal(sql.includes("room_public_receipts_setting"), false,
+    "the composed fragment never references the absent table");
+
+  const id = nextId("wcr", "a");
+  seedReceipt(db, { id, roomId: "pre-room", origin: "pre-room", source: "work-claim" });
+  assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(id), true, "SQL: visible — the leg does not exist here");
+  assert.equal(receiptVisible(db, id), true, "JS: visible — the twins agree");
+  db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 0, 'op')").run(id);
+  assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(id), false, "SQL: unpublish still hides");
+  assert.equal(receiptVisible(db, id), false, "JS: unpublish still hides");
 });
 
 test("a settings table without the toggle column disables the owner leg in both twins", () => {
@@ -189,6 +243,7 @@ test("a settings table without the toggle column disables the owner leg in both 
 
   const id = nextId("wcr", "a");
   seedReceipt(db, { id, roomId: "legacy-room", origin: "legacy-room", source: "work-claim" });
+  setSetting(db, "legacy-room", "on"); // the recorded opt-in is on; only the owner leg varies here
   const sql = receiptVisibilitySql({ ownerToggle: ownerToggleReadable(db) });
   assert.equal(!!db.prepare(`SELECT 1 FROM public_receipts WHERE id=? AND ${sql}`).get(id), true, "SQL: visible");
   assert.equal(receiptVisible(db, id), true, "JS: visible — the twins agree the leg does not exist here");
@@ -250,6 +305,28 @@ test("the lot rule across unpublish × recorded setting × toggle", () => {
           `lot / unpublish=${unpublish} / setting=${setting} / toggle=${toggle}`);
       }
     }
+  }
+});
+
+test("the pure-data receipt rule the packager's U5 filter must mirror", () => {
+  // The full truth table of receiptVisibleFromFacts over the recorded
+  // leg: a room-source row serves only with a recorded ON; a
+  // non-room-source row is untouched by the recorded facts (its
+  // defaults preserve the pre-leg verdicts).
+  const table = [
+    [{}, true],
+    [{ unpublished: true }, false],
+    [{ receiptsPrivate: true }, false],
+    [{ roomSource: false, settingEnabled: null }, true],
+    [{ roomSource: false, settingEnabled: 0 }, true],
+    [{ roomSource: true, settingEnabled: 1 }, true],
+    [{ roomSource: true, settingEnabled: 0 }, false],
+    [{ roomSource: true, settingEnabled: null }, false],
+    [{ roomSource: true, settingEnabled: 1, receiptsPrivate: true }, false],
+    [{ roomSource: true, settingEnabled: 1, unpublished: true }, false],
+  ];
+  for (const [facts, expected] of table) {
+    assert.equal(receiptVisibleFromFacts(facts), expected, JSON.stringify(facts));
   }
 });
 

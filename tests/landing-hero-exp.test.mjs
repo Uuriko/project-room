@@ -29,6 +29,9 @@ function seedReceipt(store, { id, title, at, merged }) {
     (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
     VALUES (?, ?, 'work-claim', 'commons', 'commons', 'Commons', '["agent-a"]', '["human-b"]', ?, ?, '{}', ?, 'https://room.trydemigod.com/?start=room')`)
     .run(id, title, merged ? "https://github.com/Uuriko/project-room/pull/1" : null, merged ? at : null, at);
+  // A projected room-source row implies the room recorded its opt-in
+  // (Ruling 40): the mirror the visibility predicate consults.
+  store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES ('commons', 1)").run();
 }
 
 test("front door: proof first, live counters, two doors, no bounty copy", async t => {

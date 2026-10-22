@@ -15,6 +15,8 @@
 //
 //   visible ⟺ NOT operator-unpublished
 //             AND NOT owner-hidden
+//             AND (room-source rows only) the origin room's recorded
+//                 public-receipts setting is ON
 //
 // Operator-unpublished: a public_unpublish row of kind 'receipt' naming
 // the receipt, or kind 'room' naming either of the receipt's rooms
@@ -26,6 +28,21 @@
 // room plus, for a public-work receipt, the room that owns its task
 // (resolved through public_work_receipts → public_work_tasks, because a
 // pwr_ row's origin can be a namespace rather than a room id).
+//
+// Recorded-opt-in: a room-source row (source 'work-claim' or
+// 'work-item' — the rows the publication sync projects from a room's own
+// work when the owner opts in) is visible only while the origin room's
+// recorded setting is ON (room_public_receipts_setting.enabled = 1, the
+// same recorded fact the lot rule below reads; never-recorded and
+// recorded-off are both private). The projection is the write-time half
+// of the consent (the sync deletes the rows on opt-out); this leg is
+// the read-time half, added by Ruling 40 after REV-4545 executed a
+// stale row — a projection left behind when the write-side invariant
+// failed, the drift shape the settled-lot probe observed in production
+// — being served by every anonymous surface of an opted-out room.
+// Public-work rows carry no recorded leg: they are not the room's
+// opt-in projection (they publish under the public-work contract, gated
+// by the two legs above).
 //
 // THE RULE, for a lot receipt (lot_ ids name no public_receipts row; the
 // journal is the record):
@@ -42,7 +59,10 @@
 // has no private rooms by definition (the column's default is public),
 // so the owner leg applies only where the column can be read. The read
 // path probes and never writes; the column is added by the directory's
-// own migration when directory code runs.
+// own migration when directory code runs. The recorded leg degrades the
+// same way: a store predating room_public_receipts_setting has no
+// recorded settings to consult (its rows predate recorded opt-ins), so
+// the leg applies only where the table can be read.
 //
 // Fail-closed: a check that cannot be performed hides the content
 // (isUnpublished's contract), and an id with no public_receipts row is
@@ -87,11 +107,28 @@ export function ownerHiddenReceiptSql({ taskRoomLeg = true } = {}) {
   return taskRoomLeg ? OWNER_HIDDEN_RECEIPT_SQL : OWNER_HIDDEN_ORIGIN_RECEIPT_SQL;
 }
 
+// The sources whose rows are a room's own opt-in projection (written by
+// replaceOptedInReceipts from the room's work claims and work items).
+// Only these rows carry the recorded-opt-in leg.
+export const ROOM_RECEIPT_SOURCES = ["work-claim", "work-item"];
+
+// Recorded opt-in: a room-source row serves only while its origin
+// room's recorded setting is ON. A non-room-source row passes this leg
+// unconditionally; a room-source row with no recorded ON (never
+// recorded, recorded off, or no origin room) fails it — fail-closed,
+// the lot rule's pattern.
+export const RECORDED_OPT_IN_RECEIPT_SQL = `(
+  public_receipts.source NOT IN ('work-claim','work-item')
+  OR EXISTS (
+    SELECT 1 FROM room_public_receipts_setting rs
+    WHERE rs.room_id = public_receipts.origin_room_id AND rs.enabled = 1))`;
+
 // The composed SQL predicate over a public_receipts row.
-export function receiptVisibilitySql({ ownerToggle = true, taskRoomLeg = true } = {}) {
-  return ownerToggle
-    ? `${OPERATOR_HIDDEN_RECEIPT_SQL} AND ${ownerHiddenReceiptSql({ taskRoomLeg })}`
-    : OPERATOR_HIDDEN_RECEIPT_SQL;
+export function receiptVisibilitySql({ ownerToggle = true, taskRoomLeg = true, recordedOptIn = true } = {}) {
+  const legs = [OPERATOR_HIDDEN_RECEIPT_SQL];
+  if (ownerToggle) legs.push(ownerHiddenReceiptSql({ taskRoomLeg }));
+  if (recordedOptIn) legs.push(RECORDED_OPT_IN_RECEIPT_SQL);
+  return legs.join(" AND ");
 }
 
 // Whether the public-work tables the task leg reads can be read here.
@@ -106,13 +143,27 @@ export function publicWorkTablesReadable(db) {
   }
 }
 
-// The composed predicate for a concrete store, with both schema probes
+// The composed predicate for a concrete store, with the schema probes
 // applied — the form consumers use.
 export function receiptVisibilitySqlFor(db) {
   return receiptVisibilitySql({
     ownerToggle: ownerToggleReadable(db),
     taskRoomLeg: publicWorkTablesReadable(db),
+    recordedOptIn: recordedSettingReadable(db),
   });
+}
+
+// Whether the recorded-setting table the recorded leg reads can be read
+// here. A store predating it has no recorded settings to consult, so
+// the leg does not exist there — the owner leg's degradation pattern.
+export function recordedSettingReadable(db) {
+  try {
+    db.prepare("SELECT room_id, enabled FROM room_public_receipts_setting LIMIT 0").all();
+    return true;
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return false;
+  }
 }
 
 // A legacy store whose settings table predates the toggle column has no
@@ -134,8 +185,13 @@ export function ownerToggleReadable(db) {
 // these functions over facts read from the db; a snapshot consumer that
 // derives the same facts must reach the same verdicts — that parity is
 // the U5 obligation, pinned by the conformance corpus.
-export function receiptVisibleFromFacts({ unpublished = false, receiptsPrivate = false } = {}) {
-  return !unpublished && !receiptsPrivate;
+export function receiptVisibleFromFacts({ unpublished = false, receiptsPrivate = false, roomSource = false, settingEnabled = null } = {}) {
+  if (unpublished) return false;
+  // The recorded leg, room-source rows only: only a recorded ON serves
+  // (never-recorded null and recorded-off 0 are both private, Ruling 40).
+  if (roomSource && settingEnabled !== 1) return false;
+  if (receiptsPrivate) return false;
+  return true;
 }
 
 export function lotVisibleFromFacts({ unpublished = false, settingEnabled = null, receiptsPrivate = false } = {}) {
@@ -173,13 +229,13 @@ export function hiddenReceiptIds(db, receiptIds) {
     // to the origin room alone rather than failing the whole check.
     let rows;
     try {
-      rows = db.prepare(`SELECT pr.id AS id, pr.room_id AS roomId, pr.origin_room_id AS origin, pwt.room_id AS taskRoom
+      rows = db.prepare(`SELECT pr.id AS id, pr.room_id AS roomId, pr.origin_room_id AS origin, pr.source AS source, pwt.room_id AS taskRoom
         FROM public_receipts pr
         LEFT JOIN public_work_receipts pwr ON pwr.receipt_id = pr.id
         LEFT JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
         WHERE pr.id IN (SELECT value FROM json_each(?))`).all(idList);
     } catch {
-      rows = db.prepare(`SELECT id, room_id AS roomId, origin_room_id AS origin, NULL AS taskRoom
+      rows = db.prepare(`SELECT id, room_id AS roomId, origin_room_id AS origin, source, NULL AS taskRoom
         FROM public_receipts WHERE id IN (SELECT value FROM json_each(?))`).all(idList);
     }
     for (const row of rows) rowsById.set(row.id, row);
@@ -220,6 +276,26 @@ export function hiddenReceiptIds(db, receiptIds) {
       } catch { return new Set(receiptIds); } // readable a moment ago, unreadable now: fail closed
     }
   }
+  // The recorded leg, only where the setting table can be read (the
+  // SQL twin's probe, applied identically): a room-source row needs its
+  // origin room's recorded setting ON; no recorded row is a fail-closed
+  // miss, exactly as the SQL EXISTS finds nothing.
+  const settingByRoom = new Map();
+  const settingReadable = recordedSettingReadable(db);
+  if (settingReadable) {
+    const origins = new Set();
+    for (const row of rowsById.values()) {
+      if (ROOM_RECEIPT_SOURCES.includes(row.source) && row.origin) origins.add(row.origin);
+    }
+    if (origins.size) {
+      try {
+        for (const row of db.prepare(`SELECT room_id, enabled FROM room_public_receipts_setting
+            WHERE room_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...origins]))) {
+          settingByRoom.set(row.room_id, row.enabled);
+        }
+      } catch { return new Set(receiptIds); } // readable a moment ago, unreadable now: fail closed
+    }
+  }
   for (const id of receiptIds) {
     const row = rowsById.get(id);
     if (!row || unpublishedReceipts.has(id)) { hidden.add(id); continue; }
@@ -230,7 +306,9 @@ export function hiddenReceiptIds(db, receiptIds) {
     const toggleRooms = [];
     if (row.taskRoom) toggleRooms.push(row.taskRoom);
     if (row.origin && row.origin !== row.taskRoom) toggleRooms.push(row.origin);
-    if (toggleRooms.some(roomId => privateRooms.has(roomId))) hidden.add(id);
+    if (toggleRooms.some(roomId => privateRooms.has(roomId))) { hidden.add(id); continue; }
+    if (settingReadable && ROOM_RECEIPT_SOURCES.includes(row.source)
+      && settingByRoom.get(row.origin) !== 1) hidden.add(id);
   }
   return hidden;
 }

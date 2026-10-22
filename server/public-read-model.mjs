@@ -9,10 +9,12 @@ import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "..
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 import {
   OPERATOR_HIDDEN_RECEIPT_SQL,
+  RECORDED_OPT_IN_RECEIPT_SQL,
   ownerHiddenReceiptSql,
   receiptVisibilitySqlFor,
   ownerToggleReadable,
   publicWorkTablesReadable,
+  recordedSettingReadable,
   lotReceiptVisible,
 } from "./public-visibility.mjs"; // the one visibility definition every public read applies
 
@@ -788,10 +790,11 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
 // and the sitemap. The visibility rule — this operator-unpublish leg,
 // the owner-toggle leg (#3595: the origin room, plus the owning room of
 // a public-work receipt through its task record, since a pwr_ row's
-// origin can be a namespace rather than a room id), and their
-// composition — is defined once in server/public-visibility.mjs. The
-// directory receipt count applies the same predicate (PR 2 of the
-// visibility package); the claim that it did was false before it.
+// origin can be a namespace rather than a room id), the recorded-opt-in
+// leg for room-source rows (Ruling 40), and their composition — is
+// defined once in server/public-visibility.mjs. The directory receipt
+// count applies the same predicate (PR 2 of the visibility package);
+// the claim that it did was false before it.
 const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 
 const receiptFilter = (room, needle) => {
@@ -814,13 +817,18 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
-  // The rows this list could serve: filter matches, minus both kinds of
-  // hidden (operator-unpublished, owner-toggled-off). The page query and
-  // the cursor lookup apply the same set, so a served nextCursor always
-  // names a receipt a follow-up request may anchor on.
-  const visibility = ownerToggleReadable(store.db)
-    ? [HIDDEN_RECEIPT, ownerHiddenReceiptSql({ taskRoomLeg: publicWorkTablesReadable(store.db) })]
-    : [HIDDEN_RECEIPT];
+  // The rows this list could serve: filter matches, minus every kind of
+  // hidden (operator-unpublished, owner-toggled-off, and — for
+  // room-source rows — recorded-opt-in-off). The page query and the
+  // cursor lookup apply the same set, so a served nextCursor always
+  // names a receipt a follow-up request may anchor on. The legs are
+  // composed by hand here in the definition's own terms (each gated on
+  // its schema probe, exactly as receiptVisibilitySqlFor composes them).
+  const visibility = [HIDDEN_RECEIPT];
+  if (ownerToggleReadable(store.db)) {
+    visibility.push(ownerHiddenReceiptSql({ taskRoomLeg: publicWorkTablesReadable(store.db) }));
+  }
+  if (recordedSettingReadable(store.db)) visibility.push(RECORDED_OPT_IN_RECEIPT_SQL);
   let after = "";
   const afterParams = [];
   if (cursor != null) {
@@ -830,8 +838,9 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // The cursor must name a receipt this list could serve: a hidden row
     // is not a valid pagination position — accepting it would confirm the
     // hidden receipt exists and where it sits in the order (#3595). Both
-    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
-    // owner public-receipts toggle (the owner leg). Same 422 as a
+    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT), the
+    // owner public-receipts toggle (the owner leg), and the recorded
+    // opt-in leg for room-source rows. Same 422 as a
     // never-existent id.
     const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);

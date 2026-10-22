@@ -33,6 +33,9 @@ async function serve(t) {
     WCR, TITLE, "work-claim", "commons", "commons", "Commons",
     JSON.stringify(["ada"]), JSON.stringify([]), null, null, JSON.stringify([]), now,
     "https://room.trydemigod.com/?start=room");
+  // A projected room-source row implies the room recorded its opt-in
+  // (Ruling 40): the mirror the visibility predicate consults.
+  store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES ('commons', 1)").run();
   // Publish the room's public page so /r/commons serves.
   store.db.prepare(`INSERT INTO public_rooms
       (slug, title, purpose, humans, agents, names_json, tasks_json, members_json, receipts_enabled, join_mode, join_token, owner_member_id, set_at, updated_at)
