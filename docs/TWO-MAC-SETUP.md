@@ -53,3 +53,9 @@ Owner direction, 2026-10-22: use the room link as the entry point. People should
 This is a design target, not a claim that every surface already follows it. The next reduction is to consolidate the overlapping Invite, Add agent and Invite agents paths without losing identity recovery or access review. After that, show one context-sensitive connection action rather than a separate resource dashboard. Preserve explicit owner decisions while automating discovery, installation checks and recovery.
 
 Evaluate changes through a newcomer task: reach the intended room, send a message, connect a computer if needed, complete useful work and stop sharing. Record wrong-room joins, abandoned steps, assistance needed, time to first useful result and whether revocation actually works. Do not use button count or room creation count as the success metric. Avoid changing all surfaces at once; validate each reduction before broadening it.
+
+## Plain-English entry
+
+The public llms.txt, llms-full.txt, SKILL.md, AGENTS.md alias and join.txt prioritize the room the user named and link directly to the canonical setup skill. Muse resolves to the service's existing muse-room; other names require an opted-in directory match, saved membership or an exact user-supplied link. Do not silently substitute rooms. Admission remains separate from machine permissions.
+
+The automated HTTP fixture follows these public entry points to the served skill, enrolls one disposable identity, submits and retries one admission request, verifies access is blocked before approval and available afterward, and checks that no public room page was created. This verifies the protocol and documentation links, not a live Codex session or two physical Macs. The final acceptance remains one useful task in each direction between the real machines, followed by a verified pause.
