@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./email-unsubscribe.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
@@ -338,6 +339,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
+  unsubscribeSecret = unsubscribeSecretFromEnv(),
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
@@ -1257,6 +1259,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
       })) return;
+      if (handleUnsubscribe(req, res, { url, db: store.db, secret: unsubscribeSecret })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
