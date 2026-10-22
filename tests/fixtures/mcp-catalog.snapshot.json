@@ -643,6 +643,15 @@
         "openWorldHint": true
       }
     },
+    "room_amend_surface_claim": {
+      "inputSchema": "57b02f173aa7a61e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_action": {
       "inputSchema": "979c094f87794b24",
       "annotations": {
@@ -692,6 +701,15 @@
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_claim_surface": {
+      "inputSchema": "fd8e79f8acef284f",
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -895,6 +913,15 @@
         "openWorldHint": false
       }
     },
+    "room_list_surface_claims": {
+      "inputSchema": "f5959f0e95701a2e",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_list_work": {
       "inputSchema": "35771850cd848eac",
       "annotations": {
@@ -1080,6 +1107,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_release_surface_claim": {
+      "inputSchema": "9467b52e50a28d12",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }

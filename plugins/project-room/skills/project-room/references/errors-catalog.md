@@ -641,6 +641,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_room` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_room_request` | 422 | title is required. kind must be one of: personal, organization | follow hint | Follow this error's hint and next steps. |
 | `invalid_saved` | 422 | messageId and saved are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_surface_claim` | 422 | scope must claim at least one subject: prs, issues, branch, surfaces, lane, room, or names | fix+resend | Fix the fields named in the message — scope needs at least one of prs, issues, branch, surfaces, lane, room, names — then resend. |
 | `invalid_scannable_message` | 500 | fail("invalid_scannable_message", message); }; export const quarantineThreshold = 60; const maxText = 131072; const text = (value, max = maxText) => { | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_scopes` | 422 | scopes must list one or more of: ${BOND_SCOPES.join(", ")} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_search` | 422 | limit is 1 to 200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -950,6 +951,10 @@ response's own `hint`/`next` when it names something more specific.
 | `squad_not_found` | 404 | No such squad in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `squad_owner_required` | 403 | Only the squad owner can add members | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `squad_roster_full` | 422 | A squad holds at most ${MAX_SQUAD_MEMBERS} members | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `surface_claim_closed` | 409 | Claim ${claimId} is released and cannot be amended | re-read | Re-read the claim's current state; take a fresh claim if the subject is free. |
+| `surface_claim_held` | 409 | Subject is already claimed by ${holderDisplayName} (claim ${claimId}) | wait | Another member holds the subject (detail.held names the claim): wait for release or expiry, coordinate with the holder, or claim a different subject. |
+| `surface_claim_not_found` | 404 | No surface claim "${claimId}" in this room | re-list | Re-list the room's surface claims and use a current claim id; do not guess ids. |
+| `surface_claim_not_holder` | 403 | Only the holder can amend this claim | no | Only the holder can amend; release is the holder, the room owner, or a manage_claims member. Do not retry unchanged. |
 | `squad_unknown` | 422 | squadId "${typeof data.squadId === "string" ? data.squadId : "?"}" is not an active squad in this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `stale_account_revision` | 409 | Stale account revision | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_card` | 422 | The card signature is stale; sign a fresh joinRequest | no — re-sign fresh | Sign a fresh joinRequest with a current issuedAt and resend; do not retry the same signed card. |

@@ -225,6 +225,8 @@ optional.push("server/wiki-parse.mjs", "server/wiki-data.mjs"); // W009: pure wi
 optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
+optional.push("server/surface-claims.mjs"); // CLAIM-PRIM: surface-claim state machine (imported by server/routes/surface-claims.mjs, server/mcp-room-profile.mjs)
+optional.push("server/surface-claim-sqlite.mjs"); // CLAIM-PRIM: durable surface-claim registry (imported by server/store.mjs)
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
@@ -346,6 +348,7 @@ optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/front-door.mjs"); // EXP-7 Variant B: /about front-door live facts RT route (imported by server/routes/table.mjs)
 optional.push("src/front-door.js"); // EXP-7 Variant B: /about live-facts script (loaded by about.html, registered in server/public-assets.mjs)
 optional.push("server/routes/squads.mjs"); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
+optional.push("server/routes/surface-claims.mjs"); // CLAIM-PRIM: surface-claim RT routes (imported by server/routes/table.mjs)
 optional.push("server/spend-pricing.mjs", "server/routes/spend-pricing.mjs"); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/routes/table.mjs and server/spend-grants.mjs)
 optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post budget (imported by server/store.mjs)
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)

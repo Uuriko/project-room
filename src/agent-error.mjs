@@ -256,6 +256,38 @@ export const ERROR_REGISTRY = {
     next: [path("/api/public-work/tasks"), command("GET /api/public-work/tasks and claim a different task — this one's submission deadline has passed.")],
     catalog: { http: 409, retry: "no", recovery: "Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task." },
   },
+  // Surface claims (CLAIM-PRIM): the room-native Claim primitive
+  // (server/surface-claims.mjs). Registry-born per the ratchet.
+  invalid_surface_claim: {
+    status: "action_required",
+    hint: "The surface claim has invalid fields.",
+    next: [command("Fix the fields named in the message — scope needs at least one of prs, issues, branch, surfaces, lane, room, names — then resend.")],
+    catalog: { http: 422, retry: "fix+resend", recovery: "Fix the fields named in the message — scope needs at least one of prs, issues, branch, surfaces, lane, room, names — then resend." },
+  },
+  surface_claim_held: {
+    status: "action_required",
+    hint: "That subject is already claimed by another member. The held claim, with its holder, is in detail.held.",
+    next: [{ tool: "room_list_surface_claims" }, command("Read the held claim (holder, scope, effectiveExpiresAt); wait for its release or expiry, coordinate with the holder, or claim a different subject.")],
+    catalog: { http: 409, retry: "wait", recovery: "Another member holds the subject (detail.held names the claim): wait for release or expiry, coordinate with the holder, or claim a different subject." },
+  },
+  surface_claim_not_found: {
+    status: "action_required",
+    hint: "No surface claim with that id exists in this room.",
+    next: [{ tool: "room_list_surface_claims" }, command("Re-list the room's surface claims and use a current claim id; do not guess ids.")],
+    catalog: { http: 404, retry: "re-list", recovery: "Re-list the room's surface claims and use a current claim id; do not guess ids." },
+  },
+  surface_claim_closed: {
+    status: "action_required",
+    hint: "That surface claim is no longer active — it was released, expired, or superseded.",
+    next: [{ tool: "room_list_surface_claims" }, command("Re-read the claim's current state; take a fresh claim if the subject is free.")],
+    catalog: { http: 409, retry: "re-read", recovery: "Re-read the claim's current state; take a fresh claim if the subject is free." },
+  },
+  surface_claim_not_holder: {
+    status: "action_required",
+    hint: "Only the claim's holder can do that (release also allows the room owner or a manage_claims member).",
+    next: [command("Ask the claim's holder to act, or — for release — the room owner or a member with manage_claims. Do not retry unchanged.")],
+    catalog: { http: 403, retry: "no", recovery: "Only the holder can amend; release is the holder, the room owner, or a manage_claims member. Do not retry unchanged." },
+  },
   // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
   // not a stale revision: the generic stale() branch taught the
   // workContext/expectedRevision recovery (and /api/session, unreachable

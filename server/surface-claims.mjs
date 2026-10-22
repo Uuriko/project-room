@@ -247,7 +247,7 @@ export function takeSurfaceClaim(env, roomId, holderMemberId, input) {
       env.registry.set(roomId, prior);
     }
     env.registry.set(roomId, claim);
-    return { claim: serializeClaim(claim, now, now) };
+    return { roomId, claim: serializeClaim(claim, now, now) };
   });
 }
 
@@ -261,7 +261,7 @@ export function listSurfaceClaims(env, roomId, viewerMemberId, filter = {}) {
     const listed = claims
       .filter(claim => (state === null || claim.state === state) && (!mine || claim.holderMemberId === viewerMemberId))
       .map(claim => serializeClaim(claim, env.presenceAt(roomId, claim.holderMemberId), now));
-    return { claims: listed };
+    return { roomId, claims: listed };
   });
 }
 
@@ -272,7 +272,7 @@ export function getSurfaceClaim(env, roomId, viewerMemberId, claimId) {
     loadRoom(env, roomId);
     const claim = env.registry.get(roomId, claimId);
     if (!claim) throw notFound(claimId);
-    return { claim: serializeClaim(claim, env.presenceAt(roomId, claim.holderMemberId), now) };
+    return { roomId, claim: serializeClaim(claim, env.presenceAt(roomId, claim.holderMemberId), now) };
   });
 }
 
@@ -298,7 +298,7 @@ export function releaseSurfaceClaim(env, roomId, actorMemberId, claimId, input =
     claim.releaseReason = reason;
     claim.history = [...(claim.history ?? []), { at: now, action: "released", by: actorMemberId }].slice(-MAX_HISTORY);
     env.registry.set(roomId, claim);
-    return { claim: serializeClaim(claim, env.presenceAt(roomId, claim.holderMemberId), now) };
+    return { roomId, claim: serializeClaim(claim, env.presenceAt(roomId, claim.holderMemberId), now) };
   });
 }
 
@@ -340,7 +340,7 @@ export function amendSurfaceClaim(env, roomId, actorMemberId, claimId, input) {
     claim.history = [...(claim.history ?? []),
       { at: now, action: "amended", by: actorMemberId, priorScope }].slice(-MAX_HISTORY);
     env.registry.set(roomId, claim);
-    return { claim: serializeClaim(claim, now, now) };
+    return { roomId, claim: serializeClaim(claim, now, now) };
   });
 }
 

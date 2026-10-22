@@ -1935,6 +1935,189 @@ paths:
           description: Only the squad owner can disband it (squad_owner_required)
         '404':
           description: No such squad in this room (squad_not_found)
+  /api/rooms/{roomId}/surface-claims:
+    get:
+      summary: List surface claims
+      description: |
+        CLAIM-PRIM (mig-primitives Primitive 1). Every surface claim in the
+        room: id, holder, typed scope, note, state, and timestamps. Members
+        only. States are swept before the read: a claim past its effective
+        expiry (its window end, or its holder's heartbeat presence silent
+        past the grace window) reads `expired`, never stale-active. Query:
+        `state` filters by state (active, released, expired, superseded);
+        `mine=1` lists only the caller's claims.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Surface claim list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceClaimList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      x-room-permission: member
+      summary: Take a surface claim
+      description: |
+        CLAIM-PRIM. Take a room-scoped coordination claim on a subject so
+        other members and fleets see who holds it before touching it.
+        `scope` carries at least one dimension: `prs`, `issues`, `branch`,
+        `surfaces` (repo paths or `folder/**`), `lane`, `room` (true), or
+        `names` (free-named subjects). `windowMinutes` defaults to 90 and
+        caps at 1440. The claim expires at the window end or when the
+        holder's heartbeat presence in the room goes silent past the grace
+        window (15 minutes), whichever comes first. A subject another
+        member holds returns 409 `surface_claim_held` with the held claim
+        (holder named) in `held`. Re-claiming a subject you already hold
+        supersedes your own earlier claim. A surface claim leases no board
+        work item and grants no permission; it is not a work claim.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope:
+                  type: object
+                  description: Typed subject union; at least one dimension required
+                  properties:
+                    prs: { type: array, items: { type: integer }, description: GitHub pull request numbers }
+                    issues: { type: array, items: { type: integer }, description: GitHub issue numbers }
+                    branch: { type: string, description: Branch name }
+                    surfaces: { type: array, items: { type: string }, description: Repo paths or folder/** subtrees }
+                    lane: { type: string, description: Lane name }
+                    room: { type: boolean, description: True claims the room itself }
+                    names: { type: array, items: { type: string }, description: Free-named subjects }
+                note: { type: string, description: Scope note, at most 500 chars }
+                windowMinutes: { type: integer, description: Claim window in minutes, 1 to 1440 (default 90) }
+      responses:
+        '201':
+          description: Claim taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceClaimResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '409':
+          description: Subject already claimed by another member (surface_claim_held; the held claim rides in `held`)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/surface-claims/{claimId}:
+    get:
+      summary: Read one surface claim
+      description: |
+        CLAIM-PRIM. Read a surface claim by id (`sc_…`). Members only. The
+        claim's state is swept first, so an expired claim reads `expired`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Surface claim id
+      responses:
+        '200':
+          description: The surface claim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceClaimResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such surface claim in this room (surface_claim_not_found)
+  /api/rooms/{roomId}/surface-claims/{claimId}/release:
+    post:
+      x-room-permission: holder|room_owner|manage_claims
+      summary: Release a surface claim
+      description: |
+        CLAIM-PRIM. The holder releases its own claim; the room owner or a
+        member with `manage_claims` can release another member's. `reason`
+        is optional and stored on the claim. A released claim frees its
+        subject immediately.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Surface claim id
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: Release reason, at most 200 chars }
+      responses:
+        '200':
+          description: Released claim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceClaimResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Only the holder, the room owner, or a manage_claims member can release it (surface_claim_not_holder)
+        '404':
+          description: No such surface claim in this room (surface_claim_not_found)
+        '409':
+          description: The claim is no longer active (surface_claim_closed)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/surface-claims/{claimId}/amend:
+    post:
+      x-room-permission: holder
+      summary: Amend a surface claim
+      description: |
+        CLAIM-PRIM. Holder only. Replace `scope`, `note`, or the window
+        (`windowMinutes` restarts the window from now) in place; the prior
+        scope is kept in the claim's history. Amending into a subject
+        another member holds returns 409 `surface_claim_held` with the
+        held claim in `held`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Surface claim id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scope: { type: object, description: Replacement scope, same typed union as the take call }
+                note: { type: string, description: Scope note, at most 500 chars }
+                windowMinutes: { type: integer, description: New window in minutes from now, 1 to 1440 }
+      responses:
+        '200':
+          description: Amended claim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceClaimResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Only the holder can amend this claim (surface_claim_not_holder)
+        '404':
+          description: No such surface claim in this room (surface_claim_not_found)
+        '409':
+          description: The claim is no longer active (surface_claim_closed), or the new scope is held by another member (surface_claim_held)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/typing:
     post:
       summary: Send a typing heartbeat
@@ -17645,6 +17828,61 @@ components:
         roomId: { type: string }
         squad:
           $ref: '#/components/schemas/Squad'
+    SurfaceClaimScope:
+      type: object
+      description: Typed subject union of a surface claim; at least one dimension is present
+      properties:
+        prs: { type: array, items: { type: integer }, description: GitHub pull request numbers }
+        issues: { type: array, items: { type: integer }, description: GitHub issue numbers }
+        branch: { type: string }
+        surfaces: { type: array, items: { type: string }, description: Repo paths or folder/** subtrees }
+        lane: { type: string }
+        room: { type: boolean }
+        names: { type: array, items: { type: string }, description: Free-named subjects }
+    SurfaceClaim:
+      type: object
+      description: A room-scoped surface claim (CLAIM-PRIM)
+      required: [id, holder, scope, state, claimedAt, expiresAt, heartbeatAt]
+      properties:
+        id: { type: string, description: Surface claim id (sc_…) }
+        holder:
+          type: object
+          required: [memberId]
+          properties:
+            memberId: { type: string }
+            displayName: { type: [string, 'null'] }
+            kind: { type: [string, 'null'] }
+        scope:
+          $ref: '#/components/schemas/SurfaceClaimScope'
+        note: { type: [string, 'null'] }
+        state: { type: string, enum: [active, released, expired, superseded] }
+        claimedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: The nominal window end }
+        heartbeatAt: { type: string, format: date-time, description: The holder's latest heartbeat-presence signal in the room }
+        effectiveExpiresAt: { type: string, format: date-time, description: Present on active claims — the earlier of the window end and presence grace end; the claim dies at this time }
+        releasedAt: { type: [string, 'null'], format: date-time }
+        releaseReason: { type: [string, 'null'] }
+        supersededBy: { type: [string, 'null'], description: The claim that superseded this one }
+        supersedes: { type: array, items: { type: string }, description: Earlier claims of the same holder this claim superseded }
+        history: { type: array, items: { type: object }, description: Lifecycle stamps (claimed, amended with priorScope, released, expired, superseded) }
+    SurfaceClaimList:
+      type: object
+      description: Body of GET /api/rooms/{roomId}/surface-claims
+      required: [roomId, claims]
+      properties:
+        roomId: { type: string }
+        claims:
+          type: array
+          items:
+            $ref: '#/components/schemas/SurfaceClaim'
+    SurfaceClaimResult:
+      type: object
+      description: Body of the single-claim reads and writes (take, read one, release, amend)
+      required: [roomId, claim]
+      properties:
+        roomId: { type: string }
+        claim:
+          $ref: '#/components/schemas/SurfaceClaim'
     ChannelConnection:
       type: object
       description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.
