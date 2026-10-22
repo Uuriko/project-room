@@ -91,7 +91,7 @@ test('accepted public-work receipt: the stamp is the outcome face, bound to the 
   // Unreviewed: the faces carry the record's own facts and claim no outcome.
   const fresh = publicReceiptById(f.store, id);
   assert.equal(fresh.state, 'submitted');
-  assert.equal(fresh.verification, 'system_checked');
+  assert.deepEqual(fresh.verification, { state: 'system_checked' });
   assert.deepEqual(fresh.executedChecks, [{ name: 'criteria_coverage', result: 'pass' }]);
   assert.deepEqual(fresh.checksReported, ['unit: pass']);
   assert.equal(fresh.review, undefined);
@@ -110,7 +110,7 @@ test('accepted public-work receipt: the stamp is the outcome face, bound to the 
   f.reviews.decide('commons', REVIEWER, id, f.input(receipt, 'accept', 1, { decision: 'accepted' }));
   const pub = publicReceiptById(f.store, id);
   assert.equal(pub.state, 'verified');
-  assert.equal(pub.verification, 'system_checked');
+  assert.deepEqual(pub.verification, { state: 'system_checked' });
   assert.deepEqual(pub.executedChecks, [{ name: 'criteria_coverage', result: 'pass' }, { name: 'artifact_integrity', result: 'pass' }]);
   assert.equal(pub.review.state, 'accepted');
   assert.ok(pub.review.decidedAt);
@@ -228,7 +228,7 @@ test('paid acceptance: settlement moves exactly as the train pins it, and the fa
   // at the honest hash_only tier.
   const pub = publicReceiptById(store, id);
   assert.equal(pub.state, 'verified');
-  assert.equal(pub.verification, 'hash_only');
+  assert.deepEqual(pub.verification, { state: 'hash_only' });
   assert.equal(pub.review.state, 'accepted');
   const canonical = store.publicWorkClaims.receipt(id);
   assert.equal(canonical.state, 'verified');

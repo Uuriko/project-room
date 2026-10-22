@@ -4,7 +4,8 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, PROOF_LEVELS, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { proofLevelForTierState, receiptTierState } from "./public-read-model.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -77,15 +78,20 @@ const when = value => {
 };
 
 // The verification tier a result-mode receipt carries (#3636), worded
-// exactly as the proof page's levels name them, so every surface that
-// shows the tier shows the same claim — and no surface upgrades it.
-const verificationLabel = state => state === "verified" ? "Member-verified completion"
-  : state === "self_attested" ? "Self-attested completion" : null;
+// exactly as the proof levels name it: the label is the canonical
+// PROOF_LEVELS label for the level the receipt's tier state names
+// (proofLevelForTierState), so the list, the detail page, the badge
+// and the verdict line can never drift into two vocabularies — and no
+// surface upgrades the tier.
+const verificationLabel = receipt => {
+  const level = proofLevelForTierState(receipt?.verification?.state);
+  return level ? PROOF_LEVELS[level].label : null;
+};
 
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
-  const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
+  const items = receipts.map(item => { const tier = verificationLabel(item); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
@@ -200,7 +206,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     return `<div><dt>Payout lot</dt><dd><a href="/receipts/${escapeHtml(receipt.lotId)}">${escapeHtml(receipt.lotId)}</a>${amount}${state}</dd></div>`;
   })() : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
-  const tierLabel = verificationLabel(receipt.verification?.state);
+  const tierLabel = verificationLabel(receipt);
   const verificationTier = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
@@ -222,9 +228,9 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
     if (review.verificationVerdict) rows.push(`<div><dt>Recorded check verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""} — this check does not override the delivery outcome above.</dd></div>`);
     if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
-    if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
-    else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
-    else if (receipt.verification) rows.push(`<div><dt>Verification</dt><dd>${escapeHtml(receipt.verification)}</dd></div>`);
+    if (receipt.verification?.state === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
+    else if (receipt.verification?.state === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
+    else if (receipt.verification?.state) rows.push(`<div><dt>Verification</dt><dd>${escapeHtml(receipt.verification.state)}</dd></div>`);
     if (receipt.executedChecks?.length) rows.push(`<div><dt>Platform-executed checks</dt><dd>${receipt.executedChecks.map(check => `${escapeHtml(check.name)} — ${escapeHtml(check.result)}`).join("<br>")}</dd></div>`);
     if (receipt.checksReported?.length) rows.push(`<div><dt>Checks the worker reported</dt><dd>${receipt.checksReported.map(entry => escapeHtml(entry)).join("<br>")}</dd></div>`);
     return rows.join("");
@@ -352,7 +358,11 @@ const publicJson = receipt => ({
   humans: receipt.humans,
   pullRequest: receipt.pullRequest,
   mergedAt: receipt.mergedAt,
-  ...(receipt.verification ? { verification: receipt.verification } : {}),
+  // The tier field is unconditional (U-08): every receipt JSON names its
+  // verification tier as data, from the one canonical enum — composed
+  // receipts already carry it; receiptTierState derives it for any
+  // receipt-shaped input that does not.
+  verification: { state: receiptTierState(receipt) },
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.state ? { state: receipt.state } : {}),
@@ -376,9 +386,16 @@ export function receiptsListJson(page) {
 }
 
 export function receiptJson(receipt, verification = null) {
-  // The verification (project-room-receipt-verification/1) rides the JSON
-  // shape only when a verify run produced it — readers can tell a fresh
-  // check ("checked just now") apart from stored values without parsing
-  // the verdict.
-  return { ...publicJson(receipt), ...(verification ? { verification } : {}) };
+  // The verification object always carries the recorded tier as
+  // { state }. When a verify run produced a fresh re-derivation
+  // (project-room-receipt-verification/1), it rides in the SAME object —
+  // verdict, checkedAt, per-check results and scope next to the state —
+  // so one read gives a machine consumer both the recorded tier and the
+  // fresh check as data, and a verify run never evicts the tier it was
+  // checking. Readers can still tell a fresh check ("checked just now")
+  // apart from stored values: the run's fields are present only when
+  // one ran.
+  const base = publicJson(receipt);
+  if (!verification) return base;
+  return { ...base, verification: { state: base.verification.state, ...verification } };
 }

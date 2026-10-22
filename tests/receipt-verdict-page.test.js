@@ -9,7 +9,9 @@
 //     the stored-values honesty note is replaced, not contradicted;
 //   - a source that changed since the record (GitHub: pull still open)
 //     renders the contradicted verdict on the page itself;
-//   - the JSON shape carries the verification only when one ran;
+//   - the JSON shape always carries the recorded tier as
+//     verification.state; a verify run's verdict rides in the same
+//     object, only when one ran;
 //   - verify runs are rate-limited (they can cost a GitHub call).
 // Seams: real RoomStore + read model + HTTP; GitHub is the injected
 // fetchPullRequest stub — the seam claim-pr-sync uses.
@@ -59,7 +61,8 @@ test("the plain page shows Record not rechecked with the action, and claims noth
   assert.match(html, /Verification tier: bytes re-verified\. What was checked: the server verified the merge/,
     "front-door batch B-4: the note names the tier the stored record carries (the server-verified merge), while the block above still says nothing was re-checked at read time");
   const json = await (await fetch(`${origin}/receipts/${receiptId}.json`)).json();
-  assert.equal(json.verification, undefined, "JSON carries verification only when one ran");
+  assert.deepEqual(json.verification, { state: "server_verified_merge" },
+    "JSON always carries the recorded tier; no verdict fields ride until one runs");
 });
 
 test("?verify=1 renders the graded verdict with its scope in one block", async t => {
@@ -80,6 +83,8 @@ test("?verify=1 puts the same verdict on the JSON shape", async t => {
   const { origin, receiptId } = await serve(t, mergedFetch);
   const json = await (await fetch(`${origin}/receipts/${receiptId}.json?verify=1`)).json();
   assert.equal(json.verification.schema, "project-room-receipt-verification/1");
+  assert.equal(json.verification.state, "server_verified_merge",
+    "the recorded tier rides in the same object as the fresh verdict");
   assert.equal(json.verification.verdict, "server-verified");
   assert.equal(json.verification.scope.by, "the Project Room server, at read time");
 });
