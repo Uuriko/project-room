@@ -160,3 +160,27 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
   assert.equal((await fetch(`${origin}/receipts/wcr_${"0".repeat(32)}/og.png`)).status, 404);
 });
+
+test("the detail page names its JSON twin, and the named twin serves the record", async t => {
+  const { origin } = await serve(t);
+  // A stranger walk: the list page is the only prior knowledge. Take the
+  // first receipt link it offers, then find the JSON twin from the detail
+  // page itself — never by guessing the .json suffix (#3700).
+  const list = await raw(origin, "/receipts");
+  const firstHref = /href="(\/receipts\/[a-z]+_[a-f0-9]+)"/.exec(list.text)?.[1];
+  assert.ok(firstHref, "the list page links a receipt");
+  const page = await raw(origin, firstHref);
+  assert.equal(page.status, 200);
+  const alternate = /<link rel="alternate" type="application\/json" href="([^"]+)">/.exec(page.text)?.[1];
+  assert.equal(alternate, `${firstHref}.json`);
+  const twin = await fetch(`${origin}${alternate}`);
+  assert.equal(twin.status, 200);
+  assert.match(twin.headers.get("content-type"), /application\/json/);
+  const record = JSON.parse(await twin.text());
+  assert.equal(record.id, firstHref.split("/").at(-1));
+  // The verify form rides the same discovered URL: ?verify=1 answers with
+  // the record (plus its verify run when one can be produced).
+  const verified = await fetch(`${origin}${alternate}?verify=1`);
+  assert.equal(verified.status, 200);
+  assert.equal(JSON.parse(await verified.text()).id, record.id);
+});
