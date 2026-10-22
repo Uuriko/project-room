@@ -5990,8 +5990,13 @@ for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-stat
     // Act once per blocked submit, on the form's first invalid control:
     // later controls in the same submit do not re-fire the naming, and
     // the named field is focused so the user lands on what to fix.
+    // The sweep reads validity state directly: checkValidity() fires an
+    // "invalid" event at an invalid control, so calling it inside this
+    // capture-phase handler re-enters the handler until the stack
+    // overflows (the composed head's browser-shard failures). A pure
+    // validity read names the same first invalid control, event-free.
     const firstInvalid = [...form.querySelectorAll("input, select, textarea")]
-      .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
+      .find(el => !el.disabled && el.validity && !el.validity.valid);
     if (firstInvalid && field !== firstInvalid) return;
     const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: requiredFieldName(field) }), true);
     const details = field.closest("details"); if (details && !details.open) details.open = true;
