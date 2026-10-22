@@ -1,5 +1,5 @@
 // LOCAL TEST ONLY; never exported by the production Worker.
-import entry, { HttpTestRoom } from './http-worker.test-fixture.mjs';
+import entry, { HttpTestRoom } from '../tests/cloudflare/http-worker.test-fixture.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { readConversation } from '../server/conversation-sync.mjs';
 import { messageRepository } from '../server/message-repository.mjs';

@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
 test('Worker routing and SQLite serve the bounded agent work observation', async () => {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('../tests/cloudflare/http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test';
   const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
