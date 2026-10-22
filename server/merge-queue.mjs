@@ -321,13 +321,14 @@ export function approvalGate({ claim, headSha, authorizedHeadSha }) {
     if (review?.memberId) latest.set(review.memberId, review);
   }
   const current = [...latest.values()];
-  const blocking = current.find(review => review.verdict === "changes_requested");
-  if (blocking) return { ok: false, reason: `changes requested on the claim by ${blocking.memberId}; merge waits for that reviewer's approve` };
   const owner = ownerOf(claim) ?? claim.reviews.find(review => review?.basis?.owner)?.basis?.owner ?? null;
   const approvals = current.filter(review => review.verdict === "approve" && review.memberId !== owner
     && (sameSha(String(review.basis?.headSha ?? "").toLowerCase(), head) || headsIn(review.summary).some(sha => sameSha(sha, head))));
-  // Independent review is advisory (Potter, 2026-10-16): approvals are reported, never required.
-  return { ok: true, approvedBy: approvals.map(review => review.memberId) };
+  // Review is advisory (RULES.md): approvals and change requests are reported, never required.
+  const changesRequestedBy = current.filter(review => review.verdict === "changes_requested").map(review => review.memberId);
+  return changesRequestedBy.length
+    ? { ok: true, approvedBy: approvals.map(review => review.memberId), changesRequestedBy }
+    : { ok: true, approvedBy: approvals.map(review => review.memberId) };
 }
 
 // GitHub returns multiple attempts/checks; judge the latest per name and wait
