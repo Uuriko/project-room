@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { AgentHeartbeats, agentHeartbeatSchema } from "../server/agent-heartbeats.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { WAKE_CLAIM_ROUTES } from "../server/routes/wake-claim.mjs";
 
 const T0 = 1_750_000_000_000;
 const ROOM = "muse-room";
@@ -179,6 +180,15 @@ async function call(origin, name, args, secret) {
   const body = await response.json();
   return { status: response.status, body, value: body.result?.structuredContent };
 }
+
+test("the claim route row is registered once, with MCP parity declared", () => {
+  assert.equal(WAKE_CLAIM_ROUTES.length, 1);
+  const [row] = WAKE_CLAIM_ROUTES;
+  assert.equal(row.method, "POST");
+  assert.equal(row.path, "/api/agent-heartbeats/claim");
+  assert.equal(row.parity, "mcp:heartbeat_claim");
+  assert.equal(row.schema.body.required[0], "fencingToken");
+});
 
 test("specimen 5: the claim doors — HTTP route and MCP heartbeat_claim mark started; a stale token is refused", async t => {
   const { origin, store } = await serve(t);
