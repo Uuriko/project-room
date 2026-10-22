@@ -150,3 +150,24 @@ test('actual CLI saved connection survives server restart; unknown ACK and lost 
     assert.ok(!JSON.stringify(out).includes(identity.secret));
   } finally { await new Promise(resolve=>server.close(resolve)); store.close(); rmSync(directory,{recursive:true,force:true}); }
 });
+test('delivery-only wait avoids broad context and preserves queued signals', async t => {
+  const {store,connection,identity}=await fixture(t);const paths=[];
+  const client=new AgentWakeClient({connection,fetchImpl:(url,options)=>{paths.push(new URL(url).pathname);return fetch(url,options);}});
+  const wake=store.agentHeartbeats.enqueueWake({agentId:identity.identityId,kind:'dm',roomId:'wake-room',messageId:'bounded-message'}).signal;
+  const result=await client.wait({hostId:'bounded',cadenceSeconds:60,waitMs:0,deliveryOnly:true});
+  assert.equal(result.pendingWakes[0].signalId,wake.signalId);
+  assert.equal(result.observations.after.contextRead,false);
+  assert.ok(!paths.some(p=>p.endsWith('/context')||p.includes('/attention')));
+  assert.equal(store.agentHeartbeats.pendingWakes(identity.identityId).length,1);
+});
+test('delivery-only revocation after poll discards signals', async t => {
+  const {store,owner,connection,identity}=await fixture(t);
+  store.agentHeartbeats.enqueueWake({agentId:identity.identityId,kind:'dm',roomId:'wake-room',messageId:'revoked-bounded'});
+  const client=new AgentWakeClient({connection,fetchImpl:async(url,options)=>{
+    const result=await fetch(url,options);
+    if(String(url).includes('/agent-wakes/poll'))store.identities.unlink(owner.secret,'wake-room',identity.identityId);
+    return result;
+  }});
+  await assert.rejects(client.wait({hostId:'bounded',cadenceSeconds:60,waitMs:0,deliveryOnly:true}));
+  assert.equal(store.agentHeartbeats.pendingWakes(identity.identityId).length,1);
+});

@@ -117,10 +117,16 @@ export class AgentWakeClient {
     return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: listener && !listenerInfo.acquired ? [] : signals(value.pendingWakes),
       ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
-  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null }) {
+  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null, deliveryOnly = false }) {
     hostOptions(hostId, cadenceSeconds);
-    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
-    const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
+    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000 || typeof deliveryOnly !== 'boolean'
+      || deliveryOnly && (attentionCursor !== undefined || sinceVersion !== undefined)) throw usage();
+    // Pointer-only hosts need current authority, not the full work/attention
+    // projection. They must read selected context separately before acting.
+    const deliveryObservation = async () => ({ connection: await this.#room.checkConnection(),
+      observedThroughBySource: {}, scope: 'delivery_only', contextRead: false });
+    const before = deliveryOnly ? await deliveryObservation()
+      : await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
     requireConnection(before);
     const contended = (after = before) => ({ version: 1, status: 'listener_contended', hostId,
       pendingWakes: [], timedOut: false, waitedMs: 0, acknowledged: false,
@@ -134,7 +140,7 @@ export class AgentWakeClient {
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
     if (value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
-    const after = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
+    const after = deliveryOnly ? await deliveryObservation() : await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
       attentionCursor: before.observedThroughBySource.attention?.cursor });
     requireConnection(after);
     // Authority reads and a slow poll can outlive the lease. Revalidate

@@ -1,0 +1,113 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runRoomQueueService } from '../client/room-queue-service.mjs';
+import { RoomClientError } from '../client/room-agent.mjs';
+const binding = { origin: 'https://room.example', roomId: 'room', memberId: 'receiver', threadId: '01a16245-8936-7c03-b5bf-bbad83949bb6' };
+const entry = { kind: 'dm', signalId: 'signal', roomId: 'room', messageId: 'question', createdAt: 100 };
+const page = pendingWakes => ({ status: 'signals_received', pendingWakes, more: false });
+function fixture(t) {
+  const journal = mkdtempSync(join(tmpdir(), 'room-service-'));
+  t.after(() => rmSync(journal, { force: true, recursive: true }));
+  const controller = new AbortController(), events = [];
+  return { binding, hostId: 'host', journal, allowedSenders: ['peer'], signal: controller.signal,
+    controller, events, emit: e => events.push(e),
+    client: { checkConnection: async () => {}, messageThread: async id => ({ roomId: 'room', thread: { id, authorId: 'peer', toMemberId: 'receiver' } }) },
+    wake: { wait: async () => page([entry]) },
+    wait: async () => controller.abort(), run: async () => 'accepted' };
+}
+test('queues once, survives restart, never acknowledges or calls acceptance execution', async t => {
+  const f = fixture(t); let calls = 0;
+  f.run = async () => { calls++; return 'accepted'; };
+  await runRoomQueueService(f);
+  const second = new AbortController();
+  await runRoomQueueService({ ...f, signal: second.signal, wait: async () => second.abort() });
+  assert.equal(calls, 1);
+  assert.equal(f.events.find(e => e.status === 'queued').execution, 'not_observed');
+});
+test('uncertain delivery survives restart without a second queue write', async t => {
+  const f = fixture(t); let calls = 0;
+  f.run = async () => { calls++; throw new Error('unknown'); };
+  await runRoomQueueService(f);
+  const second = new AbortController();
+  await runRoomQueueService({ ...f, signal: second.signal, wait: async () => second.abort() });
+  assert.equal(calls, 1); assert.ok(f.events.some(e => e.status === 'attention_required'));
+});
+test('503 backs off and later dispatches without exiting service', async t => {
+  const f = fixture(t); let reads = 0, waits = 0, calls = 0;
+  f.wake.wait = async () => { if (!reads++) throw new RoomClientError(503, 'service_unavailable', 'down'); return page([entry]); };
+  f.wait = async ms => { if (!waits++) assert.equal(ms, 1000); else f.controller.abort(); };
+  f.run = async () => { calls++; return 'accepted'; };
+  await runRoomQueueService(f); assert.equal(calls, 1);
+});
+test('contended listener never reads source or queues', async t => {
+  const f = fixture(t);
+  f.wake.wait = async () => ({ status: 'listener_contended' });
+  f.client.messageThread = async () => assert.fail('read'); f.run = async () => assert.fail('queued');
+  await runRoomQueueService(f);
+});
+test('revoked access exits instead of retry storm', async t => {
+  const f = fixture(t);
+  f.wake.wait = async () => { throw new RoomClientError(403, 'forbidden', 'private'); };
+  f.wait = async () => assert.fail('retry');
+  await assert.rejects(runRoomQueueService(f), /private/);
+});
+test('wrong sender, recipient, deleted source and historical events cannot dispatch', async t => {
+  for (const patch of [{ authorId: 'stranger' }, { toMemberId: 'other' }, { deletedAt: 'now' }]) {
+    const f = fixture(t); f.run = async () => assert.fail('queued');
+    f.client.messageThread = async id => ({ roomId: 'room', thread: { id, authorId: 'peer', toMemberId: 'receiver', ...patch } });
+    await runRoomQueueService(f);
+  }
+  const f = fixture(t); f.minCreatedAt = 101; f.run = async () => assert.fail('queued'); await runRoomQueueService(f);
+});
+test('lost fence immediately before queue prevents execution', async t => {
+  const f = fixture(t); let calls = 0;
+  f.wake.wait = async () => ++calls === 1 ? page([entry]) : ({ status: 'listener_contended' });
+  f.run = async () => assert.fail('queued'); await runRoomQueueService(f);
+  assert.ok(f.events.some(e => e.status === 'attention_required'));
+});
+test('pagination reaches a later eligible message', async t => {
+  const f = fixture(t); let calls = 0;
+  f.wake.wait = async ({ cursor }) => cursor === null ? { ...page([]), more: true, nextCursor: 'next' } : page([entry]);
+  f.run = async () => { calls++; return 'accepted'; };
+  await runRoomQueueService(f); assert.equal(calls, 1);
+});
+test('answered formal request is not queued again', async t => {
+  const f = fixture(t);
+  f.client.messageThread = async id => ({ roomId: 'room', thread: { id, authorId: 'peer', toMemberId: 'receiver', requestKind: 'reply' } });
+  f.client.replyContext = async () => ({ request: { status: 'answered', recipientId: 'receiver' } });
+  f.run = async () => assert.fail('queued'); await runRoomQueueService(f);
+});
+test('bounded batches continue past page limit without starving later work', async t => {
+  const f=fixture(t); let rounds=0,calls=0;
+  f.maxPages=1;
+  f.wake.wait=async ({cursor}) => cursor===null ? {...page([]),more:true,nextCursor:'later'} : page([entry]);
+  f.wait=async()=>{if(++rounds>=3)f.controller.abort();};
+  f.run=async()=>{calls++;return 'accepted';};
+  await runRoomQueueService(f);assert.equal(calls,1);
+});
+test('dispatch budget does not skip the remainder of a page', async t => {
+  const f=fixture(t);let rounds=0,calls=0;
+  f.maxDispatches=1;
+  f.wake.wait=async()=>page([entry,{...entry,signalId:'second',messageId:'second-question'}]);
+  f.wait=async()=>{if(++rounds>=3)f.controller.abort();};
+  f.run=async()=>{calls++;return 'accepted';};
+  await runRoomQueueService(f);assert.equal(calls,2);
+});
+test('abort during transient backoff is a clean shutdown', async t => {
+  const f=fixture(t);
+  f.wake.wait=async()=>{throw new RoomClientError(503,'unavailable','down');};
+  f.wait=async()=>{f.controller.abort();throw new Error('aborted');};
+  await runRoomQueueService(f);assert.equal(f.events.at(-1).status,'stopped');
+});
+test('expired deadline never creates an orphan rejected fetch', async () => {
+  const { serviceFetch }=await import('../scripts/run-room-queue-service.mjs');
+  const host=new AbortController(), request=new AbortController();
+  request.abort(new DOMException('expired','TimeoutError'));
+  let calls=0;
+  const fetch=serviceFetch(host.signal,()=>{calls++;return Promise.reject(new Error('orphan'));});
+  assert.throws(()=>fetch('https://room.example',{signal:request.signal}),/expired/);
+  assert.equal(calls,0);
+});
