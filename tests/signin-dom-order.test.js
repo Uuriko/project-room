@@ -4,7 +4,7 @@
 // Privacy links before ever reaching a sign-in control. Contract: DOM
 // order IS the visual order — sign-in controls first, consent last, and
 // no CSS `order` on the notice re-sorting it. Plus: the wall carries a
-// functional exit for the other human door — "Join with an invite code"
+// functional exit for the other human door — "Join a room"
 // routes to the join page (not product education, which stays outside
 // sign-in per tests/human-onboarding-doors.test.js).
 import test from "node:test";
@@ -38,9 +38,9 @@ test("no CSS order re-sorts the terms notice", () => {
   assert.ok(!/order\s*:/.test(rule), "visual order must come from the DOM, not flex/grid order");
 });
 
-test("the wall offers the invite-code entry route beside agent sign-in", () => {
+test("the wall offers room joining beside agent sign-in", () => {
   const routes = sliceBetween(html, 'id="signin-entry-routes"', '</section>');
-  assert.match(routes, /<a id="join-code-link" class="text-button" href="\/join">Join with an invite code<\/a>/);
+  assert.match(routes, /<a id="join-code-link" class="text-button" href="\/join">Join a room<\/a>/);
   // Agent sign-in is a link to its own page now (decision #37), not a
   // button opening an in-wall step.
   assert.match(routes, /<a id="agent-signin-button" class="text-button" href="\/agent-signin">Agent sign in<\/a>/);
