@@ -177,5 +177,28 @@ test('delivery-only reduces requests while preserving authorization and lease ch
   await client.wait({hostId:'measure',cadenceSeconds:60,waitMs:0});const full=calls;calls=0;
   await client.wait({hostId:'measure',cadenceSeconds:60,waitMs:0,deliveryOnly:true});
   t.diagnostic(JSON.stringify({fullContextRequests:full,deliveryOnlyRequests:calls}));
-  assert.ok(calls<full);assert.ok(calls>=5);
+  assert.ok(calls<full);assert.equal(calls,5);
+});
+
+test('each delivery wait checks current authority rather than reusing previous permission', async t => {
+  const {store,owner,connection,identity}=await fixture(t);
+  const client=new AgentWakeClient({connection});
+  await client.wait({hostId:'fresh',cadenceSeconds:60,waitMs:0,deliveryOnly:true});
+  store.identities.unlink(owner.secret,'wake-room',identity.identityId);
+  await assert.rejects(client.wait({hostId:'fresh',cadenceSeconds:60,waitMs:0,deliveryOnly:true}));
+});
+test('delivery-only renewal rejects a changed fencing token after polling', async t => {
+  const {store,connection,identity}=await fixture(t);let registrations=0;
+  store.agentHeartbeats.enqueueWake({agentId:identity.identityId,kind:'dm',roomId:'wake-room',messageId:'fenced'});
+  const client=new AgentWakeClient({connection,fetchImpl:async(url,options)=>{
+    const response=await fetch(url,options);
+    if(new URL(url).pathname==='/api/agent-heartbeats' && options.method==='POST' && ++registrations===2){
+      const data=await response.json();data.listener.fencingToken+='changed';
+      return Response.json(data);
+    }
+    return response;
+  }});
+  const result=await client.wait({hostId:'fence',cadenceSeconds:60,waitMs:0,deliveryOnly:true});
+  assert.equal(result.status,'listener_contended');assert.deepEqual(result.pendingWakes,[]);
+  assert.equal(store.agentHeartbeats.pendingWakes(identity.identityId).length,1);
 });

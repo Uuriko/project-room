@@ -91,6 +91,11 @@ export class AgentWakeClient {
   }
   async setup({ hostId, cadenceSeconds, listener = false }) {
     hostOptions(hostId, cadenceSeconds); await this.#room.checkConnection();
+    return this.#registerVerified({ hostId, cadenceSeconds, listener });
+  }
+  // Private: callers must have just verified this connection. This is not a
+  // permission cache and cannot be invoked by an external adapter.
+  async #registerVerified({ hostId, cadenceSeconds, listener }) {
     const value = await this.#request('/api/agent-heartbeats', { hostId, mode: 'wakeable', cadenceSeconds,
       // The lease is per-room: name the connection's pinned room when it
       // has one (the scoped setup credential is bound to it anyway), else
@@ -133,7 +138,9 @@ export class AgentWakeClient {
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' });
     // Raw HTTP polling remains observation. Standard receiving adapters own
     // the room queue before exposing pointers to their host.
-    const registered = await this.setup({ hostId, cadenceSeconds, listener: true });
+    const registered = deliveryOnly
+      ? await this.#registerVerified({ hostId, cadenceSeconds, listener: true })
+      : await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!registered.listener.acquired) return contended();
     const receivingToken = this.#fencingToken;
     const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs + (cursor === null ? '' : '&cursor=' + encodeURIComponent(cursor)), undefined, waitMs + 10000);
@@ -146,7 +153,9 @@ export class AgentWakeClient {
     // Authority reads and a slow poll can outlive the lease. Revalidate
     // before dispatch; a newly acquired token cannot bless the old page.
     // Even an empty page can trigger startup attention from its observations.
-    const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
+    const renewed = deliveryOnly
+      ? await this.#registerVerified({ hostId, cadenceSeconds, listener: true })
+      : await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
     return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes, more: value.more === true, nextCursor: value.nextCursor ?? null,
       timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,
