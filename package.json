@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "acorn": "8.18.0",
     "eslint": "10.10.0",
     "eslint-plugin-security": "^4.2.0",
     "fast-check": "4.10.2",
@@ -56,7 +57,7 @@
     "pixelmatch": "^8.0.0",
     "playwright": "1.62.1",
     "pngjs": "^7.0.0",
-    "sanitize-html": "2.17.7",
+    "sanitize-html": "2.18.0",
     "yaml": "^2.8.1"
   },
   "license": "Apache-2.0",

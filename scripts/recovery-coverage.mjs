@@ -298,6 +298,8 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
     VALUES('commons','recovery-mention-msg','agent','delivered',?,?,NULL)`)
     .run(f.now(), f.now() + 30 * 60 * 1000);
+  f.store.db.prepare(`INSERT INTO mention_observations(room_id,message_event_id,mentioned_member_id,acknowledged,acknowledged_at)
+    VALUES('commons','recovery-mention-msg','agent',1,?)`).run(f.now());
   f.store.db.prepare(`INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at)
     VALUES('commons',?,?)`)
     .run(30 * 60 * 1000, f.now());
