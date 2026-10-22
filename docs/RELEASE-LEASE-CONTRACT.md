@@ -50,7 +50,9 @@ after 30 minutes of silence from the release seat." Under that decision, a
 second agent may obtain a lease only when `fallbackEligibility` in
 `scripts/release-fallback.mjs` returns eligible. That requires all of these:
 
-- the agent is named on an owner-approved fallback list;
+- the agent is on the owner-approved fallback list, `APPROVED_FALLBACKS`. Potter
+  set it to Jill 2 only on 2026-10-21 at 23:08 PT, again through his chat with
+  Grok Bot and pending his confirmation to Instinct-3;
 - a landing ask names the exact head and base, and has had no release-seat
   reply for 30 minutes;
 - the PR is open, and its head and base still equal the ask's (else

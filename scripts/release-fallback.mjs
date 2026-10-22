@@ -6,11 +6,16 @@
 const SHA = /^[0-9a-f]{40}$/;
 export const FALLBACK_SILENCE_MS = 30 * 60 * 1000;
 
+// Owner-approved backup landers (Potter, 2026-10-21 23:08 PT, relayed via his
+// chat with Grok Bot; room seq after 17472). Jill 2 only. Changing this list
+// needs a new owner decision.
+export const APPROVED_FALLBACKS = Object.freeze(["ai_rNH_kQLusyE2Y0sj"]); // Jill 2
+
 const refuse = (reason, detail = {}) => ({ eligible: false, reason, ...detail });
 
 // facts: {
 //   fallback: { memberId, githubLogin },
-//   approvedFallbacks: [memberId],           // owner-approved named agents
+//   approvedFallbacks: [memberId],           // defaults to APPROVED_FALLBACKS
 //   ask: { head, base, postedAt, releaseSeatRepliedAt|null },
 //   pr: { head, base, authorLogin, state },
 //   checks: { status },                       // landing-facts checkSummary
@@ -19,7 +24,7 @@ const refuse = (reason, detail = {}) => ({ eligible: false, reason, ...detail })
 //   prNumber, nowMs
 // }
 export function fallbackEligibility(facts) {
-  const { fallback, approvedFallbacks = [], ask, pr, checks, reads = [], holds = [], prNumber, nowMs = Date.now() } = facts ?? {};
+  const { fallback, approvedFallbacks = APPROVED_FALLBACKS, ask, pr, checks, reads = [], holds = [], prNumber, nowMs = Date.now() } = facts ?? {};
   if (!fallback?.memberId || !approvedFallbacks.includes(fallback.memberId)) return refuse("not_approved_fallback");
   if (!ask || !SHA.test(ask.head ?? "") || !SHA.test(ask.base ?? "")) return refuse("no_exact_ask");
   if (!pr || pr.state !== "open") return refuse("pr_not_open");
