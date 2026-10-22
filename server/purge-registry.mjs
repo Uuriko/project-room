@@ -456,6 +456,64 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_wake_listener_leases",
+    "key": "agent_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_key"
+      ],
+      "identity": [
+        "agent_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_room_activity",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "agent_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_signal_claims",
+    "key": "signal_id",
+    "action": "delete",
+    "optional": true,
+    "match": {},
+    "via": {
+      "room": {
+        "parent": "agent_wake_signals",
+        "parentKey": "signal_id",
+        "childKey": "signal_id",
+        "scope": "room_id"
+      }
+    }
+  },
+  {
+    "table": "agent_wake_signal_serves",
+    "key": "signal_id",
+    "action": "delete",
+    "optional": true,
+    "match": {},
+    "via": {
+      "room": {
+        "parent": "agent_wake_signals",
+        "parentKey": "signal_id",
+        "childKey": "signal_id",
+        "scope": "room_id"
+      }
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
