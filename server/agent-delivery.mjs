@@ -17,7 +17,7 @@ export function createAgentDelivery({ store, actor, bearer, body, json, reject, 
       || !Number.isFinite(data.cadenceSeconds) || data.cadenceSeconds <= 0
       || !Number.isInteger(data.waitMs) || data.waitMs < 0 || data.waitMs > 55000
       || data.cursor != null && (typeof data.cursor !== 'string' || data.cursor.length > 1024))
-      reject(422, 'invalid_delivery', 'Use a pinned room, member, host, cadence and bounded wait');
+      reject(422, 'invalid_body', 'Use a pinned room, member, host, cadence and bounded wait');
     const resolve = () => timed('authMs', () => {
       const auth = actor(req, 'heartbeats:read');
       const report = actor(req, 'heartbeats:report');
@@ -25,7 +25,7 @@ export function createAgentDelivery({ store, actor, bearer, body, json, reject, 
         reject(403, 'identity_changed', 'Credential binding does not match the delivery room');
       const room = store.authenticate(bearer(req), data.roomId);
       if (room.member.id !== data.memberId || room.member.kind !== 'agent' || room.member.active !== true
-        || room.identityId !== auth.identityId) reject(403, 'identity_mismatch', 'Configured agent does not match current room membership');
+        || room.identityId !== auth.identityId) reject(403, 'identity_changed', 'Configured agent does not match current room membership');
       return { auth, connection: { contractVersion: 1, type: 'agent_connection_check', status: 'credential_accepted',
         roomId: data.roomId, memberId: data.memberId, kind: 'agent', permissions: [...room.member.permissions],
         checkedAt: new Date().toISOString(), expiresAt: null, scope: 'room', externalExecution: false } };

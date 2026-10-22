@@ -111,6 +111,6 @@ test('invalid delivery body is rejected before registering or polling a host', a
   const handler=createAgentDelivery({store:{transaction:()=>{writes++;}},actor:()=>({identityId:'identity'}),
     bearer:()=> 'pri_test',body:async()=>({roomId:'room',memberId:'member',hostId:'host',cadenceSeconds:60,waitMs:-1}),
     json:()=>assert.fail('response'),rate:()=>{},reject:(_status,code)=>{throw new Error(code);}});
-  await assert.rejects(handler({}, {}, {remoteAddress:'local'}),/invalid_delivery/);
+  await assert.rejects(handler({}, {}, {remoteAddress:'local'}),/invalid_body/);
   assert.equal(writes,0);
 });
