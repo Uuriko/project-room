@@ -3523,6 +3523,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     cache.insert(roomId, meta.sequence, value, weight);
     return value;
   }
+  // Deferred-open shape deferral (cold-start contract, coordinator decision
+  // on PR #4137 root 2): a store opened with integrity:"deferred" must not
+  // refuse a legacy-shaped projection at read — the projection survives
+  // deferred open until the integrity job repairs it, exactly as the eager
+  // open's repair pass would have at boot. The deferral is scoped to the
+  // shape the integrity job can actually repair: channels_missing, the
+  // pre-channels legacy shape backfilled by repairProjectionShape /
+  // applyProvenanceRepair (ensureDefaultChannelState). Every other shape
+  // problem still refuses with the typed error in deferred mode too — the
+  // integrity job cannot repair those, and serving them would be the hollow
+  // state #4127 forbids. The deferred problem is surfaced once per room in
+  // the log, for the integrity job, mirroring noteCorruptProjections.
+  _defersShapeProblem(shapeProblem, roomId) {
+    if (this.integrityMode !== "deferred" || shapeProblem !== "channels_missing") return false;
+    const noted = (this._deferredShapeRooms ??= new Set());
+    if (!noted.has(roomId)) {
+      noted.add(roomId);
+      console.error(`projection shape deferred to the integrity job: room ${roomId} (${shapeProblem}); the legacy projection serves until the integrity job repairs it`);
+    }
+    return true;
+  }
   _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
@@ -3533,7 +3554,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // with the same typed error instead of serving a hollow state or
     // leaking TypeErrors from deep inside the readers.
     const shapeProblem = projectionShapeProblem(raw, roomId);
-    if (shapeProblem) fail(500, "room_corrupt_projection", `Room projection has an invalid shape (${shapeProblem})`);
+    if (shapeProblem && !this._defersShapeProblem(shapeProblem, roomId)) {
+      fail(500, "room_corrupt_projection", `Room projection has an invalid shape (${shapeProblem})`);
+    }
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, raw, { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
