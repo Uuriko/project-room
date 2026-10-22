@@ -12,3 +12,31 @@ export const publicAssetPaths = Object.freeze(['src/work-reducers.js', 'src/mess
 // standalone filter, pinned equal by test), and the Node server answers 404
 // for them while they are absent rather than failing the request.
 export const generatedAgentPages = Object.freeze(['docs/agents/index.html', 'docs/agents/paste.html', 'docs/agents/claude-code.html', 'docs/agents/codex.html', 'docs/agents/cursor.html', 'docs/agents/cline.html', 'docs/agents/vscode.html', 'docs/agents/aider.html', 'docs/agents/openai-agents-sdk.html', 'docs/agents/langgraph.html', 'docs/agents/crewai.html']);
+
+// Static-asset cache policy, shared by the Cloudflare edge
+// (cloudflare/edge-public.mjs) and the Node server (server/http.mjs) so both
+// paths answer identical Cache-Control/ETag behaviour for the same asset
+// (#4065). Scripts, styles, SVG and the web manifest keep unhashed names, so
+// they revalidate on every load (no-cache) against a content ETag and an
+// unchanged file costs a 304. Other images and fonts get a one-day cache.
+// Anything else (HTML, text, JSON) gets no asset policy: null.
+const REVALIDATED_ASSET_TYPES = ['text/javascript', 'text/css', 'image/svg+xml', 'application/manifest+json'];
+export function assetCachePolicy(type) {
+  const base = String(type).split(';')[0].trim();
+  if ((base.startsWith('image/') && base !== 'image/svg+xml') || base.startsWith('font/')) return 'public, max-age=86400';
+  if (REVALIDATED_ASSET_TYPES.includes(base)) return 'no-cache';
+  return null;
+}
+// The ETag for an asset: the first 16 bytes of its SHA-256 digest, hex,
+// quoted. `digest` is the full SHA-256 as a Uint8Array (crypto.subtle at the
+// edge, node:crypto in the Node server) so both paths format it identically.
+export function assetEtagValue(digest) {
+  return `"${Array.from(digest.subarray(0, 16), b => b.toString(16).padStart(2, '0')).join('')}"`;
+}
+export function etagMatches(header, etag) {
+  if (typeof header !== 'string' || !header) return false;
+  return header.split(',').some(tag => {
+    const value = tag.trim().replace(/^W\//, '');
+    return value === '*' || value === etag;
+  });
+}

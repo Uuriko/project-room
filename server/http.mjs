@@ -7,7 +7,7 @@ import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSe
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
-import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
+import { publicAssetPaths, generatedAgentPages, assetCachePolicy, assetEtagValue, etagMatches } from "./public-assets.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2353,7 +2353,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
-        if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        // #4065: the same asset cache policy the edge applies
+        // (assetCachePolicy in server/public-assets.mjs). Binary images and
+        // fonts keep their one-day cache; scripts, styles, SVG and the web
+        // manifest revalidate (no-cache) against a content ETag, so an
+        // unchanged file costs a 304 instead of a re-download. Types with no
+        // policy (HTML, text, JSON) keep the server-wide defaults.
+        const policy = assetCachePolicy(type);
+        if (policy) {
+          res.setHeader("Cache-Control", policy);
+          const etag = assetEtagValue(createHash("sha256").update(data).digest());
+          res.setHeader("ETag", etag);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            res.writeHead(304);
+            return res.end();
+          }
+        }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
         }

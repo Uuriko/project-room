@@ -3,7 +3,8 @@
 // single-threaded, and a cold wake or a synchronous stretch closes its input
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
-import { publicAssetPaths } from '../server/public-assets.mjs';
+import { publicAssetPaths, assetCachePolicy, assetEtagValue, etagMatches } from '../server/public-assets.mjs';
+export { assetCachePolicy, etagMatches } from '../server/public-assets.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
@@ -150,29 +151,14 @@ export function classifyEdgePath(pathname) {
   return null;
 }
 
-const REVALIDATED_ASSET_TYPES = ['text/javascript', 'text/css', 'image/svg+xml', 'application/manifest+json'];
-export function assetCachePolicy(type) {
-  const base = String(type).split(';')[0].trim();
-  if ((base.startsWith('image/') && base !== 'image/svg+xml') || base.startsWith('font/')) return 'public, max-age=86400';
-  if (REVALIDATED_ASSET_TYPES.includes(base)) return 'no-cache';
-  return null;
-}
 const assetEtags = new WeakMap();
 async function assetEtag(bytes) {
   let etag = assetEtags.get(bytes);
   if (!etag) {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-    etag = `"${Array.from(digest.subarray(0, 16), b => b.toString(16).padStart(2, '0')).join('')}"`;
+    etag = assetEtagValue(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
     assetEtags.set(bytes, etag);
   }
   return etag;
-}
-export function etagMatches(header, etag) {
-  if (typeof header !== 'string' || !header) return false;
-  return header.split(',').some(tag => {
-    const value = tag.trim().replace(/^W\//, '');
-    return value === '*' || value === etag;
-  });
 }
 
 async function loadCachedAsset(env, file) {
