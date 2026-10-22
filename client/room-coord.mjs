@@ -110,6 +110,9 @@ const idText = value => (typeof value === "string" ? value : "");
 const claimsOf = value => {
   const claims = Array.isArray(value) ? value : value?.claims;
   if (!Array.isArray(claims)) throw new CoordError("invalid_response", "Room returned no claim list");
+  if (!Array.isArray(value) && value.hasMore === true) {
+    throw new CoordError("incomplete_claims", "Room claim list is incomplete; retry before making coordination decisions");
+  }
   return claims;
 };
 
