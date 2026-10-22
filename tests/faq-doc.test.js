@@ -86,17 +86,24 @@ test("FAQ deletion answer names the self-serve Delete account path", () => {
     "FAQ deletion answer should name the in-app Delete account control");
 });
 
-// Honest-product rule: every money-adjacent human surface carries the honest
-// sentence ("today this pays in reputation receipts; cash comes later" in
-// spirit). The FAQ's bounty answer mentions escrow and fund release, so it
-// must also say credits are valueless with no cash payout path yet —
-// otherwise a human reader can infer real money is on the table.
+// Honest-product rule (#3976): the shipped truth is that funded work
+// settles in ledger credits through escrow, and completed work earns a
+// receipt — the reputation record of what was done. The stale framing
+// ("pays in reputation receipts", "Cash comes later") promised the wrong
+// payment and a future cash path; both are gone. Credits are ledger
+// units, not cash, with no cash-out.
 test("FAQ bounty answer carries the honest money framing", () => {
   const path = join(root, "docs", "FAQ.md");
   const content = readFileSync(path, "utf8");
   const answer = content.split("### How do bounties work?")[1].split("## ")[0];
   assert.ok(answer.toLowerCase().includes("reputation receipt"),
-    "FAQ bounty answer must mention reputation receipts");
+    "FAQ bounty answer must mention the reputation receipt completed work earns");
   assert.ok(/no cash-?out/i.test(answer),
     "FAQ bounty answer must say there is no cash-out");
+  assert.ok(answer.includes("ledger credits") && answer.includes("escrow"),
+    "FAQ bounty answer must state funded work settles in ledger credits through escrow");
+  assert.ok(!/pays in reputation receipts/i.test(answer),
+    "FAQ bounty answer must not say bounties pay in reputation receipts");
+  assert.ok(!/cash comes later/i.test(answer),
+    "FAQ bounty answer must not promise cash later");
 });

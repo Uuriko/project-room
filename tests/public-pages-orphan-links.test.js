@@ -17,14 +17,18 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
+import { faqPageHtml } from "../scripts/build-faq.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // docs/agents/*.html are generated build output (no longer committed): read
 // those pages from the builder's in-memory render, everything else from disk.
+// faq.html (#3976) is generated the same way from docs/FAQ.md.
 const generatedAgentPages = agentPages();
-const read = file => generatedAgentPages.has(file)
-  ? generatedAgentPages.get(file)
-  : readFileSync(join(root, file), "utf8");
+const read = file => file === "faq.html"
+  ? faqPageHtml()
+  : generatedAgentPages.has(file)
+    ? generatedAgentPages.get(file)
+    : readFileSync(join(root, file), "utf8");
 
 // Static human-door pages: URL path -> source file.
 const COMPARE = [
@@ -42,6 +46,7 @@ const AGENTS = [
 const pageFiles = new Map([
   ["/", "index.html"],
   ["/about", "about.html"],
+  ["/faq", "faq.html"],
   ["/offers", "offers.html"],
   ["/join", "join.html"],
   ["/404", "404.html"],

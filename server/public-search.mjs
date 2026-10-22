@@ -15,7 +15,7 @@ const agentDocRoutes = Object.freeze([
   ["/docs/agents/paste", "docs/agents/paste.html"],
   ...connectSnippets.map(tool => [tool.docsPath, tool.htmlFile]),
 ]);
-export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
+export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", "/faq", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
 // Sitemap <lastmod> fallback for entries that carry no date of their own
 // (static marketing pages, the template and agent directories, legal pages,
 // and any room or receipt entry whose stored date is missing): the date of
@@ -81,7 +81,7 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
+<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
 </main>
 </body>
 </html>
@@ -117,7 +117,7 @@ export function publicHtmlNotFoundPath(pathname) {
   if (path === "/.well-known" || path.startsWith("/.well-known/")) return false;
   return true;
 }
-const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"]]);
+const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"], ["/faq", "faq.html"]]);
 export function publicSearchAssets(registered) {
   const paths = new Set(registered);
   return new Map([...staticPages, ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`]), ...agentDocRoutes]
@@ -128,6 +128,7 @@ export function publicSearchCanonical(pathname, registered) {
   if (routes.has(pathname)) return pathname;
   if (pathname === "/index.html") return routes.has("/") ? "/" : null;
   if (pathname === "/about.html") return routes.has("/about") ? "/about" : null;
+  if (pathname === "/faq.html") return routes.has("/faq") ? "/faq" : null;
   if (pathname === "/docs/agents/index.html") return routes.has("/docs/agents") ? "/docs/agents" : null;
   const candidate = pathname.endsWith(".html") ? pathname.slice(0, -5) : null;
   return candidate && routes.has(candidate) ? candidate : null;
@@ -135,7 +136,7 @@ export function publicSearchCanonical(pathname, registered) {
 // About and compare keep the marketing CSP above. The app shell and offers
 // page keep the room policy so their stylesheets and modules load.
 export function publicSearchMarketingPolicy(pathname) {
-  return pathname === "/about" || (typeof pathname === "string" && (pathname.startsWith("/compare/") || pathname === "/docs/agents" || pathname.startsWith("/docs/agents/")));
+  return pathname === "/about" || pathname === "/faq" || (typeof pathname === "string" && (pathname.startsWith("/compare/") || pathname === "/docs/agents" || pathname.startsWith("/docs/agents/")));
 }
 export function publicSearchSitemap(origin, entries) {
   const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
