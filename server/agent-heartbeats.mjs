@@ -391,6 +391,13 @@ export class AgentHeartbeats {
     for (const { sql, actual } of expected) {
       if (normalize(actual) !== normalize(sql)) throw new Error("Agent heartbeat schema requires operator reconciliation");
     }
+    // DECLARE: agent_declarations is a lazy sidecar (created on the first
+    // declaration, so most databases never have it). Partition it:
+    // present = shape-verified against the lazy DDL, absent = tolerated.
+    const declarationActual = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='agent_declarations'").get()?.sql;
+    if (declarationActual !== undefined
+        && normalize(declarationActual) !== normalize(agentDeclarationSchema.trim().replace(/;$/, "")))
+      throw new Error("Agent declaration schema requires operator reconciliation");
     return true;
   }
 

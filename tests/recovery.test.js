@@ -33,6 +33,14 @@ test("online capture preserves all application tables, identity boundaries and e
   assert.equal(followRows.length, 1); assert.equal(followJournal.length, 1);
   assert.equal(offerRecords.offers.length, 6);
   assert.deepEqual(new Set(offerRecords.offers.map(offer => offer.status)), new Set(["draft", "published", "withdrawn"]));
+  // DECLARE: one declaration writes the lazy agent_declarations sidecar
+  // into the audited DB. The audit must admit it via lazyAdditiveTables
+  // (present = allowed, never required), so the pinned table count below
+  // — which enumerates applicationTables only — does not move.
+  f.store.agentHeartbeats.heartbeat({ agentId: publicIdentity.identityId, hostId: "recovery-declare-host", mode: "pull-only",
+    availability: { state: "available" }, execution: { capabilities: ["execute"] } });
+  assert.ok(f.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_declarations'").get(),
+    "the declaration created the lazy sidecar the audit must admit");
   // One append-only operator audit row so capture comparison cannot pass
   // while operator_actions is an empty sidecar.
   appendOperatorAction(f.store, {
