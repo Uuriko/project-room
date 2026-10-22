@@ -295,3 +295,94 @@ test('claimable gate: a probation-band lane is refused above the probation cap o
   assert.equal(store.publicWorkSettlement.assertClaimable('commons', 'small-task', f.producer.identityId), 'worker');
   conserved(store);
 });
+// BUILD-W31-C specimens — append to tests/public-work-settlement.test.js
+// F5 + F6 for issue #3907. Drafted 2026-10-21 during write-fault episode;
+// append verbatim once the worktree exists, run fail-first at base head.
+
+test('payout view: the payout movement is named by its lot id, never as a receipt id (#3907 F5)', t => {
+  const f = fixture(t), { store } = f;
+  const issuedBefore = issued(store);
+  f.enable();
+  const receipt = f.claimAndFinish();
+  const outcome = store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId,
+    f.decideInput('accept-f5', 'accepted')(receipt));
+  assert.equal(outcome.settlement.phase, 'accepted');
+  store.bountyEscrow.closeEpoch('commons');
+  f.tick(3 * 24 * 3600 * 1000 + 1000);
+  store.bountyEscrow.closeEpoch('commons'); // accepted -> approved
+  store.bountyEscrow.closeEpoch('commons'); // approved -> paid
+  const settled = store.publicWorkSettlement.viewForOffer('paid-task');
+  assert.equal(settled.phase, 'paid');
+  assert.equal(settled.payoutReceipt.kind, 'payout');
+  // F5: escrow history's receiptId IS a lot id (first.lot_id ?? first.entry_id).
+  // The settlement view must name it lotId; a field called receiptId carrying
+  // a lot_… value can never match bounty_journal.receipt_id.
+  assert.equal('receiptId' in settled.payoutReceipt, false);
+  assert.match(settled.payoutReceipt.lotId, /^lot_/);
+  // The actual signed payout receipt ids ride in signedReceiptIds, are
+  // non-empty, and none of them is the lot id.
+  assert.ok(settled.payoutReceipt.signedReceiptIds.length >= 1);
+  for (const id of settled.payoutReceipt.signedReceiptIds) {
+    assert.match(id, /^room-bounty-receipt:/);
+    assert.notEqual(id, settled.payoutReceipt.lotId);
+  }
+  // Settlement totals before/after are exactly the accept path's: the rename
+  // moves no money. Worker 100_000 genesis + 3_960 net (4_000 minus the 1%
+  // pool fee of 40), bond returned; pool holds only the fee.
+  assert.equal(settled.payoutReceipt.amountMillis, 3960);
+  assert.deepEqual(millis(store, 'worker'), [103_960, 0, 0, 0]);
+  assert.deepEqual(millis(store, 'owner'), [96_000, 0, 0, 0]);
+  assert.deepEqual(millis(store, 'pool'), [40, 0, 0, 0]);
+  assert.equal(issued(store), issuedBefore); conserved(store);
+});
+
+test('lane pin: a mid-claim identity re-link does not move the settlement lane (#3907 F6)', t => {
+  const f = fixture(t), { store } = f;
+  const issuedBefore = issued(store);
+  assert.equal(issuedBefore, 200_000); // owner + worker genesis only
+  f.enable();
+  // Settlement totals before the claim: poster locked the 4-credit price.
+  assert.deepEqual(millis(store, 'owner'), [96_000, 4_000, 0, 0]);
+  assert.deepEqual(millis(store, 'worker'), [100_000, 0, 0, 0]);
+  // Claim under the producer identity while it is linked to member 'worker':
+  // the claim-time gates run for lane 'worker', and that lane is pinned.
+  store.publicWorkClaims.act('paid-task', f.producer.secret, 'claim',
+    { requestId: 'claim-f6', expectedTermsVersion: 1 });
+  assert.equal(store.publicWorkSettlement.link('paid-task').claimant_lane, 'worker');
+  // A second member joins; genesis funds its lane so a finish under the
+  // re-linked lane COULD settle there (the divergence is executable, not an
+  // incidental refusal).
+  const state = structuredClone(store.room('commons').state);
+  state.members.worker2 = { id: 'worker2', revision: 1, kind: 'agent', active: true, displayName: 'Worker Two', permissions: ['read'] };
+  store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  store.bountyEscrow.ensureGenesis('commons');
+  assert.deepEqual(millis(store, 'worker2'), [100_000, 0, 0, 0]);
+  // Re-link the claimant identity from 'worker' to 'worker2' mid-claim.
+  store.db.prepare('DELETE FROM identity_links WHERE room_id=? AND identity_id=?').run('commons', f.producer.identityId);
+  store.db.prepare('INSERT INTO identity_links VALUES (?,?,?,?)').run('commons', f.producer.identityId, 'worker2', store.now());
+  assert.equal(store.publicWorkSettlement.laneForIdentity('commons', f.producer.identityId), 'worker2');
+  // Finish as the same identity. The finish must attach under the pinned
+  // claim-time lane: worker's bond locks, worker2 is untouched.
+  const receipt = store.publicWorkClaims.act('paid-task', f.producer.secret, 'finish',
+    { requestId: 'finish-f6', expectedTermsVersion: 1, generation: 1, artifactText: 'the result', checksReported: ['checked'] }).receipt;
+  const link = store.publicWorkSettlement.link('paid-task');
+  assert.equal(link.claimant_lane, 'worker');
+  assert.equal(store.bountyEscrow.getBounty('commons', link.bounty_id).claimant, 'worker');
+  assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 0, 0]);
+  assert.deepEqual(millis(store, 'worker2'), [100_000, 0, 0, 0]);
+  conserved(store);
+  // Accept and sweep: the payout lands on the pinned lane exactly as the
+  // honest path (3_960 net to worker, 40 fee to pool); worker2 never moves.
+  const outcome = store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId,
+    f.decideInput('accept-f6', 'accepted')(receipt));
+  assert.equal(outcome.settlement.claimantLane, 'worker');
+  store.bountyEscrow.closeEpoch('commons');
+  f.tick(3 * 24 * 3600 * 1000 + 1000);
+  store.bountyEscrow.closeEpoch('commons');
+  store.bountyEscrow.closeEpoch('commons');
+  assert.equal(store.publicWorkSettlement.viewForOffer('paid-task').phase, 'paid');
+  assert.deepEqual(millis(store, 'worker'), [103_960, 0, 0, 0]);
+  assert.deepEqual(millis(store, 'worker2'), [100_000, 0, 0, 0]);
+  assert.deepEqual(millis(store, 'pool'), [40, 0, 0, 0]);
+  assert.equal(issued(store), issuedBefore + 100_000); conserved(store);
+});
