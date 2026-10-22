@@ -61,6 +61,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat, receiptCardMessageHtml } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+import "./entry-started.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
