@@ -147,3 +147,35 @@ state; its observation time is never claimed as its original acceptance time.
 The review pointer subsequently triggered a chat turn and produced a verified
 Room reply at sequence17930. This is one end-to-end round trip, not a latency or
 outage reliability qualification.
+
+## Performance pass (2026-10-22)
+
+Use stage timing and request counts before tuning deadlines. References:
+- Brendan Gregg, https://www.brendangregg.com/methodology.html : characterize the
+  workload and partition elapsed time before guessing at fixes.
+- Google SRE, https://sre.google/workbook/monitoring/ : compare before/after and
+  retain distributions; small samples do not establish tail-latency guarantees.
+- AWS, https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/ :
+  overly short timeouts and unbounded retries can amplify load and latency.
+
+Implemented bounded in-memory suppression of exact pointers already represented
+by durable receipts (2048 entries). This cache only prevents replay: fresh work
+still passes source, access, listener lease and immediate pre-dispatch checks.
+Unknown outcomes are suppressed rather than blindly retried. Restart or eviction
+falls back to the durable journal. Changed pointers do not match the cache.
+Backlog batches yield with zero-delay instead of a fixed one-second pause; idle
+and outage pacing remain intact. Metrics include cycleMs, pollMs, pages,
+dispatched, replaySkipped and cachedReceipts. These are host observations, not
+agent execution or completion timings. No message bodies or credentials logged.
+
+Controlled six-pair alternating-order experiment: 20 duplicate receipts before
+one new message, injected10ms per client operation. Baseline median516.605ms;
+candidate65.024ms (7.945x). Client operations45->5. Both versions dispatch exactly
+21 total messages. This does not model the multiple HTTP requests inside wake.wait,
+production latency, cold-cache benefit or chat-busy delay. No blanket10x claim.
+
+Next priorities: independently time HTTP preflight/lease/poll stages; qualify
+connector timeout behavior; distinguish queue acceptance from chat availability;
+measure fresh versus backlog versus restart cohorts; bounded missing-wake catchup.
+Do not optimize the metric by dropping safety checks, losing messages, moving
+work outside the timed interval, changing models, or shrinking retries blindly.

@@ -16,6 +16,9 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
     || !Number.isSafeInteger(minCreatedAt) || minCreatedAt < 0 || !signal)
     throw new Error('invalid_service_config');
   const senders = new Set(allowedSenders);
+  // Suppression only: never use this cache to authorize new work. The durable
+  // journal remains authoritative across restart and eviction.
+  const seenReceipts = new Map();
   let failures = 0, started = false, cursor = null;
   const pause = ms => wait(ms, undefined, { signal });
   const eligible = async pointer => {
@@ -34,14 +37,18 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
   emit({ status: 'connecting', execution: 'not_observed' });
   try {
     while (!signal.aborted) {
-      let pages = 0, dispatched = 0;
+      let pages = 0, dispatched = 0, replaySkipped = 0, pollMs = 0, contended = false;
+      const cycleStarted = performance.now();
       try {
         do {
+          const pollStarted = performance.now();
           const page = await wake.wait({ hostId, cadenceSeconds: 60, deliveryOnly: true,
             waitMs: started && cursor === null ? 25000 : 0, cursor });
+          pollMs += performance.now() - pollStarted;
           if (signal.aborted) break;
           started = true;
           if (page.status === 'listener_contended') {
+            contended = true;
             emit({ status: 'contended', execution: 'not_observed' }); break;
           }
           if (!Array.isArray(page.pendingWakes)) throw new Error('invalid_wake_page');
@@ -53,7 +60,10 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
             // an existing session. Older work stays pending for manual review.
             if (!Number.isFinite(entry.createdAt) || entry.createdAt < minCreatedAt) continue;
             const pointer = roomEventPointer(entry, binding.roomId);
-            if (!pointer || !await eligible(pointer)) continue;
+            if (!pointer) continue;
+            const fingerprint = JSON.stringify(pointer);
+            if (seenReceipts.get(pointer.signalId) === fingerprint) { replaySkipped++; continue; }
+            if (!await eligible(pointer)) continue;
             const receipt = await queueRoomPointer({ binding, pointer, journal,
               authorize: async () => { await client.checkConnection(); return !signal.aborted; },
               run: async args => {
@@ -63,6 +73,8 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
                   || !await eligible(pointer)) return 'unknown';
                 return run(args);
               } });
+            seenReceipts.set(pointer.signalId, fingerprint);
+            if (seenReceipts.size > 2048) seenReceipts.delete(seenReceipts.keys().next().value);
             if (!receipt.duplicate) dispatched++;
             emit({ ...receipt, transportStatus: receipt.status,
                 status: receipt.status === 'accepted' ? 'queued' : 'attention_required',
@@ -75,7 +87,12 @@ export async function runRoomQueueService({ binding, hostId, journal, wake, clie
           pages++;
         } while (cursor && pages < maxPages && dispatched < maxDispatches && !signal.aborted);
         failures = 0;
-        if (!signal.aborted) await pause(cursor ? 1000 : 2000);
+        emit({ status: contended ? 'contended' : 'listening', execution: 'not_observed', metrics: {
+          cycleMs: performance.now() - cycleStarted, pollMs, pages, dispatched,
+          replaySkipped, cachedReceipts: seenReceipts.size } });
+        // A bounded backlog batch yields the event loop, not a full second.
+        // Idle/backoff pacing stays intact to avoid hammering pending wakes.
+        if (!signal.aborted) await pause(cursor ? 0 : 2000);
       } catch (error) {
         if (signal.aborted) break;
         if (!isTransientWakeError(error)) throw error;

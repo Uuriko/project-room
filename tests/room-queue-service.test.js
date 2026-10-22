@@ -160,3 +160,39 @@ test('alternating replay receipts do not refresh or replace delivery evidence', 
   publish({ status: 'queued', transportStatus: 'accepted', signalId: 'c', duplicate: false });
   assert.equal(JSON.parse(readFileSync(file)).lastAcceptedDelivery.signalId, 'c');
 });
+
+test('duplicate backlog needs no repeated source reads while new work keeps all checks', async t => {
+  const f = fixture(t); let round = 0, reads = 0, checks = 0, dispatches = 0;
+  const old = Array.from({ length: 20 }, (_, i) => ({ ...entry, signalId: `s${i}`, messageId: `m${i}` }));
+  f.maxDispatches = 20;
+  f.wake.wait = async () => page(round ? [...old, { ...entry, signalId: 'new', messageId: 'new' }] : old);
+  f.client.messageThread = async id => { reads++; return { roomId: 'room', thread: { id, authorId: 'peer', toMemberId: 'receiver' } }; };
+  f.client.checkConnection = async () => { checks++; };
+  f.run = async () => { dispatches++; return 'accepted'; };
+  f.wait = async () => { if (!round++) { reads = 0; checks = 0; } else f.controller.abort(); };
+  await runRoomQueueService(f);
+  assert.equal(dispatches, 21);
+  assert.equal(reads, 2); assert.equal(checks, 1);
+  assert.equal(f.events.filter(e => e.metrics).at(-1).metrics.replaySkipped, 20);
+});
+test('bounded backlog batches yield immediately without an idle sleep', async t => {
+  const f = fixture(t); f.maxPages = 1;
+  f.wake.wait = async () => ({ ...page([]), more: true, nextCursor: 'more' });
+  f.wait = async ms => { assert.equal(ms, 0); f.controller.abort(); };
+  await runRoomQueueService(f);
+});
+
+test('cached uncertain outcome suppresses repeated network work and never retries dispatch', async t => {
+  const f = fixture(t); let rounds = 0, executions = 0, reads = 0;
+  f.run = async () => { executions++; return 'unknown'; };
+  f.client.messageThread = async id => { reads++; return {roomId:'room',thread:{id,authorId:'peer',toMemberId:'receiver'}}; };
+  f.wait = async () => { if (++rounds === 3) f.controller.abort(); };
+  await runRoomQueueService(f);
+  assert.equal(executions, 1); assert.equal(reads, 2);
+});
+test('changed pointer cannot hide behind suppression cache', async t => {
+  const f = fixture(t); let round = 0;
+  f.wake.wait = async () => page([{...entry, messageId: round ? 'changed' : entry.messageId}]);
+  f.wait = async () => { round++; };
+  await assert.rejects(runRoomQueueService(f), /pointer_conflict/);
+});
