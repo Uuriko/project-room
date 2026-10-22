@@ -58,6 +58,42 @@ async function openBoard(page) {
   await page.locator(".live-chip").waitFor();
 }
 
+// The board re-renders once its data lands after opening, and that render
+// REPLACES the #board-new-item form node — silently dropping anything
+// already typed into the old node. Filling immediately after openBoard()
+// races that replacement: the click then submits the replacement EMPTY
+// form (the required title blocks it) and no claim is ever created. That
+// race failed this check's S3 leg on its first hosted run (REV-4525).
+// Form-node stability alone does not prove the render has happened —
+// under load the first node can sit stable for seconds while the read
+// is still in flight — so the settled state is keyed on the load itself:
+// while the board's first read is in flight it paints .board-skeleton,
+// and the completion paint that removes the skeleton is the render that
+// settles the board (src/board-ui.js boardHtml: skeleton only while
+// loading; later paints need a new work-claim event). The wait resolves
+// only once the skeleton is gone AND the identical form node has then
+// survived a 750 ms stability window, and it keeps waiting through any
+// further replacement. No fixed delays: both legs observe DOM state.
+async function settledBoardForm(page) {
+  await page.waitForFunction(() => {
+    if (document.querySelector(".board-skeleton")) {
+      window.__qa5SettledForm = null;
+      return false;
+    }
+    const form = document.querySelector("#board-new-item");
+    if (!form) {
+      window.__qa5SettledForm = null;
+      return false;
+    }
+    if (window.__qa5SettledForm !== form) {
+      window.__qa5SettledForm = form;
+      window.__qa5SettledFormSince = Date.now();
+      return false;
+    }
+    return Date.now() - window.__qa5SettledFormSince >= 750;
+  }, null, { timeout: 15000 });
+}
+
 // S1: the empty-board copy a non-writer sees must be their actual options,
 // not the writer's "Claim work here" line with no form and no next step.
 test("board empty state shows the ask-owner copy to a signed-in non-writer", { timeout: 90000 }, async t => {
@@ -97,8 +133,17 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   assert.equal(await noteInput.count(), 1, "note input exists");
   const label = await page.locator('#board-new-item label:has(input[name="note"])').textContent();
   assert.match(label, /Note/, "note input is label-associated");
-  await page.locator('#board-new-item input[name="title"]').fill("Slice C probe claim");
+  // Fill only the settled form (see settledBoardForm): a fill that lands
+  // on the pre-render node is wiped by the replacement and the submit
+  // below would send the empty form. The read-backs pin the values on the
+  // live node immediately before submitting, so any residual swap fails
+  // here, at the fill, instead of surfacing as a silent 30 s API poll.
+  await settledBoardForm(page);
+  const titleInput = page.locator('#board-new-item input[name="title"]');
+  await titleInput.fill("Slice C probe claim");
   await noteInput.fill("context for whoever picks this up");
+  assert.equal(await titleInput.inputValue(), "Slice C probe claim", "title is on the live form");
+  assert.equal(await noteInput.inputValue(), "context for whoever picks this up", "note is on the live form");
   await page.locator('#board-new-item button[type="submit"]').click();
   // Poll the API for the created claim directly: the board's status line is
   // best-effort UI, the claim record is the S3 contract.
@@ -161,6 +206,10 @@ test("coarse pointer keeps 44px touch targets on board controls", { timeout: 900
   assert.ok(toggleBox.width >= 44 && toggleBox.height >= 44,
     `sidebar toggle is ${toggleBox.width}x${toggleBox.height}px on coarse pointer`);
   await openBoard(page);
+  // Same post-open repaint as S3 races these reads: a boundingBox taken
+  // while the completion paint swaps the form node resolves against the
+  // detached node and comes back null. Measure only the settled board.
+  await settledBoardForm(page);
   const openBox = await page.locator("#tasks-board-open").boundingBox();
   assert.ok(openBox.height >= 44, `board open button is ${openBox.height}px tall on coarse pointer`);
   const submitBox = await page.locator('#board-new-item button[type="submit"]').boundingBox();
