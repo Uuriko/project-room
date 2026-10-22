@@ -529,8 +529,17 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(recovery.run, /deploy-recovery\.mjs recover/);
   assert.doesNotMatch(recovery.run, /wrangler rollback/);
   assert.match(recovery.if, /steps\.pre\.outcome == 'success'/);
-  assert.match(steps.find(step => step.name === "Receipt to muse-room").run, /recoveryDescription/);
-  assert.doesNotMatch(steps.find(step => step.name === "Receipt to muse-room").run, /FAILED · rolled back/);
+  // Issue #3897 secondary leg: the receipt is recorded from runner-local
+  // state before any delivery, and delivery runs the recorded body through
+  // scripts/deploy-receipt.mjs, which keeps the truthful recovery wording.
+  const receiptRecord = steps.find(step => step.name === "Record deploy receipt");
+  const receiptDeliver = steps.find(step => step.name === "Receipt to muse-room");
+  assert.match(receiptRecord.run, /deploy-receipt\.mjs record/);
+  assert.match(receiptDeliver.run, /deploy-receipt\.mjs deliver/);
+  assert.ok(steps.indexOf(receiptRecord) < steps.indexOf(receiptDeliver), "receipt is recorded before it is delivered");
+  const receiptScript = readFileSync(new URL("../scripts/deploy-receipt.mjs", import.meta.url), "utf8");
+  assert.match(receiptScript, /recoveryDescription/);
+  assert.doesNotMatch(receiptScript, /FAILED · rolled back/);
   for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
     assert.match(step.run, /--keep-vars --var ROOM_BODIES_AT_REST:1/);
     assert.ok(step.env.ROOM_AGENT_CARD_SIGNING_KEY);
