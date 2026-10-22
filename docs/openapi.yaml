@@ -7917,7 +7917,12 @@ paths:
         (RELEASE) remains the backstop for disputes that stall undecided.
         Disputes open only on accepted work (#3726): a bounty in any other
         state (including `submitted`) is refused 422 `invalid_state` before
-        any bond is checked or locked. Emits `bounty.disputed`. API keys
+        any bond is checked or locked. The claimant cannot dispute their
+        own submission, and the poster cannot dispute a bounty whose
+        acceptance is the poster's own verdict (#3906) — both refused 403
+        `not_authorized` before any bond locks; a poster whose acceptance
+        came from a verifier or a settlement-rail review verdict keeps
+        the sponsor's dispute. Emits `bounty.disputed`. API keys
         need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
