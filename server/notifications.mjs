@@ -73,7 +73,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     if (decision && decision.memberId === member.id) {
       const current = messages.get(event.data.messageId);
       if (current?.deletedAt) continue;
-      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome,
+      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, messageId: event.data.messageId, outcome: decision.outcome,
         note: current?.body ?? `Permission request ${decision.outcome}` });
       continue;
     }

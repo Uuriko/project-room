@@ -327,3 +327,71 @@ test("shared link HTTP self-service joins, reads and retries with the same ident
   assert.equal(resumed.duplicate, true);
   assert.equal(f.store.shareLinks.list(f.keys.commons, "commons").links[0].joins, 1);
 });
+
+function publishEntrance(f, open = true) {
+  f.store.command(f.keys.commons, "commons", { id: "public-page", type: "room.public_page_set", data: { enabled: true } });
+  if (open) f.store.command(f.keys.commons, "commons", { id: "public-join", type: "room.join_link_set", data: { enabled: true } });
+}
+
+test("public room page admits one fresh identity, verifies access and resumes after a lost response", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  const target = `${f.origin}/r/commons`;
+  const preview = await f.connect({ target, accept: false });
+  assert.equal(preview.status, "approval_required");
+  assert.deepEqual(preview.preview.permissions, []);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+  let lose = true;
+  await assert.rejects(f.connect({ target, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (lose && new URL(url).pathname === "/api/share-links/join-agent") { lose = false; throw new TypeError("lost join response"); }
+    return response;
+  } }), /Could not complete the request/);
+  const joined = await f.connect({ target });
+  assert.equal(joined.status, "connected"); assert.deepEqual(joined.permissions, []);
+  assert.equal(joined.readiness.read, "verified");
+  const again = await f.connect({ target });
+  assert.equal(again.memberId, joined.memberId);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM identity_links WHERE room_id='commons'").get().n, 1);
+});
+
+test("public page respects request-only, private and disabled entrances", async t => {
+  const f = await fixture(t), target = `${f.origin}/r/commons`;
+  await assert.rejects(f.connect({ target }), /Public room page unavailable/);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+  publishEntrance(f, false);
+  const preview = await f.connect({ target, accept: false });
+  assert.equal(preview.preview.admission, "request");
+  const pending = await f.connect({ target }); assert.equal(pending.status, "pending");
+  assert.equal((await f.connect({ target })).requestId, pending.requestId);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM identity_links WHERE room_id='commons'").get().n, 0);
+});
+
+test("public page cannot redirect an identity or invitation to another service or room", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  for (const href of ["https://other.example/#join/" + "a".repeat(43), "/#room/lab"]) {
+    await assert.rejects(f.connect({ target: `${f.origin}/r/commons`, fetchImpl: async (url, options) => {
+      if (new URL(url).pathname === "/r/commons.json") return Response.json({ schema: "project-room-public-room/1", slug: "commons", join: { mode: "link", href } });
+      return fetch(url, options);
+    } }), /Public invitation|not a shared invitation/);
+  }
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+});
+
+test("maximum access is a retryable request, not a join grant, and approval is observed on resume", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  const options = { target: `${f.origin}/r/commons`, access: "maximum" };
+  const preview = await f.connect({ ...options, accept: false });
+  assert.ok(preview.requestedAccess.permissions.includes("manage_members"));
+  const joined = await f.connect(options);
+  assert.deepEqual(joined.permissions, []); assert.equal(joined.accessRequest.status, "pending");
+  const again = await f.connect(options);
+  assert.equal(again.accessRequest.requestId, joined.accessRequest.requestId);
+  const ownerFeed = await (await fetch(`${f.origin}/api/rooms/commons/notifications`, { headers: { Authorization: `Bearer ${f.keys.commons}` } })).json();
+  assert.equal(ownerFeed.notifications.filter(n => n.requestId === joined.accessRequest.requestId).length, 1);
+  new AccessRequests(f.store).decide(f.keys.commons, "commons", joined.accessRequest.requestId, { decision: "approve" });
+  const approved = await f.connect(options);
+  assert.equal(approved.accessRequest.status, "already_granted");
+  assert.deepEqual([...approved.permissions].sort(), [...preview.requestedAccess.permissions].sort());
+  assert.equal(approved.readiness.execution, "not_tested");
+});

@@ -5,6 +5,7 @@
 // rooms.projection, and a GET does not mint a share link. The demo room is the
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { roomSetupPrompt } from "../src/room-setup-prompt.js";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
@@ -114,6 +115,19 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
     receipts,
     proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
+    agentJoin: {
+      packet: "/llms.txt",
+      setupSkill: "/skills/project-room-setup/SKILL.md",
+      setupPrompt: roomSetupPrompt(`${ROOM_ORIGIN}/r/${slug}`),
+      roomPage: `/r/${slug}`,
+      preview: `/r/${slug}.json`,
+      admission: join.mode === "link" ? "invitation" : "approval_required",
+      permissions: [],
+      executionGranted: false,
+      next: join.mode === "link"
+        ? "Use join.href as a shared invitation with your own saved identity; preview it, join, then read your activation pack. Invitation limits and verification checks still apply."
+        : "Use your own saved identity to request read/chat access to this room; wait for approval, then read your activation pack.",
+    },
   };
   const description = room.purpose || `${room.title} on Project Room.`;
   const nameLine = room.names.length ? `<p>People who show their name: ${room.names.map(escapeHtml).join(", ")}</p>` : "";
@@ -135,7 +149,13 @@ ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
 ${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
-<p><a href="${escapeHtml(join.href)}">Join</a></p>
+<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
+<h2>Join with your AI</h2>
+<p>Copy the setup prompt to your agent. It will help you join, connect this Mac, choose what to share, and test the connection. You can stop after joining.</p>
+<details><summary>Get setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
+<p><a href="/skills/project-room-setup/SKILL.md">Agent setup skill</a></p>
+<p>${join.mode === "link" ? "The invitation grants read and chat access. Invitation limits and verification checks still apply." : "This room requires approval before a new agent can read or chat."} Joining does not start an agent or share its computer’s resources.</p>
+<p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a> · <a href="/llms.txt">Connection guide</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
 <footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>

@@ -66,6 +66,11 @@ for (const kind of ["agent", "human"]) test(`${kind} requests permissions and re
   assert.equal((await f.request(`/api/rooms/commons/work-claims/board_${kind}/claim`, f.token, {})).status, 200);
   const outcome = (await f.feed(f.token)).body.notifications.find(item => item.requestId === input.requestId && item.kind === "access_decision");
   assert.equal(outcome.outcome, "approved");
+  assert.equal(outcome.messageId, approved.body.decisionMessageId);
+  assert.equal((await f.feed(f.token)).body.notifications.filter(item => item.requestId === input.requestId).length, 1);
+  const feed = await f.feed(f.token);
+  assert.equal((await f.request("/api/rooms/commons/cursor", f.token, { sequence: feed.body.sequence })).status, 200);
+  assert.equal((await f.feed(f.token)).body.notifications.some(item => item.requestId === input.requestId), false);
   const after = f.store.room("commons").sequence;
   assert.equal((await f.decide(input.requestId, { decision: "approve" })).status, 409);
   assert.equal(f.store.room("commons").sequence, after);
