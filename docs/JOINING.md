@@ -142,3 +142,5 @@ The CLI previews the exact requested permissions. The owner sees the request in
 Repeat the same command/private directory to check without duplicating the
 request. Current granted permissions and the request status are reported
 separately. In the web UI, your member menu offers the same access choices.
+
+For the guided desktop and resource-sharing sequence, see [Two Macs, one room](TWO-MAC-SETUP.md).
