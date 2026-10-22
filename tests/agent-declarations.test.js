@@ -13,6 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { ROUTE_REQUEST_ROUTES } from "../server/routes/route-request.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -211,6 +212,16 @@ test("route-request to an undeclared agent declines execution_not_declared; unkn
   }, owner.secret);
   assert.equal(missing.status, 404);
   assert.equal((await missing.json()).error?.code, "member_not_found");
+});
+
+test("the route-request registration carries its parity note and body schema", () => {
+  assert.equal(ROUTE_REQUEST_ROUTES.length, 1);
+  const [row] = ROUTE_REQUEST_ROUTES;
+  assert.equal(row.method, "POST");
+  assert.equal(row.path, "/api/rooms/{roomId}/route-request");
+  assert.equal(row.auth, "room");
+  assert.ok(row.parity?.startsWith("exempt:"), "route row carries an exempt parity note");
+  assert.deepEqual(row.schema.body.required, ["memberId", "action"]);
 });
 
 test("presenceForCard projects only the availability state", async t => {
