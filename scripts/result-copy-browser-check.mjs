@@ -165,12 +165,12 @@ test("result copy: source changes and A/B/A edits suppress held feedback without
 test("result copy: Add-result drafts are independent and observed access loss clears export drafts during a copy", { timeout: 30000 }, async t => {
   const f = await setup(t), { page } = f; await f.open(); await page.keyboard.press("Escape");
   if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
-  await f.card.locator('[data-portable-mode="result"]').click(); await page.locator("#portable-result").fill("Unsent external proposal"); await page.keyboard.press("Escape");
+  await f.card.getByRole('button', { name: 'Use my AI', exact: true }).click(); await page.locator('#portable-add-result').click(); await page.locator("#portable-result").fill("Unsent external proposal"); await page.keyboard.press("Escape");
   await f.open(); await f.input.fill("Private export draft");
   await f.card.locator("[data-copy-result]").evaluate(node => node.click()); assert.equal(await f.input.inputValue(), "Private export draft");
   await page.keyboard.press("Escape");
   if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
-  await f.card.locator('[data-portable-mode="result"]').click(); assert.equal(await page.locator("#portable-result").inputValue(), "Unsent external proposal"); await page.keyboard.press("Escape");
+  await f.card.getByRole('button', { name: 'Use my AI', exact: true }).click(); await page.locator('#portable-add-result').click(); assert.equal(await page.locator("#portable-result").inputValue(), "Unsent external proposal"); await page.keyboard.press("Escape");
   await f.open(); await page.evaluate(() => window.copyBehavior = "hold"); await f.copy.click();
   // Rotate the same member's credential: the service ends the old browser session.
   f.keys.owner = f.store.issueAccessKey("commons", "owner");

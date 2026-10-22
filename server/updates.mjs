@@ -336,16 +336,18 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       if (!tableMissing(error)) throw error;
       flags.invites = true;
     }
+  }
+  if (member.permissions?.includes("manage_members") && !needsMeOnly) {
     try {
       const rows = store.db.prepare(
-        `SELECT request_id AS requestId, display_name AS name, created_at AS createdAt, identity_id AS actor
-         FROM access_requests WHERE room_id=? AND status='pending'`
+        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt, identity_id AS actor
+         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade')`
       ).all(roomId);
       for (const row of rows) {
         const at = iso(row.createdAt);
         items.push(draft({
           kind: "access_request", roomId, key: `access|${row.requestId}`,
-          title: clip(`${row.name} asks to join`), actor: row.actor, createdAt: at, updatedAt: at,
+          title: clip(row.status === "pending_upgrade" ? `${row.name} wants more permissions` : `${row.name} asks to join`), actor: row.actor, createdAt: at, updatedAt: at,
           basis: row.requestId, sourceRef: { requestId: row.requestId },
           next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/access-requests/${encodeURIComponent(row.requestId)}/decide` }
         }));
