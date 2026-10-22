@@ -19,6 +19,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { relieveProjections } from "./store-relief.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -587,8 +588,16 @@ export const JOBS = Object.freeze([
     // The summary is the watch: the gauges ride the heartbeat on every
     // tick, and a crossed limit fails the tick by name so the probe
     // pages before the store reaches the hard cap.
+    // A projection past the line is first relieved through the guarded
+    // archive door (server/store-relief.mjs), then measured again; only a
+    // breach that relief could not clear fails the tick.
     async run(store) {
-      const gauges = measureStoreGrowth(store);
+      let gauges = measureStoreGrowth(store);
+      let relief = null;
+      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
+        relief = relieveProjections(store, { limitBytes: STORE_GROWTH_LIMITS.maxProjectionBytes });
+        gauges = { ...measureStoreGrowth(store), relief };
+      }
       const breach = storeGrowthBreach(gauges);
       if (!breach) return gauges;
       console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
