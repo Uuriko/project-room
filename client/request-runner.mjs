@@ -5,6 +5,7 @@ import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { createWorkBrief } from "./work-brief.mjs";
+import { initializeRequestTimeline, recordRequestStage } from "./request-timeline.mjs";
 
 // The caller selects a private local file and one configured host. This is not
 // a watcher or permission to run arbitrary room messages. SQLite serializes
@@ -20,6 +21,7 @@ export function openRequestJournal(filename) {
       db.exec("ALTER TABLE request_runs ADD COLUMN attempt_id TEXT");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
+  initializeRequestTimeline(db);
   return db;
 }
 
@@ -27,6 +29,7 @@ export function openRequestJournal(filename) {
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
 export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal }) {
+  const noticedAt = Date.now();
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   const client = new RoomAgentClient(connection);
   let context = await client.replyContext(requestMessageId, { limit: 50, signal });
@@ -36,6 +39,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     connection.origin, connection.roomId, connection.memberId, requestMessageId,
     context.roomCreatedEventId, context.request.openingEventId
   ])).digest("hex");
+  recordRequestStage(db, id, "requested", Date.parse(context.request.createdAt));
+  recordRequestStage(db, id, "noticed", noticedAt);
   const report = (attemptId, action, basis = {}, reportSignal = signal) => client.requestRuns({ requestMessageId, attemptId, action,
     ...basis }, { signal: reportSignal });
   const deliver = async record => {
@@ -43,12 +48,15 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     let receipt;
     try { receipt = await client.replyAction("room_respond_to_request", input, { signal }); }
     catch (error) {
+      if (error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))
+        recordRequestStage(db, id, "delivery_blocked");
       if (record.attempt_id && [409, 422].includes(error?.status))
         await report(record.attempt_id, "needs_attention", {}, AbortSignal.timeout(5000)).catch(() => {});
       throw error;
     }
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
     db.prepare("UPDATE request_runs SET delivered=1 WHERE id=?").run(id);
+    recordRequestStage(db, id, "delivered");
     if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
     return { status: "delivered", requestId: id, receipt, hostExecuted: false };
   };
@@ -99,6 +107,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     if (error?.status >= 400 && error.status < 500) db.prepare("DELETE FROM request_runs WHERE id=? AND response IS NULL").run(id);
     throw error;
   }
+  recordRequestStage(db, id, "accepted");
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
@@ -120,6 +129,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   }, 30000);
   try {
     controller.signal.throwIfAborted();
+    recordRequestStage(db, id, "started");
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
       preparation: context.preparation, signal: controller.signal }, { binding: Object.freeze({
         origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
@@ -131,6 +141,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       ...context.current.answerBasis, responseOutcome: "answered", toMemberId: context.request.requesterId,
       workItemId: context.request.workItemId, body };
     db.prepare("UPDATE request_runs SET response=? WHERE id=?").run(JSON.stringify(response), id);
+    recordRequestStage(db, id, "finished");
     clearInterval(timer); await heartbeat;
     try { await report(attemptId, "result_ready"); }
     catch (error) {
@@ -144,6 +155,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   } catch (error) {
     clearInterval(timer); await heartbeat;
     const saved = db.prepare("SELECT response FROM request_runs WHERE id=?").get(id)?.response;
+    if (saved && error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))
+      recordRequestStage(db, id, "delivery_blocked");
     const state = saved && ![409, 422].includes(error?.status) ? "result_ready" : "needs_attention";
     await report(attemptId, state, {}, AbortSignal.timeout(5000)).catch(() => {});
     throw error;
