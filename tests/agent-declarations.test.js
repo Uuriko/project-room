@@ -39,6 +39,18 @@ const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
 });
 const heartbeat = (origin, secret, body) => post(origin, "/api/agent-heartbeats", body, secret);
 
+// MCP door: the hosted tools/call surface on the same server. The returned
+// value is the tool's structuredContent.
+async function mcpCall(origin, name, args, secret) {
+  const response = await fetch(`${origin}/room/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name, arguments: args } }),
+  });
+  const body = await response.json();
+  return { status: response.status, body, value: body.result?.structuredContent, error: body.error ?? null, isError: body.result?.isError === true };
+}
+
 async function addAgentMember(origin, fixture, ownerSecret, roomId, name, requestId) {
   const identity = fixture.store.identities.create(name);
   const reqRes = await post(origin, "/api/access-requests", {
@@ -240,4 +252,92 @@ test("presenceForCard projects only the availability state", async t => {
   assert.ok(presence, "card presence resolves");
   assert.equal(presence.status, "online");
   assert.equal(presence.availability, "away");
+});
+
+test("MCP heartbeat_set declarations persist and surface on MCP and HTTP reads", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { owner, friend, roomId } = await roomWithAgents(origin, fixture);
+  const set = await mcpCall(origin, "heartbeat_set", {
+    hostId: "friend-host", mode: "pull-only",
+    availability: { state: "busy", note: "deep work" },
+    execution: { capabilities: ["execute"], scope: "room1 only" },
+  }, friend.secret);
+  assert.equal(set.isError, false, JSON.stringify(set.body));
+  // The MCP receipt reads the declaration back, like the HTTP POST response.
+  assert.equal(set.value.declaration?.availability?.state, "busy");
+  assert.deepEqual(set.value.declaration?.execution?.capabilities, ["execute"]);
+  // MCP read door: heartbeat_get is statusOf, the same read as GET.
+  const got = await mcpCall(origin, "heartbeat_get", {}, friend.secret);
+  assert.equal(got.isError, false, JSON.stringify(got.body));
+  assert.equal(got.value.availability?.state, "busy");
+  assert.equal(got.value.availability?.note, "deep work");
+  assert.deepEqual(got.value.execution?.capabilities, ["execute"]);
+  assert.equal(got.value.execution?.scope, "room1 only");
+  // HTTP reads see the MCP-set declaration unchanged.
+  const read = await get(origin, "/api/agent-heartbeats", friend.secret);
+  const status = await read.json();
+  assert.equal(status.availability?.state, "busy");
+  assert.deepEqual(status.execution?.capabilities, ["execute"]);
+  const res = await get(origin, `/api/rooms/${roomId}/presence`, owner.secret);
+  const row = (await res.json()).members.find(m => m.memberId === friend.memberId);
+  assert.equal(row.presence?.status, "online");
+  assert.equal(row.availability?.state, "busy");
+  assert.deepEqual(row.execution?.capabilities, ["execute"]);
+});
+
+test("MCP malformed declarations are refused and store nothing", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { friend } = await roomWithAgents(origin, fixture);
+  // Semantically malformed declarations reach the shared store validation
+  // and come back with the HTTP door's own refusal: invalid_heartbeat.
+  for (const args of [
+    { availability: { state: "sleeping" } },
+    { availability: { state: "away", note: "x".repeat(141) } },
+    { execution: { capabilities: ["fly"] } },
+    { execution: { capabilities: "execute" } },
+    { execution: { scope: "no capabilities" } },
+  ]) {
+    const res = await mcpCall(origin, "heartbeat_set", { hostId: "friend-host", mode: "pull-only", ...args }, friend.secret);
+    assert.equal(res.isError, true, JSON.stringify(args));
+    assert.equal(res.value?.code, "invalid_heartbeat", JSON.stringify(args));
+  }
+  // A non-object declaration never reaches the store: the MCP door refuses
+  // the arguments themselves with an invalid_arguments call error.
+  const shaped = await mcpCall(origin, "heartbeat_set", { hostId: "friend-host", mode: "pull-only", availability: "busy" }, friend.secret);
+  assert.ok(shaped.error, JSON.stringify(shaped.body));
+  assert.equal(shaped.error.data?.reason, "invalid_arguments");
+  // Nothing was stored by any refusal: no host row, no declaration.
+  const got = await mcpCall(origin, "heartbeat_get", {}, friend.secret);
+  assert.equal(got.value.status, "unregistered");
+  assert.equal(got.value.availability, null);
+  assert.equal(got.value.execution, null);
+});
+
+test("MCP wake_register and wake_clear carry declarations with sticky semantics", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { friend } = await roomWithAgents(origin, fixture);
+  const registered = await mcpCall(origin, "wake_register", {
+    hostId: "friend-host", wakeUrl: "https://wake.example.com/hook",
+    availability: { state: "available" },
+    execution: { capabilities: ["review", "observe"] },
+  }, friend.secret);
+  assert.equal(registered.isError, false, JSON.stringify(registered.body));
+  assert.equal(registered.value.declaration?.availability?.state, "available");
+  assert.deepEqual(registered.value.declaration?.execution?.capabilities, ["review", "observe"]);
+  // wake_clear without declarations leaves them in place.
+  const clearedBare = await mcpCall(origin, "wake_clear", { hostId: "friend-host" }, friend.secret);
+  assert.equal(clearedBare.isError, false, JSON.stringify(clearedBare.body));
+  assert.equal(clearedBare.value.declaration?.availability?.state, "available");
+  assert.deepEqual(clearedBare.value.declaration?.execution?.capabilities, ["review", "observe"]);
+  // An explicit null on wake_clear clears just that declaration.
+  const clearedOne = await mcpCall(origin, "wake_clear", { hostId: "friend-host", availability: null }, friend.secret);
+  assert.equal(clearedOne.isError, false, JSON.stringify(clearedOne.body));
+  assert.equal(clearedOne.value.declaration?.availability, null);
+  assert.deepEqual(clearedOne.value.declaration?.execution?.capabilities, ["review", "observe"]);
+  const got = await mcpCall(origin, "heartbeat_get", {}, friend.secret);
+  assert.equal(got.value.availability, null);
+  assert.deepEqual(got.value.execution?.capabilities, ["review", "observe"]);
 });
