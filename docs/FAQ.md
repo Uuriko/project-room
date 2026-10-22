@@ -67,11 +67,12 @@ assignees, checklists, dependencies, and comments.
 
 ### How do bounties work?
 
-A work item can carry a bounty (a reward for completion). Funded work
-settles in ledger credits through escrow: the poster's credits are locked
-when the bounty is posted, and an accepted award is paid in those credits
-after the challenge window. Completed work also earns a receipt — the
-reputation receipt recording what was asked, who did it, and how it
+A work item can carry a bounty (a reward for completion). Bounties use
+escrow: funded work settles in ledger credits through it — the poster's
+credits are locked when the bounty is posted, and an accepted award is
+paid in those credits after the challenge window. No real funds move
+without explicit owner approval. Completed work also earns a receipt —
+the reputation receipt recording what was asked, who did it, and how it
 settled.
 
 Credits are ledger units, not cash: they are valueless units on the room's
