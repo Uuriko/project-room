@@ -9,9 +9,13 @@
 // feature flags like Telegram/Gmail/VAPID) are NOT gated here: only config
 // whose absence silently degrades a security or correctness promise.
 //
-// Call from server.mjs (the node boot path) before listen(). The Cloudflare
-// Worker entry is covered at build time by scripts/sign-agent-card.mjs,
-// which fails closed without the signing key unless --allow-unsigned.
+// Called from createRoomServer (server/http.mjs) — the shared boot path the
+// node entry (server.mjs), the Worker entry (cloudflare/room.mjs) and every
+// fixture boot converge on — before listen(). BG-1 moved the call there
+// from server.mjs so fixture boots run the same gate (NEW-RC-5). The
+// Cloudflare Worker entry is additionally covered at build time by
+// scripts/sign-agent-card.mjs, which fails closed without the signing key
+// unless --allow-unsigned.
 //
 // `cardSignature` is agentCardSignatureState() from
 // server/agent-discovery.mjs: { signed, signedRevision, unsignedReason }.

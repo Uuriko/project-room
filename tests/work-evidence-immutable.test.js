@@ -107,10 +107,9 @@ test("the audit replays the withdrawal instead of believing the projection", t =
   room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
   assert.doesNotThrow(() => auditRecovery(room.store));
 
-  const row = room.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
-  const state = JSON.parse(row.projection);
+  const state = structuredClone(room.store.room("commons").state);
   state.workItems[WORK_ITEM].receipt.nativeText.withdrawnBy = "reviewer";
-  room.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(state));
+  room.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(room.store.storedProjection("commons", state));
   assert.throws(() => auditRecovery(room.store), "a withdrawal attributed to the wrong member is not a replay of the log");
 });
 

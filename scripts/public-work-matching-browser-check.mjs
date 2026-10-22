@@ -84,7 +84,12 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.locator('#contribution-status').screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-contribution-result-${width}.png` });
   const artifactPath = await visitor.locator('#contribution-artifact').getAttribute('href'), receiptPath = await visitor.locator('#contribution-receipt').getAttribute('href');
   assert.equal(artifactPath, `/api/public-work/receipts/${submitted.receipt.receiptId}/artifact`);
-  assert.equal((await (await visitor.request.get(f.origin + receiptPath)).json()).receiptId, submitted.receipt.receiptId);
+  // Front-door batch B-4: the human's View receipt link opens the human
+  // receipt page, not raw JSON; the JSON stays as the secondary link.
+  assert.equal(receiptPath, `/receipts/${submitted.receipt.receiptId}`);
+  assert.match(await (await visitor.request.get(f.origin + receiptPath)).text(), /Verification tier:/);
+  const jsonPath = await visitor.locator('#contribution-status a', { hasText: 'Receipt JSON' }).getAttribute('href');
+  assert.equal((await (await visitor.request.get(f.origin + jsonPath)).json()).receiptId, submitted.receipt.receiptId);
   const [download] = await Promise.all([visitor.waitForEvent('download'), visitor.locator('#contribution-artifact').click()]);
   assert.deepEqual(readFileSync(await download.path()), Buffer.from(artifactText, 'utf8'));
   f.store.projectOffers.transition('commons', 'owner', offerId, 'withdraw', { requestId: 'after-submission-withdraw', expectedRevision: 2 });

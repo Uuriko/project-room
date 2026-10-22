@@ -53,12 +53,33 @@ export function collectLargestTables(db, { deadlineMs = 1500, now = () => perfor
   return { tables: counts.slice(0, limit), partial, ...(skipped.length ? { skipped } : {}) };
 }
 
+// Rooms the patrol parked (r67), for operatorStatus below.
+function patrolBlocks(store, limit = 25) {
+  try {
+    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, head_seq AS headSeq,
+      error_class AS errorClass, error, blocked_at AS blockedAt
+      FROM patrol_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
+      ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
+    }));
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
+}
+
 export function operatorStatus(store, options = {}) {
   const tables = collectLargestTables(store.db, options);
   return {
     version: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
     ready: operatorReady(store),
     jobs: "see /api/health/jobs",
+    // Outstanding isolated integrity failures: every (step, record) row
+    // the integrity job is currently reporting, with its stored one-line
+    // message and failure count. This surface is operator-token gated, so
+    // the full rows are shown — the public health view carries only the
+    // sanitized detail (code, sub-check, class, and the failing room's
+    // id). Stores predating batch isolation have no such rows.
+    integrityFailures: typeof store.integrityFailures === "function" ? store.integrityFailures() : [],
     lastColdStart: lastColdStart(store),
     tables: tables.tables,
     partial: tables.partial,
@@ -71,13 +92,19 @@ export function operatorStatus(store, options = {}) {
     // without this an operator sees which room is red but not which event
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
-    messagesBackfillBlocks: messagesBackfillBlocks(store)
+    messagesBackfillBlocks: messagesBackfillBlocks(store),
+    // Rooms the patrol parked (r67): the patrol_blocks rows (room, cursor,
+    // head, error class, one-line error). The public health surface carries
+    // only "patrol could not process a room (<class>)" and a count, so
+    // without this no surface names the room. Operator-token gated; capped.
+    patrolBlocks: patrolBlocks(store)
   };
 }
 
 function messagesBackfillBlocks(store, limit = 25) {
   try {
-    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, error, head_seq AS headSeq, blocked_at AS blockedAt
+    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, error, head_seq AS headSeq, blocked_at AS blockedAt,
+      last_diagnosed_at AS lastDiagnosedAt
       FROM messages_backfill_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
       ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
     }));

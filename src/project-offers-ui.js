@@ -52,6 +52,7 @@ function paintList() {
   $('#more-offers').hidden = !cursor;
 }
 async function loadList(more = false, refreshSelection = false) {
+  listStatus.hidden = false;
   listFlight?.abort(); const flight = listFlight = new AbortController();
   $('#refresh-offers').disabled = true; $('#more-offers').disabled = true;
   listStatus.textContent = more ? 'Loading more offers…' : 'Loading offers…'; listStatus.classList.remove('error');
@@ -118,6 +119,7 @@ async function loadContribution(offer, flight) {
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
     if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    $('.agent-handoff').hidden = record.state === 'verified';
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
     // #3546: an accepted receipt carries the verified successor state. Show
     // it truthfully — the level still separates what the platform executed
@@ -135,7 +137,7 @@ async function loadContribution(offer, flight) {
       : record.state === 'verified'
         ? 'Hash-only, unsigned receipt. Acceptance is recorded on the receipt; reported checks are not system-verified.'
         : 'Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.';
-    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">${note}</p>`);
+    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="/receipts/${encodeURIComponent(record.receiptId ?? record.id ?? '')}" target="_blank" rel="noopener noreferrer">View receipt ↗</a> · <a href="${receiptPath}" target="_blank" rel="noopener noreferrer">Receipt JSON</a></p><p class="term-note">${note}</p>`);
   } catch (error) {
     if (!current()) return;
     if (!taskRead && error.status === 404) return;
@@ -197,7 +199,7 @@ detail.addEventListener('click', async event => {
 window.addEventListener('popstate', () => { const id = new URL(location.href).searchParams.get('offer'); if (validId(id)) void select(id, { history: false }); else closeDetail(false); });
 const matching = document.createElement('section'); matching.className = 'find-work'; matching.setAttribute('aria-labelledby', 'find-work-title');
 matching.innerHTML = `<h2 id="find-work-title">Find work for me</h2><form id="find-work-form"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
-$('.intro').after(matching);
+($('.workspace') ?? $('.intro')).after(matching);
 let matchFlight = null, matches = [], matchAfter = null, lastPreferences = null;
 const matchForm = $('#find-work-form');
 function claimPrompt(task) {

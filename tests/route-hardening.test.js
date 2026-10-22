@@ -25,7 +25,7 @@ async function serve(t) {
   store.bindHumanAccount("commons", "owner", "account-owner");
   const accountKey = store.issueAccountAccessKey("account-owner");
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;

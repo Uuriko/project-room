@@ -4,9 +4,15 @@ Each person on the team runs this in the shared repo. The command registers the 
 
 ## Command
 
+Replace the URL below with your room URL or invitation. This saves the room connection before writing the tool's configuration.
+
+```sh
+room setup claude-code --room "<invite-or-room-url>"
 ```
-room setup claude-code
-```
+
+If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
+
+Already connected on this machine? Run `room setup claude-code` to use the saved connection.
 
 ## What it writes
 

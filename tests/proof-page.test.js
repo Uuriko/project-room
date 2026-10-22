@@ -213,3 +213,24 @@ test("room page links to the proof page and the sitemap lists it", async t => {
   const sitemap = await raw(origin, "/sitemap.xml");
   assert.ok(sitemap.text.includes("/r/commons/proof"));
 });
+
+test("proof share layer: JSON-LD mirrors the entries and the OG card rides the same gate", async t => {
+  const { origin } = await serve(t);
+  const page = await raw(origin, "/r/commons/proof");
+  assert.equal(page.status, 200);
+  assert.match(page.text, /application\/ld\+json/);
+  assert.match(page.text, /\/r\/commons\/proof\/og\.png/);
+  const marker = '<script type="application/ld+json">';
+  const start = page.text.indexOf(marker) + marker.length;
+  const ld = JSON.parse(page.text.slice(start, page.text.indexOf("</script>", start)));
+  assert.equal(ld["@type"], "CollectionPage");
+  assert.equal(ld.mainEntity.itemListElement.length, 3);
+  assert.match(ld.mainEntity.itemListElement[0].description, /Artifact hash recorded/);
+  const og = await fetch(`${origin}/r/commons/proof/og.png`);
+  assert.equal(og.status, 200);
+  assert.match(og.headers.get("content-type"), /image\/png/);
+  assert.match(og.headers.get("cache-control"), /max-age=300/);
+  const bytes = new Uint8Array(await og.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
+  assert.equal((await fetch(`${origin}/r/nope/proof/og.png`)).status, 404);
+});
