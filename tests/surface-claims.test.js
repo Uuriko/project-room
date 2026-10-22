@@ -26,8 +26,38 @@ import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { DatabaseSync } from "node:sqlite";
+import {
+  CLAIM_PRESENCE_GRACE_MS, DEFAULT_CLAIM_WINDOW_MINUTES, MAX_CLAIM_WINDOW_MINUTES,
+  scopesIntersect
+} from "../server/surface-claims.mjs";
+import { createDurableSurfaceClaimRegistry, surfaceClaimSchema } from "../server/surface-claim-sqlite.mjs";
+import { takeSurfaceClaimRoute } from "../server/routes/surface-claims.mjs";
 
 const MIN = 60_000;
+
+// --- module units ---------------------------------------------------------------
+
+test("registry round-trips an envelope row on a bare database", () => {
+  // Direct module coverage for server/surface-claim-sqlite.mjs,
+  // server/surface-claims.mjs and server/routes/surface-claims.mjs (the
+  // HTTP specimens below exercise them end to end).
+  assert.equal(typeof takeSurfaceClaimRoute, "function");
+  assert.equal(CLAIM_PRESENCE_GRACE_MS, 15 * 60_000);
+  assert.equal(DEFAULT_CLAIM_WINDOW_MINUTES, 90);
+  assert.equal(MAX_CLAIM_WINDOW_MINUTES, 1440);
+  assert.equal(scopesIntersect({ surfaces: ["server/**"] }, { surfaces: ["server/store.mjs"] }), true);
+  assert.equal(scopesIntersect({ surfaces: ["server/**"] }, { surfaces: ["web/**"] }), false);
+  const db = new DatabaseSync(":memory:");
+  db.exec(surfaceClaimSchema);
+  const registry = createDurableSurfaceClaimRegistry(db);
+  assert.equal(registry.get("room-a", "sc_x"), null);
+  registry.set("room-a", { id: "sc_x", holderMemberId: "m1", scope: { prs: [1] }, state: "active" });
+  assert.equal(registry.get("room-a", "sc_x").scope.prs[0], 1);
+  assert.equal(registry.list("room-a").length, 1);
+  assert.equal(registry.list("room-b").length, 0);
+  db.close();
+});
 
 // --- route table ---------------------------------------------------------------
 
