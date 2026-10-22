@@ -18,7 +18,7 @@ test("an agent identity cannot approve, including its own draft", () => {
   assert.throws(() => q.approve(p.proposalId, { by: agent }), { code: "approval_not_human" });
 });
 
-test("a verdict is terminal and one-use", () => {
+test("a verdict is terminal (not the same as consumed once)", () => {
   const { q, p } = fresh();
   q.approve(p.proposalId, { by: john });
   assert.throws(() => q.approve(p.proposalId, { by: john }));

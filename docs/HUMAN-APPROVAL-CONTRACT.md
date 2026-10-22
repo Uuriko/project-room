@@ -22,7 +22,8 @@ An approval is a service record, not a message. It is valid only if all hold:
 2. What: bound to one action kind, one resource id, and the exact version the
    human was shown (draft version, request revision, work revision, or commit).
 3. When: has an expiry; an expired approval is refused, not reused.
-4. Once: consumed by the action it approves; a second use is refused.
+4. Once: consumed by the action it approves; a second use is refused
+   (target; not implemented anywhere today).
 5. Still valid: re-checked at use time. If the approver lost access or revoked
    it, or the resource moved past the approved version, it is refused.
 
@@ -31,23 +32,32 @@ Already-authorized actions get no extra approval step.
 
 ## Current state (agent draft queue, server/inbox-approval.mjs)
 
+Scope: this section covers only the inert agent-draft approval queue. It is not
+a general action-approval protocol, and nothing here is complete for other
+actions.
+
 | Property | Today |
 |---|---|
-| Who | Holds: only human identities may approve, request edits or reject. |
-| Once | Holds: approved and rejected are terminal. |
-| What | Gap: `approve(proposalId)` takes no expected version. After a resubmit, a human who saw v1 can approve v2 (pinned by the probe). |
-| When | Gap: no expiry on pending proposals or verdicts. |
-| Still valid | Not in this module; depends on the caller's route auth. |
+| Who | Holds through the authenticated route (caller identity from auth), not from the `by` object alone. Only human members may approve, request edits or reject; an agent gets 403. Not established: binding the approver to a particular agent's owner. |
+| Terminal verdict | Holds: approved and rejected are terminal; a second verdict is refused (409). |
+| Once (consumed by the action) | Not implemented. The module has no consume or use operation, and an approved record stays readable and reusable. |
+| What | Gap: `approve(proposalId)` takes no expected version (an `expectedVersion` input is refused today with 422). After a resubmit, a human who saw v1 can approve v2 (pinned by the probe). |
+| When | Gap: no expiry. There is no `expiresAt` on proposals or verdicts. |
+| Still valid at use | Not established: no consume-time revocation or version check. |
+| Device proof | Not established, and not proposed: a device label is display only. |
 
 ## Smallest next change (for review, not built)
 
-`approve(proposalId, { by, expectedVersion })`: refuse with
-`approval_version_changed` when it differs from the current version. Same for
-reject and requestEdits. Then add `expiresAt` on the verdict path. Both reuse
-existing fields; no new table.
+1. Version binding: `approve(proposalId, { by, expectedVersion })` refuses with
+   `approval_version_changed` when it differs from the current version; same
+   for reject and requestEdits. Needs the route to accept the field.
+2. Expiry and consumption are larger: they need a new field on the route
+   shape, a persisted operation with replay behavior, and compatibility with
+   existing rows. Design those separately before code.
 
 ## Probe
 
 tests/human-approval-probe.test.js pins: agents cannot approve, verdicts are
-one-use, and the version gap above. When the version check ships, flip the
-last test to expect the refusal.
+terminal, and the version gap above. When the version check ships, flip the
+last test to expect the refusal. An independent real-HTTP check of the same
+points is recorded at muse-room 17329.
