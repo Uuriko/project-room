@@ -157,6 +157,14 @@
     "scripts/deep-link-reveal-browser-check.mjs": 201666,
     "scripts/about-receipt-honesty-browser-check.mjs": 15047,
     "scripts/entry-simplification-browser-check.mjs": 5057,
-    "scripts/room-only-workspace-browser-check.mjs": 2147
+    "scripts/room-only-workspace-browser-check.mjs": 2147,
+    "scripts/conversation-scroll-boundary-browser-check.mjs": 3956
+  },
+  "localMeasurements": {
+    "scripts/conversation-scroll-boundary-browser-check.mjs": {
+      "milliseconds": 3956,
+      "platform": "darwin",
+      "note": "Local complete suite duration; initial estimate for shard placement, not a CI performance claim."
+    }
   }
 }

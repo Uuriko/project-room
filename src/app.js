@@ -5114,7 +5114,23 @@ let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
+// Gestures in another pane, a dialog, or a nested scrolling control do not
+// express reading this conversation. Keep those scroll owners independent.
+function isConversationScroll(event) {
+  const list = $("#message-list"), target = event.target;
+  if (!(target instanceof Element) || target.closest("dialog,input,textarea,select,[contenteditable]")) return false;
+  if (event.type === "keydown" && target.closest("button,a[href],[role=button]")) return false;
+  if (!list.contains(target)) {
+    // Mobile layouts scroll the page; keyboard navigation can target its body.
+    return list.scrollHeight <= list.clientHeight && (target === document.body || target === document.documentElement);
+  }
+  for (let node = target; node && node !== list; node = node.parentElement) {
+    if (node.scrollHeight > node.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(node).overflowY)) return false;
+  }
+  return true;
+}
 addEventListener("wheel", event => {
+  if (!isConversationScroll(event)) return;
   noteReaderScroll();
   // A conversation at its end cannot emit a scroll event for a downward
   // wheel: a short list has nothing to scroll, and a longer list already at
@@ -5123,20 +5139,20 @@ addEventListener("wheel", event => {
   const list = $("#message-list");
   if (event.deltaY > 0 && list.contains(event.target) && nearBottomOfList()) scheduleHorizonAdvance();
 }, { capture: true, passive: true });
-addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
-addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
+addEventListener("touchmove", event => { if (isConversationScroll(event)) noteReaderScroll(); }, { capture: true, passive: true });
+addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && isConversationScroll(event)) noteReaderScroll(); }, { capture: true });
 $("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
 $("#message-list").addEventListener("focusin", () => timelinePin.clear());
 for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
-    if (!readerScrolling()) return;
-    noteReaderScroll();
-    // Lazy history: reading up toward the oldest held message loads the rest.
-    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
     }
+    if (!readerScrolling()) return;
+    noteReaderScroll();
+    // Lazy history: reading up toward the oldest held message loads the rest.
+    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (nearBottomOfList()) scheduleHorizonAdvance();
   }, { passive: true });
 }

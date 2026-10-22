@@ -131,7 +131,9 @@ test("a deep link inside the first window reveals immediately, before the fill",
   ctx.releaseFill();
   // The web app loads older history lazily: a target inside the first window
   // owes no fill, so the reader's own scroll toward the top brings it in.
-  await page.evaluate(() => { const list = document.querySelector("#message-list"); dispatchEvent(new Event("wheel")); list.scrollTop = 0; scrollTo(0, 0); list.dispatchEvent(new Event("scroll")); dispatchEvent(new Event("scroll")); });
+  const box = await page.locator("#message-list").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -10000);
   await page.waitForFunction(id => Boolean(document.querySelector(`[data-message-record-id="${id}"]`)), OLD_ID, { timeout: 20000 });
   await page.waitForTimeout(1000);
   assert.equal(await focusedId(page), RECENT_ID, "no second reveal moves focus after the fill");
