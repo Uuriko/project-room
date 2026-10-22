@@ -295,7 +295,14 @@ test("checkSummary reports exact-head status with pending and failed names", () 
   const head = "a".repeat(40);
   const runs = (list, total) => ({ total_count: total ?? list.length, check_runs: list });
   const ok = { status: "completed", conclusion: "success", name: "unit" };
-  assert.equal(checkSummary(head, runs([ok, { status: "completed", conclusion: "skipped", name: "s" }, { status: "completed", conclusion: "neutral", name: "n" }])).status, "green");
+  const none = { statuses: [] };
+  assert.equal(checkSummary(head, runs([ok, { status: "completed", conclusion: "skipped", name: "s" }, { status: "completed", conclusion: "neutral", name: "n" }]), none).status, "green");
+  assert.equal(checkSummary(head, runs([ok])).status, "incomplete");
+  assert.equal(checkSummary(head, runs([ok]), { statuses: [{ context: "room/release-lease", state: "success" }] }).status, "green");
+  const lease = checkSummary(head, runs([ok]), { statuses: [{ context: "room/release-lease", state: "pending" }] });
+  assert.equal(lease.status, "pending");
+  assert.deepEqual(lease.pending, ["room/release-lease"]);
+  assert.equal(checkSummary(head, runs([ok]), { statuses: [{ context: "x", state: "error" }] }).status, "failing");
   const pend = checkSummary(head, runs([ok, { status: "queued", conclusion: null, name: "browser 3/6" }]));
   assert.equal(pend.status, "pending");
   assert.deepEqual(pend.pending, ["browser 3/6"]);
@@ -304,11 +311,11 @@ test("checkSummary reports exact-head status with pending and failed names", () 
   assert.deepEqual(fail.failed, ["a"]);
   assert.equal(checkSummary(head, runs([ok], 120)).status, "incomplete");
   for (const conclusion of ["stale", null, "something_new"]) {
-    const odd = checkSummary(head, runs([ok, { status: "completed", conclusion, name: "odd" }]));
+    const odd = checkSummary(head, runs([ok, { status: "completed", conclusion, name: "odd" }]), { statuses: [] });
     assert.equal(odd.status, "incomplete");
     assert.deepEqual(odd.unknown, ["odd"]);
   }
-  assert.equal(checkSummary(head, runs([])).status, "none");
+  assert.equal(checkSummary(head, runs([]), { statuses: [] }).status, "none");
   assert.deepEqual(checkSummary(head, {}), { head, unavailable: "checks_unreadable" });
 });
 
@@ -328,7 +335,7 @@ test("facts carry mergeSlot with claims and checks at the PR head", async () => 
   const claimsImpl = async () => ({ truncated: false, claims: [{ id: "MERGE-SLOT", state: "in_progress", owner: "codex", leaseExpiresAt: "2026-10-22T05:00:00.000Z" }] });
   const ghImpl = async () => ({ number: 4490, headRefOid: PRHEAD, author: { login: "grok" }, reviews: [] });
   const seen = [];
-  const checksImpl = async (sha) => { seen.push(sha); return { total_count: 1, check_runs: [{ status: "in_progress", name: "browser" }] }; };
+  const checksImpl = async (sha) => { seen.push(sha); return { runs: { total_count: 1, check_runs: [{ status: "in_progress", name: "browser" }] }, statuses: { statuses: [] } }; };
   const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, ghImpl, checksImpl, pr: 4490, nowMs: Date.parse("2026-10-22T03:00:00.000Z") });
   assert.equal(facts.mergeSlot.owner, "codex");
   assert.equal(facts.mergeSlot.held, true);

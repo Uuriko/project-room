@@ -203,7 +203,9 @@ export function mergeSlot(claims, nowMs = Date.now()) {
 }
 
 // Hosted checks at one exact head: counts plus the names still pending or failed.
-export function checkSummary(head, runs) {
+// Commit statuses (for example room/release-lease) are not check runs, so a
+// summary without them is never green.
+export function checkSummary(head, runs, statuses = null) {
   if (!runs || !Array.isArray(runs.check_runs)) return { head, unavailable: "checks_unreadable" };
   const pending = [];
   const failed = [];
@@ -219,15 +221,24 @@ export function checkSummary(head, runs) {
     else if (c === "failure" || c === "timed_out" || c === "cancelled" || c === "action_required" || c === "startup_failure") { counts.failure++; failed.push(name); }
     else { counts.other++; unknown.push(name); }
   }
+  const statusRows = Array.isArray(statuses?.statuses) ? statuses.statuses : null;
+  for (const row of statusRows ?? []) {
+    const name = typeof row?.context === "string" ? row.context : "unnamed";
+    if (row?.state === "success") counts.success++;
+    else if (row?.state === "pending") { counts.pending++; pending.push(name); }
+    else if (row?.state === "failure" || row?.state === "error") { counts.failure++; failed.push(name); }
+    else { counts.other++; unknown.push(name); }
+  }
+  const includesCommitStatuses = statusRows !== null;
   const total = Number.isSafeInteger(runs.total_count) ? runs.total_count : runs.check_runs.length;
   const truncated = total > runs.check_runs.length;
   let status = "green";
   // A stale, null or unrecognized conclusion is never read as green.
-  if (truncated || counts.other > 0) status = "incomplete";
+  if (truncated || counts.other > 0 || !includesCommitStatuses) status = "incomplete";
   if (counts.failure > 0) status = "failing";
   else if (counts.pending > 0) status = "pending";
-  else if (runs.check_runs.length === 0) status = "none";
-  return { head, status, total, truncated, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
+  else if (runs.check_runs.length === 0 && (statusRows ?? []).length === 0) status = "none";
+  return { head, status, total, truncated, includesCommitStatuses, counts, pending: pending.sort(), failed: failed.sort(), unknown: unknown.sort() };
 }
 
 export async function landingFacts({
@@ -289,7 +300,8 @@ export async function landingFacts({
     else facts.pullRequest = reviewBind(await ghImpl(pr), localHead, patchId, execImpl, mainSha);
     if (checksImpl && SHA.test(facts.pullRequest?.head ?? "")) {
       try {
-        facts.checks = checkSummary(facts.pullRequest.head, await checksImpl(facts.pullRequest.head));
+        const read = await checksImpl(facts.pullRequest.head);
+        facts.checks = checkSummary(facts.pullRequest.head, read?.runs, read?.statuses ?? null);
       } catch {
         facts.checks = { head: facts.pullRequest.head, unavailable: "checks_unreadable" };
       }
@@ -371,7 +383,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       checksImpl: parsed.pr == null ? null : async (sha) => {
         const result = spawnSync("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`], { encoding: "utf8" });
         if (result.status !== 0) throw new Error("checks_unreadable");
-        return JSON.parse(result.stdout);
+        const status = spawnSync("gh", ["api", `repos/{owner}/{repo}/commits/${sha}/status?per_page=100`], { encoding: "utf8" });
+        return { runs: JSON.parse(result.stdout), statuses: status.status === 0 ? JSON.parse(status.stdout) : null };
       },
       ghImpl: parsed.pr == null ? null : async (number) => {
         const result = spawnSync("gh", ["pr", "view", String(number), "--json", "number,headRefOid,reviewDecision,author,reviews"], { encoding: "utf8" });
