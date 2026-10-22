@@ -65,7 +65,6 @@ export const BROWSER_SUITE_EXCLUSIONS = {
   // Known-failing on main: wiring them now would merge a red gate.
   // Wire each when its issue closes (and drop the exclusion).
   "qa5-a11y-c-browser-check.mjs": "KNOWN-FAILING on main (0/6) — issue #3842; wire when it closes",
-  "manual-owner-exercise-check.mjs": "KNOWN-FAILING on main — issue #3837; wire when it closes",
 };
 
 export function checkFilesOnDisk(scriptsDir) {
