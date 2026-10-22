@@ -13,6 +13,7 @@
   "human.workChooseVerifier": "Choose who verifies this work.",
   "agentSignIn.credentialMismatch": "That agent ID and secret don’t match. Check both and try again.",
   "agentSignIn.proofRequired": "Identity mint proof required",
+  "handoff.checkAsserted": "asserted",
   "human.workHistory": "Work history",
   "human.workActive": "Work · {count} active",
   "human.workNeedsInput": "Work · {active} active · {count} need input",
