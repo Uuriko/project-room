@@ -49,7 +49,7 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
-import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection, projectionShapeProblem } from "./projection-at-rest.mjs"; // Phase 1a
+import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection, projectionShapeProblems } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
@@ -3528,19 +3528,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // refuse a legacy-shaped projection at read — the projection survives
   // deferred open until the integrity job repairs it, exactly as the eager
   // open's repair pass would have at boot. The deferral is scoped to the
-  // shape the integrity job can actually repair: channels_missing, the
-  // pre-channels legacy shape backfilled by repairProjectionShape /
-  // applyProvenanceRepair (ensureDefaultChannelState). Every other shape
-  // problem still refuses with the typed error in deferred mode too — the
-  // integrity job cannot repair those, and serving them would be the hollow
-  // state #4127 forbids. The deferred problem is surfaced once per room in
-  // the log, for the integrity job, mirroring noteCorruptProjections.
-  _defersShapeProblem(shapeProblem, roomId) {
-    if (this.integrityMode !== "deferred" || shapeProblem !== "channels_missing") return false;
+  // shape the integrity job can actually repair: channels_missing as the
+  // projection's ONLY shape problem, the pre-channels legacy shape
+  // backfilled by repairProjectionShape / applyProvenanceRepair
+  // (ensureDefaultChannelState). The gate-visible first problem is not
+  // enough to decide this: projectionShapeProblem reports problems in a
+  // fixed order, so a compound projection (channels_missing plus a later
+  // problem, e.g. messages_missing) reads as channels_missing while
+  // carrying corruption the integrity job cannot repair — deferring for it
+  // would serve the hollow state #4127 forbids (and the integrity run
+  // would merely unmask the second problem, not repair it). The predicate
+  // therefore takes the full problem set and defers only when it is
+  // exactly {channels_missing}. Every other shape problem — alone or in a
+  // compound — still refuses with the typed error in deferred mode too.
+  // The deferred problem is surfaced once per room in the log, for the
+  // integrity job, mirroring noteCorruptProjections.
+  _defersShapeProblem(shapeProblems, roomId) {
+    if (this.integrityMode !== "deferred") return false;
+    if (shapeProblems.length !== 1 || shapeProblems[0] !== "channels_missing") return false;
     const noted = (this._deferredShapeRooms ??= new Set());
     if (!noted.has(roomId)) {
       noted.add(roomId);
-      console.error(`projection shape deferred to the integrity job: room ${roomId} (${shapeProblem}); the legacy projection serves until the integrity job repairs it`);
+      console.error(`projection shape deferred to the integrity job: room ${roomId} (channels_missing, the projection's only shape problem); the legacy projection serves until the integrity job backfills its channels`);
     }
     return true;
   }
@@ -3553,8 +3562,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // #4127: valid JSON with the wrong shape is corruption too. Refuse it
     // with the same typed error instead of serving a hollow state or
     // leaking TypeErrors from deep inside the readers.
-    const shapeProblem = projectionShapeProblem(raw, roomId);
-    if (shapeProblem && !this._defersShapeProblem(shapeProblem, roomId)) {
+    const shapeProblems = projectionShapeProblems(raw, roomId);
+    const shapeProblem = shapeProblems[0] ?? null;
+    if (shapeProblem && !this._defersShapeProblem(shapeProblems, roomId)) {
       fail(500, "room_corrupt_projection", `Room projection has an invalid shape (${shapeProblem})`);
     }
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, raw, { verifyBodyHashes });

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { projectionShapeProblem } from "../server/projection-at-rest.mjs";
+import { projectionShapeProblem, projectionShapeProblems } from "../server/projection-at-rest.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-shape-"));
@@ -104,4 +104,62 @@ test("patrol files no identity finding for a healthy room", t => {
   const { store } = fixture(t);
   store.patrolTick();
   assert.deepEqual(store.patrolFindings().filter(finding => finding.kind === "projection_room_mismatch"), []);
+});
+
+test("the shape validator reports the full problem set in check order", () => {
+  const sound = { room: { id: "alpha" }, members: {}, channels: {}, messages: [], workItems: {} };
+  assert.deepEqual(projectionShapeProblems(sound, "alpha"), []);
+  assert.deepEqual(projectionShapeProblems(null, "alpha"), ["not_an_object"]);
+  assert.deepEqual(projectionShapeProblems([], "alpha"), ["not_an_object"]);
+  assert.deepEqual(projectionShapeProblems({}, "alpha"), ["room_missing", "members_missing", "channels_missing", "messages_missing", "work_items_missing"]);
+  // Compounds keep every problem, in the fixed check order — the set the
+  // deferred-open predicate decides on.
+  assert.deepEqual(projectionShapeProblems({ room: { id: "alpha" }, members: {} }, "alpha"),
+    ["channels_missing", "messages_missing", "work_items_missing"]);
+  assert.deepEqual(projectionShapeProblems({ room: { id: "alpha" }, members: {}, messages: [] }, "alpha"),
+    ["channels_missing", "work_items_missing"]);
+  assert.deepEqual(projectionShapeProblems({ room: { id: "alpha" }, members: {}, channels: {} }, "alpha"),
+    ["messages_missing", "work_items_missing"]);
+  // The singular stays the first problem of the set.
+  assert.equal(projectionShapeProblem({ room: { id: "alpha" }, members: {} }, "alpha"), "channels_missing");
+  assert.equal(projectionShapeProblem({ room: { id: "alpha" }, members: {}, channels: {} }, "alpha"), "messages_missing");
+});
+
+// PR #4137 delta: the deferred-open deferral covers channels_missing ONLY
+// when it is the projection's sole shape problem. projectionShapeProblem
+// reports the first problem in a fixed order (members → channels →
+// messages → work_items), so a compound whose second problem sorts after
+// channels_missing is gate-visible as plain channels_missing — deferring
+// on that alone served a hollow state (messages/workItems undefined) in
+// deferred mode, the leak #4127 forbids. Both compound shapes must refuse
+// with the typed error under deferred open.
+function deferredStore(t, mutate) {
+  const directory = mkdtempSync(join(tmpdir(), "room-shape-deferred-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename);
+  store.initialize(initialRoom("alpha"));
+  const parsed = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='alpha'").get().projection);
+  mutate(parsed);
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(parsed));
+  store.close();
+  const deferred = new RoomStore(filename, { integrity: "deferred" });
+  t.after(() => { try { deferred.close(); } catch { /* already closed */ } });
+  return { deferred, parsed };
+}
+
+test("deferred open refuses a channels+messages compound with the typed error", t => {
+  const { deferred, parsed } = deferredStore(t, state => { delete state.channels; delete state.messages; });
+  // Precondition: the gate-visible first problem is channels_missing — the
+  // trap the deferral predicate must see through.
+  assert.equal(projectionShapeProblem(parsed, "alpha"), "channels_missing");
+  assert.deepEqual(projectionShapeProblems(parsed, "alpha"), ["channels_missing", "messages_missing"]);
+  assertTypedCorruption(readError(deferred));
+});
+
+test("deferred open refuses a channels+work_items compound with the typed error", t => {
+  const { deferred, parsed } = deferredStore(t, state => { delete state.channels; delete state.workItems; });
+  assert.equal(projectionShapeProblem(parsed, "alpha"), "channels_missing");
+  assert.deepEqual(projectionShapeProblems(parsed, "alpha"), ["channels_missing", "work_items_missing"]);
+  assertTypedCorruption(readError(deferred));
 });

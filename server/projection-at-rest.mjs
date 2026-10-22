@@ -214,17 +214,27 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
 // emptyRoomState + compact): a state object whose room is this room, with
 // the core collections present. Anything else — valid JSON, wrong shape —
 // is corruption a reader must refuse, not serve as a hollow room (#4127).
-// O(1) field checks only: this runs on the hot read path. Returns a short
-// problem token, or null when the shape is sound.
+// O(1) field checks only: this runs on the hot read path. Returns the full
+// set of short problem tokens, in the fixed order the checks run (empty
+// when the shape is sound). Most callers need only the first problem; the
+// full set matters where a decision turns on a problem being the ONLY one
+// (the deferred-open deferral in server/store.mjs defers solely for the
+// lone legacy channels_missing shape — a compound is corruption the
+// integrity job cannot fully repair, so it must not ride the deferral).
+export function projectionShapeProblems(state, roomId) {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return ["not_an_object"];
+  const problems = [];
+  if (!state.room || typeof state.room !== "object" || Array.isArray(state.room)) problems.push("room_missing");
+  else if (state.room.id !== roomId) problems.push("room_id_mismatch");
+  if (!state.members || typeof state.members !== "object" || Array.isArray(state.members)) problems.push("members_missing");
+  if (!state.channels || typeof state.channels !== "object" || Array.isArray(state.channels)) problems.push("channels_missing");
+  if (!Array.isArray(state.messages)) problems.push("messages_missing");
+  if (!state.workItems || typeof state.workItems !== "object" || Array.isArray(state.workItems)) problems.push("work_items_missing");
+  return problems;
+}
+// The first shape problem, or null when the shape is sound.
 export function projectionShapeProblem(state, roomId) {
-  if (!state || typeof state !== "object" || Array.isArray(state)) return "not_an_object";
-  if (!state.room || typeof state.room !== "object" || Array.isArray(state.room)) return "room_missing";
-  if (state.room.id !== roomId) return "room_id_mismatch";
-  if (!state.members || typeof state.members !== "object" || Array.isArray(state.members)) return "members_missing";
-  if (!state.channels || typeof state.channels !== "object" || Array.isArray(state.channels)) return "channels_missing";
-  if (!Array.isArray(state.messages)) return "messages_missing";
-  if (!state.workItems || typeof state.workItems !== "object" || Array.isArray(state.workItems)) return "work_items_missing";
-  return null;
+  return projectionShapeProblems(state, roomId)[0] ?? null;
 }
 // Put bodies back into a state parsed from rooms.projection. Mutates and
 // returns the state. `missing` lists messages whose body row is gone, which
