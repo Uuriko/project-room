@@ -349,10 +349,10 @@ export async function joinSharedInvite(origin, linkToken, displayName, options =
     throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
   return value;
 }
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, options = {}) {
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
-    body: { roomId, title, purpose, kind, displayName } }, options);
+    body: { roomId, title, purpose, kind, displayName, requestId, starter } }, options);
   if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
   return value;

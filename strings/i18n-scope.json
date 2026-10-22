@@ -38,6 +38,7 @@
   "src/display-name-guard.js",
   "src/dm-consents.js",
   "src/dm-room-wiring.mjs",
+  "src/entry-started.js",
   "src/entry.js",
   "src/error-copy.js",
   "src/events.js",
