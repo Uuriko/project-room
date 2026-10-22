@@ -1452,6 +1452,28 @@ export class RoomAgentClient {
   }
 }
 
+// Point to already-authorized discussion without copying drafts into progress.
+// A bounded window can be incomplete: these are observed drafts, not the latest
+// drafts in the task, and a proposal never becomes a completion or instruction.
+function discussionResumeLines(result) {
+  const preparation = result.preparation, discussion = preparation?.discussion;
+  if (!discussion) return ["Discussion not read. Saved drafts may exist. Read: " + JSON.stringify({ tool: "room_read_work",
+    arguments: { roomId: result.roomId, workItemId: result.work.id, brief: true, includeDiscussion: true } })];
+  const drafts = discussion.items.filter(item => item.message?.workItemId === result.work.id && item.message.proposal
+    && validId(item.message.id) && validId(item.message.authorId) && Number.isSafeInteger(item.sequence))
+    .sort((a, b) => b.sequence - a.sequence).slice(0, 3);
+  return [
+    `Discussion window: after ${discussion.since ?? 0} through ${discussion.horizon}; ${discussion.hasMore ? "incomplete" : "complete for this window"}.`,
+    ...(drafts.length ? ["Observed draft references (not verified progress):", ...drafts.map(item => JSON.stringify({
+      authorId: item.message.authorId, basisRevision: item.message.proposal.basisRevision,
+      read: { tool: "room_read_result", arguments: { roomId: result.roomId, workItemId: result.work.id, draftMessageId: item.message.id } }
+    }))] : ["No draft references in this observed window; older or unread drafts may exist."]),
+    ...(preparation.nextRead ? ["Continue discussion: " + JSON.stringify(preparation.nextRead)] : []),
+    ...(preparation.changedDuringRead ? ["Work changed during this read; compare draft basis with current revision."] : []),
+    ...(preparation.eventsAfterDiscussion ? ["There are newer room events beyond this discussion window; refresh relevant context before acting."] : [])
+  ];
+}
+
 // Compact authenticated view, distinct from the opt-in portable export.
 export function workContextMarkdown(result) {
   if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
@@ -1462,6 +1484,7 @@ export function workContextMarkdown(result) {
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...discussionResumeLines(result),
     ...(result.replyRequestContext ? [
       `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
