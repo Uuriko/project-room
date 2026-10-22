@@ -9,6 +9,7 @@ import { governanceJson } from "./governance.mjs";
 import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
 import { ROOM_ORIGIN, EDGE_DOOR_HOSTS } from "../src/service-origin.js";
+import { agentSkillsDoc } from "./agent-skills-docs.mjs";
 export { ROOM_ORIGIN, EDGE_DOOR_HOSTS, edgeDoorApiPath } from "../src/service-origin.js";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
 export const ROOM_PUBLIC_WWW = "https://www.getdasha.com/room";
@@ -1670,5 +1671,5 @@ export function isEdgeDoorUrl(url) {
 
 export function discoveryDoc(pathname) {
   const canonical = ALIASES[pathname] ?? pathname;
-  return CANONICAL[canonical] ?? null;
+  return CANONICAL[canonical] ?? agentSkillsDoc(pathname, CANONICAL["/SKILL.md"]);
 }
