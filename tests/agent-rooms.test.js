@@ -764,3 +764,23 @@ test("create with starter:false skips the auto-claimed starter task", t => {
   assert.ok(!store.workClaims.list("no-starter-room").some(item => item.id === "starter"),
     "no starter work claim was created");
 });
+
+for (const retry of [false, true]) {
+  test(`empty room ${retry ? "retry" : "creation"} offers usable actions without a nonexistent starter`, t => {
+    const { store, rooms, identity } = setup(t);
+    const args = { ...createArgs("empty-actions"), starter: false, requestId: "empty-actions-request" };
+    if (retry) rooms.create(identity.secret, args);
+    const result = rooms.create(identity.secret, args);
+    assert.equal(result.duplicate, retry);
+    assert.equal(result.starter, null);
+    for (const steps of [result.next, result.nextActions]) {
+      assert.ok(!steps.some(step => ["start-work", "finish-work"].includes(step.action)),
+        "must not direct the caller to update a nonexistent starter");
+      const create = steps.find(step => step.action === "create-task");
+      assert.equal(create.path, "/api/rooms/empty-actions/work-claims");
+      assert.ok(steps.some(step => step.action === "post-message"));
+      assert.ok(steps.some(step => step.action === "invite-members"));
+    }
+    assert.equal(store.workClaims.get(result.roomId, "starter"), null);
+  });
+}

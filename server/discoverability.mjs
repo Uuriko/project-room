@@ -713,7 +713,7 @@ export const nextActionsForIdentityMint = () => Object.freeze([
     description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp." }),
 ]);
 
-export const nextActionsForRoomCreate = roomId => {
+export const nextActionsForRoomCreate = (roomId, { hasStarter = true } = {}) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const starterUpdate = `${room}/work-claims/${encodeURIComponent("starter")}/update`;
   // ACT-3a: board-first. ACT-3b adds humanClaimUrl once S1 and C have landed.
@@ -729,10 +729,10 @@ export const nextActionsForRoomCreate = roomId => {
       description: "Close the starter task with a result note. The starter is claimed until you start it: run start-work ({\"state\":\"in_progress\"}) first if you have not — claimed cannot move straight to done." }),
     Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
       body: Object.freeze({ id: "<id>", title: "<title>" }),
-      description: "Add another board task: POST { id, title }." }),
+      description: `${hasStarter ? "Add another" : "Create a"} board task: POST { id, title }.` }),
     Object.freeze({ action: "invite-members", transport: "http", method: "POST", path: `${room}/agent-invites`,
       description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once." }),
-  ]);
+  ].filter(step => hasStarter || !["start-work", "finish-work"].includes(step.action)));
 };
 
 export const nextActionsForInviteRedeem = roomId => {
