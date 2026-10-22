@@ -486,21 +486,38 @@ function resetRoom(store, roomId) {
   });
 }
 
+// A diagnosis that reached the caller's deadline before it could finish:
+// the replay's verdict is unknown, so callers must leave every block row
+// untouched and let a later call re-diagnose — never record, clear, or
+// stamp from a partial replay. Distinct from a block object (a verdict)
+// and from null (a clean replay).
+const DIAGNOSIS_DEFERRED = Symbol("diagnosis-deferred");
+
+// How often a diagnosis replay checks the caller's deadline. Checking on
+// every event would tax the common case for a bound only the long tail
+// needs; every 128 events bounds the overshoot past the deadline to a
+// small slice of one replay.
+const DIAGNOSIS_DEADLINE_CHECK_EVERY = 128;
+
 // Replay the room's whole log from empty and report the first event the
 // current reducer rejects, or the tail gap when the log ends before the
 // room's head sequence. Returns null when the log replays cleanly and
 // reaches the head: the fillRoom throw is then not attributable to a stored
 // event (a cooperative interruption via yieldBetween, a storage error, a
 // corrupt cursor snapshot) and the caller rethrows it unchanged — parking
-// is only for failures the data itself guarantees will recur.
-function diagnoseBlock(db, roomId) {
+// is only for failures the data itself guarantees will recur. Returns
+// DIAGNOSIS_DEFERRED when the caller's deadline passes mid-replay.
+function diagnoseBlock(db, roomId, { deadline = Infinity } = {}) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
   if (maxSeq < head) {
     return { sequence: maxSeq, eventId: null, error: `messages backfill stopped at ${maxSeq} before room ${roomId} reached sequence ${head}` };
   }
   let state = emptyRoomState();
+  let replayed = 0;
   for (const row of db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)) {
+    replayed += 1;
+    if (replayed % DIAGNOSIS_DEADLINE_CHECK_EVERY === 0 && Date.now() > deadline) return DIAGNOSIS_DEFERRED;
     try {
       state = compactState(applyEvent(state, JSON.parse(row.body)));
     } catch (error) {
@@ -514,14 +531,16 @@ function diagnoseBlock(db, roomId) {
 // diagnoseBlock replays the whole room log; for muse-room (about 14k events)
 // that was 35.8 s of CPU in one integrity tick on a shared 4-CPU box, over
 // the production Durable Object's 30 s cpu_ms, and the head-moved
-// re-diagnosis runs it with no deadline. The cursor already holds the state
+// re-diagnosis originally ran it with no deadline (issue #3904 F4;
+// every diagnosis honors the caller's deadline now — see
+// DIAGNOSIS_DEFERRED). The cursor already holds the state
 // the backfill resumes from (state_json at applied_seq, anchored to the
 // event id it names), so the question "does this room move past its block
 // now" only needs the events after it: through the old blocked sequence on a
 // re-diagnosis, or to the first failure on a fresh park. Returns undefined
 // when there is no usable snapshot (no cursor, torn or stale snapshot, a
 // rewritten anchor event), and the caller falls back to the full replay.
-function diagnoseFromCursor(db, roomId, upTo) {
+function diagnoseFromCursor(db, roomId, upTo, { deadline = Infinity } = {}) {
   const cursor = readCursor(db, roomId, true);
   if (!cursor || typeof cursor.state_json !== "string" || !Number.isInteger(cursor.state_seq) || cursor.state_seq <= 0 || cursor.state_seq < cursor.applied_seq) return undefined;
   // A quiet room can already be at its replay head. Still validate the anchor
@@ -531,7 +550,10 @@ function diagnoseFromCursor(db, roomId, upTo) {
   try { state = decodeMessageReplaySnapshot(db, roomId, cursor.state_json); } catch { return undefined; }
   const rows = db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
     .all(roomId, cursor.state_seq, upTo);
+  let replayed = 0;
   for (const row of rows) {
+    replayed += 1;
+    if (replayed % DIAGNOSIS_DEADLINE_CHECK_EVERY === 0 && Date.now() > deadline) return DIAGNOSIS_DEFERRED;
     try {
       state = compactState(applyEvent(state, JSON.parse(row.body)));
     } catch (error) {
@@ -545,14 +567,14 @@ function diagnoseFromCursor(db, roomId, upTo) {
 // so the failing event is after it. Replaying from sequence 0 instead can
 // name an older event the backfill already applied under an earlier reducer
 // and will never read again, parking the room on the wrong event.
-function diagnoseFreshBlock(db, roomId) {
+function diagnoseFreshBlock(db, roomId, { deadline = Infinity } = {}) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
   if (maxSeq >= head) {
-    const resumed = diagnoseFromCursor(db, roomId, head);
+    const resumed = diagnoseFromCursor(db, roomId, head, { deadline });
     if (resumed !== undefined) return resumed;
   }
-  return diagnoseBlock(db, roomId);
+  return diagnoseBlock(db, roomId, { deadline });
 }
 
 // r71: a standing park can name an event at or below the cursor snapshot.
@@ -562,7 +584,7 @@ function diagnoseFreshBlock(db, roomId) {
 // empty, so the old code fell back to the full replay, found the same event
 // and kept the park on every re-diagnosis. Ask the backfill's own question
 // instead: does the next chunk after the snapshot replay?
-function rediagnoseBlock(db, roomId, blockedSeq) {
+function rediagnoseBlock(db, roomId, blockedSeq, { deadline = Infinity } = {}) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
   if (maxSeq >= head && Number.isInteger(blockedSeq) && blockedSeq > 0) {
@@ -570,10 +592,10 @@ function rediagnoseBlock(db, roomId, blockedSeq) {
     const upTo = Number.isInteger(stateSeq) && blockedSeq <= stateSeq
       ? Math.min(stateSeq + BACKFILL_COMMIT, head)
       : Math.min(blockedSeq, head);
-    const resumed = diagnoseFromCursor(db, roomId, upTo);
+    const resumed = diagnoseFromCursor(db, roomId, upTo, { deadline });
     if (resumed !== undefined) return resumed;
   }
-  return diagnoseBlock(db, roomId);
+  return diagnoseBlock(db, roomId, { deadline });
 }
 
 // Record (or refresh) a room's block. Returns true when the block is new or
@@ -628,8 +650,12 @@ function clearBlock(store, roomId) {
 // re-diagnosis through the same diagnoseBlock path. A clean replay clears
 // the park and the room rejoins this call's sweep; a still-failing log
 // keeps its park, with only the attempt stamp moving when the diagnosis is
-// unchanged. Periodic attempts honor the caller's deadline; head-moved
-// diagnoses keep their existing unconditional pass.
+// unchanged. Every diagnosis here honors the caller's deadline — head-moved
+// rooms included (issue #3904 F4: they previously ran unconditionally, so
+// every live parked room multiplied the tick's cost by one full replay).
+// A diagnosis the deadline interrupts leaves its block row untouched and
+// stops the refresh for this call; the room is re-diagnosed on a later
+// call, when its head is still stale or its cadence comes due.
 function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity } = {}) {
   const rows = store.db.prepare(
     "SELECT room_id, sequence, event_id, error, head_seq, last_diagnosed_at FROM messages_backfill_blocks ORDER BY room_id"
@@ -639,7 +665,9 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
     if (head !== row.head_seq) {
-      const block = rediagnoseBlock(store.db, row.room_id, row.sequence);
+      if (Date.now() > deadline) break;
+      const block = rediagnoseBlock(store.db, row.room_id, row.sequence, { deadline });
+      if (block === DIAGNOSIS_DEFERRED) break;
       if (!block) clearBlock(store, row.room_id);
       else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
       continue;
@@ -653,7 +681,8 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
     if (Date.now() - row.last_diagnosed_at < MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS) continue;
     if (Date.now() > deadline) break;
     periodicLeft -= 1;
-    const block = rediagnoseBlock(store.db, row.room_id, row.sequence);
+    const block = rediagnoseBlock(store.db, row.room_id, row.sequence, { deadline });
+    if (block === DIAGNOSIS_DEFERRED) break;
     if (!block) { clearBlock(store, row.room_id); continue; }
     const changed = row.sequence !== block.sequence || row.event_id !== block.eventId || row.error !== block.error;
     if (changed) {
@@ -908,7 +937,15 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     } catch (error) {
       if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
-      const block = diagnoseFreshBlock(store.db, room.id);
+      const block = diagnoseFreshBlock(store.db, room.id, { deadline });
+      if (block === DIAGNOSIS_DEFERRED) {
+        // The deadline passed before the diagnosis could finish, so the
+        // room is neither parked nor cleared on a partial replay: report
+        // the call's budget as exhausted and let a later call diagnose it
+        // with a fresh budget.
+        const progress = readCursor(store.db, room.id);
+        return { done: false, events, rooms, budgetExceeded: true, roomId: room.id, appliedSeq: progress?.applied_seq ?? null, replaySeq: progress?.state_seq ?? null, blocked: allBlocked(), failed };
+      }
       if (!block) throw error; // not a stored-event failure: propagate as before
       // Park the room durably (later calls skip it until the block goes
       // stale) and report it as this call's fresh failure for the unified
