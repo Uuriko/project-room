@@ -6558,16 +6558,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const nowMs = this.now();
     const replyToId = typeof data.replyToId === "string" ? data.replyToId : "";
     if (replyToId) {
+      // Deadline classification must not depend on whether a reader happened
+      // to persist lazy expiry before this reply. Late response evidence lives
+      // separately from the terminal deadline state.
+      this.flipExpiredMentions(roomId, nowMs);
       const pending = this.db.prepare(
         `SELECT m.message_event_id AS eventId, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
-         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')`
       ).all(roomId, senderMemberId);
       const answered = pending.find(row => {
         let parsed = null;
         try { parsed = JSON.parse(row.body); } catch { parsed = null; }
         return (parsed?.data?.messageId || row.eventId) === replyToId;
       });
+      if (answered) this.db.prepare(
+        `INSERT INTO mention_observations(room_id,message_event_id,mentioned_member_id,acknowledged,responded_at)
+         VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
+         DO UPDATE SET acknowledged=1, responded_at=COALESCE(mention_observations.responded_at,excluded.responded_at)`
+      ).run(roomId, answered.eventId, senderMemberId, nowMs);
       if (answered) this.db.prepare(
         `UPDATE mention_states SET state='responded', decided_at=?
          WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
@@ -6670,10 +6679,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return 0;
     }
     if (!expired) return 0;
-    const run = () => this.db.prepare(
-      `UPDATE mention_states SET state='timed_out', decided_at=?
-       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
-    ).run(nowMs, roomId, nowMs);
+    const run = () => {
+      // Preserve facts from legacy acknowledged rows without inventing their
+      // original acknowledgement time.
+      this.db.prepare(`INSERT OR IGNORE INTO mention_observations
+        (room_id,message_event_id,mentioned_member_id,acknowledged)
+        SELECT room_id,message_event_id,mentioned_member_id,1 FROM mention_states
+        WHERE room_id=? AND state='acknowledged' AND timeout_at<=?`).run(roomId, nowMs);
+      return this.db.prepare(
+        `UPDATE mention_states SET state='timed_out', decided_at=?
+         WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
+      ).run(nowMs, roomId, nowMs);
+    };
     return this.db.isTransaction ? run().changes : this.transaction(run).changes;
   }
 
@@ -6699,6 +6716,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(any ? 403 : 404, any ? "mention_not_yours" : "mention_not_found",
           any ? "You can only acknowledge your own mentions" : "No mention found for this message");
       }
+      // An explicit late ACK is still an observation even when the deadline
+      // state is terminal. Repeats preserve the first recorded timestamp.
+      this.db.prepare(`INSERT INTO mention_observations
+        (room_id,message_event_id,mentioned_member_id,acknowledged,acknowledged_at)
+        VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
+        DO UPDATE SET acknowledged=1, acknowledged_at=COALESCE(mention_observations.acknowledged_at,excluded.acknowledged_at)`)
+        .run(roomId, messageEventId, auth.member.id, this.now());
       if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
       assertTransitionMention("delivered", "acknowledged");
       this.db.prepare(

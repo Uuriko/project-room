@@ -117,14 +117,26 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await ensureSidebar();
     await page.locator("#channel-list [data-channel]").filter({ hasText: "general" }).click();
     assert.equal(await page.locator("#message-input").inputValue(), "Unsent general notes", "sending clears only its destination draft");
-    const readerPosition = label === "desktop" ? await page.locator("#message-list").evaluate(list => { list.scrollTop = 420; return list.scrollTop; }) : null;
+    // Actual reader input releases the newest-message pin. Setting scrollTop
+    // alone is programmatic layout movement and intentionally does not do so.
+    let readerPosition = null;
+    if (label === "desktop") {
+      await page.locator("#message-list").hover();
+      await page.mouse.wheel(0, -400);
+      await page.waitForFunction(() => {
+        const list = document.querySelector("#message-list");
+        return list.scrollTop > 0 && list.scrollHeight - list.clientHeight - list.scrollTop > 100;
+      });
+      readerPosition = await page.locator("#message-list").evaluate(list => list.scrollTop);
+    }
     await ensureSidebar();
     await page.locator("#channel-list [data-channel]").filter({ hasText: "design" }).click();
     assert.equal(await page.locator("#message-input").inputValue(), "");
     if (readerPosition !== null) {
       await page.locator("#channel-list [data-channel]").filter({ hasText: "general" }).click();
       const returned = await page.locator("#message-list").evaluate(list => list.scrollTop);
-      assert.ok(readerPosition > 0 && Math.abs(returned - readerPosition) < 3, "return to the same reading position");
+      assert.ok(readerPosition > 0 && Math.abs(returned - readerPosition) < 3,
+        `return to the same reading position: expected ${readerPosition}, got ${returned}`);
       await page.locator("#channel-list [data-channel]").filter({ hasText: "design" }).click();
     }
     await ensureSidebar();
