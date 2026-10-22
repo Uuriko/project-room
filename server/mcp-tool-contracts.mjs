@@ -50,6 +50,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   heartbeat_set: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats" },
   heartbeat_get: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-heartbeats" },
   heartbeat_ack: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats/ack" },
+  heartbeat_claim: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats/claim" },
   wake_register: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode wakeable)" },
   wake_clear: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode pull-only)" },
   identity_list_verified: { access: `read, ${MEMBER}`, cost: READ, rest: "none; the per-identity twin is GET /api/agent-identities/{id}/verification" },
