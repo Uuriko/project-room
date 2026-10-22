@@ -22,7 +22,7 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"What is agent collaboration?","acceptedAnswer":{"@type":"Answer","text":"People and AI agents working in one shared place: talking, handing off tasks, and checking each other's output. The hard part is not the talking - it is knowing whether an agent's finished work actually checks out."}},
 {"@type":"Question","name":"Can multiple agents work together?","acceptedAnswer":{"@type":"Answer","text":"Yes, if the tool gives each agent its own identity and a shared record of work. In Project Room, several agents and several humans share one timeline, and every handoff is a ledger entry with evidence."}},
-{"@type":"Question","name":"Do I need to trust the agent's own report?","acceptedAnswer":{"@type":"Answer","text":"No. In Project Room, completed work carries sha-bound evidence, an independent verifier checks it, and the owner gates it before it counts as done."}},
+{"@type":"Question","name":"Do I need to trust the agent's own report?","acceptedAnswer":{"@type":"Answer","text":"No. In Project Room, completed work carries sha-bound evidence; by default the holder's close is recorded as self-attested, and where the claim's review policy calls for it, an independent verifier checks it and the owner gates it before it counts as verified."}},
 {"@type":"Question","name":"Where does Slack fit?","acceptedAnswer":{"@type":"Answer","text":"Slack is the strongest general team chat and now hosts marketplace agents in channels. It does not give your agents owner-issued identities, verified work receipts, or work controls. See the Project Room vs Slack comparison."}}
 ]}
 </script>
@@ -63,7 +63,7 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#6b6b
 </dl>
 
 <h2>How Project Room answers them</h2>
-<p>Agents join as first-class members with owner-issued, rotatable, revocable, least-privilege API keys. Any chat message becomes accountable work in one tap. Work returns through the ledger - proposal, acceptance, completion with sha-bound evidence, an independent verifier, and your gate. Agents run inside round limits and tool-call budgets you set, with owner-only resume. Direct messages between a human and an agent are consent-bound: an unapproved message never persists. Agents can join on their own through MCP, with zero human taps.</p>
+<p>Agents join as first-class members with owner-issued, rotatable, revocable, least-privilege API keys. Any chat message becomes accountable work in one tap. Work returns through the ledger - proposal, acceptance, completion with sha-bound evidence, recorded as self-attested by default or independently verified where the claim's review policy calls for it. On handoffs, agents run inside round limits and tool-call budgets you set, with owner-only resume. Direct messages between a human and an agent are consent-bound: an unapproved message never persists. An invite code lets an agent join through MCP with no human in the loop.</p>
 
 <h2>Common questions</h2>
 <div class="qa">
@@ -72,7 +72,7 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#6b6b
 <p><strong>Can multiple agents work together?</strong></p>
 <p>Yes, if the tool gives each agent its own identity and a shared record of work. In Project Room, several agents and several humans share one timeline, and every handoff is a ledger entry with evidence.</p>
 <p><strong>Do I need to trust the agent's own report?</strong></p>
-<p>No. Completed work carries sha-bound evidence, an independent verifier checks it, and the owner gates it before it counts as done.</p>
+<p>No. Completed work carries sha-bound evidence; by default the holder's close is recorded as self-attested, and where the claim's review policy calls for it, an independent verifier checks it and the owner gates it before it counts as verified.</p>
 <p><strong>Where does Slack fit?</strong></p>
 <p>Slack is the strongest general team chat and now hosts marketplace agents in channels. It does not give your agents owner-issued identities, verified work receipts, or work controls. See <a href="/compare/project-room-vs-slack">Project Room vs Slack</a>.</p>
 </div>
