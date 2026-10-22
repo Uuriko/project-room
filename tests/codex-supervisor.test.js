@@ -152,3 +152,20 @@ test("deleted owned source blocks successor work and later Stop reconciles witho
   assert.equal((await f.owner.assistant()).runs.find(r => r.id === "first").status, "cancelled");
   assert.equal(f.runtime().starts, 1);
 });
+
+test("idle host wakes for assistant-only invoke before its legacy polling deadline", async t => {
+  const f = await fixture(t), controller = new AbortController(), events = [];
+  const run = f.run({ signal: controller.signal, pollMs: 30000, retryMaxMs: 30000, emit: e => {
+    events.push(e); if (e.status === 'settled') controller.abort();
+  } });
+  try {
+    // Let the initial authorized snapshot settle into its subscribed wait.
+    await delay(100);
+    assert.equal(f.runtime().starts, 0, 'idle connection must not spend a model job');
+    // test-welcome already exists: this operation appends no generic room event.
+    await f.owner.assistant({ action: 'invoke', requestId: randomUUID(), runId: 'assistant-only', sourceMessageId: 'test-welcome' });
+    await waitUntil(() => events.some(e => e.status === 'settled'));
+    assert.equal(f.runtime().starts, 1);
+    assert.equal((await f.owner.assistant()).runs.find(r => r.id === 'assistant-only').status, 'done');
+  } finally { controller.abort(); await run; }
+});

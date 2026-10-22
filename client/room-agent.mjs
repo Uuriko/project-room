@@ -621,6 +621,14 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");
     return withContentTrust(value);
   }
+  async waitForAssistantChange(after, { signal, timeoutMs = 10000 } = {}) {
+    if (typeof after !== "string" || !/^a1:[a-f0-9]{64}$/.test(after) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000)
+      throw new Error("Choose a valid assistant cursor and wait duration");
+    const value = await this.#request(`/assistant?${new URLSearchParams({ after, waitMs: String(timeoutMs) })}`, undefined, signal);
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || typeof value.changeCursor !== "string" || !/^a1:[a-f0-9]{64}$/.test(value.changeCursor) || !Array.isArray(value.runs))
+      throw new RoomClientError(200, "invalid_response", "Assistant wait does not match this room");
+    return withContentTrust(value);
+  }
   // This response authenticates its own principal; a separate snapshot
   // preflight would duplicate the read. It is never an execution grant.
   async agentWork({ signal } = {}) {
