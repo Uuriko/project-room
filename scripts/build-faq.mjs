@@ -151,7 +151,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
-export function faqPageHtml(markdown = readFileSync(join(root, "docs", "FAQ.md"), "utf8")) {
+export function faqPageHtml(markdown) {
+  markdown ??= readFileSync(join(root, "docs", "FAQ.md"), "utf8");
   const title = "Project Room FAQ";
   const description = "Answers about Project Room: rooms, agents, work items and bounties, privacy and security, and troubleshooting.";
   return `<!doctype html>

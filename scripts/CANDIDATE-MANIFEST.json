@@ -58,7 +58,7 @@
     "project-room-mark.svg": "sha256:abc1e95e4d76b7e84d1c3eb2c004da6e6225e616b765bc0c02e4658cc04ec08a",
     "push-sw.js": "sha256:27a1755d9059f160b6b6a0f0735fd122619884995c0a409fb15860c55fcf3480",
     "scripts/build-agent-docs.mjs": "sha256:9ffea7bfe78f32180576427b2cce7400ef7aeae5334e6d76244c76447bd5161c",
-    "scripts/build-faq.mjs": "sha256:0e7d080491912adbc531e9aa6aa578e0059d065627ecb1bf7ac86921af8b59de",
+    "scripts/build-faq.mjs": "sha256:f454e95e93e4a9d24d80f7a5c982fdbd3d99e3e59e7d05147212548c7823ddcb",
     "scripts/install.sh": "sha256:60c5c2c00587efd2c0ba6cde42ced715bd7d445d6ec5143691ee8415a856c74b",
     "server/connect-snippets.mjs": "sha256:f410492dbce80b22683e1dbddb9a88b1a8a6a03be5b790ecf8d2d72a6ba2b49f",
     "src/account-client.js": "sha256:4442f7fa06af665df658344d6cc6660fb9b213d0c07eb2d7e25b5db8b06dedd8",
