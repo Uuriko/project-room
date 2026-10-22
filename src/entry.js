@@ -1,8 +1,7 @@
 import { hasSessionHint } from "./browser-session.js";
 import { uiText } from "./strings.js";
-
 // Static imports must finish before the readable fallback yields to startup.
-document.documentElement.dataset.entryStarted = "true";
+import "./entry-started.js";
 
 let flight = null, dispose = () => {};
 const resumeKey = "project-room:signin-entry:v1";
