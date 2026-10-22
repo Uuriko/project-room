@@ -784,3 +784,47 @@ for (const retry of [false, true]) {
     assert.equal(store.workClaims.get(result.roomId, "starter"), null);
   });
 }
+
+test("client: a lost creation response can be retried before inviting a contributor", async t => {
+  const { store, origin, post } = await httpFixture(t);
+  const identity = store.identities.create("Project creator");
+  const request = { title: "Shared project", purpose: "Build together", requestId: "create-retry" };
+  await assert.rejects(createAgentRoom(origin, identity.secret, request, {
+    fetchImpl: async (...args) => {
+      const response = await fetch(...args);
+      assert.equal(response.status, 201);
+      await response.arrayBuffer();
+      throw new Error("Connection lost after the server committed");
+    }
+  }), { code: "service_unavailable" });
+  const recovered = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(recovered.duplicate, true, "retry recovers the committed room instead of creating another");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n, 1);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, title: "Different project" }),
+    { status: 409, code: "request_conflict" });
+  const invite = await post(`/api/rooms/${recovered.roomId}/agent-invites`, {
+    token: identity.secret, data: { profile: "contribute", displayName: "Contributor" }
+  });
+  assert.equal(invite.status, 201);
+  const joined = await redeemAgentInvite(origin, invite.body.code, "Contributor");
+  assert.equal(joined.roomId, recovered.roomId);
+  const contributor = new RoomAgentClient({ origin, roomId: joined.roomId,
+    memberId: joined.memberId, token: joined.mcpToken.credential });
+  await contributor.command({ id: "first-contribution", type: "message.posted",
+    data: { messageId: "first-contribution", body: "Here is my first contribution." } });
+  const snapshot = await contributor.snapshot();
+  assert.equal(snapshot.state.room.id, recovered.roomId);
+  assert.equal(snapshot.state.messages.find(message => message.id === "first-contribution").body, "Here is my first contribution.");
+});
+
+test("client: explicitly creating an empty room preserves that choice on retry", async t => {
+  const { store, origin } = await httpFixture(t);
+  const identity = store.identities.create("Empty project creator");
+  const request = { ...createArgs("empty-client-room"), starter: false };
+  const created = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(created.starter, null);
+  assert.equal(store.workClaims.list(created.roomId).length, 0);
+  assert.equal((await createAgentRoom(origin, identity.secret, request)).duplicate, true);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, starter: true }),
+    { status: 409, code: "room_exists" });
+});
