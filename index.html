@@ -96,15 +96,12 @@
              (/agent-signin, same component + endpoints); the wall
              keeps one labeled link to it. -->
         <a id="agent-signin-button" class="text-button" href="/agent-signin">Agent sign in</a>
-        <a class="text-button" href="/offers">Open work</a>
-        <a class="text-button" href="/receipts">Receipts</a>
         </div>
 
 
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
-        <button id="nav-inbox" type="button" aria-current="false">Inbox <span id="inbox-attention-count"></span></button>
         <button id="nav-rooms" type="button" aria-current="page">Rooms</button>
         <button id="choose-room" type="button" class="text-button" hidden>Switch room</button>
       </nav>
@@ -112,16 +109,13 @@
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h2 id="account-rooms-title" class="view-title" role="heading" aria-level="1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
-        <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
-          <h3 id="owner-cockpit-title">Needs you</h3>
-          <p id="cockpit-summary" role="status"></p>
-          <div id="cockpit-decisions"></div>
-          <div id="cockpit-exceptions"></div>
-          <div id="cockpit-room-stubs"></div>
-        </section>
+        <label for="account-rooms-search">Search your rooms</label>
+        <input id="account-rooms-search" type="search" autocomplete="off">
+        <p id="account-rooms-filter-status" role="status"></p>
+        <p><a class="button" href="./join">Join room</a></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
-        <p class="form-hint">Join a room through its invitation.</p>
+
         <!-- Request access lives at the room address now: the join page
              carries the one request-access door (human-map §8.1, #3293
              step 2). The acquisition-intent consumer in src/app.js sends
@@ -152,133 +146,18 @@
             <p id="acq-invite-link" class="form-hint" hidden></p>
           </div>
         </details>
+        <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
+          <h3 id="owner-cockpit-title">Needs you</h3>
+          <p id="cockpit-summary" role="status"></p>
+          <div id="cockpit-decisions"></div>
+          <div id="cockpit-exceptions"></div>
+          <div id="cockpit-room-stubs"></div>
+        </section>
         <details id="account-settings" class="account-settings">
           <summary>Sign-in &amp; security</summary>
           <div id="account-settings-body"></div>
         </details>
       </section>
-      <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
-        <aside class="inbox-sidebar">
-          <header><h2 id="inbox-heading" class="view-title" role="heading" aria-level="1" tabindex="-1">Inbox</h2><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
-          <section class="inbox-gmail" aria-label="Gmail">
-            <p id="inbox-gmail-notice" class="form-hint" role="status"></p>
-            <p id="inbox-gmail-status" class="form-hint" role="status">Bring your email into your private inbox.</p>
-            <button id="inbox-gmail-open" class="button primary" type="button" hidden>Open Gmail</button>
-            <button id="inbox-gmail-connect" class="button primary" type="button" disabled>Connect Gmail</button>
-            <details><summary>Manage inbox</summary>
-              <p class="form-hint">Gmail imports up to 25 recent inbox messages when you connect or sync. Your email stays private until you choose to share it.</p>
-              <button id="inbox-gmail-disconnect" class="button ghost" type="button" hidden>Disconnect</button>
-              <button id="inbox-setup" class="button ghost" type="button">Personalize setup</button>
-            </details>
-          </section>
-          <p id="inbox-status" role="status"></p>
-          <div id="inbox-filters" class="inbox-filters" role="group" aria-label="Filter messages" hidden>
-            <label>Channel <select id="inbox-filter-channel"></select></label>
-            <label>Connection <select id="inbox-filter-connection"></select></label>
-            <label class="inbox-filter-toggle"><input id="inbox-group-toggle" type="checkbox" checked> Group by connection</label>
-          </div>
-          <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Your inbox is empty. Connect Gmail to bring in your email.</p>
-          <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
-          <details id="inbox-add-connection" class="inbox-add-connection" hidden>
-            <summary>Advanced connections</summary>
-            <form id="inbox-connection-form" class="inbox-connection-form">
-              <label for="inbox-connection-channel">Channel</label>
-              <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option><option value="whatsapp">WhatsApp (pairing required)</option></select>
-              <label for="inbox-connection-id">Connection id</label>
-              <input id="inbox-connection-id" name="id" type="text" value="telegram-bot" maxlength="128" required autocomplete="off">
-              <div data-channel="telegram">
-                <label for="inbox-connection-bot-id">Bot id</label>
-                <input id="inbox-connection-bot-id" name="bot-id" type="text" inputmode="numeric" maxlength="20" placeholder="digits before the colon in the token" required autocomplete="off">
-                <label for="inbox-connection-username">Bot username</label>
-                <input id="inbox-connection-username" name="username" type="text" maxlength="33" placeholder="your_room_bot" required autocomplete="off">
-              </div>
-              <div data-channel="email" hidden>
-                <label for="inbox-connection-address">Mailbox address</label>
-                <input id="inbox-connection-address" name="address" type="email" maxlength="320" placeholder="you@example.test" autocomplete="off">
-              </div>
-              <div data-channel="whatsapp" hidden>
-                <label for="inbox-connection-phone">Phone number</label>
-                <input id="inbox-connection-phone" name="phone" type="tel" inputmode="tel" maxlength="16" placeholder="+15551234567" autocomplete="off">
-                <p class="form-hint">E.164 format. Only the last four digits are kept; the full number is never stored or shown.</p>
-              </div>
-              <label for="inbox-connection-name">Display name <span class="form-hint">(optional)</span></label>
-              <input id="inbox-connection-name" name="name" type="text" maxlength="200" autocomplete="off">
-              <p class="form-hint">Never paste a bot token or a webhook secret here; those are deployment bindings.</p>
-              <div class="inbox-draft-actions"><span id="inbox-connection-form-status" role="status"></span><button class="button secondary" type="submit">Add</button></div>
-            </form>
-          </details>
-        </aside>
-        <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
-        <article id="inbox-reader" class="inbox-reader" hidden>
-          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span> <span id="inbox-addressed" class="inbox-needs-you" hidden>Addressed to you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button> <button id="inbox-thread-toggle" class="button secondary" type="button">Conversation</button></header>
-          <p id="inbox-addresses" class="form-hint"></p>
-          <details id="inbox-email-details" class="form-hint" hidden><summary>Details</summary><div id="inbox-email-metadata"></div></details>
-          <section id="inbox-attachments" class="form-hint" aria-label="Attachments" hidden><h3>Attachments</h3><ul id="inbox-attachment-list"></ul><p class="form-hint">Names and sizes only — file downloads are unavailable.</p></section>
-          <section id="inbox-thread" class="form-hint" aria-label="Conversation" hidden><h3>Conversation</h3><div id="inbox-thread-list"></div></section>
-          <p id="inbox-source-notice" class="form-hint" hidden></p>
-          <div id="inbox-source-body" class="inbox-source-body"></div>
-          <section id="inbox-results" class="inbox-results" aria-label="Related room work" hidden><h3>From the room</h3><div id="inbox-result-list"></div></section>
-          <form id="inbox-draft-form" class="inbox-draft-form">
-            <label for="inbox-draft">Private reply draft</label>
-            <textarea id="inbox-draft" rows="5" maxlength="4000" placeholder="Write a reply…"></textarea>
-            <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
-            <p id="inbox-origin" class="form-hint"></p>
-          </form>
-          <section id="inbox-review-region" class="inbox-review-region" aria-label="Review &amp; send" hidden>
-            <h3 class="inbox-review-heading">Review &amp; send</h3>
-          <section id="inbox-reply-panel" class="inbox-send-panel" aria-label="Sample email review" hidden>
-            <p id="inbox-reply-status" class="form-hint" role="status"></p>
-            <button id="inbox-reply-open" class="button secondary" type="button">Review reply</button>
-          </section>
-          <section id="inbox-send-panel" class="inbox-send-panel" aria-label="Sample reply" hidden>
-            <p id="inbox-send-status" class="form-hint" role="status"></p>
-            <div class="inbox-draft-actions">
-              <button id="inbox-send-view" class="text-button" type="button" hidden>View reply</button>
-              <button id="inbox-send-cancel" class="button ghost" type="button" hidden>Cancel reply</button>
-              <button id="inbox-send-check" class="button secondary" type="button" hidden>Check status</button>
-              <button id="inbox-send-resume" class="button secondary" type="button" hidden>Review reply</button>
-              <button id="inbox-send-preview" class="button secondary" type="button">Preview reply</button>
-            </div>
-          </section>
-          <section id="inbox-conflict" class="inbox-conflict" aria-label="Draft changes" hidden>
-            <h3>Saved draft</h3><pre id="inbox-remote-draft"></pre>
-            <div><button id="inbox-use-saved" class="button secondary" type="button">Use saved</button><button id="inbox-use-mine" class="button secondary" type="button">Keep mine</button></div>
-          </section>
-          </section>
-        </article>
-      </section>
-      <dialog id="inbox-share-dialog" class="inbox-share-dialog" aria-labelledby="inbox-share-title">
-        <h2 id="inbox-share-title">Share with room</h2><p id="inbox-share-audience"></p>
-        <p class="form-hint">Selected text becomes room history, including for future members.</p>
-        <div id="inbox-share-paragraphs"></div><p id="inbox-share-status" role="status"></p>
-        <div class="inbox-draft-actions"><button id="inbox-share-close" class="button ghost" type="button">Close</button><button id="inbox-share-confirm" class="button primary" type="button" disabled>Share</button></div>
-      </dialog>
-      <dialog id="inbox-result-dialog" class="inbox-share-dialog" aria-labelledby="inbox-result-title">
-        <h2 id="inbox-result-title">Use as private draft</h2><p id="inbox-result-status" role="status"></p>
-        <pre id="inbox-result-body"></pre>
-        <details><summary>Replaces your current draft</summary><pre id="inbox-replaced-draft"></pre></details>
-        <p class="form-hint">Nothing will be sent.</p>
-        <div class="inbox-draft-actions"><button id="inbox-result-close" type="button" class="button ghost">Cancel</button><button id="inbox-result-use" type="button" class="button primary" disabled>Use as draft</button></div>
-      </dialog>
-      <dialog id="inbox-reply-dialog" class="inbox-share-dialog" aria-labelledby="inbox-reply-title">
-        <h2 id="inbox-reply-title">Review sample reply</h2>
-        <dl id="inbox-reply-addresses" class="inbox-reply-addresses"></dl>
-        <h3 id="inbox-reply-subject"></h3>
-        <div id="inbox-reply-versions" class="inbox-reply-versions">
-          <section><h3 id="inbox-reply-mailbox-label" hidden>Mailbox draft</h3><pre id="inbox-reply-body"></pre></section>
-          <section id="inbox-reply-local" hidden><h3>Your draft <span id="inbox-reply-local-state"></span></h3><pre id="inbox-reply-local-body"></pre></section>
-        </div>
-        <details id="inbox-reply-original" hidden><summary>Original draft</summary><pre id="inbox-reply-original-body"></pre></details>
-        <p id="inbox-reply-dialog-status" class="form-hint" role="status"></p>
-        <div class="inbox-draft-actions"><button id="inbox-reply-close" class="button ghost" type="button">Close</button><button id="inbox-reply-confirm" class="button primary" type="button" disabled>Mark reviewed</button></div>
-      </dialog>
-      <dialog id="inbox-send-dialog" class="inbox-share-dialog" aria-labelledby="inbox-send-title">
-        <h2 id="inbox-send-title">Sample reply</h2>
-        <p id="inbox-send-addresses" class="form-hint"></p><h3 id="inbox-send-subject"></h3>
-        <pre id="inbox-send-body"></pre><p id="inbox-send-dialog-status" class="form-hint" role="status"></p>
-        <div class="inbox-draft-actions"><button id="inbox-send-close" class="button ghost" type="button">Close</button><button id="inbox-send-confirm" class="button primary" type="button" disabled>Send sample</button></div>
-      </dialog>
       <main id="main" class="community-shell" hidden>
         <aside id="room-sidebar" aria-label="Channels and people">
           <div id="sidebar-workspace"></div>
@@ -294,7 +173,6 @@
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
             <button id="new-work-open" type="button">New work</button>
-            <button id="squads-open" type="button" aria-haspopup="dialog" aria-controls="squads-dialog">Squads</button>
           </nav>
           <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
           <div id="sidebar-invite"></div>
@@ -307,7 +185,7 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
-          <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
+
         </aside>
 
       <dialog id="board-dialog" aria-labelledby="board-title">
@@ -317,10 +195,6 @@
             <div id="work-board"></div>
           </details>
         </dialog>
-        <dialog id="squads-dialog" aria-labelledby="squads-title">
-          <div class="dialog-head"><h2 id="squads-title">Squads</h2><button id="squads-close" class="button ghost" type="button">Close</button></div>
-          <div id="squads-list"></div>
-        </dialog>
 
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
@@ -328,10 +202,9 @@
             <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="sr-only"></span></button>
               <details id="room-more" class="room-more"><summary class="topbar-button">More</summary>
                 <div class="room-more-actions">
-              <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
               <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Saved for later <span id="later-count" class="count-chip" hidden></span></button>
               <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Go to… <kbd aria-hidden="true">&#8984;K</kbd></button>
               <button id="topbar-settings" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">Settings</button>
@@ -339,9 +212,9 @@
               </details>
             </div>
           </header>
-          <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
+          <section id="needs-attention" aria-label="Needs your attention" hidden>
             <header class="attention-header">
-              <h3><span class="attention-icon" aria-hidden="true">!</span> Needs your attention <span id="attention-count" class="count-chip"></span></h3>
+              <h3>Decisions <span id="attention-count" class="sr-only"></span></h3>
               <button id="attention-refresh" class="button ghost" type="button">Refresh</button>
             </header>
             <ol id="attention-list" class="attention-list"></ol>
@@ -352,16 +225,6 @@
             </div>
             <p id="attention-status" class="status form-status" role="status"></p>
           </section>
-          <section id="activity-preview" class="needs-attention" aria-label="Recent activity for you" hidden>
-            <header class="attention-header">
-              <h3><span class="attention-icon" aria-hidden="true">✦</span> Needs your attention <span id="activity-preview-count" class="count-chip"></span></h3>
-              <span class="attention-actions">
-                <button id="activity-preview-open" class="button ghost" type="button">Open activity</button>
-                <button id="activity-preview-dismiss" class="button ghost" type="button">Dismiss</button>
-              </span>
-            </header>
-            <ol id="activity-preview-list" class="attention-list"></ol>
-          </section>
           <form id="search-form" class="topbar-search" role="search" aria-label="Search this room" hidden>
             <label class="sr-only" for="message-search">Search messages and work</label>
             <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentions</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
@@ -369,6 +232,7 @@
           <section id="search-results" class="search-results" aria-label="Search results" hidden>
             <p id="search-count" role="status"></p>
             <ol id="search-list"></ol>
+            <div id="results-panel" hidden><ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol></div>
           </section>
           <div id="thread-bar" class="thread-bar" hidden>
             <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
@@ -488,23 +352,6 @@
           </details>
         </dialog>
 
-        <dialog id="activity-dialog" aria-labelledby="activity-title">
-          <div class="dialog-head"><h2 id="activity-title">Activity</h2><button id="activity-close" class="button ghost" type="button">Close</button></div>
-          <p class="form-hint">Mentions, replies, and thread replies naming you — newest first. Opening an item marks it read.</p>
-          <div id="activity-filters" class="filter-row" role="group" aria-label="Filter activity">
-            <button class="button ghost" type="button" data-activity-filter="" aria-pressed="true">All</button>
-            <button class="button ghost" type="button" data-activity-filter="mention" aria-pressed="false">Mentions</button>
-            <button class="button ghost" type="button" data-activity-filter="reply" aria-pressed="false">Replies</button>
-            <button class="button ghost" type="button" data-activity-filter="thread_reply" aria-pressed="false">Threads</button>
-          </div>
-          <p id="activity-status" class="status form-status" role="status"></p>
-          <ul id="activity-list" class="rb-list"></ul>
-          <div class="rb-actions">
-            <button id="activity-older" class="button ghost" type="button" hidden>Older</button>
-            <button id="activity-read-all" class="button ghost" type="button">Mark all read</button>
-          </div>
-        </dialog>
-
         <dialog id="later-dialog" aria-labelledby="later-title">
           <div class="dialog-head"><h2 id="later-title">Saved for later</h2><button id="later-close" class="button ghost" type="button">Close</button></div>
           <p class="form-hint">Messages you saved. Opening one jumps to it in the conversation.</p>
@@ -545,51 +392,6 @@
           </details>
           <details id="advanced-room-tools"><summary>Advanced</summary>
             <p><a href="/demo">Demo conversation</a> · <button id="connect-guide-open" type="button" class="text-button">Connect your AI</button></p>
-          <details id="land-queue-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Landing</span><span id="land-queue-count" class="count-chip"></span></summary>
-            <div id="land-queue-list" class="land-queue-list"></div>
-          </details>
-          <details id="referral-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Referrals</span><span id="referral-count" class="count-chip"></span></summary>
-            <div id="referral-board" class="referral-board">
-              <div class="referral-mine">
-                <button id="referral-link-button" class="button secondary" type="button">My referral link</button>
-                <p id="referral-link-result" class="form-hint" hidden></p>
-              </div>
-              <div id="referral-my-list" class="referral-list" hidden>
-                <h4>My referrals</h4>
-                <ul id="referral-my-items"></ul>
-              </div>
-              <div id="referral-leaderboard-wrap" class="referral-list" hidden>
-                <h4>Leaderboard</h4>
-                <ol id="referral-leaderboard"></ol>
-              </div>
-              <div id="referral-recent-wrap" class="referral-list" hidden>
-                <h4>Recent joins</h4>
-                <ul id="referral-recent"></ul>
-              </div>
-            </div>
-          </details>
-          <details id="open-questions-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Open questions</span><span id="open-questions-count" class="count-chip"></span></summary>
-            <div id="open-questions-list-host" class="open-questions-board"></div>
-            <p id="open-questions-status" class="form-hint" role="status"></p>
-          </details>
-          <details id="retention-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Retention</span><span id="retention-alert" class="count-chip" hidden></span></summary>
-            <div id="retention-panel-host" class="retention-board"></div>
-            <p id="retention-status" class="form-hint" role="status"></p>
-          </details>
-          <details id="bounty-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Bounties &amp; credits</span><span id="bounty-count" class="count-chip"></span></summary>
-            <div id="bounty-board-host" class="bounty-board"></div>
-            <p id="bounty-status" class="form-hint" role="status"></p>
-          </details>
-          </details>
-          <details id="room-tools" class="room-tools"><summary>Suggestions and automations</summary>
-            <div id="recipe-strip" class="recipe-strip" hidden></div>
-            <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
-            <div id="recipe-preview" class="recipe-preview" hidden></div>
           </details>
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
@@ -601,10 +403,7 @@
             </div>
             <p id="room-about-status" class="status form-status" role="status"></p>
           </details>
-          <details id="results-panel" class="panel">
-            <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
-            <ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol>
-          </details>
+
           <details id="record-panel" class="panel record-panel">
             <summary class="panel-header section-summary"><span class="section-label"><strong id="record-title">History</strong></span><span id="event-count" class="count-chip"></span></summary>
             <details id="decision-section">
@@ -777,7 +576,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><h2 id="result-title" tabindex="-1">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-discuss" type="button" class="button" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></section>
+    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><div id="result-resize" role="separator" aria-orientation="vertical" aria-controls="result-dialog" tabindex="0"></div><header class="result-header"><h2 id="result-title" tabindex="-1">Result</h2><details id="result-options" class="result-options"><summary aria-label="Preview actions">⋯</summary><div><button id="result-copy-text" type="button" class="button ghost" hidden></button><button id="result-download" type="button" class="button ghost" hidden></button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></details><button id="close-result" type="button" class="button ghost"></button></header><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><p id="result-use-status" class="form-hint" role="status"></p><div class="portable-actions"><button id="result-discuss" type="button" class="button" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button></div></section>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>

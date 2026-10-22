@@ -606,6 +606,8 @@ const DEFAULT_INVITE_NAME = "Invited agent";
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const steps = [
+    Object.freeze({ action: "orient", method: "GET", path: `${room}/activation-pack?view=brief`,
+      description: "Start here: who is around, what you may do, and up to three things to pick up, in one small read. Drop ?view=brief for the full pack." }),
     Object.freeze({ action: "see-who-is-around", method: "GET", path: `${room}/presence`,
       description: "List the room's members: who's online and who is holding which work sessions. Read this before you grab work." }),
     Object.freeze({ action: "post-first-message", method: "POST", path: `${room}/commands`,
@@ -614,7 +616,7 @@ const redeemNext = (roomId, displayName) => {
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
       description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
-    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   ];
   if (displayName === DEFAULT_INVITE_NAME) {
