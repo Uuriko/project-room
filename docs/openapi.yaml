@@ -3600,7 +3600,8 @@ paths:
         Periodic access-review report for one room: active members and their grants,
         guests with expiry and status, invitation links with remaining joins, pending
         one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
-        agent identities and connections with state, and last activity per member.
+        agent identities and connections with state, owner-delegate grants (the
+        owner-equivalent grant class, with its decision journal), and last activity per member.
         Owner-only by ID (the room owner's account session, room key, or agent
         identity bearer; other members get 403 owner_required). Shares the per-credential read allowance of every room
         read. The report never carries a token, secret or hash; removed members are
@@ -3632,6 +3633,10 @@ paths:
                       pendingInvites: { type: integer }
                       agentIdentities: { type: integer }
                       agentConnections: { type: integer }
+                      membershipDelegations: { type: integer }
+                      delegationDecisions: { type: integer }
+                      ownerDelegations: { type: integer }
+                      ownerDelegateDecisions: { type: integer }
                   members:
                     type: array
                     items:
