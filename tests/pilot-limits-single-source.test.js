@@ -4,12 +4,20 @@
 // agent invites, so raising PILOT_LIMITS left those paths refusing at the old
 // numbers. This walks every module under server/ and cloudflare/ (recursively)
 // and fails if a cap is hard-coded again.
+//
+// CAP-PROBE-BINDING (2026-10-18): the write paths no longer compare against
+// the constant directly — they enforce the cap each store derived from the
+// runtime probe (RoomStore.projectionCapBytes / storeProjectionCapBytes in
+// storage-limits.mjs), ceilinged by PROJECTION_CAP_CEILING_BYTES. The literal
+// therefore lives exactly once, in storage-limits.mjs, and PILOT_LIMITS
+// carries it by reference; this guard now also pins that single home.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PILOT_LIMITS } from "../server/store.mjs";
+import { PROJECTION_CAP_CEILING_BYTES } from "../server/storage-limits.mjs";
 import { DurableDatabase, isTooBig } from "../cloudflare/storage.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -36,8 +44,15 @@ test("no module hard-codes the room projection cap", () => {
   const literal = /(\d+\s*\*\s*1024\s*\*\s*1024|\b\d{7,}\b|\d+\s*<<\s*20)/;
   assert.deepEqual(scan(line =>
     /MAX_PROJECTION_BYTES\s*=/.test(line)
-    || (/byteLength\(\s*projection/.test(line) && />\s*/.test(line) && !/PILOT_LIMITS\.projectionBytes/.test(line))
-    || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|^\s*\/\//.test(line))), []);
+    || (/byteLength\(\s*projection/.test(line) && />\s*/.test(line) && !/(PILOT_LIMITS\.projectionBytes|[Pp]rojectionCapBytes)/.test(line))
+    || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|PROJECTION_CAP_CEILING_BYTES\s*=|^\s*\/\//.test(line))), []);
+});
+
+test("the projection ceiling literal has exactly one home: storage-limits.mjs", () => {
+  const definitions = scan(line => /PROJECTION_CAP_CEILING_BYTES\s*=\s*\d/.test(line));
+  assert.equal(definitions.length, 1, definitions.join(", "));
+  assert.ok(definitions[0].startsWith("server/storage-limits.mjs:"), definitions[0]);
+  assert.equal(PILOT_LIMITS.projectionBytes, PROJECTION_CAP_CEILING_BYTES);
 });
 
 test("room capacity policy retains 1,000,000 events and the 4 MiB application guard", () => {

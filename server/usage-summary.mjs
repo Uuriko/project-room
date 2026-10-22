@@ -17,6 +17,7 @@
 // (30 days without one), not `?days=`; GET /spend-allowance stays as is.
 
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { storeProjectionCapBytes } from "./storage-limits.mjs";
 import { SESSION_EVENT_TYPES } from "../src/work-item-session.js";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 
@@ -101,7 +102,7 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
         members: headroom(activeMemberCount(room.state.members), PILOT_LIMITS.membersPerRoom),
         events: headroom(room.sequence, PILOT_LIMITS.eventsPerRoom),
         workItems: headroom(Object.keys(room.state.workItems ?? {}).length, PILOT_LIMITS.workItemsPerRoom),
-        projectionBytes: headroom(projectionBytes, PILOT_LIMITS.projectionBytes)
+        projectionBytes: headroom(projectionBytes, storeProjectionCapBytes(store))
       }
     };
   });

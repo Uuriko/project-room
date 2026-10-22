@@ -30,6 +30,7 @@
 
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
 import { PILOT_LIMITS } from "./store.mjs";
+import { storeProjectionCapBytes } from "./storage-limits.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -385,7 +386,7 @@ export class AccessRequests {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+    if (Buffer.byteLength(projection) > storeProjectionCapBytes(this.store)) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -573,7 +574,7 @@ export class AccessRequests {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }
     const projection = this.store.storedProjection(row.room_id, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {
+    if (Buffer.byteLength(projection) > storeProjectionCapBytes(this.store)) {
       return { approved: false, pendingNote: "Room projection limit reached; the request waits for an owner decision." };
     }
     const sequence = room.sequence + 1;

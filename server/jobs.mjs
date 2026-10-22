@@ -261,12 +261,35 @@ function defineJob(job) {
 // are one aggregate read over the rooms table plus the SQLite page
 // count — cheap at any room count. The limits are the lines where an
 // operator must act, not the hard caps: the largest room projection is
-// escalated at 3.5 MB against the 4 MiB application cap, and the
-// database at 8 GB against the 10 GB Durable Object SQLite limit.
+// escalated at five-sixths of the projection cap the store derived
+// from the runtime probe at open (storeGrowthLimits below; five-sixths
+// of today's cap reproduces the historical 3.5 MB line, and the line
+// now tracks the wall when a runtime's measured limit moves it), and
+// the database at 8 GB against the 10 GB Durable Object SQLite limit.
+// STORE_GROWTH_LIMITS itself remains the fallback for a store that
+// carries no derived cap.
 export const STORE_GROWTH_LIMITS = Object.freeze({
   maxProjectionBytes: 3_500_000,
   dbBytes: 8_000_000_000
 });
+
+// The escalation fraction of the effective projection cap: five-sixths
+// of today's cap is the historical fixed line, kept as a fraction so
+// the warning tracks the wall the write paths actually enforce.
+export const STORE_GROWTH_PROJECTION_FRACTION = 5 / 6;
+
+// The limits a store is judged against, derived from the projection cap
+// the store derived from the runtime probe at open (storage-limits.mjs)
+// — the escalation cites the same number the write paths enforce, not
+// a second constant that can drift from it.
+export function storeGrowthLimits(store) {
+  const cap = Number(store?.projectionCapBytes);
+  if (!Number.isFinite(cap) || cap <= 0) return STORE_GROWTH_LIMITS;
+  return Object.freeze({
+    maxProjectionBytes: Math.floor(cap * STORE_GROWTH_PROJECTION_FRACTION),
+    dbBytes: STORE_GROWTH_LIMITS.dbBytes
+  });
+}
 
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
@@ -589,7 +612,7 @@ export const JOBS = Object.freeze([
     // pages before the store reaches the hard cap.
     async run(store) {
       const gauges = measureStoreGrowth(store);
-      const breach = storeGrowthBreach(gauges);
+      const breach = storeGrowthBreach(gauges, storeGrowthLimits(store));
       if (!breach) return gauges;
       console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
       return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
