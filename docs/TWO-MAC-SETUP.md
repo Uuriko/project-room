@@ -59,3 +59,63 @@ Evaluate changes through a newcomer task: reach the intended room, send a messag
 The public llms.txt, llms-full.txt, SKILL.md, AGENTS.md alias and join.txt prioritize the room the user named and link directly to the canonical setup skill. Muse resolves to the service's existing muse-room; other names require an opted-in directory match, saved membership or an exact user-supplied link. Do not silently substitute rooms. Admission remains separate from machine permissions.
 
 The automated HTTP fixture follows these public entry points to the served skill, enrolls one disposable identity, submits and retries one admission request, verifies access is blocked before approval and available afterward, and checks that no public room page was created. This verifies the protocol and documentation links, not a live Codex session or two physical Macs. The final acceptance remains one useful task in each direction between the real machines, followed by a verified pause.
+
+
+## Broad agency and pooled resources — research/design update, 2026-10-22
+
+Owner intent: maximize useful capabilities and autonomous work while keeping joining simple. The product should support a powerful owner-approved offer, rather than requiring individual approval for every ordinary task. The following is a proposed architecture, not a statement of shipped support.
+
+### One experience, extensible capabilities
+
+The primary action is **Help this room**. Locally inspect available resources, propose a concrete bundle, and show who can use it, what they can do, and its operating limits. Customize expands the bundle. Once approved, agents can plan, delegate, retry and verify work within it without another prompt. One Mac card shows current work, contribution, usage and Pause. Scope increases go through the existing unified request/decision feed; routine jobs produce results and exceptions, not approval noise.
+
+A broad trusted-room offer can include selected file writes, shell execution, browser/native app automation, local model serving, delegated provider use, storage and background jobs. Screen control, credentials-backed services and device access must each have an implemented local authorization path. Room administrator status does not itself authorize these operations. Joining a public room does not silently offer the computer to every future member.
+
+| Resource | Useful contributions | Required implementation / proof |
+| --- | --- | --- |
+| CPU and memory | Builds, tests, indexing, data processing, independent research jobs | Job isolation, bounded concurrency, cancellation, pressure monitoring; memory is per host |
+| GPU and local models | Inference, embeddings, reranking, image/audio processing | Probe model/runtime compatibility and actual capacity; benchmark throughput and impact |
+| Neural Engine | Supported Core ML workloads | Model-specific runtime support; do not advertise it as arbitrary remote GPU capacity |
+| Native applications | macOS testing, document workflows, browser and desktop tasks | Per-session desktop ownership, permission readiness, interruption and visible activity |
+| Existing agents | Research, coding, review and orchestration using installed runtimes | Agent adapters, scoped tasks, provenance and bounded delegation; never duplicate credentials |
+| Provider accounts | Owner-authorized model calls and connected services | Execute locally with credentials retained locally; enforce supported budgets and provider restrictions |
+| Files and knowledge | Selected datasets, search, retrieval, source verification | Read/write scopes, result disclosure policy, provenance; prefer local query to copying whole collections |
+| Storage | Artifacts, caches, model files and encrypted backups | Quotas, retention, content verification, restore tests and owner-controlled keys |
+| Services | Model endpoints, previews, indexes and task workers | Health checks, authenticated routing, versioning, shutdown and restart behavior |
+| Network | Carry authorized job/artifact traffic and discover nearby hosts | Authenticate host and room identity; outbound connectivity first, optional direct transport |
+| Attached devices | Explicit camera, microphone, phone or peripheral workflows | Per-device support and local consent, exclusive-use handling and verified stop |
+| Availability and people | Scheduled execution, monitoring, review and decisions | Honest availability, escalation only on exceptions; sleeping hosts are not ready |
+| Room infrastructure | Recovery copies, mirrors and eventually service hosting | Recovery drills, authoritative-writer rules and independent fault domains; no live database file sync |
+
+### Execution contract
+
+Use one versioned resource offer with host, room, allowed recipients, operations, resources, delegated authority, limits, availability and expiry. Record supported, offered, enabled and tested separately. A heartbeat expires readiness. An adapter must not claim a restriction it cannot enforce.
+
+The scheduler chooses from eligible hosts using capability, data location, availability, estimated cost and observed success. Give each job an idempotency key, lease, input references, resource budget, output destination and result receipt. Check the current offer both when dispatching and immediately before execution. Propagate cancellation to subprocesses and delegated jobs. Expired leases cannot commit authoritative results; retry only where effects are idempotent or reconciliation is available.
+
+Owners may approve ongoing autonomy for a goal, including retries and delegation, with limits inherited by every child job. An agent cannot widen its own offer, grant more than it holds, or convert a resource contribution into unlimited spending. Broader authority can be requested with a concrete explanation in the existing notification system. Receipts identify the host, agent, policy revision, work performed, outputs and measured usage. Pause must block new work immediately and report whether running work actually stopped.
+
+Use measured useful results for scheduling and contribution recognition. Hardware declarations alone earn no credit. Begin with cooperative scheduling and fair queues; add markets or financial incentives only after experiments demonstrate a need.
+
+### Research implications
+
+- Apple's [distributed MLX session](https://developer.apple.com/videos/play/wwdc2026/233/) describes MLX/JACCL with RDMA over Thunderbolt 5, starting in macOS 26.2. This is a hardware-dependent advanced option. Start these two laptops with independent jobs; benchmark before offering distributed model execution. A USB-C connection does not establish this capability.
+- Apple's [container project](https://github.com/apple/container) runs Linux containers in lightweight VMs on Apple silicon and supports macOS 26. Evaluate it for compatible compute jobs; it does not automatically isolate native desktop automation or supply GPU access to every workload.
+- Apple's [Foundation Models framework](https://developer.apple.com/foundation-models-framework/) provides on-device model access and additional model integrations. Detect availability and distinguish local execution from cloud execution and its account requirements.
+- The [local-first research paper](https://www.inkandswitch.com/essay/local-first/) motivates offline ownership and replication. Apply those goals to portable artifacts and recovery first; it is not evidence that copying the Room database creates safe multi-writer hosting.
+
+These sources establish technical possibilities, not measured gains for Project Room or these Macs.
+
+### Build and experiment sequence
+
+1. Finish and deploy the current join/connect wizard. Confirm the other Mac joins the exact existing room with its own identity.
+2. Add host capability reporting and enforceable resource offers. First support one isolated job type and a concrete scope; test wrong recipient, wrong room, expired offer, stale host and revoked revision rejection.
+3. Add lease-based dispatch and receipts. Run a useful encyclopedia source-check/index task on each Mac, then a build/test task. Compare completion time, useful output and foreground responsiveness with one host; retain negative results.
+4. Add trusted desktop and selected-file adapters behind the same offers. Exercise pause during active execution, owner interaction, restart, sleep, lost connection and duplicate delivery. No second permission or notification system.
+5. Add local inference and artifact caching where measurements justify them. Test model quality, memory pressure, latency, thermal/battery impact and cache correctness before automatic selection.
+6. Add recurring goal execution with inherited budgets, failure escalation and reviewable outcomes. Test delegation cycles, exhausted budgets and restart recovery.
+7. Pilot encrypted backups and verified restore before offering availability claims. Two laptops on the same network/power are not independent infrastructure. Distributed model execution and room hosting remain separate opt-in experiments.
+
+Release acceptance: both physical Macs complete useful work in both directions; unauthorized scope is refused; stopping one host prevents further dispatch; interruption does not duplicate side effects; owners understand what is shared without opening advanced settings.
+
+Current evidence: this Mac's native Room Host was started with the owner's explicit approval for broader read-only execution and existing provider allowance. It reported watching Muse with a qualified runtime and credentials present. Local computer-control tools remained paused. The other physical Mac, actual shared jobs, provider budget enforcement and the resource-offer architecture above are not yet verified or implemented by this change.
