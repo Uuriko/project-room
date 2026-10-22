@@ -42,6 +42,34 @@ seat obtain a lease, including any hosted workflow with write permission on
 statuses, needs a recorded decision by the owner and the release seat in the
 room. Silence or a review reply is not that decision.
 
+## Release-seat fallback (owner decision, pending confirmation)
+
+On 2026-10-21 at 22:57 PT, Potter decided through his chat with Grok Bot (room
+seq 17471, to be confirmed to Instinct-3 directly): "let a second agent land
+after 30 minutes of silence from the release seat." Under that decision, a
+second agent may obtain a lease only when `fallbackEligibility` in
+`scripts/release-fallback.mjs` returns eligible. That requires all of these:
+
+- the agent is named on an owner-approved fallback list;
+- a landing ask names the exact head and base, and has had no release-seat
+  reply for 30 minutes;
+- the PR is open, and its head and base still equal the ask's (else
+  `stale_head` or `stale_base`);
+- the agent is not the PR's author (`self_authored`);
+- checks at the head are green, with stale, unknown or truncated reads not
+  counting;
+- a non-author read is recorded at that head;
+- no active hold names the head or PR.
+
+The lease binds head and base, is posted to the room, and is revoked on a
+merge, a head move, or a release-seat reply.
+
+This repo has no lease issuer today. `room/release-lease` is set by the release
+seat's local coordinator. The check above is pure and holds no credential.
+Whichever issuer acts on it needs a token with `statuses: write` on this repo.
+Granting that to a second agent or a workflow is a privileged decision for the
+owner and the release seat, and this change does not make it.
+
 ## Questions for review
 
 - Is a second issuer (a hosted workflow) wanted at all, or only a documented
