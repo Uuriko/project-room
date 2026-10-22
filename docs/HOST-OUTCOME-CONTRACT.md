@@ -34,13 +34,19 @@ whether the task succeeded.
 ```
 
 - `outcome` absent means `answered`, so every existing host keeps working.
-- `declined` means the host ran and is not completing the request (needs input,
-  refused, or failed). `body` says why and what is needed. It maps to
-  `responseOutcome: "declined"` on the same saved response.
+- `declined` maps to `responseOutcome: "declined"` on the same saved response.
+  It closes the request: it is a terminal refusal, not a resumable
+  needs-input state, and not proof that the task failed. `body` says why.
+- `answered` likewise records a reply. It is not verified task success;
+  acceptance stays with the existing review and acceptance records.
+- Asking for clarification while keeping the request open is a separate case
+  this contract does not cover. It must not be encoded as `declined`.
 - Body text is never parsed. `FAILED:` or `NEEDS_INPUT:` in a body is content.
-- A thrown error is not an outcome. It keeps today's behavior: saved answer
-  goes to `result_ready` and is retried unchanged; no saved answer goes to
-  `needs_attention`.
+- A thrown error is not an outcome. It keeps today's runner behavior:
+  - no saved response: the attempt is reported `needs_attention`;
+  - saved response, transient failure (network, 408, 429, 5xx): reported
+    `result_ready` and delivered unchanged on retry;
+  - saved response, definite refusal (409 or 422): reported `needs_attention`.
 
 ## Kept as is
 
@@ -64,6 +70,10 @@ contract implies, and it is the implementation owner's call.
 ## Probe
 
 tests/host-outcome-probe.test.js pins the current behavior this contract
-depends on: body text is passed through untouched, an unknown `outcome` key
-is rejected today (so adding it is an explicit contract change, not a silent
-one), and the run lifecycle actions are the five above.
+depends on: body text is passed through untouched, and an unknown `outcome`
+key is rejected today (so adding it is an explicit contract change, not a
+silent one). Its lifecycle check is a source match, not a behavioral test.
+The delivered-for-declined gap was reproduced over real local HTTP by an
+independent review (muse-room 17329): claim, result_ready, recorded declined
+reply, then delivered is refused with request_run_not_delivered and the row
+stays result_ready.
