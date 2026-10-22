@@ -199,7 +199,31 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_claim_surface", "Take a surface claim in a room: a coordination claim on a subject so other members and fleets see who holds it before touching it. Same write as POST /api/rooms/:roomId/surface-claims. scope carries at least one of prs, issues, branch, surfaces (repo paths or folder/**), lane, room (true), names (free-named subjects). windowMinutes defaults to 90. The claim expires at the window end or when your heartbeat presence in the room goes silent past the grace window, whichever comes first. A subject another member holds returns surface_claim_held with the held claim (holder named) in detail.held. Re-claiming a subject you already hold supersedes your old claim. This is not a work claim: it leases no board item and grants no permission.", schema({
+    roomId: roomIdField,
+    scope: { type: "object", description: "Typed subject union: prs/issues (number arrays), branch (string), surfaces (path array), lane (string), room (true), names (string array). At least one dimension." },
+    note: { type: "string", maxLength: 500 },
+    windowMinutes: { type: "integer", minimum: 1, maximum: 1440 }
+  }, ["roomId", "scope"]), false),
+  tool("room_list_surface_claims", "List surface claims in a room, or read one when claimId is set. Same reads as GET /api/rooms/:roomId/surface-claims and GET /api/rooms/:roomId/surface-claims/:claimId. States are swept first: a claim past its effective expiry (window end, or holder presence silent past the grace window) reads expired, never stale-active. Optional state filters (active, released, expired, superseded); mine=true lists only your own claims. Reading does not renew or change any claim.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, description: "Omit to list. Set to read one claim." },
+    state: { type: "string", enum: ["active", "released", "expired", "superseded"] },
+    mine: { type: "boolean" }
+  }, ["roomId"])),
+  tool("room_release_surface_claim", "Release a surface claim. Same write as POST /api/rooms/:roomId/surface-claims/:claimId/release. The holder releases its own claim; the room owner or a member with manage_claims can release another member's. reason is optional and stored on the claim. A released claim frees its subject immediately.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, description: "Surface claim id (sc_...) from room_claim_surface or room_list_surface_claims." },
+    reason: { type: "string", maxLength: 200 }
+  }, ["roomId", "claimId"]), false),
+  tool("room_amend_surface_claim", "Amend your own surface claim in place: replace scope, note, or window (windowMinutes restarts the window from now). Same write as POST /api/rooms/:roomId/surface-claims/:claimId/amend. Holder only. The prior scope is kept in the claim's history. Amending into a subject another member holds returns surface_claim_held with the held claim in detail.held.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, description: "Surface claim id (sc_...) from room_claim_surface or room_list_surface_claims." },
+    scope: { type: "object", description: "Replacement scope, same typed union as room_claim_surface." },
+    note: { type: "string", maxLength: 500 },
+    windowMinutes: { type: "integer", minimum: 1, maximum: 1440 }
+  }, ["roomId", "claimId"]), false)
 
 ];
 

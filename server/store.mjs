@@ -71,6 +71,7 @@ import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
+import { createDurableSurfaceClaimRegistry, surfaceClaimSchema } from "./surface-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, ensurePublicReceiptAgentIdsColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
@@ -1131,7 +1132,7 @@ function roomSchemaStamp() {
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     wakeQueuePauseBySchema,
-    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    attentionSchema, workClaimSchema, surfaceClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
@@ -1429,6 +1430,10 @@ export class RoomStore {
       transaction: fn => this.transaction(fn),
       onChange: roomId => noteWorkClaimChange(this, roomId),
     });
+    // CLAIM-PRIM: durable surface claims (server/surface-claims.mjs).
+    this.surfaceClaims = createDurableSurfaceClaimRegistry(this.db, {
+      transaction: fn => this.transaction(fn),
+    });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -1502,6 +1507,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
+        this.surfaceClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
         this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
@@ -1761,6 +1767,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.workClaims.verifySchema({ allowAbsent: true });
       this.db.exec(workClaimSchema);
       this.workClaims.verifySchema();
+      // Surface claims are purely additive: IF NOT EXISTS, no schema version bump.
+      this.surfaceClaims.verifySchema({ allowAbsent: true });
+      this.db.exec(surfaceClaimSchema);
+      this.surfaceClaims.verifySchema();
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
@@ -5115,6 +5125,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
     });
+  }
+  // CLAIM-PRIM: the member's latest heartbeat-presence signal in the room,
+  // in ms — the agent host heartbeat (via the identity link, the same
+  // signal presence() reads) or the member's latest room activity,
+  // whichever is newer. Null when the member has no signal on record.
+  // Surface-claim expiry consumes this (server/surface-claims.mjs).
+  surfaceClaimPresenceAt(roomId, memberId) {
+    const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+    let latest = NaN;
+    const link = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+      .get(roomId, memberId);
+    if (link) {
+      const status = this.agentHeartbeats.statusOf(link.identityId);
+      const seen = timestamp(status?.lastSeenAt);
+      if (Number.isFinite(seen)) latest = seen;
+    }
+    const activity = this.db.prepare(
+      `SELECT max(json_extract(body,'$.at')) AS at FROM events WHERE room_id=? AND json_extract(body,'$.actorId')=?`
+    ).get(roomId, memberId);
+    const acted = timestamp(activity?.at);
+    if (Number.isFinite(acted)) latest = Number.isFinite(latest) ? Math.max(latest, acted) : acted;
+    return Number.isFinite(latest) ? latest : null;
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
     // 3rd arg may be the legacy session binding or an options object.

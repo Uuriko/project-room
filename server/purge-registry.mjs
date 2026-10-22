@@ -1854,6 +1854,16 @@ const ROWS = [
     }
   },
   {
+    "table": "surface_claims",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "work_claims",
     "key": "room_id",
     "action": "delete",

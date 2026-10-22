@@ -371,6 +371,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // Durable live work claims: additive, verified on open, included in recovery.
   "work_claims",
   "work_claim_config",
+  // Durable surface claims (CLAIM-PRIM): additive, verified on open, same
+  // rationale as the work-claim rows — older writers have no code path to
+  // it and the registry verifies its own schema on open.
+  "surface_claims",
   // Claim-history spill (W3 data preservation): the append-only store for
   // history stamps the SEC-2 cap trims out of work_claims rows. Purely
   // additive and intentionally NOT fenced, same rationale as the claim
