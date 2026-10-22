@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { discoveryDoc, DISCOVERY_PATHS, ROOM_ORIGIN } from "../server/agent-discovery.mjs";
 import { CONNECT_SKILL_PATH, AGENT_SKILLS_INDEX_PATH, CONNECT_PROTOCOL_ROUTES, connectSkillMd, agentSkillsIndexJson } from "../server/connect-skill.mjs";
 import { DISCOVERABILITY_ROUTES } from "../server/discoverability.mjs";
@@ -117,6 +118,52 @@ test("the MCP tool the skill names for saying hello exists in the catalog snapsh
   for (const match of body.matchAll(/`(room_[a-z_]+)`/g)) {
     assert.ok(toolNames.has(match[1]), `skill names MCP tool ${match[1]}, absent from the catalog snapshot`);
   }
+});
+
+test("the credential field the skill prose names is the one the redeem response carries, and it authenticates", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-connect-skill-pin-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = { "User-Agent": "project-room-agent", "Content-Type": "application/json", Origin: base };
+
+  // The one-time credential field Step 1's prose names.
+  const named = connectSkillMd().match(/one-time `([A-Za-z]+)`/);
+  assert.ok(named, "the skill's Step 1 prose names a one-time credential field");
+  const field = named[1];
+
+  const mint = await fetch(`${base}/api/rooms/commons/agent-invites`, {
+    method: "POST", headers: { ...headers, Authorization: `Bearer ${ownerKey}` },
+    body: JSON.stringify({ permissions: ["accept_work"], expiresInMinutes: 60, displayName: "Pin Bot" })
+  });
+  assert.equal(mint.status, 201, "operator-side mint succeeds");
+  const { code } = await mint.json();
+
+  const redeem = await fetch(`${base}/api/agent-invites/redeem`, {
+    method: "POST", headers, body: JSON.stringify({ code, displayName: "Pin Bot" })
+  });
+  assert.equal(redeem.status, 201, "redeem as documented succeeds");
+  const response = await redeem.json();
+
+  // Exactly one secret-shaped field rides the response, and the prose names
+  // it (D1: the prose named `secret`; the response carries `identitySecret`,
+  // and Step 2 read from the named field returned 401).
+  const secretFields = Object.keys(response).filter(key => /secret/i.test(key));
+  assert.deepEqual(secretFields, [field],
+    `redeem response carries secret-shaped fields [${secretFields.join(", ")}] but the skill names ${field}`);
+  assert.equal(typeof response[field], "string");
+  assert.ok(response[field].length > 0, "the named field carries the credential value");
+
+  // Step 2 as documented, with the value from the prose-named field.
+  const heartbeat = await fetch(`${base}/api/agent-heartbeats`, {
+    method: "POST", headers: { ...headers, Authorization: `Bearer ${response[field]}` },
+    body: JSON.stringify({ hostId: "pin-host", mode: "wakeable" })
+  });
+  assert.equal(heartbeat.status, 200, "heartbeat with the prose-named field's value succeeds");
 });
 
 test("the connect skill copy makes no pay or payout claim", () => {
