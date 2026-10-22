@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { APPROVED_FALLBACKS, fallbackEligibility, FALLBACK_SILENCE_MS } from "../scripts/release-fallback.mjs";
+import { APPROVED_FALLBACKS, OWNER_CONFIRMATION_SEQ, fallbackEligibility, FALLBACK_SILENCE_MS } from "../scripts/release-fallback.mjs";
 
 const JILL = "ai_rNH_kQLusyE2Y0sj";
 const HEAD = "a".repeat(40);
@@ -10,6 +10,7 @@ const NOW = T0 + FALLBACK_SILENCE_MS;
 const iso = ms => new Date(ms).toISOString();
 const base = (over = {}) => ({
   fallback: { memberId: JILL, githubLogin: "jill-2" },
+  ownerConfirmationSeq: 17999,
   ask: { head: HEAD, base: BASE, postedAt: iso(T0), releaseSeatRepliedAt: null },
   pr: { number: 4490, head: HEAD, base: BASE, authorLogin: "codex-bot", state: "open" },
   checks: { head: HEAD, status: "green", includesCommitStatuses: true },
@@ -74,4 +75,21 @@ test("the owner-approved fallback list names Jill 2 only", () => {
   assert.equal(fallbackEligibility(base({ fallback: { memberId: "ai_NiIvggYi1S2wfYN_", githubLogin: "grok-bot" } })).reason, "not_approved_fallback");
   assert.equal(fallbackEligibility(base({ approvedFallbacks: [] })).reason, "not_approved_fallback");
   assert.equal(fallbackEligibility(null).reason, "not_approved_fallback");
+});
+
+test("the relayed decision refuses until the owner's own room record is set", () => {
+  assert.equal(OWNER_CONFIRMATION_SEQ, null);
+  assert.equal(fallbackEligibility(base({ ownerConfirmationSeq: undefined })).reason, "owner_unconfirmed");
+  assert.equal(fallbackEligibility(base({ ownerConfirmationSeq: 0 })).reason, "owner_unconfirmed");
+});
+
+test("logins compare case-insensitively and malformed hold rows refuse (17501)", () => {
+  assert.equal(fallbackEligibility(base({ pr: pr({ authorLogin: "JILL-2" }) })).reason, "self_authored");
+  assert.equal(fallbackEligibility(base({ reads: [{ login: "CODEX-BOT", head: HEAD, verified: true }] })).reason, "no_non_author_read");
+  assert.equal(fallbackEligibility(base({ pr: pr({ authorLogin: "bad login!" }) })).reason, "author_unknown");
+  const bad = base();
+  bad.holdObservation.holds = [null];
+  assert.equal(fallbackEligibility(bad).reason, "holds_malformed");
+  bad.holdObservation.holds = [{ active: true }];
+  assert.equal(fallbackEligibility(bad).reason, "holds_malformed");
 });

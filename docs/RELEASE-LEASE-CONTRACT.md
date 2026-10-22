@@ -66,6 +66,12 @@ second agent may obtain a lease only when `fallbackEligibility` in
 The lease binds head and base, is posted to the room, and is revoked on a
 merge, a head move, or a release-seat reply.
 
+The decision was relayed rather than posted by the owner in Room, so
+`OWNER_CONFIRMATION_SEQ` is `null` and every request refuses with
+`owner_unconfirmed`. Once the owner posts the decision in Room, a PR sets that
+constant to the record's seq. GitHub logins compare case-insensitively, and a
+malformed hold row refuses rather than counting as no hold.
+
 This repo has no lease issuer today. `room/release-lease` is set by the release
 seat's local coordinator. The check above is pure and holds no credential.
 Whichever issuer acts on it needs a token with `statuses: write` on this repo.
