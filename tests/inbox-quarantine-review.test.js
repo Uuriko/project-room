@@ -13,7 +13,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { normalizeTelegramUpdate, telegramSourceId } from "../server/channel-adapters/telegram.mjs";
 import { RoomStore, ServiceError } from "../server/store.mjs";
-import { InboxClient } from "../src/inbox-client.js";
+import { InboxClient } from "../archive/deferred-email/src/inbox-client.js";
 
 const throwsCode = (fn, status, code) => assert.throws(fn,
   error => error instanceof ServiceError && error.status === status && error.code === code);
@@ -225,7 +225,7 @@ test("the thread-split schema verifies on read-only opens without migrating", t 
 
 async function httpFixture(t) {
   const { f, account, token, binding, hold1, hold2 } = quarantineFixture(t);
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -465,7 +465,7 @@ test("a re-import shows the latest shadow decision, not the first", t => {
 
 test("GET /api/inbox/quarantine exposes the shadow context over HTTP", async t => {
   const { f, token, binding } = shadowFixture(t);
-  const server = createRoomServer({ store: f.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;

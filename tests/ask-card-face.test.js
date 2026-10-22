@@ -21,6 +21,16 @@ test('a host silent past the window reads Stalled; the stop button only renders 
   assert.equal(askFaceStatus(null), null);
 });
 
+test('server pickup observations win over a skewed browser clock', () => {
+  const queued = { status: 'queued', createdAt: 5000 };
+  assert.equal(askFaceStatus({ ...queued, displayStatus: 'not_picked_up' }, 1000).key, 'not_picked_up');
+  assert.equal(askFaceStatus({ ...queued, displayStatus: 'queued' }, 1e9).key, 'asked');
+  assert.equal(askFaceStatus({ ...queued, displayStatus: 'not_picked_up' }, 1000, { availability: 'paused' }).key, 'host_paused');
+  assert.equal(askFaceStatus({ status: 'working', displayStatus: 'stalled' }).key, 'stalled');
+  assert.equal(askFaceStatus({ status: 'unknown', displayStatus: 'unknown' }).text, 'Connection interrupted');
+  assert.equal(askFaceStatus({ status: 'working', displayStatus: 'working', stopOutcome: 'attempt_revoked' }).key, 'unknown');
+});
+
 test('the face shows the newest open ask; with none open, the newest finished one', () => {
   const runs = { a: { id: 'a', status: 'done', createdAt: 30 }, b: { id: 'b', status: 'working', createdAt: 10 }, c: { id: 'c', status: 'queued', createdAt: 20 }, d: { id: 'd', status: 'queued', createdAt: 40, sourceDeleted: true } };
   assert.equal(faceRun(runs).id, 'c', 'open beats finished, newest open first, deleted prompts never surface');

@@ -223,7 +223,7 @@ export class OAuthGrantAgents {
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {
-        fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+        fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       }
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -265,5 +265,19 @@ export function createGrantAgentResolver(store, { accountPrincipalClients = ACCO
     if (accountPrincipalClients.includes(clientId)) return Object.freeze({ accountPrincipal: true });
     const resolved = store.oauthGrantAgents.resolve({ accountId: userId, clientId, clientName });
     return Object.freeze({ agentIdentityId: resolved.identityId });
+  };
+}
+
+// The removal check factory — the resolver's companion shape, injected by
+// server/http.mjs into the provider and reused verbatim by tests. A
+// binding that EXISTS and is revoked is a removed agent: the provider
+// refuses its token verification, exchanges, and refreshes, so removal
+// cannot be undone by a stale family re-binding a successor at refresh
+// time. A pair with no binding was never approved (nothing was removed),
+// and a live binding is ordinary — only the revoked state is a removal.
+export function createGrantAgentRemovalCheck(store) {
+  return ({ userId, clientId }) => {
+    const binding = store.oauthGrantAgents.binding({ accountId: userId, clientId });
+    return binding !== null && binding.revokedAt !== null;
   };
 }
