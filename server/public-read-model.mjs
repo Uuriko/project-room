@@ -21,6 +21,7 @@ const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
 // The member receipt's public twin (#3636): the same deterministic id the
 // projection writes, and the absolute URL a holder can share.
 export const publicWorkClaimReceiptId = (roomId, claimId) => hashId("wcr", roomId, claimId);
+export const publicWorkItemReceiptId = (roomId, itemId) => hashId("wir", roomId, itemId);
 export const publicReceiptUrl = id => `${PUBLIC_ORIGIN}/receipts/${id}`;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -357,7 +358,7 @@ function optedInRows(store, state) {
     const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
       ? item.receipt.evidenceVersion : null;
     rows.push({
-      id: hashId("wir", roomId, item.id),
+      id: publicWorkItemReceiptId(roomId, item.id),
       title: cleanName(item.title) ?? "Receipt",
       source: "work-item",
       originRoomId: roomId,
@@ -797,7 +798,17 @@ const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
-  if (room) { clauses.push("room_id=?"); params.push(room); }
+  if (room) {
+    // A room's own receipts match by their source room even when the
+    // room withholds its public face (room_id stays null until the
+    // room lists): the caller already holds the room id, so the filter
+    // confirms nothing the receipt page doesn't. Public-work rows
+    // carry their room in room_id — their origin is a namespace, never
+    // a room — so the origin leg names only the room sources, the same
+    // split roomProofRows applies.
+    clauses.push("(room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))");
+    params.push(room, room);
+  }
   if (needle) { clauses.push("instr(lower(agents_json), ?) > 0"); params.push(needle); }
   return { clauses, params };
 };

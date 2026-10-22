@@ -60,12 +60,12 @@ import {
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
-import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, publicReceipts } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -476,11 +476,26 @@ const receiptOf = item => {
 // in to public receipts and neither the owner toggle nor an operator
 // unpublish hides it — so the field is never a dead link. No twin: both
 // fields are null, stating plainly that this receipt has no public page.
+//
+// The recorded opt-in is checked on the room state itself, never on the
+// projection rows: a stale row left by mirror drift must not advertise a
+// link for a room that opted out (the settled-lot RCA's lesson). And one
+// completion carries one public receipt under either of two ids — the
+// claim's own wcr_ row, or the wir_ row a completed board work item
+// projects the same completion under (the projection deliberately skips
+// the mirrored claim there, UT-SHARE F-3) — so both deterministic ids
+// are tried and whichever the public read resolves is the twin.
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
-  const publicId = publicWorkClaimReceiptId(roomId, item.id);
-  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
-  return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+  const noTwin = Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  const state = store.room(roomId)?.state;
+  if (!state || publicReceipts(state).enabled !== true) return noTwin;
+  for (const publicId of [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]) {
+    if (publicReceiptById(store, publicId)) {
+      return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+    }
+  }
+  return noTwin;
 };
 
 const receiptsQueryOf = (reject, params) => {
