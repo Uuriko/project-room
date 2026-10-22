@@ -1481,7 +1481,10 @@ paths:
         `lastSeenAt` is last command, session heartbeat, or member.added.
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
-        non-agent or unlinked members).
+        non-agent or unlinked members), plus DECLARE additive `availability`
+        and `execution` — the seat's declared availability and execution
+        capabilities from its heartbeat payload, projected beside presence
+        and never merged into it (null when undeclared or unlinked).
         Derived state is working only for a fresh processing/active session;
         listening for an SSE watcher, canonical online agent host (respecting
         each host's cadence), or a human command within 5 minutes; idle for
@@ -1611,6 +1614,65 @@ paths:
                         method: { type: string }
                         path: { type: string }
                         description: { type: string }
+  /api/rooms/{roomId}/route-request:
+    post:
+      x-room-permission: member
+      summary: Route a work action to a seat, with a typed answer
+      description: >-
+        DECLARE (MIG-PRESENCE Gap 2): ask a named member's seat to take a
+        work action (`execute`, `review`, or `observe`). The caller must be
+        a member of the room and the target an active member (404
+        `member_not_found` otherwise). An agent seat's execution
+        declaration (set on the heartbeat payload) gates the action,
+        AND-ed on top of membership — a declaration never makes a
+        non-member reachable. The answer is always a receipt, never
+        silence: `routed: true` with a `route_accepted` receipt (an
+        accepted agent request is queued as an `assignment` wake signal
+        under the receipt's `requestId`; human members accept directly),
+        or `routed: false` with a `route_decline` receipt — reason
+        `wrong_seat` naming the seat's declared capabilities and scope
+        when the declaration excludes the action, or
+        `execution_not_declared` when the seat never declared.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memberId, action]
+              additionalProperties: false
+              properties:
+                memberId: { type: string, description: "The target member's id in this room" }
+                action: { type: string, enum: [execute, review, observe] }
+                note: { type: string, maxLength: 1000, description: "Optional context for the seat" }
+      responses:
+        '200':
+          description: Routed or declined — the receipt says which
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routed: { type: boolean }
+                  receipt:
+                    type: object
+                    properties:
+                      kind: { type: string, enum: [route_accepted, route_decline] }
+                      reason: { type: string, enum: [wrong_seat, execution_not_declared], description: "Declines only" }
+                      roomId: { type: string }
+                      memberId: { type: string }
+                      action: { type: string }
+                      requestedBy: { type: string }
+                      requestId: { type: string, description: "Acceptances only; also the wake signal's message id for agent seats" }
+                      declaredCapabilities: { type: array, nullable: true, items: { type: string }, description: "Declines only; null when undeclared" }
+                      declaredScope: { type: string, nullable: true, description: "Declines only" }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '404': { description: member_not_found }
+        '409': { description: room_archived }
+        '422': { description: invalid_request }
   /api/rooms/{roomId}/export:
     get:
       summary: Export the event log as JSONL, or as a readable HTML page
@@ -11270,6 +11332,21 @@ paths:
                       required: [roomId]
                       properties:
                         roomId: { type: string, minLength: 1 }
+                availability:
+                  type: ["object", "null"]
+                  description: "DECLARE (MIG-PRESENCE Gap 1): the seat's declared availability — { state: available|busy|away|offline, until?: epoch ms, note?: <=140 chars }. Identity-level and sticky like cadenceSeconds: omitted keeps the stored declaration, an explicit null clears it. Declared availability is a separate fact from heartbeat presence and never overwrites it; the response's declaration block and GET read it back, and room presence projects it beside host presence."
+                  required: [state]
+                  properties:
+                    state: { type: string, enum: [available, busy, away, offline] }
+                    until: { type: ["number", "null"], description: "epoch ms the state holds until" }
+                    note: { type: ["string", "null"], maxLength: 140 }
+                execution:
+                  type: ["object", "null"]
+                  description: "DECLARE (MIG-PRESENCE Gap 2): the seat's declared execution capabilities — { capabilities: subset of [execute, review, observe] (empty declares none), scope?: <=280 chars }. Same sticky semantics as availability. POST /api/rooms/{roomId}/route-request gates routed actions on this declaration and answers exclusions with a typed decline receipt."
+                  required: [capabilities]
+                  properties:
+                    capabilities: { type: array, items: { type: string, enum: [execute, review, observe] } }
+                    scope: { type: ["string", "null"], maxLength: 280 }
                 pushNotification:
                   type: object
                   required: [url, token]
@@ -11283,7 +11360,7 @@ paths:
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, declaration: { availability, execution, updatedAt }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
@@ -11294,13 +11371,16 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:read` scope. Returns `{ agentId, status
         (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
-        wakeUrl, lastSeenAt, state }] }`. A room access key meeting the same
+        wakeUrl, lastSeenAt, state }], availability, execution }` — the
+        caller's DECLARE declarations ride beside host presence (null when
+        never declared; declared availability never changes the
+        heartbeat-derived status). A room access key meeting the same
         single-room binding requirements sees only its own credential-specific
         pull-only hosts, never identity-owned wake URLs. 120 per identity per minute.
       security:
         - bearerAuth: []
       responses:
-        '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
+        '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }], availability, execution }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
   /api/agent-wakes/poll:
