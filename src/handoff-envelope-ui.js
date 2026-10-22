@@ -86,16 +86,18 @@ function expectedOutputHtml(expectedOutput) {
   return `<p><span class="handoff-chip">${kind}</span></p><p class="definition">${esc(expectedOutput.description ?? "")}</p>${schema}`;
 }
 
-function acceptanceTestHtml(acceptanceTest, checksPassed) {
+function acceptanceTestHtml(acceptanceTest, checksAsserted) {
   const checks = Array.isArray(acceptanceTest?.checks) ? acceptanceTest.checks : [];
   if (!checks.length) return "";
-  const passed = new Set(Array.isArray(checksPassed) ? checksPassed : []);
+  // The journal records the recipient's assertion, never an evaluation
+  // (#4064 H2), so the mark reads "asserted", not "passed".
+  const asserted = new Set(Array.isArray(checksAsserted) ? checksAsserted : []);
   return `<ol class="handoff-checks">${checks.map(check => {
     const kind = CHECK_KIND_LABELS[check?.kind] ?? esc(check?.kind ?? "check");
     const target = check?.workId ? `work <code>${esc(check.workId)}</code>${check?.verdict ? ` · verdict ${esc(check.verdict)}` : ""}`
       : check?.reviewer ? `reviewer ${esc(check.reviewer)}`
       : check?.verdict ? `verdict ${esc(check.verdict)}` : "";
-    const mark = passed.has(check?.kind) ? ` <span class="handoff-pass">passed</span>` : "";
+    const mark = asserted.has(check?.kind) ? ` <span class="handoff-pass">asserted</span>` : "";
     const description = check?.description ? `<p class="handoff-note">${esc(check.description)}</p>` : "";
     return `<li><span class="handoff-chip">${kind}</span>${target ? ` ${target}` : ""}${mark}${description}</li>`;
   }).join("")}</ol>`;
@@ -152,7 +154,9 @@ export function handoffEnvelopeHtml(receipt) {
     section("Inputs", inputsHtml(envelope.inputs)),
     section("Authority", authorityHtml(envelope.authority)),
     section("Expected output", expectedOutputHtml(envelope.expectedOutput)),
-    section("Acceptance test", acceptanceTestHtml(envelope.acceptanceTest, completedEntry?.checksPassed)),
+    // Receipts written before #4064 recorded the assertion as checksPassed;
+    // read either, render both as the assertion they always were.
+    section("Acceptance test", acceptanceTestHtml(envelope.acceptanceTest, completedEntry?.checksAsserted ?? completedEntry?.checksPassed)),
     section("Termination", terminationHtml(envelope.termination)),
     section("Provenance", provenanceHtml(envelope.provenance)),
   ].join("");

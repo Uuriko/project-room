@@ -216,7 +216,7 @@ test("L-29: fetchUrls stops fetching once maxEvidence is reached", async () => {
     "no web-fetch quota spent on URLs that can never be used");
 });
 
-// ---- L-30: checksPassed keeps every asserted pass --------------------------
+// ---- L-30: checksAsserted keeps every asserted pass ------------------------
 // (1) Contract: complete() records exactly the checks the recipient
 // asserted, without collapsing duplicates. (2) Regression: dedupe merged
 // two distinct same-kind checks into one, weakening acceptance on the
@@ -247,7 +247,7 @@ test("L-30: complete records every asserted check pass without dedupe", () => {
   const done = journal.transition("room-1", envelopeId, "completed",
     { by: "agent-b", checksPassed: ["result_submitted", "result_submitted"] });
   const entry = done.history.at(-1);
-  assert.deepEqual([...entry.checksPassed], ["result_submitted", "result_submitted"],
+  assert.deepEqual([...entry.checksAsserted], ["result_submitted", "result_submitted"],
     "both asserted passes are recorded");
 });
 

@@ -148,9 +148,17 @@ test("completed envelopes mark the checks the recipient asserted passed", () => 
   const html = handoffEnvelopeHtml(receipt({ status: "completed",
     history: [{ status: "proposed", at: iso(NOW), by: "agent-a" },
       { status: "accepted", at: iso(NOW + HOUR), by: "agent-b" },
-      { status: "completed", at: iso(NOW + 2 * HOUR), by: "agent-b", checksPassed: ["work_completed"] }] }));
-  assert.match(html, /Work completed<\/span>[\s\S]*?<span class="handoff-pass">passed<\/span>/);
+      { status: "completed", at: iso(NOW + 2 * HOUR), by: "agent-b", checksAsserted: ["work_completed"] }] }));
+  // The mark reads "asserted": the journal never evaluates checks (#4064 H2).
+  assert.match(html, /Work completed<\/span>[\s\S]*?<span class="handoff-pass">asserted<\/span>/);
   assert.doesNotMatch(html, /Result submitted<\/span>[\s\S]*?<span class="handoff-pass">/);
+  // Receipts written before #4064 recorded the same assertion as
+  // checksPassed; they render with the same honest mark.
+  const legacy = handoffEnvelopeHtml(receipt({ status: "completed",
+    history: [{ status: "proposed", at: iso(NOW), by: "agent-a" },
+      { status: "accepted", at: iso(NOW + HOUR), by: "agent-b" },
+      { status: "completed", at: iso(NOW + 2 * HOUR), by: "agent-b", checksPassed: ["work_completed"] }] }));
+  assert.match(legacy, /Work completed<\/span>[\s\S]*?<span class="handoff-pass">asserted<\/span>/);
 });
 
 test("state transitions display correctly across proposed, accepted and completed cards", () => {

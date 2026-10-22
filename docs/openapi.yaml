@@ -12823,7 +12823,8 @@ paths:
         Room-token write (CSRF + rate limit). The envelope carries the seven
         typed sections: objective, inputs (references, never blobs),
         authority (permission bits, room/work resource scope, expiry),
-        expectedOutput, acceptanceTest (machine-checkable checks),
+        expectedOutput, acceptanceTest (declared checks, named in
+        machine-readable form),
         termination (expiry plus the on-expiry behaviour), and provenance
         (creator, claim id, task id, parent envelope, full ancestor chain).
         Authority bits are confined to the collab vocabulary — manage_members
@@ -12879,9 +12880,11 @@ paths:
         accepted | rejected | cancelled, accepted → completed | rejected |
         escalated | cancelled. Only the recipient may accept, reject, or
         complete; only the sender may cancel; either party may escalate.
-        Completing requires naming the declared acceptance checks that
-        passed (checksPassed). Expiry to expired is system-only — the sweep
-        owns it.
+        Completing requires the recipient to name the declared acceptance
+        checks they assert passed (checksAsserted, or the legacy input name
+        checksPassed); the receipt records the assertion as checksAsserted
+        and the journal does not evaluate the checks. Expiry to expired is
+        system-only — the sweep owns it.
       security:
         - roomToken: []
       parameters:
@@ -12899,7 +12902,8 @@ paths:
               properties:
                 status: { type: string, enum: [accepted, completed, rejected, escalated, cancelled] }
                 note: { type: string, maxLength: 500 }
-                checksPassed: { type: array, items: { type: string }, description: "kinds from the envelope's acceptanceTest.checks" }
+                checksPassed: { type: array, items: { type: string }, description: "legacy input name for checksAsserted" }
+                checksAsserted: { type: array, items: { type: string }, description: "kinds from the envelope's acceptanceTest.checks that the recipient asserts passed; recorded on the receipt as checksAsserted, never evaluated" }
       responses:
         '401': { description: unauthenticated }
         '200': { description: "{ envelope: { envelopeId, status, roomId, envelope, history } }" }

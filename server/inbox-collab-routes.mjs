@@ -382,11 +382,12 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       case "envelope-transition": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
-        if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed"] })) {
-          invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
+        if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed", "checksAsserted"] })) {
+          invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksAsserted?}');
         }
         const envelope = store.handoffEnvelopes.transition(roomId, collabId, fields.status,
-          { by: caller.id, note: fields.note ?? null, checksPassed: fields.checksPassed ?? null });
+          { by: caller.id, note: fields.note ?? null, checksPassed: fields.checksPassed ?? null,
+            checksAsserted: fields.checksAsserted ?? null });
         return json(res, 200, { envelope });
       }
       case "envelope-sweep": {
