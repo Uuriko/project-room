@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
 import {Miniflare} from 'miniflare';
-import {STORE_SCHEMA_VERSION} from '../server/writer-fence.mjs';
+import {STORE_SCHEMA_VERSION} from '../../server/writer-fence.mjs';
 test('Worker record rails preserve verified completion, scoped privacy and exact retry after restart',async()=>{
  const bundle=await build({entryPoints:[fileURLToPath(new URL('./record-rails.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
  const persistence=await mkdtemp(join(tmpdir(),'record-rails-worker-')),config={modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'RecordRailRoom',useSQLite:true}},durableObjectsPersist:persistence};let mf=new Miniflare(config);
