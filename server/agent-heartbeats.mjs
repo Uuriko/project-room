@@ -151,6 +151,69 @@ export const wakeRoomActivitySchema = `
     PRIMARY KEY(agent_id, room_id)
   );
 `;
+// DECLARE (MIG-PRESENCE Gap 1 + Gap 2): identity-level seat declarations —
+// availability (available|busy|away|offline) and execution capabilities
+// (execute|review|observe). A seat declares them on the heartbeat payload;
+// they are identity-level and last-write-wins, sticky like cadenceSeconds
+// (an omitted field preserves the stored declaration, an explicit null
+// clears it). Declared availability and heartbeat-derived presence are
+// different facts: neither overwrites the other, and an absent declaration
+// reads as unknown (null), never as a fabricated default. Lazy DDL for the
+// same reason as the lease tables: kept out of agentHeartbeatSchema so
+// deployed databases keep passing the strict DDL-text verifySchema.
+export const agentDeclarationSchema = `
+  CREATE TABLE IF NOT EXISTS agent_declarations (
+    agent_id TEXT PRIMARY KEY,
+    availability_json TEXT,
+    execution_json TEXT,
+    updated_at INTEGER NOT NULL
+  );
+`;
+export const AVAILABILITY_STATES = Object.freeze(["available", "busy", "away", "offline"]);
+export const EXECUTION_CAPABILITIES = Object.freeze(["execute", "review", "observe"]);
+const AVAILABILITY_KEYS = Object.freeze(["state", "until", "note"]);
+const EXECUTION_KEYS = Object.freeze(["capabilities", "scope"]);
+export const MAX_AVAILABILITY_NOTE_CHARS = 140;
+export const MAX_EXECUTION_SCOPE_CHARS = 280;
+
+const checkAvailability = value => {
+  check(value !== null && typeof value === "object" && !Array.isArray(value),
+    422, "invalid_heartbeat", "availability must be an object");
+  check(Object.keys(value).every(key => AVAILABILITY_KEYS.includes(key)),
+    422, "invalid_heartbeat", "availability accepts state, until, and note only");
+  check(AVAILABILITY_STATES.includes(value.state),
+    422, "invalid_heartbeat", `availability.state must be one of ${AVAILABILITY_STATES.join(", ")}`);
+  if (value.until !== undefined && value.until !== null)
+    check(Number.isFinite(value.until) && value.until > 0,
+      422, "invalid_heartbeat", "availability.until must be a positive epoch-ms number");
+  if (value.note !== undefined && value.note !== null)
+    check(typeof value.note === "string" && value.note.length <= MAX_AVAILABILITY_NOTE_CHARS,
+      422, "invalid_heartbeat", `availability.note must be a string of at most ${MAX_AVAILABILITY_NOTE_CHARS} chars`);
+  return Object.freeze({
+    state: value.state,
+    ...(value.until !== undefined && value.until !== null ? { until: value.until } : {}),
+    ...(value.note !== undefined && value.note !== null ? { note: value.note } : {}),
+  });
+};
+
+const checkExecution = value => {
+  check(value !== null && typeof value === "object" && !Array.isArray(value),
+    422, "invalid_heartbeat", "execution must be an object");
+  check(Object.keys(value).every(key => EXECUTION_KEYS.includes(key)),
+    422, "invalid_heartbeat", "execution accepts capabilities and scope only");
+  check(Array.isArray(value.capabilities),
+    422, "invalid_heartbeat", "execution.capabilities must be an array (possibly empty: declares no execution)");
+  check(value.capabilities.every(cap => EXECUTION_CAPABILITIES.includes(cap)),
+    422, "invalid_heartbeat", `execution.capabilities entries must be among ${EXECUTION_CAPABILITIES.join(", ")}`);
+  if (value.scope !== undefined && value.scope !== null)
+    check(typeof value.scope === "string" && value.scope.length <= MAX_EXECUTION_SCOPE_CHARS,
+      422, "invalid_heartbeat", `execution.scope must be a string of at most ${MAX_EXECUTION_SCOPE_CHARS} chars`);
+  return Object.freeze({
+    capabilities: Object.freeze([...new Set(value.capabilities)]),
+    ...(value.scope !== undefined && value.scope !== null ? { scope: value.scope } : {}),
+  });
+};
+
 export const SCOPED_LISTENER_HOST_PATTERN = /^(?:rk_[a-f0-9]{64}|ak_[a-f0-9]{32})_/;
 export const isScopedListenerHostId = hostId =>
   typeof hostId === "string" && SCOPED_LISTENER_HOST_PATTERN.test(hostId);
@@ -337,6 +400,67 @@ export class AgentHeartbeats {
     return this;
   }
 
+  // Idempotent DDL for the declarations table (no-op on warm databases).
+  ensureDeclarationSchema() {
+    this.db.exec(agentDeclarationSchema);
+    return this;
+  }
+
+  // DECLARE: the identity's current declarations — { availability,
+  // execution, updatedAt } with nulls when never declared. Missing-table
+  // tolerant like the other read paths: a pre-feature database (or a
+  // read-only open, which never migrates) reads as undeclared, never an
+  // error. Absent means unknown — callers must not invent a default.
+  declarationOf(agentId) {
+    checkAgentId(agentId);
+    let row = null;
+    try {
+      row = this.db.prepare(
+        "SELECT availability_json AS availabilityJson, execution_json AS executionJson, updated_at AS updatedAt FROM agent_declarations WHERE agent_id=?")
+        .get(agentId);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      row = null;
+    }
+    const parse = text => {
+      if (text === null || text === undefined) return null;
+      try {
+        const value = JSON.parse(text);
+        return value && typeof value === "object" && !Array.isArray(value) ? Object.freeze(value) : null;
+      } catch { return null; }
+    };
+    return Object.freeze({
+      availability: parse(row?.availabilityJson),
+      execution: parse(row?.executionJson),
+      updatedAt: row?.updatedAt ?? null,
+    });
+  }
+
+  // DECLARE: persist one heartbeat's declarations. Sticky like
+  // cadenceSeconds: undefined (omitted) preserves the stored declaration,
+  // a validated object replaces it, an explicit null clears it. Called
+  // from heartbeat() only after validation, so a refused heartbeat
+  // stores nothing.
+  storeDeclarations(agentId, { availability, execution }, at) {
+    this.ensureDeclarationSchema();
+    const current = this.declarationOf(agentId);
+    const availabilityJson = availability === undefined
+      ? (current.availability ? JSON.stringify(current.availability) : null)
+      : availability === null ? null : JSON.stringify(availability);
+    const executionJson = execution === undefined
+      ? (current.execution ? JSON.stringify(current.execution) : null)
+      : execution === null ? null : JSON.stringify(execution);
+    this.db.prepare(`INSERT INTO agent_declarations
+      (agent_id, availability_json, execution_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(agent_id) DO UPDATE SET
+        availability_json=excluded.availability_json,
+        execution_json=excluded.execution_json,
+        updated_at=excluded.updated_at`)
+      .run(agentId, availabilityJson, executionJson, at);
+    return this;
+  }
+
   // plan-wake-live: stamp the agent's last-polled-at. Polls and
   // heartbeats both prove the host is listening (a heartbeat response
   // carries the pending wake queue), so both count as poll activity.
@@ -511,10 +635,16 @@ export class AgentHeartbeats {
   // erased a declared cadence — collapsing the presence window, and
   // with #3592 the wakeability window too — for a host that had
   // declared its cadence once and then heartbeated bare.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat", availability = undefined, execution = undefined }) {
     checkAgentId(agentId);
     checkHostId(hostId);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
+    // DECLARE: declarations validate before anything is stored, so a
+    // refused heartbeat leaves the host row and the declarations untouched.
+    // undefined (omitted) and null (explicit clear) pass through as-is;
+    // an object is normalized by its checker.
+    const nextAvailability = availability === undefined || availability === null ? availability : checkAvailability(availability);
+    const nextExecution = execution === undefined || execution === null ? execution : checkExecution(execution);
     // RC-2026-09-28-3602: wakeable is the default; mode may be null when the
     // caller omits it. An explicitly invalid value still fails.
     const effectiveMode = mode === undefined || mode === null ? "wakeable" : mode;
@@ -571,6 +701,11 @@ export class AgentHeartbeats {
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
     if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
+    // DECLARE: identity-level declarations ride the same heartbeat. They
+    // are stored after the host upsert so the heartbeat's own liveness is
+    // recorded even if the caller only meant to declare.
+    if (nextAvailability !== undefined || nextExecution !== undefined)
+      this.storeDeclarations(agentId, { availability: nextAvailability, execution: nextExecution }, at);
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
     const pushRow = this.db.prepare(
@@ -1165,6 +1300,10 @@ export class AgentHeartbeats {
   statusOf(agentId) {
     checkAgentId(agentId);
     const at = this.now();
+    // DECLARE: the identity's declarations ride every presence read.
+    // Declared availability is a separate fact from host liveness: a seat
+    // can be online and away, or offline and declared available.
+    const declaration = this.declarationOf(agentId);
     let hosts;
     try {
       hosts = this.db.prepare("SELECT * FROM agent_hosts WHERE agent_id=? ORDER BY last_seen_at DESC")
@@ -1175,10 +1314,12 @@ export class AgentHeartbeats {
       // migrate): no host ever reported — read as unregistered, never an
       // error. presenceForCard promises null for absent heartbeat tables;
       // that promise runs through this shape.
-      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
+      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]),
+        availability: declaration.availability, execution: declaration.execution });
     }
     if (hosts.length === 0) {
-      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
+      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]),
+        availability: declaration.availability, execution: declaration.execution });
     }
     let cadences = new Map();
     try {
@@ -1202,6 +1343,8 @@ export class AgentHeartbeats {
       status: online ? "online" : "offline",
       lastSeenAt: withState[0].lastSeenAt,
       hosts: Object.freeze(withState),
+      availability: declaration.availability,
+      execution: declaration.execution,
     });
   }
 

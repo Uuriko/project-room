@@ -33,6 +33,10 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     // re-create the reset-by-omit hazard the store no longer has.
     cadenceSeconds: data.cadenceSeconds,
     pushNotification: data.pushNotification ?? null, workWakes: data.workWakes,
+    // DECLARE: availability/execution declarations pass through untouched,
+    // like cadenceSeconds — undefined (omitted) preserves the stored
+    // declaration, an object replaces it, an explicit null clears it.
+    availability: data.availability, execution: data.execution,
     workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null,
     // #3345: delivery accounting attributes the page to its door (the
     // REST heartbeat route and the MCP heartbeat_set tool share this path).

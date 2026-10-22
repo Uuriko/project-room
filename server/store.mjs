@@ -5074,6 +5074,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         .map(m => {
           const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
           const host = hostStatusOf(m.id);
+          // DECLARE (MIG-PRESENCE Gap 1 + Gap 2): the seat's declarations,
+          // projected beside heartbeat presence — never merged into it.
+          // Null for members with no linked identity or no declaration.
+          const declaration = host.identityId ? this.agentHeartbeats.declarationOf(host.identityId) : null;
           const workingOn = working.get(m.id) ?? [];
           const isWatching = watching.has(m.id);
           return {
@@ -5081,6 +5085,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             watching: isWatching, workingOn,
             lastSeenAt, statusMessage: m.statusMessage ?? null,
             presence: agentPresence(m.id),
+            availability: declaration?.availability ?? null,
+            execution: declaration?.execution ?? null,
             // #660: derived working state + owner/scope projection (additive).
             state: presenceState({
               kind: m.kind,

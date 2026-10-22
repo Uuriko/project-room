@@ -1569,6 +1569,37 @@ paths:
                             The member chip lazy-loads the card from
                             /api/rooms/{roomId}/members/{memberId}/card;
                             null when the member has no visible card.
+                        availability:
+                          type: object
+                          nullable: true
+                          description: >-
+                            DECLARE: the seat's declared availability
+                            (`{ state: available|busy|away|offline, until?,
+                            note? }`), declared on the heartbeat payload.
+                            A declared fact beside heartbeat `presence`,
+                            never merged into it: a seat can be online and
+                            away. Null when the member has no linked
+                            identity or never declared (unknown, not a
+                            default).
+                          properties:
+                            state: { type: string, enum: [available, busy, away, offline] }
+                            until: { type: number, description: "epoch ms the state holds until, when declared" }
+                            note: { type: string, maxLength: 140 }
+                        execution:
+                          type: object
+                          nullable: true
+                          description: >-
+                            DECLARE: the seat's declared execution
+                            capabilities (`{ capabilities:
+                            [execute|review|observe...], scope? }`),
+                            declared on the heartbeat payload. POST
+                            /api/rooms/{roomId}/route-request answers a
+                            routed action against this declaration with a
+                            typed decline instead of silence. Null when
+                            undeclared.
+                          properties:
+                            capabilities: { type: array, items: { type: string, enum: [execute, review, observe] } }
+                            scope: { type: string, maxLength: 280 }
                   next:
                     type: array
                     description: Machine-readable follow-ups — dm-member when someone is watching, listening or executing fresh work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
