@@ -24,6 +24,10 @@ async function serve(t, { seed = false } = {}) {
       .run(id, title, merged ? "https://github.com/Uuriko/project-room/pull/1" : null, merged ? at : null, at);
     insert(`pwr_${"a".repeat(64)}`, "Older verified work", "2026-10-01T00:00:00.000Z", true);
     insert(`pwr_${"b".repeat(64)}`, "Newer recorded work", "2026-10-05T00:00:00.000Z", false);
+    // Projected room-source rows imply a recorded opt-in (Ruling 40): the
+    // rows above are inserted behind the store's back, so the setting the
+    // real command path would have recorded is recorded here too.
+    store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES ('commons', 1)").run();
   }
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
