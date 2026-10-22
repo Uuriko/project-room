@@ -11215,7 +11215,7 @@ paths:
         cadence is declared — reads as stale/offline. The response carries
         the agent's queued wake signals (`pendingWakes`: mention/dm signals
         queued while the agent was offline); acknowledge them via POST
-        `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
+        `/api/agent-heartbeats/ack` once handled. 300 per identity per minute.
       security:
         - bearerAuth: []
       requestBody:
@@ -11287,7 +11287,7 @@ paths:
         identity and room binding are rechecked after a held wait before
         returning any pointers. Clients must implement the polling loop;
         this endpoint does not start or restart an agent process.
-        30 requests per identity per minute.
+        600 requests per identity per minute.
       security:
         - bearerAuth: []
       parameters:
