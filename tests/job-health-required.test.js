@@ -74,6 +74,7 @@ function jobsFetch(jobsPayload, status = 200) {
     if (url.endsWith("/mcp")) return new Response(JSON.stringify({ jsonrpc: "2.0", result: { tools: [{ name: "room_status" }] } }), { status: 200, headers: { "content-type": "application/json" } });
     if (url.endsWith("/llms.txt")) return new Response("# Uuriko Project Room\n", { status: 200, headers: { "content-type": "text/plain" } });
     if (url.endsWith("/api/health/jobs")) return new Response(JSON.stringify(jobsPayload), { status, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/api/public/receipts")) return new Response(JSON.stringify({ schema: "project-room-public-receipt-list/1", receipts: [] }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
   };
 }

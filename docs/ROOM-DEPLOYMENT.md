@@ -156,6 +156,13 @@ account that already runs Room.
   named tool.
 - `GET /llms.txt`. The check passes when the response is `text/plain` and
   contains the packet heading `# Uuriko Project Room`.
+- `GET /api/health/jobs`. The check passes when no active job is failing or
+  stale and no required job is disabled; a failing job is named with its
+  public error code.
+- `GET /api/public/receipts`. The check passes when the response is the
+  public receipt list envelope (`project-room-public-receipt-list/1`) with a
+  receipts array. An empty list passes; a missing or misshapen envelope
+  fails.
 
 A run fails when any check fails or times out (10 seconds). The streak lives
 in the `PROBE_STATE` KV binding. One failed run does not notify anyone. The

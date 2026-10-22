@@ -29,6 +29,7 @@ export const STATE_KEY = "streak";
 export const PROBE_USER_AGENT = "project-room-external-probe";
 const BODY_LIMIT = 65_536;
 const LLMS_HEADING = "# Uuriko Project Room";
+const RECEIPTS_SCHEMA = "project-room-public-receipt-list/1";
 
 const emptyState = () => ({
   consecutiveFailures: 0,
@@ -261,7 +262,22 @@ async function runChecks(origin, fetchImpl, limitMs) {
     if (stale.length) return fail("jobs", response.status, "job_stale", stale.slice(0, 3).map(nameOf).join(", "));
     return response.status === 200 ? pass("jobs", 200) : fail("jobs", 503, "http_status");
   });
-  const checks = await Promise.all([ready, mcp, llms, jobs]);
+  // The public receipts wall is the proof layer's public face: the room can
+  // answer every private door while the wall it shows the world is down or
+  // serving a broken envelope. The check grades the list envelope only —
+  // an empty list is a legitimate wall, a missing or misshapen one is not.
+  const receipts = checkCall("receipts", async () => {
+    const response = await fetchImpl(new URL("/api/public/receipts", origin), { method: "GET", headers, redirect: "manual", signal: signal() });
+    const body = await readLimited(response);
+    if (response.status !== 200) return fail("receipts", response.status, "http_status");
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { return fail("receipts", 200, "invalid_json"); }
+    if (!parsed || parsed.schema !== RECEIPTS_SCHEMA || !Array.isArray(parsed.receipts)) {
+      return fail("receipts", 200, "receipts_missing");
+    }
+    return pass("receipts", 200);
+  });
+  const checks = await Promise.all([ready, mcp, llms, jobs, receipts]);
   return checks;
 }
 
@@ -281,7 +297,7 @@ export function outageNotice(origin, checks, incidentId) {
 }
 
 export function recoveryNotice(origin, incidentId) {
-  return `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, llms, and jobs passed.`;
+  return `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, llms, jobs, and receipts passed.`;
 }
 
 async function postJson(fetchImpl, url, body, headers, limitMs) {

@@ -118,7 +118,7 @@ test("a healthy room passes ready, anonymous tools/list, and llms.txt without a 
   const result = await run({ PROBE_ORIGIN: room.origin, PROBE_STATE: memoryKv() });
   assert.equal(result.ok, true);
   assert.equal(result.error, null);
-  assert.deepEqual(result.checks.map(check => check.id), ["ready", "mcp", "llms", "jobs"]);
+  assert.deepEqual(result.checks.map(check => check.id), ["ready", "mcp", "llms", "jobs", "receipts"]);
   assert.ok(result.checks.every(check => check.ok), JSON.stringify(result.checks));
   assert.deepEqual(result.alerts, []);
   const mcp = calls.filter(call => call.url === `${room.origin}/mcp`);
@@ -454,9 +454,14 @@ function jobsFetch(jobsPayload) {
     if (url.endsWith("/mcp")) return new Response(JSON.stringify({ jsonrpc: "2.0", result: { tools: [{ name: "room_status" }] } }), { status: 200, headers: { "content-type": "application/json" } });
     if (url.endsWith("/llms.txt")) return new Response("# Uuriko Project Room\n", { status: 200, headers: { "content-type": "text/plain" } });
     if (url.endsWith("/api/health/jobs")) return new Response(JSON.stringify(jobsPayload), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/api/public/receipts")) return new Response(JSON.stringify(HEALTHY_RECEIPTS), { status: 200, headers: { "content-type": "application/json" } });
     return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
   };
 }
+
+const HEALTHY_RECEIPTS = { schema: "project-room-public-receipt-list/1", receipts: [
+  { schema: "project-room-public-receipt/1", id: "wir_00000000000000000000000000aa", title: "Specimen receipt" }
+] };
 
 const HEALTHY_JOBS = { schema: "room.job-health/1", status: "ok", jobs: [
   { name: "integrity", status: "ok", stale: false, consecutiveFailures: 0 },
@@ -565,4 +570,99 @@ test("jobs diagnostics consume the real Worker health response, including 503", 
     const check = await probe(response);
     assert.equal(check.ok, false); assert.equal(check.status, 503); assert.equal(check.reason, "http_status"); assert.equal(check.detail, null);
   }
+});
+
+test("the persisted streak state advances its timestamp across runs", async () => {
+  // DP-17's smoke cell: after revival this is the two-read the operator
+  // acceptance performs against the real PROBE_STATE namespace — two reads
+  // at least one cron apart must show a moved lastAt, or the Worker is
+  // still not remembering anything.
+  const kv = memoryKv();
+  const down = async () => { throw new TypeError("fetch failed"); };
+  const env = { PROBE_ORIGIN: "https://probe.example", PROBE_STATE: kv };
+  const first = await runExternalProbe(env, down);
+  const firstState = JSON.parse(await kv.get("streak"));
+  assert.equal(first.consecutiveFailures, 1);
+  assert.equal(firstState.consecutiveFailures, 1);
+  assert.equal(typeof firstState.lastAt, "string");
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const second = await runExternalProbe(env, down);
+  const secondState = JSON.parse(await kv.get("streak"));
+  assert.equal(second.consecutiveFailures, 2);
+  assert.equal(secondState.consecutiveFailures, 2);
+  assert.ok(Date.parse(secondState.lastAt) > Date.parse(firstState.lastAt),
+    `lastAt advanced: ${firstState.lastAt} -> ${secondState.lastAt}`);
+});
+
+// The receipts check: the public wall is graded on its list envelope. A
+// healthy envelope (even with an empty list) passes; a misshapen one, a
+// non-JSON body, and an HTTP failure are three distinct failures.
+function receiptsFetch(receiptsResponse) {
+  const healthy = jobsFetch(HEALTHY_JOBS);
+  return async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/api/public/receipts")) return receiptsResponse;
+    return healthy(input);
+  };
+}
+
+test("receipts check passes a healthy envelope and an empty list", async () => {
+  for (const payload of [HEALTHY_RECEIPTS, { schema: "project-room-public-receipt-list/1", receipts: [] }]) {
+    const response = new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, receiptsFetch(response));
+    assert.equal(result.ok, true, JSON.stringify(result.checks));
+    assert.equal(result.checks.find(check => check.id === "receipts").ok, true);
+  }
+});
+
+test("receipts check fails closed on a misshapen envelope, a non-JSON body, and an HTTP failure", async () => {
+  const cases = [
+    [new Response(JSON.stringify({ receipts: [] }), { status: 200, headers: { "content-type": "application/json" } }), "receipts_missing"],
+    [new Response(JSON.stringify({ schema: "project-room-public-receipt-list/1", receipts: {} }), { status: 200, headers: { "content-type": "application/json" } }), "receipts_missing"],
+    [new Response("<html>wall</html>", { status: 200, headers: { "content-type": "text/html" } }), "invalid_json"],
+    [new Response(JSON.stringify(HEALTHY_RECEIPTS), { status: 500, headers: { "content-type": "application/json" } }), "http_status"]
+  ];
+  for (const [response, reason] of cases) {
+    const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, receiptsFetch(response));
+    assert.equal(result.ok, false);
+    const receipts = result.checks.find(check => check.id === "receipts");
+    assert.equal(receipts.ok, false);
+    assert.equal(receipts.reason, reason);
+  }
+});
+
+test("a receipts-only outage alerts after two runs and recovers with the wall", async () => {
+  const hooks = [];
+  let wall = new Response("wall down", { status: 503 });
+  const fetchImpl = async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { return new Response(null, { status: 204 }); }
+    if (url.endsWith("/api/public/receipts")) return wall;
+    return jobsFetch(HEALTHY_JOBS)(input);
+  };
+  const env = {
+    PROBE_ORIGIN: "https://probe.example",
+    PROBE_STATE: memoryKv(),
+    PROBE_ALERT_WEBHOOK_URL: "https://alerts.example/hook"
+  };
+  const first = await runExternalProbe(env, fetchImpl);
+  assert.equal(first.ok, false);
+  assert.deepEqual(first.alerts, []);
+  const second = await runExternalProbe(env, async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { hooks.push("outage"); return new Response(null, { status: 204 }); }
+    if (url.endsWith("/api/public/receipts")) return wall;
+    return jobsFetch(HEALTHY_JOBS)(input);
+  });
+  assert.equal(second.consecutiveFailures, 2);
+  assert.equal(second.alerts.find(alert => alert.destination === "webhook")?.kind, "outage");
+  wall = new Response(JSON.stringify(HEALTHY_RECEIPTS), { status: 200, headers: { "content-type": "application/json" } });
+  const recovered = await runExternalProbe(env, async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { hooks.push("recovery"); return new Response(null, { status: 204 }); }
+    if (url.endsWith("/api/public/receipts")) return wall;
+    return jobsFetch(HEALTHY_JOBS)(input);
+  });
+  assert.equal(recovered.ok, true);
+  assert.deepEqual(hooks, ["outage", "recovery"]);
 });
