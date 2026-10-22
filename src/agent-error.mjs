@@ -256,6 +256,38 @@ export const ERROR_REGISTRY = {
     next: [path("/api/public-work/tasks"), command("GET /api/public-work/tasks and claim a different task — this one's submission deadline has passed.")],
     catalog: { http: 409, retry: "no", recovery: "Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task." },
   },
+  // Landing records (RECORD-PRIM): the room-native Record primitive
+  // (server/landing-records.mjs). Registry-born per the ratchet.
+  invalid_landing_record: {
+    status: "action_required",
+    hint: "The landing record has invalid fields.",
+    next: [command("Fix the fields named in the message — pr, full 40-char headSha/baseSha, typed evidence links, and an acceptingAuthority whenever flags are present — then resend.")],
+    catalog: { http: 422, retry: "fix+resend", recovery: "Fix the fields named in the message — pr, full 40-char headSha/baseSha, typed evidence links, and an acceptingAuthority whenever flags are present — then resend." },
+  },
+  landing_record_not_found: {
+    status: "action_required",
+    hint: "No landing record with that id exists in this room.",
+    next: [{ tool: "room_list_landing_records" }, command("Re-list the room's landing records and use a current record id; do not guess ids.")],
+    catalog: { http: 404, retry: "re-list", recovery: "Re-list the room's landing records and use a current record id; do not guess ids." },
+  },
+  landing_record_closed: {
+    status: "action_required",
+    hint: "That landing record is no longer land-ready — it was landed, revoked, or superseded.",
+    next: [{ tool: "room_list_landing_records" }, command("Re-read the record's current state. A superseded record is replaced by creating a record at the PR's current head; a landed or revoked record stands as history.")],
+    catalog: { http: 409, retry: "re-read", recovery: "Re-read the record's current state; only a land-ready record can land, be revoked, or be superseded." },
+  },
+  landing_record_exists: {
+    status: "action_required",
+    hint: "That PR already has a land-ready record at the same head. The existing record is in detail.existing.",
+    next: [{ tool: "room_list_landing_records" }, command("Use the existing record (detail.existing), or revoke it first if it was issued in error. One live record per PR head is the rule.")],
+    catalog: { http: 409, retry: "re-read", recovery: "A land-ready record already exists for this PR at this head (detail.existing): use it, or revoke it before re-issuing." },
+  },
+  landing_record_not_authority: {
+    status: "action_required",
+    hint: "Only the record's creator, the room owner, or a member with the decide permission can change this record's state.",
+    next: [command("Ask the record's creator, the room owner, or a decide member to act. Do not retry unchanged.")],
+    catalog: { http: 403, retry: "no", recovery: "Only the record's creator, the room owner, or a member with the decide permission can land, revoke, or supersede it. Do not retry unchanged." },
+  },
   // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
   // not a stale revision: the generic stale() branch taught the
   // workContext/expectedRevision recovery (and /api/session, unreachable

@@ -742,6 +742,15 @@
         "openWorldHint": false
       }
     },
+    "room_create_landing_record": {
+      "inputSchema": "685a4917485d07b0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_decide_access_request": {
       "inputSchema": "a908437a59ff991f",
       "annotations": {
@@ -823,6 +832,15 @@
         "openWorldHint": false
       }
     },
+    "room_land_record": {
+      "inputSchema": "7ab97e6e580ca414",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_link_work_claim_pr": {
       "inputSchema": "bdc08d9682895268",
       "annotations": {
@@ -861,6 +879,15 @@
     },
     "room_list_files": {
       "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_list_landing_records": {
+      "inputSchema": "a7b81711cfc197f0",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1147,6 +1174,15 @@
         "openWorldHint": false
       }
     },
+    "room_revoke_landing_record": {
+      "inputSchema": "93a2a3dfddd0d6dd",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_select_help_offer": {
       "inputSchema": "e01ff20c1de7f96c",
       "annotations": {
@@ -1179,6 +1215,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_supersede_landing_record": {
+      "inputSchema": "9bb07a07e272637f",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }

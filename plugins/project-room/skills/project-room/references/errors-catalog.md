@@ -532,6 +532,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_key` | internal | seed must be 64 lowercase hex characters (32-byte Ed25519 seed) | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_land_item` | 422 | repo and prNumber are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_land_tip` | 422 | itemId and a tip field are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_landing_record` | 422 | a record carrying priced flags cannot be created without naming its acceptingAuthority | fix+resend | Fix the fields named in the message — pr, full 40-char headSha/baseSha, typed evidence links, and an acceptingAuthority whenever flags are present — then resend. |
 | `invalid_limit` | 422 | limit must be an integer 1..100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link` | 422 | Choose a short guest name | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_access` | 422 | Choose guest, member or co_admin access | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -742,6 +743,10 @@ response's own `hint`/`next` when it names something more specific.
 | `key_not_found` | 404 | No such registered key for this identity | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `land_item_not_found` | 404 | Land queue item was not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `land_queue_full` | 409 | This room's land queue is full | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `landing_record_closed` | 409 | Landing record ${recordId} is landed and cannot change state | re-read | Re-read the record's current state; only a land-ready record can land, be revoked, or be superseded. |
+| `landing_record_exists` | 409 | PR #${pr} already has a land-ready record at head ${headSha} (record ${recordId}) | re-read | A land-ready record already exists for this PR at this head (detail.existing): use it, or revoke it before re-issuing. |
+| `landing_record_not_authority` | 403 | Only the record's creator, the room owner, or a member with the decide permission can change this record's state | no | Only the record's creator, the room owner, or a member with the decide permission can land, revoke, or supersede it. Do not retry unchanged. |
+| `landing_record_not_found` | 404 | No landing record "${recordId}" in this room | re-list | Re-list the room's landing records and use a current record id; do not guess ids. |
 | `lane_mismatch` | 403 | agent.lane must match the authenticated member lane | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `lane_not_registered` | 403 | Register a lane before carrying a decision | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `last_login_method` | 409 | Keep at least one active sign-in method | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

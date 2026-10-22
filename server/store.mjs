@@ -71,6 +71,7 @@ import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
+import { createDurableLandingRecordRegistry, landingRecordSchema } from "./landing-record-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, ensurePublicReceiptAgentIdsColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
@@ -1131,7 +1132,7 @@ function roomSchemaStamp() {
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     wakeQueuePauseBySchema,
-    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    attentionSchema, workClaimSchema, landingRecordSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
@@ -1429,6 +1430,10 @@ export class RoomStore {
       transaction: fn => this.transaction(fn),
       onChange: roomId => noteWorkClaimChange(this, roomId),
     });
+    // RECORD-PRIM: durable landing records (server/landing-records.mjs).
+    this.landingRecords = createDurableLandingRecordRegistry(this.db, {
+      transaction: fn => this.transaction(fn),
+    });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -1502,6 +1507,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
+        this.landingRecords.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
         this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
@@ -1761,6 +1767,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.workClaims.verifySchema({ allowAbsent: true });
       this.db.exec(workClaimSchema);
       this.workClaims.verifySchema();
+      // Landing records are purely additive: IF NOT EXISTS, no schema version bump.
+      this.landingRecords.verifySchema({ allowAbsent: true });
+      this.db.exec(landingRecordSchema);
+      this.landingRecords.verifySchema();
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
@@ -5115,6 +5125,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
     });
+  }
+  // RECORD-PRIM: the freshest head the room's land queue has observed for
+  // a PR, or null when the queue holds no observation for it. The queue's
+  // scheduled GitHub refresh (server/land-queue.mjs) is the room's only
+  // PR-head source; landing-record head-binding derives from it
+  // (server/landing-records.mjs).
+  landingRecordObservedHead(roomId, pr) {
+    const row = this.db.prepare(
+      "SELECT head_sha AS headSha FROM land_queue WHERE room_id=? AND pr_number=? AND head_sha IS NOT NULL ORDER BY updated_at DESC LIMIT 1"
+    ).get(roomId, pr);
+    return row?.headSha ?? null;
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
     // 3rd arg may be the legacy session binding or an options object.

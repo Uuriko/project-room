@@ -174,6 +174,11 @@ const ALLOW = {
       threadId: "'or reads one when threadId is set' — omitted lists threads (GET /api/rooms/{roomId}/peer-dms), set reads one (GET …/peer-dms/{threadId}, where it is required).",
     },
   },
+  room_list_landing_records: {
+    routeSelector: {
+      recordId: "'or read one when recordId is set' — omitted lists records (GET /api/rooms/{roomId}/landing-records), set reads one (GET …/landing-records/{recordId}, where it is required).",
+    },
+  },
   wake_register: {
     // "Same store call as POST /api/agent-heartbeats with mode wakeable."
     fixed: { mode: "wakeable" },

@@ -483,6 +483,26 @@ export async function seedRecoveryCoverage(f) {
     (room_id, squad_id, name, goal, members_json, channel_message_id, owner_id, state, created_at, updated_at)
     VALUES ('commons', 'sq_recovery0001', 'recovery-crew', 'recover the room', '["owner"]', NULL, 'owner', 'active', ?, ?)`)
     .run(f.now(), f.now());
+  // RECORD-PRIM: one landing-record envelope row so the recovery audit
+  // sees the landing_records table with substantive fixture data.
+  f.store.db.prepare(`INSERT INTO landing_records
+    (room_id, record_id, item_json, updated_at)
+    VALUES ('commons', 'lr_recovery0001', ?, ?)`)
+    .run(JSON.stringify({
+      v: 1, kind: "landing-record",
+      data: {
+        id: "lr_recovery0001", pr: 4242,
+        headSha: "a".repeat(40), baseSha: "b".repeat(40),
+        state: "land-ready",
+        evidence: [{ kind: "suite", ref: "recovery seed suite run" }],
+        flags: [], acceptingAuthority: null,
+        note: "Seeded so the capture covers landing records.",
+        createdByMemberId: "owner", createdByDisplayName: "Owner", createdByKind: "human",
+        createdAt: f.now(), landedAt: null, landedByMemberId: null, mergedSha: null, treeSha: null,
+        revokedAt: null, revokeReason: null, supersededBy: null, supersededByHeadSha: null,
+        supersedes: [], history: [{ at: f.now(), action: "created", by: "owner" }]
+      }
+    }), f.now());
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),
