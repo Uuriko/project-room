@@ -11,7 +11,9 @@
 // Review the linked qualification before dispatch and explicitly acknowledge
 // that manual review with COMPATIBILITY_REVIEWED. It must cover
 // the exact current/target pair, including semantic changes and all intervening
-// writes. This gate checks its scope, not whether a claimed test really ran.
+// writes. Each evidence link must be a run or blob URL in THIS repository
+// (Uuriko/project-room); a blob link must pin a commit that exists in this
+// repo. This gate checks its scope, not whether a claimed test really ran.
 // Equal schemas alone never qualify a rollback. No qualifying receipt is shipped
 // by this repair; unknown targets or missing evidence require a roll forward.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -106,9 +108,21 @@ function qualification(current, targets) {
     const check = evidence.checks?.[name];
     let link;
     try { link = new URL(check?.evidence); } catch { /* rejected below */ }
+    // Evidence is bound to this repository: a run or blob URL in any other
+    // GitHub repository proves nothing about this one's qualification, so
+    // the owner/repo segment is part of the predicate, anchored at the start
+    // of the pathname. A blob URL must also pin a commit that exists in
+    // this repo (the rollback workflow checks out full history), so the
+    // referenced source is source this gate can actually verify.
+    const runPath = link?.pathname.match(/^\/Uuriko\/project-room\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/);
+    const blobPath = link?.pathname.match(/^\/Uuriko\/project-room\/blob\/([0-9a-f]{40})\/[^?#]+$/);
+    let blobCommitKnown = false;
+    if (blobPath) {
+      try { command(['git', 'cat-file', '-e', `${blobPath[1]}^{commit}`]); blobCommitKnown = true; } catch { blobCommitKnown = false; }
+    }
     if (check?.result !== 'passed' || !link || link.protocol !== 'https:' || link.username || link.password || link.hash ||
-        !/\/(?:actions\/runs\/\d+(?:\/attempts\/\d+)?|blob\/[0-9a-f]{40}\/[^?#]+)$/.test(link.pathname) || link.hostname !== 'github.com' || link.search)
-      throw new Error(`${name}: exact-source qualification evidence required; schema equality is insufficient`);
+        link.hostname !== 'github.com' || link.search || (!runPath && !blobCommitKnown))
+      throw new Error(`${name}: qualification evidence must be a github.com run or blob URL in this repository (Uuriko/project-room), with any blob pinned to a commit in this repo; schema equality is insufficient`);
   }
   return { path, blob: command(['git', 'rev-parse', reference]).trim(), reviewedBy: process.env.GITHUB_ACTOR, checks: evidence.checks };
 }

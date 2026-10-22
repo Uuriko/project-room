@@ -6,6 +6,14 @@
 // cycles partly because of diff size) and faster reviews. Split the PR when
 // you can; justify it when you cannot.
 //
+// Generated/lockfile paths are excluded from the counted lines, but they are
+// tallied and reported as excluded lines, and excluded volume over
+// EXCLUDED_MULTIPLIER x the threshold needs the same justification — an
+// arbitrarily large generated diff cannot pass invisibly at counted: 0.
+// A justification must be real content: at least MIN_JUSTIFICATION_CHARS
+// non-whitespace characters AND at least MIN_JUSTIFICATION_DISTINCT_WORDS
+// distinct words, so a repeated-character filler body does not qualify.
+//
 // Pure contract: checkDiffSize({ numstat, prBody, threshold? }) -> { ok, counted, message }.
 // The verdict is a deterministic function of (numstat, prBody, threshold):
 // the same inputs always produce the same verdict. Two runs at the same head
@@ -27,6 +35,14 @@ export const MAX_DIFF_LINES = 300;
 // Justification text must carry at least this many non-whitespace characters
 // after the heading; a bare "n/a" does not count.
 export const MIN_JUSTIFICATION_CHARS = 40;
+
+// ...and at least this many distinct words, so a body of one repeated token
+// ("xxxx…") is not a justification either.
+export const MIN_JUSTIFICATION_DISTINCT_WORDS = 6;
+
+// Excluded (generated/lockfile) lines are capped at this multiple of the
+// counted-lines threshold before they need the same justification.
+export const EXCLUDED_MULTIPLIER = 10;
 
 // Lockfiles and generated bundles churn without review surface and do not
 // cause the same rebase conflicts as source edits.
@@ -164,20 +180,23 @@ function numstatDestination(field) {
   return path;
 }
 
-function countedLines(numstat) {
-  let total = 0;
+function tallyLines(numstat) {
+  let counted = 0;
+  let excluded = 0;
   for (const line of String(numstat).split("\n")) {
     const parts = line.split("\t");
     if (parts.length < 3) continue;
     const [added, removed] = parts;
     const path = numstatDestination(parts.slice(2).join("\t"));
-    if (isExcluded(path)) continue;
     const a = Number.parseInt(added, 10);
     const b = Number.parseInt(removed, 10);
-    if (Number.isFinite(a)) total += a;
-    if (Number.isFinite(b)) total += b;
+    let lines = 0;
+    if (Number.isFinite(a)) lines += a;
+    if (Number.isFinite(b)) lines += b;
+    if (isExcluded(path)) excluded += lines;
+    else counted += lines;
   }
-  return total;
+  return { counted, excluded };
 }
 
 // Short fingerprint of the exact body the verdict was computed from, so two
@@ -210,42 +229,56 @@ function findJustification(prBody) {
     if (/^\s*#{1,6}\s+\S/.test(lines[i])) break;
     content.push(lines[i]);
   }
-  const nonWs = content.join("\n").replace(/\s+/g, "").length;
-  return nonWs >= MIN_JUSTIFICATION_CHARS ? content.join("\n").trim() : null;
+  const text = content.join("\n");
+  const nonWs = text.replace(/\s+/g, "").length;
+  const distinctWords = new Set(text.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []).size;
+  return nonWs >= MIN_JUSTIFICATION_CHARS && distinctWords >= MIN_JUSTIFICATION_DISTINCT_WORDS
+    ? text.trim()
+    : null;
 }
 
-function inputsLine(counted, prBody, justificationStatus) {
-  return `inputs: counted ${counted} · body sha256 ${bodyFingerprint(prBody)} · justification ${justificationStatus}`;
+function inputsLine(counted, excluded, prBody, justificationStatus) {
+  return `inputs: counted ${counted} · excluded ${excluded} · body sha256 ${bodyFingerprint(prBody)} · justification ${justificationStatus}`;
 }
 
 export function checkDiffSize({ numstat, prBody, threshold } = {}) {
   const limit = threshold ?? resolveThreshold();
-  const counted = countedLines(numstat);
-  const justification = counted > limit ? findJustification(prBody) : null;
+  const excludedLimit = limit * EXCLUDED_MULTIPLIER;
+  const { counted, excluded } = tallyLines(numstat);
+  const overCounted = counted > limit;
+  const overExcluded = excluded > excludedLimit;
+  const justification = overCounted || overExcluded ? findJustification(prBody) : null;
   const inputs = inputsLine(
     counted,
+    excluded,
     prBody,
-    counted <= limit ? "not needed" : justification ? "found" : "missing",
+    !overCounted && !overExcluded ? "not needed" : justification ? "found" : "missing",
   );
-  if (counted <= limit) {
+  if (!overCounted && !overExcluded) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines (threshold ${limit}) — no justification needed.\n${inputs}`,
+      excluded,
+      message: `ok: ${counted} changed lines (threshold ${limit}), ${excluded} excluded lines (cap ${excludedLimit}) — no justification needed.\n${inputs}`,
     };
   }
   if (justification) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines exceed the ${limit}-line threshold, but the PR body carries a justification section.\n${inputs}`,
+      excluded,
+      message: `ok: ${counted} changed lines / ${excluded} excluded lines exceed the ${limit}-line threshold / ${excludedLimit}-line excluded cap, but the PR body carries a justification section.\n${inputs}`,
     };
   }
+  const reasons = [];
+  if (overCounted) reasons.push(`${counted} changed lines exceed the ${limit}-line threshold`);
+  if (overExcluded) reasons.push(`${excluded} excluded (generated/lockfile) lines exceed the ${excludedLimit}-line excluded cap`);
   return {
     ok: false,
     counted,
+    excluded,
     message: [
-      `PR diff size check failed: ${counted} changed lines exceed the ${limit}-line threshold.`,
+      `PR diff size check failed: ${reasons.join("; ")}.`,
       inputs,
       "",
       "Why: smaller diffs mean fewer rebase conflicts (PR #1530 needed five rebase",
@@ -255,8 +288,9 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
       "To pass, either:",
       "  1. Split this PR into smaller PRs (preferred), or",
       "  2. Add a '## Large diff justification:' section to the PR body explaining",
-      "     why this diff cannot be split (about 40 characters of real content or more).",
-      "     The reason may start on the heading line itself, after the colon.",
+      "     why this diff cannot be split (40+ characters and at least 6 distinct",
+      "     words of real content). The reason may start on the heading line",
+      "     itself, after the colon.",
     ].join("\n"),
   };
 }
