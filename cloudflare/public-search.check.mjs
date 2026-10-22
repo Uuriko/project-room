@@ -42,7 +42,7 @@ function assertAboutPolicy(response, origin) {
 }
 
 test('actual Worker public search routes load packaged HTML and preserve private/error indexing defaults', async () => {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('../tests/cloudflare/http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test';
   // Asset bytes are cached for the life of the isolate. A deploy that drops
