@@ -34,6 +34,7 @@ const COMPARE = [
   "multi-agent-workspace",
   "ai-agent-coordination",
   "project-room-vs-agent-room",
+  "agent-bounties-alternatives",
 ];
 const AGENTS = [
   "claude-code", "codex", "cursor", "cline", "vscode", "aider",
