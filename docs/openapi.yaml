@@ -6225,7 +6225,8 @@ paths:
         filters. Responses are paginated on the board watermark.
         Retired. Every authenticated board/v2 route returns 410
         board_v2_retired. next points at /api/rooms/{roomId}/work-claims.
-        The board_vtwo_* tables are not dropped.
+        Fresh stores no longer create the board_vtwo_* tables (#3997);
+        databases that already carry them keep them.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'

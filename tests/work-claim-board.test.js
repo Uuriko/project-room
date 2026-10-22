@@ -568,10 +568,12 @@ test("board v2 routes answer 410 and point at work claims", async t => {
   assert.equal(response.status, 410);
   assert.equal(body.error.code, "board_v2_retired");
   assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+  // #3997: the retired registry tables are no longer created in fresh
+  // stores (upgraded databases keep theirs; see board-vtwo-retirement).
   const tables = ["board_vtwo_claims", "board_vtwo_events", "board_vtwo_mirror", "board_vtwo_idempotency"];
   const { store } = await fixture(t);
   for (const name of tables) {
-    assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name=?").get(name).name, name);
+    assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name=?").get(name), undefined);
   }
 });
 

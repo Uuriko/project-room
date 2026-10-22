@@ -437,7 +437,9 @@ stay as a compatibility view over claims of kind `land`. The `land_queue`
 rows are kept. Copying an existing row into a claim is idempotent.
 
 Board v2 routes return **410** `board_v2_retired`. `next` points at
-`/work-claims`. The `board_vtwo_*` tables are not dropped.
+`/work-claims`. Fresh stores no longer create the `board_vtwo_*` tables
+(#3997); databases that already carry them keep them, and restores skip
+their rows.
 
 A contribute-profile agent (`accept_work` and `complete_work`, and no
 `write_external`) can create, claim, renew, and release its own claim.

@@ -174,19 +174,9 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO guest_selfserve_idem(room_id,key_hash,request_id,token_hash,member_id,expires_at,renewed,created_at)
     VALUES('commons',?,'recovery-selfserve-request',?,'guest-agent-selfserve',?,0,?)`)
     .run("b".repeat(64), "c".repeat(64), f.now() + 86400000, f.now());
-  // Seed the board-v2 durable registry tables (PR #1144) so the recovery
-  // audit's substantive-fixture-data check covers them. Written directly:
-  // the fixture has no reason to run the board-v2 claim state machine.
-  f.store.db.prepare(`INSERT INTO board_vtwo_claims(task_id,lane,files,lease,lease_h,reason,state,claim_seq,claim_at,heartbeat_at,last_seq,receipts)
-    VALUES('recovery-claim','recovery-lane','[]','lease=6h',6,'recovery fixture','claimed',1,?,?,0,'[]')`)
-    .run(new Date(f.now()).toISOString(), new Date(f.now()).toISOString());
-  f.store.db.prepare(`INSERT INTO board_vtwo_events(at,kind,task_id,lane,payload,supersedes,idempotency_key,mirror_issue,mirror_comment)
-    VALUES(?, 'claim.created','recovery-claim','recovery-lane','{}',NULL,'recovery-idem-key',NULL,NULL)`)
-    .run(new Date(f.now()).toISOString());
-  f.store.db.prepare(`INSERT INTO board_vtwo_mirror(id,current_issue,issues) VALUES(1,266,'[266]')`).run();
-  f.store.db.prepare(`INSERT INTO board_vtwo_idempotency(scoped_key,status,body,fingerprint,created_at)
-    VALUES('recovery-scope',200,'{}','recovery-fingerprint',?)`)
-    .run(Date.now());
+  // The board-v2 durable registry tables (PR #1144) are no longer seeded:
+  // fresh stores do not create board_vtwo_* since their removal (#3997),
+  // so they are outside the audit's application-table coverage.
   // Seed one referral invite (redeemed) + its key row + chain membership so
   // the capture covers referral_invite_keys, referral_invites and
   // referral_chain_members (#1025 signed agent-carried referral invites).

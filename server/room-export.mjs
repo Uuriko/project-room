@@ -274,8 +274,14 @@ export function contentVerificationLevel(trailer, computed) {
   if (!trailer.tables) return "events-only";
   for (const [table, expected] of Object.entries(trailer.tables)) {
     const actual = computed[table];
-    if (!actual)
+    if (!actual) {
+      // A table retired after the backup was taken (REPLAY_SKIPPED_TABLES,
+      // e.g. board_vtwo_* in #3997) is pinned by the old trailer but is
+      // digest-skipped now and loaded by no restore path, so there is no
+      // computed digest to compare and nothing landing to protect.
+      if (contentDigestSkipped(table)) continue;
       throw new Error(`Export trailer pins table ${table} but the export holds no rows for it`);
+    }
     if (actual.rows !== expected.rows || actual.sha256 !== expected.sha256)
       throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
   }
@@ -478,7 +484,10 @@ function insertOrder(names) {
 // store never creates. The two runtime markers belong to the Durable Object
 // writer fence (cloudflare/storage.mjs) and mean nothing in a sqlite file.
 // The retired Emissary tables stay in upgraded databases (no DROP was ever
-// issued) but no module reads them. abuse_rate_buckets is rate-limit state
+// issued) but no module reads them. The retired board-v2 registry
+// (board_vtwo_*, removed in #3997) is the same shape: fresh stores no
+// longer create the tables, upgraded databases keep theirs, and no module
+// reads them. abuse_rate_buckets is rate-limit state
 // the Durable Object creates on first use (server/abuse-rate-buckets.mjs); a
 // restored store starts with fresh budgets. The wake-accounting tables
 // (server/wake-metrics.mjs, #3345) are the same shape: lazily created
@@ -491,6 +500,7 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
+  "board_vtwo_claims", "board_vtwo_events", "board_vtwo_mirror", "board_vtwo_idempotency",
   "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
 ]);
 
