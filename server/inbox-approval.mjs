@@ -79,6 +79,16 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
     if (!proposal) fail("approval_not_found", "No such approval proposal.", { proposalId });
     return proposal;
   };
+  // A verdict may name the version the human was shown. When it does and the
+  // proposal has moved on (resubmitted), the verdict is refused, never applied
+  // to a draft the human did not see. Omitted keeps the existing behavior.
+  const checkVersion = (proposal, expectedVersion) => {
+    if (expectedVersion === undefined || expectedVersion === null) return;
+    check(Number.isSafeInteger(expectedVersion) && expectedVersion >= 1, "approval_invalid", "expectedVersion must be a positive integer");
+    if (expectedVersion !== proposal.version)
+      fail("approval_version_changed", `This proposal is now version ${proposal.version}; review it before deciding.`,
+        { expectedVersion, version: proposal.version });
+  };
   const move = (proposal, status, by, extra = {}) => {
     if (!transitions[proposal.status].includes(status))
       fail("approval_transition", `A ${proposal.status} proposal cannot move to ${status}.`,
@@ -104,15 +114,17 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
   }
 
   // Human verdicts. Every one is append-only on the proposal's history.
-  function approve(proposalId, { by, note = null } = {}) {
+  function approve(proposalId, { by, note = null, expectedVersion = null } = {}) {
     const proposal = getProposal(proposalId);
     const who = humanOf(by);
+    checkVersion(proposal, expectedVersion);
     return move(proposal, "approved", who, note === null || note === undefined
       ? {} : { note: textOf(note, 1000, "note") });
   }
-  function requestEdits(proposalId, { by, edits, note = null } = {}) {
+  function requestEdits(proposalId, { by, edits, note = null, expectedVersion = null } = {}) {
     const proposal = getProposal(proposalId);
     const who = humanOf(by);
+    checkVersion(proposal, expectedVersion);
     const requestedEdits = Object.freeze({ edits: textOf(edits, 2000, "edits"), by: who,
       at: isoOf(clock()) });
     const next = move(proposal, "changes_requested", who, note === null || note === undefined
@@ -142,9 +154,10 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
     proposals.set(stored.proposalId, stored);
     return stored;
   }
-  function reject(proposalId, { by, reason } = {}) {
+  function reject(proposalId, { by, reason, expectedVersion = null } = {}) {
     const proposal = getProposal(proposalId);
     const who = humanOf(by);
+    checkVersion(proposal, expectedVersion);
     return move(proposal, "rejected", who, { reason: textOf(reason, 1000, "reason") });
   }
 
