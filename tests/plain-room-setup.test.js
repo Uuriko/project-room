@@ -44,6 +44,20 @@ test('public entry points lead to the served setup skill before unrelated work',
   assert.notEqual((await pack()).status, 200);
   new AccessRequests(store).decide(owner, 'muse-room', pending.requestId, { decision: 'approve', permissions: [] });
   assert.equal((await pack()).status, 200);
+  // A newly joined peer can discover members, but enrollment is not a host.
+  const presenceResponse = await fetch(origin + '/api/rooms/muse-room/presence', { headers });
+  assert.equal(presenceResponse.status, 200);
+  const presence = await presenceResponse.json();
+  const self = presence.members.find(member => member.memberId === identity.identityId);
+  assert.ok(self, 'the joined identity is discoverable without a directory card');
+  assert.equal(self.watching, false);
+  assert.ok(!['working', 'listening'].includes(self.state), 'membership alone does not advertise readiness');
+  const capabilitiesResponse = await fetch(origin + '/api/rooms/muse-room/capabilities', { headers });
+  assert.equal(capabilitiesResponse.status, 200);
+  const capabilities = await capabilitiesResponse.json();
+  assert.ok(!capabilities.members.some(member => member.memberId === identity.identityId && member.capabilities.length), 'joining grants no advertised capabilities');
+  assert.equal((await fetch(origin + `/api/rooms/muse-room/members/${identity.identityId}/card`, { headers })).status, 404);
+  assert.equal((await fetch(origin + '/api/rooms/muse-room/presence')).status, 401, 'roster discovery remains authenticated');
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM agent_identities').get().n, 1);
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM access_requests').get().n, 1);
   assert.equal((await fetch(origin + '/r/muse-room')).status, 404);
