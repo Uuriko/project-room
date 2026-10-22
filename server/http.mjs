@@ -22,12 +22,12 @@ import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js"
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
-import { handleAgentConnect } from "./routes/agent-connect.mjs";
+import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
@@ -334,7 +334,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null, gmailAuth = null, directSendFetch = null,
+  googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
@@ -381,7 +381,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
-  const gmail = gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
+  const gmail = enableDeferredInbox && gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
   // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
   // honestly (mail_not_configured) and never pretend a code was sent.
   const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
@@ -1236,6 +1236,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // 405 Allow on a known path. The inbox mount and the auth group keep
       // their own session and method checks. Anything else falls through
       // to the legacy chain below until that chain is empty.
+      // The private email workspace is excluded from v1. Preserve stored data
+      // and isolated compatibility fixtures without exposing import/send flows.
+      if (!enableDeferredInbox && (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")
+        || url.pathname.startsWith("/api/auth/gmail/"))) reject(404, "not_found", "Not found");
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
@@ -3087,8 +3091,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // An agent invite code asked for without HTML gets the /a/ steps.
+        // The lookup is a scrypt hash (agent-invites codeHash), so it shares
+        // /a/<code>'s per-address limit, and the preview it reads is handed
+        // to the /a/ handler so one GET hashes the code once.
+        const agentCode = joinPathAgentCode(url.pathname);
+        if (agentCode) rate(`agent-connect:${remoteAddress}`, 30);
+        const livePreview = agentCode ? agentInvitePreview(store, agentCode) : null;
+        const liveCode = livePreview ? agentCode : null;
+        if (liveCode && !acceptPrefersHtml(req.headers.accept)) {
+          const agentUrl = new URL(url);
+          agentUrl.pathname = `/a/${encodeURIComponent(liveCode)}`;
+          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate: () => {}, reject, origin: expectedOrigin(), preview: livePreview })) return;
+        }
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
-        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        let page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        if (liveCode) page = joinPageForAgentCode(page, liveCode);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
@@ -4428,7 +4446,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
+        const view = url.searchParams.get("view");
+        if (view !== null && view !== "brief") reject(422, "invalid_view", "view=brief is the only accepted view; omit it for the full pack");
+        const pack = buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) });
+        if (view !== "brief") return json(res, 200, pack);
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        const { members } = store.presence(selected.token, roomId, watchers, fence);
+        return json(res, 200, briefActivationPack(pack, members, store.now(), viewerId));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.
@@ -4535,12 +4559,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+          return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate
             // would deadlock invite mint permanently instead of nudging the
             // owner to verify. Where mail is configured the gate still applies.
-            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }), expectedOrigin()));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");

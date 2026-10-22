@@ -23,6 +23,24 @@ import ProjectRoomKit
                 guard let room else { exit(1) }
                 let result = try await room.webView.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .page)
                 print("WK_ACCEPTANCE \(String(describing: result))")
+                if let index = args.firstIndex(of: "--after-reload"), index + 1 < args.count {
+                    let afterReload = try String(contentsOfFile: args[index + 1], encoding: .utf8)
+                    let previousDocument = try await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double
+                    room.webView.reload()
+                    var replaced = false
+                    for _ in 0..<200 {
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                        if room.webView.isLoading { continue }
+                        if let current = try? await room.webView.evaluateJavaScript("performance.timeOrigin") as? Double,
+                           current != previousDocument {
+                            replaced = true
+                            break
+                        }
+                    }
+                    guard replaced else { throw NSError(domain: "RoomAcceptance", code: 1, userInfo: [NSLocalizedDescriptionKey: "Reload did not replace the document"]) }
+                    let recovered = try await room.webView.callAsyncJavaScript(afterReload, arguments: [:], in: nil, contentWorld: .page)
+                    print("WK_RELOAD_ACCEPTANCE \(String(describing: recovered))")
+                }
                 if let output = CommandLine.arguments.firstIndex(of: "--screenshot"), output + 1 < CommandLine.arguments.count {
                     let shot = try await room.webView.takeSnapshot(configuration: nil)
                     if let tiff = shot.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let data = bitmap.representation(using: .png, properties: [:]) {
