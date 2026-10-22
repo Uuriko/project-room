@@ -94,7 +94,7 @@ function requestHref(slug, ref) {
   return withRef(`/?request=${encodeURIComponent(slug)}`, ref);
 }
 
-export function publicRoomView(store, slug, { ref = "" } = {}) {
+export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } = {}) {
   const room = loadPublicRoom(store, slug);
   if (!room) return null;
   const clean = publicRef(ref);
@@ -118,7 +118,7 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
     agentJoin: {
       packet: "/llms.txt",
       setupSkill: "/skills/project-room-setup/SKILL.md",
-      setupPrompt: roomSetupPrompt(`${ROOM_ORIGIN}/r/${slug}`),
+      setupPrompt: roomSetupPrompt(`${origin}/r/${slug}`),
       roomPage: `/r/${slug}`,
       preview: `/r/${slug}.json`,
       admission: join.mode === "link" ? "invitation" : "approval_required",

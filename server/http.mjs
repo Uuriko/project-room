@@ -2303,7 +2303,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // (the owner flipping public receipts off must bite immediately).
           return sendPage(200, proof.html, proofPage[2] ? proof.document : null, `/r/${proofPage[1]}/proof`, "no-store");
         }
-        const page = publicRoomView(store, roomPage[1], { ref });
+        const page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin() });
         // A browser opening /r/<slug> for a room that is unknown or not
         // published gets the same styled 404 as any other public path, not
         // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
