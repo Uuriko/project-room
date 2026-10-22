@@ -70,7 +70,7 @@
     "src/auth-signin-ui.js": "sha256:28a9fd7d332d4719509fe16b45a3c8fcc9d4068d35d5625dd8390200c6086c67",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:fcfc2f32ac667cc81165e3e6026be9dfe00e137afaa99296b7e43e61d0d5abf5",
+    "src/board-ui.js": "sha256:f544276fb2416a96152201059c7f6be000678d0cb0244bde9bd199aa9eb01542",
     "src/board.css": "sha256:552972a44f5411ff254a0e8032de11382c07385c17ad8de42b50cd6d751f2c6a",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",

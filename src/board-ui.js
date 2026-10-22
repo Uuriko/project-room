@@ -1007,7 +1007,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (form.id) return `#${form.id}`;
     if (typeof form.hasAttribute !== "function" || typeof form.getAttribute !== "function") return null;
     for (const attr of ["data-claim-review", "data-claim-deliver", "data-claim-link-pr", "data-claim-reassign"])
-      if (form.hasAttribute(attr)) return `${attr}=${form.getAttribute(attr)}`;
+      if (form.hasAttribute(attr)) return [attr, form.getAttribute(attr)].join("=");
     if (form.hasAttribute("data-claim-cap")) return "data-claim-cap";
     return null;
   };
