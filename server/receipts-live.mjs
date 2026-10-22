@@ -1,6 +1,8 @@
 // Public receipt reads. Rows live in public_receipts, written when an owner
 // opts in or a public-work receipt is recorded. These functions do not read
-// rooms.projection.
+// rooms.projection. Settled bounty lots have no stored row: the listing
+// reads in the read model merge the read-time-composed lot receipts
+// (publicLotReceiptById) into the same surfaces, under the lot rule.
 //
 // Visibility has one definition (server/public-visibility.mjs) and the
 // read model applies the whole of it in SQL, before pagination: operator

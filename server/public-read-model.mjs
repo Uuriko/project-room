@@ -802,6 +802,41 @@ const receiptFilter = (room, needle) => {
   return { clauses, params };
 };
 
+// Listing order shared by stored rows and lot receipts: newest first,
+// id ascending on a tie — the order every listing surface already used.
+const byListingOrder = (a, b) => a.at === b.at
+  ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  : (a.at < b.at ? 1 : -1);
+const isAfterCursor = (item, cursorAt, cursorId) => cursorAt == null
+  || item.at < cursorAt || (item.at === cursorAt && item.id > cursorId);
+
+// Lot receipts have no public_receipts row (composed at read time in
+// publicLotReceiptById below, #3958), so listing surfaces must merge
+// them in explicitly or a settled, opted-in lot is detail-only and
+// undiscoverable from the stranger index. Visibility is NOT re-decided
+// here: publicLotReceiptById applies the one lot rule (recorded opt-in
+// only, #3594) and returns null for every lot that must stay private —
+// unsettled, non-bounty, opted-out, never-recorded, unpublished. The
+// agent filter matches a stored row's agents_json; a lot receipt's
+// agents list is empty, so an agent-filtered list names no lots.
+function visibleLotReceipts(store, { room = null, needle = null } = {}) {
+  if (needle) return [];
+  let lotIds = [];
+  try {
+    lotIds = store.db.prepare(room
+      ? "SELECT DISTINCT lot_id AS lotId FROM bounty_journal WHERE bounty_id IS NOT NULL AND room_id=? ORDER BY lot_id"
+      : "SELECT DISTINCT lot_id AS lotId FROM bounty_journal WHERE bounty_id IS NOT NULL ORDER BY lot_id")
+      .all(...(room ? [room] : [])).map(row => row.lotId);
+  } catch { return []; } // a store with no escrow ledger has no lot receipts
+  const receipts = [];
+  for (const lotId of lotIds) {
+    if (typeof lotId !== "string" || !LOT_RECEIPT_ID.test(lotId)) continue;
+    const receipt = publicLotReceiptById(store, lotId);
+    if (receipt && (!room || receipt.room?.id === room)) receipts.push(receipt);
+  }
+  return receipts;
+}
+
 export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "room filter must be a room id" } };
@@ -823,6 +858,8 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     : [HIDDEN_RECEIPT];
   let after = "";
   const afterParams = [];
+  let cursorAt = null;
+  let cursorId = null;
   if (cursor != null) {
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
@@ -832,20 +869,35 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // hidden receipt exists and where it sits in the order (#3595). Both
     // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
     // owner public-receipts toggle (the owner leg). Same 422 as a
-    // never-existent id.
+    // never-existent id. A lot cursor resolves through the lot read,
+    // which applies the lot rule the same fail-closed way.
     const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
-    if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+    if (current) {
+      cursorAt = current.at; cursorId = current.id;
+    } else if (LOT_RECEIPT_ID.test(cursor)) {
+      const lot = visibleLotReceipts(store, { room, needle }).find(item => item.id === cursor);
+      if (!lot) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+      cursorAt = lot.at; cursorId = lot.id;
+    } else {
+      return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+    }
     after = "(at < ? OR (at = ? AND id > ?))";
-    afterParams.push(current.at, current.at, current.id);
+    afterParams.push(cursorAt, cursorAt, cursorId);
   }
+  const lots = visibleLotReceipts(store, { room, needle })
+    .filter(item => isAfterCursor(item, cursorAt, cursorId));
   const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  // Fetch enough stored rows to fill the page after the visible lots
+  // interleave into it: the page plus one lookahead, plus one stored
+  // row per lot that could sit ahead of the page's last entry.
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
-    .all(...filter.params, ...afterParams, limit + 1);
-  const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
-  const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
+    .all(...filter.params, ...afterParams, limit + 1 + lots.length);
+  const merged = [...rows.map(row => receiptWithOutcome(store, row)), ...lots].sort(byListingOrder);
+  const page = merged.slice(0, limit);
+  const nextCursor = merged.length > limit ? page.at(-1)?.id ?? null : null;
   return { receipts: page, nextCursor };
 }
 
@@ -1126,14 +1178,17 @@ export function publicLotReceiptById(store, id) {
 
 export function collectPublicReceipts(store) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
+  const stored = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
+  return [...stored, ...visibleLotReceipts(store)].sort(byListingOrder);
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+  const stored = store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC LIMIT ?`).all(cap);
+  const lots = visibleLotReceipts(store).map(receipt => ({ id: receipt.id, at: receipt.at }));
+  return [...stored, ...lots].sort(byListingOrder).slice(0, cap).map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));

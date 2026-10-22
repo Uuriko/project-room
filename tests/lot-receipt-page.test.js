@@ -561,11 +561,13 @@ test("GET /receipts/<lotId> serves the settled lot page and JSON; unknown lots 4
   const missingJson = await fetch(`${origin}/receipts/lot_${"0".repeat(16)}.json`);
   assert.equal(missingJson.status, 404);
 
-  // The gallery still lists only stored public receipts; lots are
-  // detail-only and do not leak into the listing.
+  // The gallery lists the lot alongside stored public receipts (#3958):
+  // the owner recorded the opt-in above, so the settled lot is on the
+  // stranger index, not detail-only. (The never-recorded gallery absence
+  // is pinned by the #3594 gate test below.)
   const list = await fetch(`${origin}/receipts`);
   assert.equal(list.status, 200);
-  assert.doesNotMatch(await list.text(), /Fix the flaky export/);
+  assert.match(await list.text(), /Fix the flaky export/);
 });
 
 test("the room's recorded public-receipts setting gates the lot page (#3594)", async t => {
