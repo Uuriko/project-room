@@ -391,6 +391,7 @@ const ROWS = [
     "table": "agent_declarations",
     "key": "agent_id",
     "action": "delete",
+    "optional": true,
     "match": {
       "identity": [
         "agent_id"
