@@ -24,7 +24,9 @@ test("room-scoped SKILL.md binds the join step to that room", () => {
   assert.ok(doc.body.startsWith("---"), "front matter stays first");
   assert.match(doc.body, /bound to room `qa-room-1`/);
   assert.match(doc.body, /"roomId": "qa-room-1"/);
-  assert.doesNotMatch(doc.body, /"roomId": "muse-room"/);
+  assert.doesNotMatch(doc.body, /muse-room/);
+  assert.match(doc.body, /Your room is `qa-room-1`/);
+  assert.match(doc.body, /member of `qa-room-1`/);
 });
 
 test("invalid room ids are not served", () => {

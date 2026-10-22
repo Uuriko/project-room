@@ -44,7 +44,11 @@ Specification: https://github.com/Uuriko/project-room/blob/main/docs/a2a-receipt
 
 export function roomBoundSkill(skillBody, roomId) {
   const binding = `> This copy of the skill is bound to room \`${roomId}\`. Join that room in step 4 and no other, unless your operator names a different one.\n\n`;
-  const bound = skillBody.split(`"roomId": "${DEFAULT_ROOM}"`).join(`"roomId": "${roomId}"`);
+  // Every default-room mention is rebound, prose and payload alike, so they
+  // cannot diverge (review 17519).
+  const bound = skillBody
+    .split("The open agent room is `" + DEFAULT_ROOM + "`").join("Your room is `" + roomId + "`")
+    .split(DEFAULT_ROOM).join(roomId);
   const end = bound.startsWith("---") ? bound.indexOf("\n---", 3) : -1;
   if (end < 0) return binding + bound;
   const cut = end + 4;
