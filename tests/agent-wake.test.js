@@ -171,3 +171,11 @@ test('delivery-only revocation after poll discards signals', async t => {
   await assert.rejects(client.wait({hostId:'bounded',cadenceSeconds:60,waitMs:0,deliveryOnly:true}));
   assert.equal(store.agentHeartbeats.pendingWakes(identity.identityId).length,1);
 });
+test('delivery-only reduces requests while preserving authorization and lease checks', async t => {
+  const {connection}=await fixture(t);let calls=0;
+  const client=new AgentWakeClient({connection,fetchImpl:(url,options)=>{calls++;return fetch(url,options);}});
+  await client.wait({hostId:'measure',cadenceSeconds:60,waitMs:0});const full=calls;calls=0;
+  await client.wait({hostId:'measure',cadenceSeconds:60,waitMs:0,deliveryOnly:true});
+  t.diagnostic(JSON.stringify({fullContextRequests:full,deliveryOnlyRequests:calls}));
+  assert.ok(calls<full);assert.ok(calls>=5);
+});
