@@ -5973,14 +5973,29 @@ $("#create-work-button").addEventListener("click", e => {
 // Native validation fires "invalid" per control but a dialog form can
 // swallow it without a visible word; name the first invalid field in the
 // form's own status region and open any closed disclosure around it.
+// The visible name of a blocked field, from its label's OWN words — never
+// the control's content. Reading the label's full textContent poured a
+// <select>'s every option into the status message ("Produced byChoose
+// producerOutside person or AI…"), naming nothing (#3771 remainder).
+function requiredFieldName(field) {
+  const label = field.closest?.("label");
+  const ownText = label ? [...label.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(" ") : "";
+  const spanText = label?.querySelector?.("span")?.textContent ?? "";
+  return (ownText.trim() || spanText.trim() || field.getAttribute?.("aria-label") || field.name || "A required field").replace(/\s+/g, " ").slice(0, 60);
+}
 for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-status"], ["#action-form", "#action-error"], ["#decision-form", "#decision-status"]]) {
   const form = $(formSelector); if (!form) continue;
   form.addEventListener("invalid", event => {
     const field = event.target;
-    const label = field.closest("label")?.textContent?.trim().replace(/\s+/g, " ").slice(0, 60)
-      || field.getAttribute?.("aria-label") || field.name || "A required field";
-    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: label }), true);
+    // Act once per blocked submit, on the form's first invalid control:
+    // later controls in the same submit do not re-fire the naming, and
+    // the named field is focused so the user lands on what to fix.
+    const firstInvalid = [...form.querySelectorAll("input, select, textarea")]
+      .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
+    if (firstInvalid && field !== firstInvalid) return;
+    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: requiredFieldName(field) }), true);
     const details = field.closest("details"); if (details && !details.open) details.open = true;
+    field.focus?.();
   }, true);
 }
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
@@ -6052,14 +6067,19 @@ function sendWorkProposal() {
     closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
   }, { failureHint: "Your work proposal was kept; try again." });
 }
-const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
-const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
+// #3771 remainder: a required field says so on its label — the action
+// dialog's fields used to read as optional notes while the DOM required
+// them. A label that already states the requirement in prose (or an
+// optional field's label) is left as written.
+const requiredMark = (label, required = true) => !required || /required|optional/i.test(label) ? label : `${label} (required)`;
+const field = (name, label, type = "text", required = true) => `<label>${esc(requiredMark(label, required))}<input name="${name}" type="${type}"${required ? " required" : ""} maxlength="2000"></label>`;
+const area = (name, label) => `<label>${esc(requiredMark(label))}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
 function producerField() {
   const members = Object.values(state.members).sort((a, b) => a.displayName.localeCompare(b.displayName));
   const self = members.find(member => member.id === session.member.id);
   const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
   const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(kindLabel(member.kind))}${member.active === false ? " · access revoked" : ""}</option>`).join("");
-  return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
+  return `<label>Produced by (required)<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
   "offer-help": [T.HELP_OFFER_OPENED, "Offer help", ""],
@@ -6073,9 +6093,9 @@ const actionSpecs = {
   complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS, display only)", "url") + field("evidenceVersion", "Exact commit or artifact version (display only)") + area("nextAction", "Next handoff") + area("signedEvidence", "Signed evidence JSON (room-signed-evidence/1 — required; paste the object your agent identity key signed)")],
   claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Paths or folder/**, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>Reserves matching scope in this room. External permission is separate.</p>"],
   release: [T.CLAIM_RELEASED, "Release this scope?", "<p>Other work can reserve it next. This does not stop an outside agent or change the work's result. Confirm any outside activity separately.</p>"],
-  renew: [T.CLAIM_RENEWED, "Renew this scope", field("expiresAt", "New expiry (ISO timestamp, with timezone)") + field("progressMessageId", "Progress message id (optional evidence)") + "<p>Extends the reservation. A heartbeat is enough. If you cite a message, it must be a public message you posted after the current lease started.</p>"],
-  verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
-  decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
+  renew: [T.CLAIM_RENEWED, "Renew this scope", field("expiresAt", "New expiry (ISO timestamp, with timezone)") + field("progressMessageId", "Progress message id (optional evidence)", "text", false) + "<p>Extends the reservation. A heartbeat is enough. If you cite a message, it must be a public message you posted after the current lease started.</p>"],
+  verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result (required)<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
+  decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision (required)<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
@@ -6208,7 +6228,7 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   }
   if (action === "help") {
     const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
-    $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
+    $("#action-fields").innerHTML = '<label>What would help? (required)<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for (required)<select name="duration" required>'
       + (keep ? '<option value="keep">Keep current end time</option>' : "")
       + '<option value="3600000">1 hour</option><option value="86400000"' + (keep ? "" : " selected") + '>1 day</option><option value="604800000">7 days</option></select></label><p class="form-hint">Visible to this room. You stay accountable; no work starts automatically.</p><p id="help-current" class="form-hint" hidden></p>';
     $("#action-fields [name=scope]").value = item.helpWanted?.scope ?? "";
@@ -6217,8 +6237,8 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (action === "end-help") $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="help-current" class="definition"></p>');
   if (isOfferAction(action)) {
     $("#action-fields").innerHTML = '<p id="offer-current" class="definition"></p>'
-      + (action === "offer-help" ? '<label>How can you help?<textarea name="plan" required rows="3" maxlength="600"></textarea></label>'
-        : '<p id="offer-plan" class="definition"></p><label>Note<textarea name="reason" required rows="2" maxlength="600"></textarea></label>')
+      + (action === "offer-help" ? '<label>How can you help? (required)<textarea name="plan" required rows="3" maxlength="600"></textarea></label>'
+        : '<p id="offer-plan" class="definition"></p><label>Note (required)<textarea name="reason" required rows="2" maxlength="600"></textarea></label>')
       + (action === "release-offer" ? '<label class="checkbox-label"><input name="externalActivityUnverified" type="checkbox" required> Outside work may still be running.</label>'
         : '<p class="form-hint">Coordination only. No work starts or permissions change.</p>');
   }
