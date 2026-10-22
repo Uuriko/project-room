@@ -554,6 +554,51 @@ test("re-adding a pull request keeps one row and can move the claimant", async t
   assert.equal(events[1].data.claimantMemberId, memberId);
 });
 
+function linkMember(store, ownerKey, displayName, permissions = []) {
+  const identity = store.identities.create(displayName);
+  const linked = store.identities.link(ownerKey, "commons", {
+    identityId: identity.identityId, displayName, permissions
+  });
+  return { identity, memberId: linked.memberId };
+}
+
+test("an ordinary member cannot name another member as claimant (#3905)", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId: actorId } = linkOffline(store, ownerKey);
+  const { memberId: otherId } = linkMember(store, ownerKey, "Ben Lander");
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  // Fresh add naming someone else: refused, and nothing is stored or mirrored.
+  await assert.rejects(
+    () => store.landQueue.add("commons", actorId, { repo: "acme/demo", prNumber: 969, claimantMemberId: otherId }),
+    error => error.status === 403 && error.code === "access_denied",
+    "naming another member as claimant requires the owner or manage_members"
+  );
+  assert.equal(store.landQueue.list("commons", "owner").items.length, 0);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM land_queue").get().n, 0);
+  // Naming yourself explicitly, or omitting the claimant, still works.
+  const own = await store.landQueue.add("commons", actorId, { repo: "acme/demo", prNumber: 969, claimantMemberId: actorId });
+  assert.equal(own.item.claimantMemberId, actorId);
+  // Reassignment: the same ordinary member cannot move the item to someone else.
+  await assert.rejects(
+    () => store.landQueue.add("commons", actorId, { repo: "acme/demo", prNumber: 969, claimantMemberId: otherId }),
+    error => error.status === 403 && error.code === "access_denied",
+    "reassigning the claimant to another member requires the owner or manage_members"
+  );
+  assert.equal(store.landQueue.list("commons", "owner").items[0].claimantMemberId, actorId);
+  assert.deepEqual(landEvents(store).map(event => event.data.changed), [["added"]]);
+});
+
+test("the owner and a manage_members member can name another member as claimant (#3905)", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId: otherId } = linkMember(store, ownerKey, "Ben Lander");
+  const { memberId: adminId } = linkMember(store, ownerKey, "Cora Lander", ["manage_members"]);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const byOwner = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: otherId });
+  assert.equal(byOwner.item.claimantMemberId, otherId);
+  const byAdmin = await store.landQueue.add("commons", adminId, { repo: "acme/demo", prNumber: 970, claimantMemberId: otherId });
+  assert.equal(byAdmin.item.claimantMemberId, otherId);
+});
+
 test("prototype-named phantom members are not room members (#3023)", async t => {
   const { store } = fixture(t);
   store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot()).fetchImpl });

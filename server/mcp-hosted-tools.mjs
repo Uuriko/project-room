@@ -150,11 +150,11 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     inviteId: { type: "string", minLength: 1, maxLength: 64, description: "inviteId from room_list_agent_invites." }
   }, ["roomId", "inviteId"]), false),
-  tool("add_land_item", "[paid: room-cents] 1 cent per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
+  tool("add_land_item", "[paid: room-cents] 1 cent per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add, but naming a different member as claimant requires the room owner or manage_members. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
     prNumber: { type: "integer", minimum: 1, maximum: 100000000 },
-    claimantMemberId: { ...idField, description: "Member woken about this pull request. Defaults to the caller." },
+    claimantMemberId: { ...idField, description: "Member woken about this pull request. Defaults to the caller. Naming another member requires the room owner or manage_members." },
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "repo", "prNumber"]), false),
   tool("list_land_queue", "List this room's land queue. Same read as GET /api/rooms/:roomId/list_land_queue. Each item includes the pull request number, title, head SHA, check rollup, behind-main flag, merged SHA, and tip when one was reported.", schema({

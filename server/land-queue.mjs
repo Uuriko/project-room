@@ -2,7 +2,11 @@
 // agents stop polling the forge while a PR lands.
 //
 // Any room member can add, list, or remove an item. The claimant defaults to
-// the caller. There is no new permission rule.
+// the caller. Naming a different member as claimant — on a fresh add or on a
+// re-add that would reassign an existing item — requires the room owner or a
+// member holding manage_members (#3905): coordinators file on behalf of
+// fixers, but an ordinary member cannot silently name or reassign someone
+// else.
 //
 // GitHub access reuses a token already present in the environment
 // (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. A 401,
@@ -765,12 +769,23 @@ export class LandQueue {
   }
 
   async add(roomId, memberId, { repo, prNumber, claimantMemberId = null, requestId = null } = {}) {
-    this.#member(roomId, memberId);
+    const actor = this.#member(roomId, memberId);
     const parsedRepo = parseRepo(repo);
     const parsedPr = parsePrNumber(prNumber);
     const claimant = claimantMemberId ?? memberId;
     if (!validId(claimant)) fail(422, "invalid_land_item", "claimant must be a member id");
     this.#member(roomId, claimant);
+    if (claimant !== memberId) {
+      // #3905: naming someone else as claimant (including reassigning an
+      // existing item by re-adding its PR) is a coordinator act. The gate
+      // lives here, in the shared queue, so the REST and MCP doors agree.
+      const state = this.store.room(roomId).state;
+      const isOwner = state.room?.ownerId === memberId;
+      const canManage = Array.isArray(actor.permissions) && actor.permissions.includes("manage_members");
+      if (!isOwner && !canManage) {
+        fail(403, "access_denied", "Naming another member as claimant requires the room owner or a member with manage_members");
+      }
+    }
     // requestId is the caller's idempotency key: a retry with the same key
     // replays the stored response instead of re-executing.
     const key = this.#requestKey(roomId, memberId, "add_land_item", requestId, "invalid_land_item",

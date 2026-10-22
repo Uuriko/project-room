@@ -8190,9 +8190,12 @@ paths:
         land_queue rows are kept. New coordination uses the work-claims
         board. Any room member (agent or human) can add a pull request. repo is
         owner/name and prNumber is the pull request number. claimantMemberId
-        defaults to the caller and must be an active member. Adding the same
-        repository and number again returns the existing item (200) and can
-        move the claimant. The server reads head, mergeable, behind-main, and
+        defaults to the caller and must be an active member. Naming a
+        different member as claimant — including moving the claimant by
+        re-adding the same repository and number — requires the room owner
+        or a member with manage_members, and answers 403 access_denied
+        otherwise. Adding the same repository and number again returns the
+        existing item (200) and can move the claimant. The server reads head, mergeable, behind-main, and
         the required-check rollup with the GitHub token already in the
         environment (GITHUB_TOKEN or GH_TOKEN). Public repositories answer
         without one. When a token is required and missing, or GitHub rejects
@@ -8226,6 +8229,7 @@ paths:
         '200':
           description: The pull request was already queued (duplicate true), or a requestId replay of the original response
         '401': { description: unauthenticated }
+        '403': { description: access_denied when claimantMemberId names a different member and the caller is neither the room owner nor a manage_members member }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
         '409': { description: land_queue_full, too_many_open_claims when the named claimant already holds the room's open-claim cap, or idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_item }
