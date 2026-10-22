@@ -159,29 +159,31 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
  * Whether a reply request is eligible to be (re)run. The second disjunct
  * covers retrying a locally-saved response — it must still require the
  * request to be open, or closed/cancelled requests would be re-run (G-L2).
+ * Standing blockers suppress new work only; saved delivery still revalidates
+ * through the service and must not be stranded by an execution-only pause.
  */
-export function isRequestEligible(request, { owned, runState, hasPendingDelivery }) {
+export function isRequestEligible(request, { owned, runState, hasPendingDelivery, blocked = false }) {
   if (request?.status !== "open") return false;
-  if (!owned) return true;
+  if (!owned) return !blocked;
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
 export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs, connectionUnavailable = false;
+  let delay = intervalMs, connectionUnavailable = false, pendingStatement;
+  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
   while (!signal?.aborted) {
     let cursor = null;
     try {
-      const { requests, evaluatedThrough } = await client.replyRequests({ status: "all", signal });
+      const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
       cursor = evaluatedThrough;
-      const { runs } = await client.requestRuns(undefined, { signal });
-      const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
       const owned = request => Object.hasOwn(runs, request.id);
       const eligible = requests.filter(request => isRequestEligible(request, {
         owned: owned(request),
+        blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
-        hasPendingDelivery: Boolean(pending(request)),
+        hasPendingDelivery: owned(request) && runs[request.id]?.state !== "needs_attention" && Boolean(pending(request)),
       }));
       for (const request of eligible.slice(0, 50)) {
         signal?.throwIfAborted();

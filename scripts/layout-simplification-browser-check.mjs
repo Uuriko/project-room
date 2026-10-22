@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { contrastRatio } from '../src/design-tokens.js';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { signInFixture } from './auth-signin.mjs';
@@ -36,7 +37,7 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (account) {
       await ensureSidebarOpen(page);
-      assert.equal(await page.locator(width > 940 ? '#sidebar-workspace #workspace-nav' : '.app-shell > #workspace-nav').isVisible(), true);
+      assert.equal(await page.locator('#sidebar-workspace #workspace-nav').isVisible(), true);
       await ensureSidebarClosed(page);
       await clickChrome(page, '#nav-rooms');
       await page.locator('#account-rooms-panel').waitFor();
@@ -104,5 +105,48 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.app-shell > .topbar').isVisible(), true);
     assert.deepEqual(errors, []);
+  });
+}
+
+const hex = rgb => '#' + rgb.match(/\d+/g).slice(0, 3).map(x => Number(x).toString(16).padStart(2, '0')).join('');
+for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
+  test(`conversation navigation ${width} ${theme}: readable, reachable and draft-preserving`, { timeout: 30000 }, async t => {
+    const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const browser = await chromium.launch({ headless: true });
+    t.after(async () => {
+      await browser.close(); server.closeStreams(); server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+    });
+    const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: width < 500, isMobile: width < 500 });
+    page.setDefaultTimeout(5000);
+    await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
+    await signInFixture(page, f.store.issueAccountAccessKey(f.store.accountForMember('commons', 'owner').id));
+    await page.locator('#main').waitFor({ state: 'visible' });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    await page.locator('#message-input').fill('Keep my draft through navigation');
+    assert.equal(await page.locator('#composer-hint').isVisible(), width >= 500);
+    assert.equal(await page.locator('.app-shell > #workspace-nav').count(), 0, 'no redundant bottom navigation in a conversation');
+    if (width < 500) {
+      assert.equal(await page.locator('.app-shell').evaluate(node => parseFloat(getComputedStyle(node).paddingBottom)), 0);
+      await page.locator('#sidebar-toggle').click();
+    }
+    const nav = page.locator('#sidebar-workspace #nav-rooms');
+    const colors = await nav.evaluate(node => ({ foreground: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor }));
+    assert.ok(contrastRatio(hex(colors.foreground), hex(colors.background)) >= 4.5, 'normal navigation text meets AA contrast');
+    const box = await nav.boundingBox(); assert.ok(box.height >= 44, 'navigation retains a touch-sized target');
+    await nav.click();
+    await page.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.app-shell > #workspace-nav').isVisible(), true, 'account navigation remains available');
+    await page.locator('[data-account-room="commons"]').click();
+    await page.locator('#main').waitFor({ state: 'visible' });
+    if (width < 500) await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#message-input').inputValue(), 'Keep my draft through navigation');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.locator('#composer-options-toggle').click();
+    assert.equal(await page.locator('#new-work-button').isVisible(), true);
+    await page.locator('#composer-options-toggle').click();
+    const send = page.locator('#message-form button[type="submit"]');
+    assert.ok(await send.evaluate(node => { const r = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }), 'Send is not covered');
   });
 }
