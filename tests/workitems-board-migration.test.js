@@ -18,7 +18,8 @@ import {
 } from "../server/work-item-board.mjs";
 import { availableWorkInRoom } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { updateWork, recordReview } from "../server/work-claims.mjs";
+import { updateWork, recordReview, appendWorkPullRequest, claimHistoryLength } from "../server/work-claims.mjs";
+import { recordPullOutcome } from "../server/claim-coordination.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const T0 = "2026-10-01T00:00:00.000Z";
@@ -285,6 +286,37 @@ test("mapping preserves board review authority, round identity and linked PR out
   assert.deepEqual(boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW, existing: mapped }), mapped);
 });
 
+test("mapping: #3761 sync merge keeps board-appended PR links and recorded outcomes", () => {
+  // Issue #3761's exact scenario: the existing row accumulated link state
+  // the event facts never see — 102 appended through the board door (the
+  // current link) and a recorded closed outcome on 101 — while the facts
+  // carry only 101 from claim.acquired. Re-mapping must union, not
+  // replace: both links survive and 101's recorded record stays verbatim.
+  const work = item({ state: "working", claim: liveClaimFields() });
+  const url = n => `https://github.com/Uuriko/project-room/pull/${n}`;
+  const link = (n, outcome) => ({
+    url: url(n), repo: "Uuriko/project-room", number: n,
+    outcome, syncedAt: outcome ? at(5 * H) : null, nextPollAt: null, etag: outcome ? "etag" : null,
+    rateLimitedUntil: null, pollBackoffMs: null, ciCursor: null, ciStatus: null,
+  });
+  const claimEvent = ev("claim.acquired", 2 * H, "worker", { workItemId: "task-a", pullRequests: [url(101)] });
+  const facts = factsFor([claimEvent]);
+  facts.pullRequests = claimEvent.data.pullRequests;
+  const existing = { pullRequest: link(102, null), pullRequests: [link(101, "closed"), link(102, null)] };
+  const mapped = boardClaimForWorkItem(work, facts, { nowMs: NOW, existing });
+  assert.deepEqual(mapped.pullRequests, [link(101, "closed"), link(102, null)]);
+  // Facts still contribute links the row has never seen, as fresh links.
+  const facts2 = factsFor([claimEvent]);
+  facts2.pullRequests = [url(101), url(103)];
+  const mapped2 = boardClaimForWorkItem(work, facts2, { nowMs: NOW, existing });
+  assert.equal(mapped2.pullRequests.length, 3);
+  assert.deepEqual(mapped2.pullRequests.find(pull => pull.number === 101), link(101, "closed"));
+  assert.deepEqual(mapped2.pullRequests.find(pull => pull.number === 102), link(102, null));
+  assert.deepEqual(mapped2.pullRequests.find(pull => pull.number === 103), link(103, null));
+  // The merge is a fixed point: re-mapping the merged row changes nothing.
+  assert.deepEqual(boardClaimForWorkItem(work, facts, { nowMs: NOW, existing: mapped }), mapped);
+});
+
 test("plan never rewinds a board delivery or its send-back while the work projection lags", () => {
   const work = item({ state: "working", claim: liveClaimFields(), verifierMemberId: "owner" });
   let row = boardClaimForWorkItem(work, factsFor([]), { nowMs: NOW });
@@ -491,6 +523,36 @@ test("store: AvailableWork is board-only after the flip — the board is the one
   f.store.backfillRoomWorkItemClaims("commons");
   assert.deepEqual(identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items),
     new Set(["board-native", "task-open"]));
+});
+
+test("store: #3761 a board-appended PR link and a recorded outcome survive a work-item sync event", (t) => {
+  const f = fixture(t);
+  const url = n => `https://github.com/Uuriko/project-room/pull/${n}`;
+  f.send(f.ownerKey, "propose-3761", "work.proposed", {
+    workItemId: "task-3761", title: "Sync merge task", definitionOfDone: "Links survive sync",
+    accountableMemberId: "worker", mode: "write",
+  });
+  f.mutate(f.workerKey, "accept-3761", "work.accepted", "task-3761");
+  f.mutate(f.workerKey, "claim-3761", "claim.acquired", "task-3761", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+    expiresAt: new Date(Date.now() + 2 * H).toISOString(), pullRequests: [url(101)],
+  });
+  let row = f.store.workClaims.get("commons", "task-3761");
+  assert.deepEqual(row.pullRequests.map(pull => pull.number), [101]);
+  // The board door appends a second link the event facts never see, and
+  // claim-prs records an outcome on the first.
+  row = appendWorkPullRequest(row, "worker", { pullRequest: url(102),
+    expectedClaimedAt: row.claimedAt, expectedHistoryLength: claimHistoryLength(row), now: Date.now() });
+  f.store.workClaims.set("commons", row);
+  row = recordPullOutcome(f.store.workClaims.get("commons", "task-3761"), url(101), "closed", Date.now());
+  f.store.workClaims.set("commons", row);
+  // A later sync-type event re-runs the sync: the row is rebuilt from
+  // facts + existing, and must keep both links with the outcome intact.
+  f.mutate(f.workerKey, "start-3761", "work.started", "task-3761");
+  row = f.store.workClaims.get("commons", "task-3761");
+  assert.deepEqual(row.pullRequests.map(pull => `${pull.number}:${pull.outcome}`), ["101:closed", "102:null"]);
+  assert.equal(row.pullRequest.number, 102);
+  assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
 });
 
 // ---------------------------------------------------------------------------
