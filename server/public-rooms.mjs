@@ -34,7 +34,8 @@ const SETUP_COPY_SCRIPT = `(() => {
     } finally { button.disabled = false; }
   });
 })();`;
-export const PUBLIC_PAGE_CSP = RECEIPTS_PAGE_CSP.replace('script-src ', `script-src 'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}' `);
+export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
+export const PUBLIC_ROOM_SETUP_CSP = RECEIPTS_PAGE_CSP.replace('script-src ', `script-src 'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}' `);
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/home.png`;
 
