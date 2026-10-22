@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
-import { parseFailingTests } from "./failing-tests.mjs";
+import { parseFailingTests, FIXTURE_FAILURE_NAMES } from "./failing-tests.mjs";
 
 const XML_ENTITIES = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
@@ -158,6 +158,18 @@ export function runTestFiles(files, options = {}) {
   return { status, signal: result.signal, failures, fileDurationsMs };
 }
 
+/**
+ * The failures list as the shard receipt records it: the raw parse minus the
+ * deliberately failing fixture names (FIXTURE_FAILURE_NAMES), mirroring the
+ * PR-comment path in formatFailureComment. The filter lives here, at receipt
+ * write time — runTestFiles keeps the unfiltered parse because
+ * tests/unit-ci-runner.test.js asserts the probe name is still reported
+ * there (issue #4261).
+ */
+export function receiptFailures(failures) {
+  return Array.isArray(failures) ? failures.filter((f) => !FIXTURE_FAILURE_NAMES.has(f)) : failures;
+}
+
 function main() {
   const argv = process.argv.slice(2);
   if (argv.length !== 1 || !argv[0].startsWith("--shard=")) {
@@ -194,7 +206,7 @@ function main() {
         planHash: plan.planHash,
         status,
         signal,
-        failures,
+        failures: receiptFailures(failures),
         // Per-file measured runtimes from this actual hosted run (junit
         // sidecar). Backward compatible: older receipts omit this field
         // and verifyUnitShards does not require it.
