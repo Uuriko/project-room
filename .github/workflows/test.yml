@@ -219,7 +219,17 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
       - name: Install Playwright Chromium (binary cached) and its OS deps
-        run: npx playwright install --with-deps chromium
+        # Chromium's OS deps come from Ubuntu; the runner's Microsoft apt source has
+        # 403'd during apt update and killed shards before any test ran, so drop it
+        # and retry transient mirror failures.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
+          for attempt in 1 2 3; do
+            npx playwright install --with-deps chromium && exit 0
+            echo "::warning::playwright install attempt $attempt failed; retrying"
+            sleep $((attempt * 15))
+          done
+          exit 1
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
         # Same suites as test:browser, plus a junit file under test-results/ for the step below.
         run: scripts/test-env.sh npm run test:browser:ci -- --shard=${{ matrix.shard }}/6
@@ -299,7 +309,17 @@ jobs:
       - name: Install Playwright Chromium (binary cached) and its OS deps
         id: pwinstall
         background: true
-        run: npx playwright install --with-deps chromium
+        # Chromium's OS deps come from Ubuntu; the runner's Microsoft apt source has
+        # 403'd during apt update and killed shards before any test ran, so drop it
+        # and retry transient mirror failures.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
+          for attempt in 1 2 3; do
+            npx playwright install --with-deps chromium && exit 0
+            echo "::warning::playwright install attempt $attempt failed; retrying"
+            sleep $((attempt * 15))
+          done
+          exit 1
       - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
       - name: Wait for Playwright install
         wait: pwinstall
