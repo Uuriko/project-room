@@ -595,7 +595,8 @@ export const JOBS = Object.freeze([
       let gauges = measureStoreGrowth(store);
       let relief = null;
       if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
-        relief = relieveProjections(store, { limitBytes: STORE_GROWTH_LIMITS.maxProjectionBytes });
+        const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
+        relief = relieveProjections(store, { limitBytes });
         gauges = { ...measureStoreGrowth(store), relief };
       }
       const breach = storeGrowthBreach(gauges);
