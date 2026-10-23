@@ -4214,6 +4214,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
     return bound && this.memberSelfLeft(roomId, bound.member_id, state) ? bound.member_id : null;
   }
+  // The rebound shape (r126): this member was the accepted target of a
+  // targeted invitation, holds no account binding of its own any more, and
+  // the invited account is now bound to a DIFFERENT member of this room —
+  // the person came back through a newer invitation as a newer member (the
+  // invitation audit's "rebound invitee"). The old member record is retired
+  // history; the newer membership is the person's live one.
+  memberRebound(roomId, memberId) {
+    if (this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, memberId)) return false;
+    const accepted = this.db.prepare("SELECT intended_account_id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'").get(roomId, memberId);
+    if (!accepted) return false;
+    return Boolean(this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=? AND member_id<>?").get(roomId, accepted.intended_account_id, memberId));
+  }
   // Inactive, and the last deactivation was the member's own act.
   memberSelfLeft(roomId, memberId, state) {
     if (state.members[memberId]?.active !== false) return false;
@@ -4481,7 +4493,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       refuseArchivedWrite(room.state);
-      const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
+      const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId, ...(leftMemberId ? { rejoinOfMemberId: leftMemberId } : {}) });
       let state;
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
@@ -5879,7 +5891,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command, expectedSessionBinding = null) {
+  command(token, roomId, command, expectedSessionBinding = null, internal = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
     // command transaction cannot roll back, so remember the spend and refund
@@ -5944,6 +5956,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           .filter(id => firstBlockedWakeTarget(room.state, auth.member.id, [id]))
         : [];
       const target = room.state.members[command.data.memberId];
+      // r126 rebound guard: reactivating the OLD member of a person who
+      // self-left and rejoined through a newer invitation would leave an
+      // active human with no account binding, and every later invitation
+      // audit (cold start, backup, export, the integrity job) would fail on
+      // the record. Refuse here, before the event is built; the person's
+      // newer membership is the one to change instead.
+      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === true && target?.kind === "human" && target.active === false
+        && this.memberRebound(roomId, target.id)) {
+        fail(409, "membership_rebound", "This person rejoined as a newer member. Change that membership instead.");
+      }
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
@@ -6088,7 +6110,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : memberAuthorityEvent ? {
             ...command.data,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-            ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
+            // Both member-authority events carry the display-name policy
+            // stamp: member.added for the admission checks, and
+            // member.access_changed so the reducer can gate its v3
+            // reactivation guard on the stamp — a live reactivation is
+            // stamped, stored pre-v3 access_changed history is not, and
+            // replay never re-judges it (CURE-4348).
+            displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION,
+            // Internal-only (display-name policy v3): the account-deletion
+            // flow ends a membership with membershipEndReason so the reducer
+            // can free the name. The field is NOT in the public command
+            // shape — validateCommand refuses it in command.data — so only
+            // this internal option (and stored history) can carry it; a
+            // forged stamp on an owner remove / member leave is impossible.
+            ...(command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false
+              && internal?.membershipEndReason === "account_deleted"
+              ? { membershipEndReason: "account_deleted" } : {}),
           }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
@@ -6100,7 +6137,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // control characters are refused.
       if (command.type === T.MEMBER_ADDED || command.type === T.MEMBER_JOINED_VIA_INVITATION) {
         try {
-          assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members);
+          // Policy v3: mirror the reducer's removed-member reservation so
+          // the refusal surfaces here with its suggestion; the reducer's
+          // stamped check below remains the authority.
+          assertMemberDisplayNameAvailable(command.data?.displayName, room.state.members,
+            { includeInactive: true, excludeId: command.data?.memberId ?? null });
         } catch (error) {
           if (error?.code === "display_name_unavailable" && error.reason !== "duplicate") {
             const refused = new ServiceError(422, "display_name_unavailable", error.message);

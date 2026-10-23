@@ -720,14 +720,19 @@ export class AgentIdentities {
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       const memberName = displayName?.trim() || identity.displayName;
-      // Compare against active room members inside the writer transaction,
+      // Compare against room members (active and removed) inside the writer transaction,
       // not an earlier snapshot. Exact duplicates and reserved labels are
       // refused by the live member.added guard. This check still blocks
       // deceptive alternate spellings, mixed scripts, and invisible characters
       // before that command. Same-identity relinks keep the path above.
       const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+      // Policy v3: removed members' names count too — a deceptive spelling
+      // of a removed member's name is refused here, and the exact name is
+      // refused by the member.added roster check below. The joining
+      // identity's own record stays excluded.
       const activeNames = Object.values(this.store.room(roomId).state.members)
-        .filter(member => member.active !== false && member.id !== resolvedMemberId
+        .filter(member => member.id !== resolvedMemberId
+          && member.membershipEndedBy !== "account_deleted"
           && canonical(member.displayName) !== canonical(memberName))
         .map(member => ({ memberId: member.id, displayName: member.displayName }));
       assertNotReservedRoleName(memberName); // Q3-D: and when the identity joins a room

@@ -13,7 +13,7 @@
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
+import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { verifyCardSignature } from "./agent-card-signing.mjs";
 import {
@@ -452,6 +452,12 @@ export class GuestInvites {
         permissions: member.permissions,
         active: true,
         authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+        // Display-name policy v3: this direct builder stands in for
+        // store.command, so it carries the stamp store.command would add —
+        // without it the reducer's reactivation guard (stamped events
+        // only, so pre-v3 history is never re-judged) cannot fire on this
+        // live path (CURE-4348-2 producer census).
+        displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION,
       },
     });
     let state;

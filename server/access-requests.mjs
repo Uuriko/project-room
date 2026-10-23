@@ -303,7 +303,9 @@ export class AccessRequests {
       // linked member's current name, rather than checking it against itself.
       const requestName = member ? member.displayName : name;
       if (!member) {
-        assertAdmissibleMemberName(requestName, room.state.members); // Q3-D: roster check plus role names
+        // Policy v3: a removed member's name stays reserved; the requester's
+        // own inactive record never blocks the requester.
+        assertAdmissibleMemberName(requestName, room.state.members, { includeInactive: true, excludeId: identityId }); // Q3-D: roster check plus role names
       }
       const now = this.store.now();
       const storedPermissions = member ? { version: 1, kind: "permission-upgrade",
@@ -529,7 +531,7 @@ export class AccessRequests {
     // become a member here. A name that fails only the older mixed-script
     // check still waits for the owner, as before.
     try {
-      assertMemberDisplayNameAvailable(row.display_name, room.state.members);
+      assertMemberDisplayNameAvailable(row.display_name, room.state.members, { includeInactive: true, excludeId: row.identity_id });
     } catch (error) {
       if (error.code !== "display_name_unavailable") throw error;
       return { approved: false, pendingNote: "That display name is unavailable, so the request waits for an owner decision." };
@@ -537,8 +539,12 @@ export class AccessRequests {
     // Deceptive-name guard, same as AgentIdentities.link(): a confusing or
     // duplicate name never auto-admits — it waits for owner review.
     const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+    // Policy v3: removed members' names count here too — a deceptive
+    // spelling of a removed member's name must not auto-admit either. The
+    // requester's own record (member.id === identity id) stays excluded.
     const activeNames = Object.values(room.state.members)
-      .filter(member => member.active !== false && member.id !== row.identity_id
+      .filter(member => member.id !== row.identity_id
+        && member.membershipEndedBy !== "account_deleted"
         && canonical(member.displayName) !== canonical(row.display_name))
       .map(member => ({ memberId: member.id, displayName: member.displayName }));
     const checked = checkAgentDisplayName(row.display_name, { activeNames });
@@ -725,7 +731,7 @@ export class AccessRequests {
       const unheld = this.store.delegation.unheldPermissions(authority, auth, grants);
       if (unheld.length) fail(403, "access_denied", `Cannot grant permissions not held: ${unheld.join(", ")}. Approve with permissions you hold, or ask the room owner`);
       const identities = this.store.identities;
-      assertMemberDisplayNameAvailable(row.display_name, this.store.room(roomId).state.members);
+      assertMemberDisplayNameAvailable(row.display_name, this.store.room(roomId).state.members, { includeInactive: true, excludeId: row.identity_id });
       // Referral attribution: match the "who referred you?" text against
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.
