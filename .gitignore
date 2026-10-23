@@ -40,3 +40,6 @@ docs/room-health.html
 # Agent pages — built by scripts/build-agent-docs.mjs at CF deploy time
 # (decision #36 / #3254 Option A: never committed, never in the runtime package)
 docs/agents/*.html
+# FAQ page — built by scripts/build-faq.mjs from docs/FAQ.md (#3976),
+# under the same never-committed rule.
+faq.html
