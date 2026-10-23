@@ -289,9 +289,27 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
   dbBytes: 8_000_000_000
 });
 
+// Storage alert lines: 8 GB under the 10 GB Durable Object SQLite cap, and a
+// per-room warning at 3.5 MiB under the 4 MiB store cap. Every crossed line
+// is named in the summary's alerts, so a database alert is not hidden behind
+// a room breach, and roomsNearCap counts rooms (no ids) past the warning.
+export const STORAGE_ALERT_LINES = Object.freeze({
+  dbBytes: 8_000_000_000,
+  dbCapBytes: 10_000_000_000,
+  roomWarnBytes: 3.5 * 1024 * 1024
+});
+
+export function storageAlerts(gauges, lines = STORAGE_ALERT_LINES) {
+  const alerts = [];
+  if (Number(gauges?.dbBytes) >= lines.dbBytes) alerts.push("db_near_cap");
+  if (Number(gauges?.roomsNearCap) > 0) alerts.push("room_near_store_cap");
+  return alerts;
+}
+
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
-    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes,
+    COALESCE(SUM(LENGTH(projection) >= ${STORAGE_ALERT_LINES.roomWarnBytes}), 0) AS roomsNearCap FROM rooms`).get();
   let dbBytes = 0;
   // The Durable Object runtime refuses PRAGMA page_count, so the worker
   // read 0 here and the 10 GB SQLite line was never watched in production.
@@ -310,6 +328,7 @@ export function measureStoreGrowth(store) {
     rooms: Number(row?.rooms) || 0,
     events: Number(row?.events) || 0,
     maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
+    roomsNearCap: Number(row?.roomsNearCap) || 0,
     dbBytes
   };
 }
@@ -675,10 +694,13 @@ export const JOBS = Object.freeze([
         // nested relief object never reached /api/health/jobs.
         gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
       }
+      const alerts = storageAlerts(gauges);
+      if (alerts.length) gauges = { ...gauges, alerts };
       const breach = storeGrowthBreach(gauges);
-      if (!breach) return gauges;
-      console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
-      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
+      if (!breach && !alerts.length) return gauges;
+      console.warn(`[store-growth] ${breach ?? alerts[0]} crossed a storage line: ${JSON.stringify(gauges)}`);
+      const subcheck = alerts.includes("db_near_cap") ? "db_near_cap" : breach === "maxProjectionBytes" ? "maxProjectionBytes" : alerts[0] ?? breach;
+      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit", subcheck } };
     }
   })
 ]);
