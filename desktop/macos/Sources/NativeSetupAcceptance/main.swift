@@ -61,7 +61,8 @@ import ProjectRoomKit
         _ = NSApplication.shared
         let host = try LocalRoomHost(directory: root.appendingPathComponent("host"))
         let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 760), styleMask: [.titled], backing: .buffered, defer: false)
-        let setup = LocalRoomHostSetupWindow(host: host, completion: {})
+        var outcomes: [Bool] = []
+        let setup = LocalRoomHostSetupWindow(host: host, completion: { outcomes.append($0) })
         parent.makeKeyAndOrderFront(nil)
         setup.show(on: parent)
         try await Task.sleep(nanoseconds: 200_000_000)
@@ -124,8 +125,36 @@ import ProjectRoomKit
         try "process.exit(1)".write(to: helper, atomically: true, encoding: .utf8)
         try await connectAndWait()
         check(connectionField.stringValue.isEmpty, "failed reconnect cannot save a stale room connection")
+        let save = controls.compactMap { $0 as? NSButton }.first { $0.title == "Save setup" }!
+        save.performClick(nil)
+        check(outcomes.isEmpty && parent.attachedSheet != nil, "invalid Save stays open without a successful completion")
+        let cancel = controls.compactMap { $0 as? NSButton }.first { $0.title == "Cancel" }!
+        cancel.performClick(nil)
+        check(outcomes == [false], "idle Cancel reports cancellation instead of successful setup")
         withExtendedLifetime(setup) {}
-        parent.endSheet(sheet); parent.close()
+        // Cancel while a helper is running must wait for it, then report only cancellation.
+        try "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},100);".write(to: helper, atomically: true, encoding: .utf8)
+        let busySetup = LocalRoomHostSetupWindow(host: host, completion: { outcomes.append($0) })
+        busySetup.show(on: parent)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let busyControls = descendants(parent.attachedSheet!.contentView!)
+        func busyField(_ name: String) -> NSTextField {
+            busyControls.compactMap { $0 as? NSTextField }.first { $0.placeholderString == name }!
+        }
+        busyField("Node executable").stringValue = node.path
+        busyField("Room host script").stringValue = root.appendingPathComponent("run-codex-room.mjs").path
+        busyField("Paste a room or invitation link").stringValue = "https://example.test/cancel"
+        let busyConnect = busyControls.compactMap { $0 as? NSButton }.first { $0.title == "Connect room" }!
+        busyConnect.performClick(nil)
+        check(!busyConnect.isEnabled, "connection helper disables conflicting setup actions")
+        busyControls.compactMap { $0 as? NSButton }.first { $0.title == "Cancel" }!.performClick(nil)
+        for _ in 0..<100 {
+            if outcomes.count == 2 { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        check(outcomes == [false, false], "running-helper Cancel reports cancellation exactly once")
+        withExtendedLifetime(busySetup) {}
+        parent.close()
         #endif
         print("NATIVE_SETUP_ACCEPTANCE_OK")
     }
