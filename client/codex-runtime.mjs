@@ -66,6 +66,11 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     work_brief_version TEXT);`);
   if (!db.prepare("PRAGMA table_info(codex_runtime_outputs)").all().some(column => column.name === "phase"))
     db.exec("ALTER TABLE codex_runtime_outputs ADD COLUMN phase TEXT");
+  db.exec(`CREATE TABLE IF NOT EXISTS codex_runtime_tool_blocks (
+    attempt_id TEXT NOT NULL, item_id TEXT NOT NULL,
+    PRIMARY KEY(attempt_id,item_id));`);
+  const attention = id => db.prepare("SELECT 1 FROM codex_runtime_tool_blocks WHERE attempt_id=? LIMIT 1").get(id)
+    ? { attention: "tool_approval_required" } : {};
   const get = id => db.prepare("SELECT * FROM codex_runtime_attempts WHERE id=?").get(id);
   const patch = (id, state) => db.prepare("UPDATE codex_runtime_attempts SET state=? WHERE id=?").run(state, id);
   const ready = () => {
@@ -83,6 +88,12 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     return keyFor(binding);
   };
   const saveItem = (id, item) => {
+    // Record the runtime's structured refusal, never infer permission from model prose.
+    // Keep only the item identity; tool arguments and private error details stay local.
+    if (item?.type === "mcpToolCall" && typeof item.id === "string"
+      && item.status === "failed" && typeof item.error?.message === "string"
+      && item.error.message.includes("requires approval") && item.error.message.includes("approval policy"))
+      db.prepare("INSERT OR IGNORE INTO codex_runtime_tool_blocks VALUES(?,?)").run(id, item.id);
     if (item?.type !== "agentMessage" || typeof item.id !== "string" || typeof item.text !== "string") return;
     db.prepare("INSERT INTO codex_runtime_outputs VALUES(?,?,?,?) ON CONFLICT(attempt_id,item_id) DO UPDATE SET text=excluded.text,phase=excluded.phase")
       .run(id, item.id, item.text, item.phase ?? null);
@@ -99,7 +110,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const result = turn.status === "completed" ? final.map(item => item.text).join("\n") : null;
     db.prepare("UPDATE codex_runtime_attempts SET turn_id=?,state=?,result=? WHERE id=?")
       .run(turn.id, saved.state === "stopping" && turn.status === "inProgress" ? "stopping" : turn.status, result, id);
-    return { status: get(id).state, ...(result === null ? {} : { body: result }) };
+    return { status: get(id).state, ...(result === null ? {} : { body: result, ...attention(id) }) };
   };
   const reconcile = async binding => {
     const id = await checked(binding, "read"), saved = get(id);
@@ -108,7 +119,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     // Exact-bound terminal notifications are durable facts. A later transport
     // loss must not erase them or require another provider request to prove them.
     if (terminal.has(saved.state)) return { status: saved.state,
-      ...(saved.state === "completed" ? { body: saved.result } : {}) };
+      ...(saved.state === "completed" ? { body: saved.result, ...attention(id) } : {}) };
     await ready();
     const value = await rpc.request("thread/read", { threadId: saved.thread_id, includeTurns: true });
     if (value?.thread?.id !== saved.thread_id) throw new Error("Runtime returned a different thread");
@@ -202,7 +213,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       try {
         if (event.method === "turn/completed") {
           const result = recordTurn(id, params.turn);
-          if (result.status === "completed") finish({ body: result.body });
+          if (result.status === "completed") finish({ body: result.body, ...attention(id) });
           else fail(new Error(`Runtime turn ${result.status}`));
         } else if (event.method === "item/started" && params.item?.type === "agentMessage") saveItem(id, { ...params.item, text: params.item.text ?? "" });
         else if (event.method === "item/completed") saveItem(id, params.item);
@@ -215,7 +226,8 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     };
     const unsubscribe = rpc.subscribe(receive);
     const timer = setTimeout(() => fail(new Error("Runtime outcome uncertain; reconcile original turn")), timeoutMs);
-    const abort = () => { stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
+    let interruption;
+    const abort = () => { interruption ??= stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
     input.signal?.addEventListener("abort", abort, { once: true });
     // Attach rejection handler before awaiting turn/start (notifications may race).
     completed.catch(() => {});
@@ -228,7 +240,12 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       if (terminal.has(value.turn.status)) receive({ method: "turn/completed", params: { threadId: started.thread.id, turn: value.turn } });
       if (input.signal?.aborted) abort();
       return await completed;
-    } finally { clearTimeout(timer); unsubscribe(); input.signal?.removeEventListener("abort", abort); }
+    } finally {
+      clearTimeout(timer); input.signal?.removeEventListener("abort", abort);
+      // Let the bounded interrupt RPC reach the process before callers close it.
+      // Its acknowledgement still does not prove terminal execution.
+      await interruption; unsubscribe();
+    }
   };
   return Object.assign(execute, { steer, interrupt, reconcile, contextObservation });
 }
