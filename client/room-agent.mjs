@@ -1221,6 +1221,10 @@ export class RoomAgentClient {
     const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
     return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
   }
+  requestMemberPermissions({ permissions, requestId, note } = {}, { signal } = {}) {
+    return this.#accessAdmin("/members/me/permission-requests",
+      { permissions, requestId, ...(note === undefined ? {} : { note }) }, { signal });
+  }
   decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
     return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
       { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
