@@ -15,6 +15,14 @@
 // never re-runs the parked backfill and keeps every message a later event
 // names. A refusal is reported, never retried in the same tick, and never
 // fails the tick on its own: the breach that remains is what pages.
+//
+// Recovery gate (QA delta 17987, docs/OPERATOR.md "Take a backup first"):
+// relief runs only when the caller hands it a verified recovery point (the
+// store-growth job passes the newest verified daily backup, at most a day
+// old). Without one nothing is archived and the summary says so
+// (backupMissing: 1); the breach still fails the tick. The archive itself is
+// reversible from the event log: restoreArchivedMessages
+// (server/messages-store.mjs) puts every moved message back.
 
 import { ARCHIVE_DEFAULT_KEEP, operatorArchive } from "./operator-archive.mjs";
 
@@ -37,9 +45,13 @@ function errorCode(error) {
 
 // Returns { attempted, relieved, freedBytes, refused } with counts only:
 // the summary rides the public health surface, so no room ids or text.
-export function relieveProjections(store, { limitBytes, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive } = {}) {
+export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive } = {}) {
   const result = { attempted: 0, relieved: 0, freedBytes: 0, refused: 0 };
   if (store?.readOnly || !Number.isFinite(limitBytes)) return result;
+  if (!recovery || typeof recovery !== "object") {
+    const waiting = roomsPastLine(store.db, limitBytes, maxRooms).length;
+    return waiting ? { ...result, backupMissing: 1 } : result;
+  }
   for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
     result.attempted += 1;
     const request = { roomId, keepNewest, reason: RELIEF_REASON, belowCursor: parked(store.db, roomId) };

@@ -18,7 +18,7 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjections } from "./store-relief.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
@@ -591,12 +591,15 @@ export const JOBS = Object.freeze([
     // A projection past the line is first relieved through the guarded
     // archive door (server/store-relief.mjs), then measured again; only a
     // breach that relief could not clear fails the tick.
-    async run(store) {
+    // Relief needs a verified recovery point (the newest verified daily
+    // backup, at most a day old); without one it archives nothing.
+    async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
       if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
-        relief = relieveProjections(store, { limitBytes });
+        const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
+        relief = relieveProjections(store, { limitBytes, recovery });
         gauges = { ...measureStoreGrowth(store), relief };
       }
       const breach = storeGrowthBreach(gauges);
