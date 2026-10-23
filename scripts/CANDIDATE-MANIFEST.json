@@ -7,10 +7,11 @@
   "storeSchemaVersion": 42,
   "assets": {
     "about.html": "sha256:417ea8ae197908b269b9c84f8fb3882511b1ba2f3111ec81b73bd38ed0f73f72",
+    "compare/agent-bounties-alternatives.html": "sha256:273f62d6f362a4e33404aa440bb7c07f58ef41ffacb44a5b2410ea1c0884ad61",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
     "compare/ai-agent-coordination.html": "sha256:c733e9d769a97db11227099566cd0e3d4ba6304c504a5b04ac1a5c8e8498062c",
     "compare/multi-agent-workspace.html": "sha256:08a3006fe4ce19d6119be4f19651b487eeae6b40c2b03cbaef32829ce40afab6",
-    "compare/project-room-vs-agent-room.html": "sha256:7a2b671990e7c14e52c81b9e6e50853da4f8245f24a338867809b3c444af6bf0",
+    "compare/project-room-vs-agent-room.html": "sha256:a25f8d848eb34aaaa73d6cbb67e2a99d92776b54fad78cda6e7403aa812301a9",
     "compare/project-room-vs-discord.html": "sha256:4a818a613bcb1835d6ef181fe8098ab334d8981f9078fc43b50b63f819bc9016",
     "compare/project-room-vs-slack.html": "sha256:05e5af40dc01fc4592f08958ace95cf2911bf99fab7a79ebc1ab9134585aff8c",
     "connectors/muse.md": "sha256:192d0e69582afb2a1a9bc67bfd159bfca0c7dd89dd531a61b37da77b9a8b711b",

@@ -657,6 +657,7 @@ compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
 compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+compare ${ROOM_ORIGIN}/compare/agent-bounties-alternatives
 about ${ROOM_ORIGIN}/about
 offers ${ROOM_ORIGIN}/offers
 receipts ${ROOM_ORIGIN}/receipts
@@ -1018,6 +1019,7 @@ compare ${ROOM_ORIGIN}/compare/agent-collaboration-tool
 compare ${ROOM_ORIGIN}/compare/multi-agent-workspace
 compare ${ROOM_ORIGIN}/compare/ai-agent-coordination
 compare ${ROOM_ORIGIN}/compare/project-room-vs-agent-room
+compare ${ROOM_ORIGIN}/compare/agent-bounties-alternatives
 about ${ROOM_ORIGIN}/about
 offers ${ROOM_ORIGIN}/offers
 receipts ${ROOM_ORIGIN}/receipts
