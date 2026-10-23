@@ -3,10 +3,18 @@
 // A server-recognized `oat_` access token (minted through a provider
 // instance sharing the room store's database — the server's own provider
 // reads the same tables) now authenticates room routes in mode "oauth":
-// the provider proves the grant, the store proves membership
-// (member_accounts -> active human member), and the route's OAuth scope
-// classification (server/http.mjs OAUTH_ROUTE_SCOPES) gates what the grant
-// may reach. Scopes only restrict the consenting account's own membership.
+// the provider proves the grant, the store proves membership, and the
+// route's OAuth scope classification (server/http.mjs OAUTH_ROUTE_SCOPES)
+// gates what the grant may reach. Scopes only restrict the bound member's
+// own reach.
+//
+// AGENT-DOOR-AUTH stage 2: the binding swapped from the consenting
+// account's human member to the agent member the account owns (the
+// provider is wired with the production grant-agent resolver, so minting
+// here binds exactly as the server's own approvals do). The scope/route
+// classification is unchanged; attribution and member-level checks now
+// run against the agent member. Stage-2 specimens live in
+// tests/agent-door-auth-stage2.test.js.
 //
 // Pins here:
 // - one success route per scope class (rooms:read, chat:read, chat:write,
@@ -35,7 +43,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createOAuthProvider } from "../server/oauth-provider.mjs";
-import { createWork } from "../server/work-claims.mjs";
+import { createGrantAgentResolver } from "../server/oauth-grant-agents.mjs";
+import { createWork, claimWork } from "../server/work-claims.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const ALL_SCOPES = ["rooms:read", "chat:read", "chat:write", "work:read", "work:write"];
@@ -78,7 +87,10 @@ async function serve(t) {
   // Mint a token the SERVER's provider will verify: a second provider
   // instance over the same database (the durable provider store is the
   // shared state; registration + issuance write the rows the server reads).
-  const provider = createOAuthProvider({ db: store.db, clock: () => store.now() });
+  const provider = createOAuthProvider({
+    db: store.db, clock: () => store.now(),
+    resolveGrantAgent: createGrantAgentResolver(store),
+  });
   provider.registerClient({
     clientId: "muse", name: "Muse", redirectUris: ["https://muse.ai/oauth/callback"],
   });
@@ -105,13 +117,21 @@ async function serve(t) {
 test("oauth success: one route per scope class, plus the multi-class activation pack", async t => {
   const f = await serve(t);
   f.seedClaim();
+  // Stage 2: the grant's actor is the owned agent member, not the room
+  // owner — seed the claim as held by that agent so the holder-only close
+  // below is the agent acting on its own work.
+  const probe = f.provider.verifyAccessToken(f.mint("account-owner", ALL_SCOPES));
+  const seededClaim = f.store.workClaims.get("commons", "claim-1");
+  f.store.workClaims.set("commons", claimWork(seededClaim, probe.agentIdentityId, { now: Date.now() }));
 
-  // rooms:read — agent fleet overview (owner member) and the room's
-  // verified-agents policy flag.
-  const rooms = await f.request("/api/rooms/commons/agents/overview", { token: f.mint("account-owner", ["rooms:read"]) });
-  assert.equal(rooms.status, 200);
-  assert.equal(rooms.body.roomId, "commons");
-  assert.equal(rooms.body.scope, "room");
+  // rooms:read — the room's verified-agents policy flag. The fleet
+  // overview is owner/sponsor-gated inside its handler: stage 1's actor
+  // was the owner member and passed; stage 2's agent member is not the
+  // owner, so the owner's own grant is refused there — the grant never
+  // acts as the human, not even for its owner.
+  const overview = await f.request("/api/rooms/commons/agents/overview", { token: f.mint("account-owner", ["rooms:read"]) });
+  assert.equal(overview.status, 403);
+  assert.equal(overview.body.error.code, "owner_required");
   const policy = await f.request("/api/rooms/commons/verification-policy", { token: f.mint("account-owner", ["rooms:read"]) });
   assert.equal(policy.status, 200);
 
@@ -130,7 +150,7 @@ test("oauth success: one route per scope class, plus the multi-class activation 
   assert.equal(workRead.status, 200);
   assert.ok(workRead.body.claims.some(claim => claim.id === "claim-1"));
 
-  // work:write — close the seeded claim (room owner authority inside the
+  // work:write — close the seeded claim (holder authority inside the
   // claim rules; the OAuth scope is what the door checks).
   const workWrite = await f.request("/api/rooms/commons/work-claims/claim-1/close", {
     method: "POST", token: f.mint("account-owner", ["work:write"]), data: {},
@@ -258,20 +278,25 @@ test("oauth direct-authenticate surfaces stay closed for a VALID token", async t
   assert.equal(fetchRes.body.error.message, "Sign in with an active room key or agent identity secret");
 });
 
-test("oauth scopes restrict but never widen: a plain member with every scope is still member-denied", async t => {
+test("oauth scopes restrict but never widen: a plain member's grant is still member-denied", async t => {
   const f = await serve(t);
-  // account-plain is an active human member with no permissions: the fleet
-  // overview is owner/sponsor-gated inside the handler, and no OAuth scope
-  // changes that.
+  // account-plain is an active human member with no permissions. Stage 1
+  // bound the grant to plain's human member and the fleet overview's
+  // handler gate refused it (owner_required). Stage 2 binds the grant to
+  // plain's owned agent member — and admitting that member requires
+  // invite authority plain does not hold, so the bind itself denies with
+  // 403 access_denied before any handler runs. Either way, no OAuth scope
+  // widens what the member could do; the handler-level member denial for
+  // an admitted agent is pinned in the success test (owner_required).
   const res = await f.request("/api/rooms/commons/agents/overview", { token: f.mint("account-plain", ALL_SCOPES) });
   assert.equal(res.status, 403);
-  assert.equal(res.body.error.code, "owner_required");
-  // The same member CAN use a route its membership allows (its own
-  // ready-work preference), proving the denial above is the member check,
-  // not the OAuth door.
+  assert.equal(res.body.error.code, "access_denied");
+  assert.equal(res.body.error.message, "This account's member cannot admit its agent to this Room");
+  // The denial is the admission rule, not the account: plain's human
+  // member keeps its own access through its own credentials.
   const own = await f.request("/api/rooms/commons/members/me/wants-work", { token: f.mint("account-plain", ["work:read"]) });
-  assert.equal(own.status, 200);
-  assert.equal(own.body.memberId, "plain");
+  assert.equal(own.status, 403);
+  assert.equal(own.body.error.code, "access_denied");
 });
 
 test("oauth malformed oat_ shapes still die at the bearer format gate", async t => {

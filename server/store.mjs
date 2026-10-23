@@ -157,6 +157,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { OAuthGrantAgents, oauthGrantAgentsSchema } from "./oauth-grant-agents.mjs"; // AGENT-DOOR-AUTH stage 2: OAuth grants bind to an owned agent identity.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -1142,7 +1143,7 @@ function roomSchemaStamp() {
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
-    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, oauthGrantAgentsSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
@@ -1412,6 +1413,7 @@ export class RoomStore {
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
+    this.oauthGrantAgents = new OAuthGrantAgents(this);
     this.delegation = new MembershipDelegation(this);
     this.delegationJournal = new MembershipDelegationJournal(this);
     this.ownerDelegates = new OwnerDelegates(this);
@@ -1769,6 +1771,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
       convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
+      // AGENT-DOOR-AUTH stage 2: OAuth grant agent bindings — purely
+      // additive, no schema version bump, outside the writer fence.
+      this.db.exec(oauthGrantAgentsSchema);
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
       this.workWakes.verifySchema();
@@ -4166,6 +4171,68 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return {
       account: { id: accountId, active: true, revision: accountRow.revision, authEpoch: accountRow.auth_epoch },
       member, roomId
+    };
+  }
+  // AGENT-DOOR-AUTH stage 2 (REV-4092-S1 note N1, seam 1 of 3): bind an
+  // OAuth grant to the AGENT member the approving account owns — the
+  // stage-1 human binding above now serves only account-principal clients
+  // (the first-party Mac app sign-in). The provider proved the grant and
+  // stamped it at approval time with the owned agent identity (see
+  // server/oauth-grant-agents.mjs); this method proves, in order:
+  //   1. the owning account is active (same 401 shape as stage 1);
+  //   2. the (account, client) binding is live and names exactly the
+  //      grant's agent identity — a removed agent or a mismatched stamp
+  //      fails closed as unauthenticated, never as the human;
+  //   3. the agent identity itself is not revoked;
+  //   4. the owner holds an active HUMAN membership in the room (the
+  //      authority source — the grant acts only where its owner is a
+  //      member, and loses the room when the owner does);
+  //   5. the agent member itself: materialized on first use, and a member
+  //      a room owner removed fails closed (removal is never undone by a
+  //      later grant request).
+  // The returned auth's member is the AGENT member, so every handler and
+  // journal entry attributes the grant's actions to the agent, with the
+  // owner carried alongside as ownerMember / accountableHumanId.
+  authenticateOAuthAgent(grant, roomId) {
+    if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
+    const accountId = grant.userId;
+    const accountRow = this.db.prepare("SELECT active, revision, auth_epoch FROM accounts WHERE id=?").get(accountId);
+    if (!accountRow || accountRow.active !== 1) fail(401, "unauthenticated", "Session or key expired or revoked");
+    const binding = this.oauthGrantAgents.liveBinding({ accountId, clientId: grant.clientId });
+    if (!binding || binding.identityId !== grant.agentIdentityId) {
+      fail(401, "unauthenticated", "Session or key expired or revoked");
+    }
+    const identityRow = this.db.prepare("SELECT revoked_at FROM agent_identities WHERE identity_id=?").get(grant.agentIdentityId);
+    if (!identityRow || identityRow.revoked_at !== null) fail(401, "unauthenticated", "Session or key expired or revoked");
+    const ownerBinding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
+    if (!ownerBinding) fail(403, "access_denied", "This account has no membership in that Room");
+    const ownerMember = this.roomAuthority(roomId).members[ownerBinding.member_id];
+    if (!ownerMember || ownerMember.kind !== "human" || ownerMember.active === false) fail(403, "access_denied", "Active human Room membership required");
+    this.verifyInvitedMembership(roomId, ownerMember);
+    const member = this.oauthGrantAgents.ensureAgentMember({
+      roomId, identityId: binding.identityId, displayName: binding.displayName, ownerMember,
+    });
+    // CURE-4416-REMOVE: permissions evaluate at use against the owner's
+    // CURRENT ceiling in this room. The stored member carries the grant's
+    // own set (the owner's permissions ∩ the agent-safe set, taken at
+    // materialization); the effective set for this use is that set
+    // intersected with what the owner holds NOW, so narrowing the owner
+    // narrows the grant at every door, and re-widening restores up to the
+    // granted set — never beyond it, which is what "the grant can never
+    // widen what the owner themselves could do" means at use time, not
+    // only at materialization. The stored member is deliberately NOT
+    // rewritten: its set is the grant's own ceiling for the re-widen leg.
+    // When nothing was narrowed away the stored member is returned
+    // untouched (no copy, no behaviour change).
+    const grantedPermissions = member.permissions ?? [];
+    const ownerPermissions = ownerMember.permissions ?? [];
+    const effectivePermissions = grantedPermissions.filter(permission => ownerPermissions.includes(permission));
+    const boundMember = effectivePermissions.length === grantedPermissions.length
+      ? member
+      : { ...member, permissions: effectivePermissions };
+    return {
+      account: { id: accountId, active: true, revision: accountRow.revision, authEpoch: accountRow.auth_epoch },
+      member: boundMember, roomId, ownerMember,
     };
   }
   accountRooms(token, binding, { after = null } = {}) {

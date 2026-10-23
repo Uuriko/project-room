@@ -222,6 +222,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
+  route("/api/oauth/agents/{id}", ["DELETE"], "account-session", "Remove one connected agent the signed-in account owns (the {id} is the client id whose grant acts as the agent): the binding and agent identity are revoked, its room members are deactivated, and the client's live OAuth token families are revoked. Unknown ids and other accounts' agents both answer 404.", "oauthAgentRemove"),
   // Account-session inventory + targeted revocation (CX4). Native desktop
   // sessions live here, not in the OAuth family: the desktop exchange
   // retires its OAuth grant and keeps only the account-session slot.
