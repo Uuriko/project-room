@@ -73,6 +73,14 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-attach'), $('#composer-options'), ask); $('.composer-row').append(composerActions);
   ask.addEventListener('click', () => { contribution = null; endContribution?.(); paint(); $('#message-input').focus(); });
+  const setupHint = document.createElement('p'); setupHint.id = 'assistant-setup-hint'; setupHint.className = 'form-hint'; setupHint.hidden = true;
+  const setupHintText = document.createElement('span');
+  const setupShortcut = document.createElement('button'); setupShortcut.type = 'button'; setupShortcut.className = 'text-button';
+  setupShortcut.textContent = uiText('human.setupAssistant');
+  setupShortcut.onclick = () => $('#assistant-setup').click();
+  setupHint.append(setupHintText, ' ', setupShortcut); $('#composer-hint').after(setupHint);
+  $('#message-input').setAttribute('aria-describedby', `${$('#message-input').getAttribute('aria-describedby') || ''} assistant-setup-hint`.trim());
+  $('#message-to-select').addEventListener('change', () => paint());
   const assistantSettings = document.createElement('div');
   assistantSettings.append(section.querySelector('.assistant-heading'));
   const activity = $('#assistant-activity');
@@ -125,6 +133,15 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     finally { button.disabled = false; }
   };
   function paint() {
+    const assistantState = projection?.assistant;
+    const owner = getState()?.room.ownerId === getSession()?.member.id;
+    const missing = assistantState && !askAvailable(assistantState);
+    const hintKey = missing ? (owner ? 'human.setupMissingOwner' : 'human.setupMissingMember')
+      : assistantState?.availability === 'awaiting_host' ? 'human.setupWaiting'
+      : assistantState?.availability === 'paused' ? 'human.setupPaused' : null;
+    setupHint.hidden = !human() || !hintKey || Boolean($('#message-to-select').value);
+    setupHintText.textContent = hintKey ? uiText(hintKey) : '';
+    setupShortcut.hidden = !missing || !owner;
     ask.hidden = !human() || !contribution;
     assistantSettings.hidden = !human();
     const context = getConversation?.();
@@ -366,7 +383,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
-      section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active;
+      section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active; setupHint.hidden = true;
       if (active) {
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');

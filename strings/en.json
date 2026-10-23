@@ -524,5 +524,10 @@
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
-  "result.previewActions": "Preview actions"
+  "result.previewActions": "Preview actions",
+  "human.setupAssistant": "Set up assistant",
+  "human.setupMissingOwner": "No room assistant is connected. Messages will be shared without an assistant response.",
+  "human.setupMissingMember": "No room assistant is connected. Ask the room owner to connect one. Messages will still be shared.",
+  "human.setupWaiting": "The room assistant is waiting for its host to connect. Requests will stay queued until it connects.",
+  "human.setupPaused": "The room assistant is paused. Requests will stay queued until it resumes."
 }
