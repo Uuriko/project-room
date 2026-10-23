@@ -124,7 +124,20 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     }
   }
   if (run.attemptId && run.attemptId !== attemptId) throw new Error("Another host owns this shared attempt");
-  if (!run.attemptId) run = (await act({ action: "claim", requestId: `codex-claim-${key}`, expectedRevision: run.revision })).result;
+  if (!run.attemptId) {
+    try { run = (await act({ action: "claim", requestId: `codex-claim-${key}`, expectedRevision: run.revision })).result; }
+    catch (error) {
+      // Older hosts use the same member/run claim ID with different attempt IDs.
+      // Classify only a confirmed foreign owner as a race, not every retry conflict.
+      if (error.code === "assistant_retry_conflict") {
+        const current = await read();
+        if (current.attemptId && current.attemptId !== attemptId) {
+          throw Object.assign(new Error("Another host owns this shared attempt"), { code: "assistant_run_owned" });
+        }
+      }
+      throw error;
+    }
+  }
   if (run.status !== "working" && !(record.inputs && ["unknown", "resume_requested", ...stops].includes(run.status)))
     throw new Error("Shared attempt is not working");
   const binding = { kind: "shared-assistant", origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
@@ -136,7 +149,8 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   const runtime = createCodexRuntimeHost({ db, rpc, cwd, policy, emit: event => draft.emit(event), timeoutMs, scope: connection,
     authorize: async (bound, action) => {
       const current = await read();
-      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt || current.sourceDeleted)
+      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt
+        || current.sourceDeleted && !(stops.has(current.status) && ["read", "interrupt"].includes(action)))
         throw new Error("Shared runtime attempt was revoked");
       if (["start", "steer"].includes(action)) {
         if (current.status !== "working") throw new Error("Shared runtime is stopping");
@@ -230,7 +244,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
         result = await runtime(await preparedInput(), { binding, previousBinding });
       else {
         if (recovered.status !== "completed") throw new Error("Shared runtime recovery required; original turn is not completed");
-        result = { body: recovered.body };
+        result = { body: recovered.body, ...(recovered.attention ? { attention: recovered.attention } : {}) };
       }
     } else result = await runtime(await preparedInput(), { binding, previousBinding });
   } catch (error) {
@@ -253,6 +267,10 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
       state: current.status === "cancel_requested" ? "cancelled" : "paused", summary: "Execution stopped." });
   if (current.attemptId !== attemptId || !["working", "unknown"].includes(current.status) || current.sourceDeleted)
     throw new Error("Shared result is withheld: attempt stopped or changed");
+  if (result.attention === "tool_approval_required")
+    return act({ action: "report", requestId: `codex-tool-blocked-${key}-${record.continuation ?? 0}-${current.revision}`,
+      expectedRevision: current.revision, state: "needs_input",
+      summary: "A tool was blocked by the host approval policy. Review the agent response and host permissions before continuing; completion is not confirmed." });
   const currentInputs = await inputs(current);
   if (basis !== digest(currentInputs)) {
     const round = Number(record.continuation ?? 0) + 1;
@@ -268,7 +286,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     return runCodexSharedAssistant({ connection, db, rpc, cwd, policy, runId, emit, signal, pollMs, timeoutMs, maxContinuations });
   }
   const publish = { action: "publish", requestId: `codex-publish-${key}-${record.continuation ?? 0}`, expectedRevision: current.revision,
-    body: result.body, summary: "Completed the shared request.", appliedInputMessageIds: selected.map(item => item.messageId) };
+    body: result.body, summary: "The agent returned a response.", appliedInputMessageIds: selected.map(item => item.messageId) };
   db.prepare("UPDATE codex_shared_runs SET publish=? WHERE id=?").run(JSON.stringify(publish), key);
   try { return await act(publish); } // Server transaction fences Stop, changed inputs and replacement attempts.
   catch (error) {

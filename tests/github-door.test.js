@@ -212,7 +212,7 @@ test("outbound cursor scan finds the newest digest marker beyond 3000 older comm
       const parsed = new URL(url);
       const page = Number(parsed.searchParams.get("page") ?? 1);
       const perPage = Number(parsed.searchParams.get("per_page") ?? 100);
-      const ordered = parsed.searchParams.get("direction") === "desc" ? [...comments].reverse() : comments;
+      const ordered = comments; // GitHub issue comments are always ascending by ID.
       return new Response(JSON.stringify(ordered.slice((page - 1) * perPage, page * perPage)));
     }
     const comment = { ...JSON.parse(init.body), user: bot };
@@ -227,7 +227,7 @@ test("outbound cursor scan finds the newest digest marker beyond 3000 older comm
   assert.equal(requestedAfter, 99, "cursor must come from the newest digest, not the oldest fetched page");
   assert.equal(result.posted, false);
   assert.equal(comments.length, 3500, "no duplicate digest may be posted");
-  assert.ok(requestedUrls.length <= 2, `newest-first scan should stop at the first trusted marker, fetched ${requestedUrls.length} pages`);
+  assert.ok(requestedUrls.every(url => !new URL(url).searchParams.has("direction")), "use supported issue-comment parameters");
 });
 
 test("forged markers from humans, other bots and quoted text cannot advance outbound cursor", async () => {

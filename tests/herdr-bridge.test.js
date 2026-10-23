@@ -154,7 +154,7 @@ const auditEntries = () =>
   readFileSync(auditLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'herdr-bridge-test-'));
+  dir = mkdtempSync(join(tmpdir(), 'hb-'));
   mkdirSync(join(dir, 'sockets'), { recursive: true });
   const uid = process.getuid?.() ?? 1000;
   const wsA = join(dir, 'ws-a'); const wsB = join(dir, 'ws-b');
@@ -475,7 +475,7 @@ test('write with no response retries once with the same key, then 504', async ()
 test('circuit breaker opens after 5 consecutive failures and probes back', async () => {
   // point tenant-a at a dead socket by swapping its entry mid-test is not
   // possible; instead fail at the socket level via failConnect on a temp bridge
-  const dir2 = mkdtempSync(join(tmpdir(), 'herdr-bridge-cb-'));
+  const dir2 = mkdtempSync(join(tmpdir(), 'hbc-'));
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   writeFileSync(tenantsFile2, JSON.stringify({ tenants: {
@@ -510,7 +510,7 @@ test('half-open probe failing with a non-transport error does not wedge the brea
   // an application error (pane_not_found — proof the server is live) ran
   // neither recordSuccess nor recordFailure, leaking halfOpenProbe=true and
   // wedging the tenant's breaker open forever.
-  const dir2 = mkdtempSync(join(tmpdir(), 'herdr-bridge-cb-probe-'));
+  const dir2 = mkdtempSync(join(tmpdir(), 'hbp-'));
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   const socketPath = join(dir2, 'live.sock');
@@ -673,7 +673,7 @@ test('GET /v1/events streams socket events as SSE with heartbeats', async () => 
 });
 
 test('dual-key rotation: previous generation token accepted with prev key id', async () => {
-  const dir2 = mkdtempSync(join(tmpdir(), 'herdr-bridge-rot-'));
+  const dir2 = mkdtempSync(join(tmpdir(), 'hbr-'));
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   writeFileSync(tenantsFile2, JSON.stringify({ tenants: {
