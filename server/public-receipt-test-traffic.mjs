@@ -70,11 +70,16 @@ export function isTestTraffic({ roomId = null, agents = [] } = {}) {
 // fragments. Returns the fragment and its params (rooms first, then
 // agent names); consumers negate it for exclusion or use it as-is for
 // counting. The agent leg matches whole credited names via json_each —
-// the same exactness as the JS form.
+// the same exactness as the JS form. The room leg is COALESCE-wrapped:
+// a receipt with no room (room_id NULL — the census found one, and
+// projected work-claim receipts carry none) is judged on its credited
+// names only, exactly as the JS form judges it; an unwrapped IN would
+// make the predicate NULL for such rows and a NOT over it would drop
+// them from the default view entirely.
 export function testTrafficMatchSql() {
   const roomMarks = TEST_TRAFFIC_ROOM_IDS.map(() => "?").join(",");
   const nameMarks = TEST_TRAFFIC_AGENT_NAMES.map(() => "?").join(",");
-  const sql = `(public_receipts.room_id IN (${roomMarks})
+  const sql = `(COALESCE(public_receipts.room_id IN (${roomMarks}), 0)
     OR EXISTS (SELECT 1 FROM json_each(public_receipts.agents_json)
                WHERE lower(json_each.value) IN (${nameMarks})))`;
   return { sql, params: [...TEST_TRAFFIC_ROOM_IDS, ...TEST_TRAFFIC_AGENT_NAMES.map(name => name.toLowerCase())] };

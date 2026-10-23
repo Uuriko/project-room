@@ -67,6 +67,26 @@ test("default list excludes test traffic and counts it, with no short pages", t 
   assert.equal(rest.nextCursor, null);
 });
 
+test("a room-less receipt is judged on its credited names only, never dropped by its NULL room", t => {
+  // Projected work-claim receipts carry room_id NULL in the table (the
+  // census's own index had a null-room row). A NULL room must not make
+  // the SQL predicate NULL: an ordinary room-less receipt stays on the
+  // default wall, and a room-less drill is excluded by its agent name.
+  const rows = [
+    { id: `wcr_${hex("1", 32)}`, title: "Real room-less PR work", source: "work-claim", roomId: null, agents: ["Member Dev"], pullRequest: "https://github.com/Uuriko/project-room/pull/2", at: "2026-10-05T00:00:00.000Z" },
+    { id: `wir_${hex("2", 32)}`, title: "Room-less drill by agent", source: "work-item", roomId: null, agents: ["UT Coldstart"], at: "2026-10-04T00:00:00.000Z" },
+  ];
+  const store = serve(t, rows);
+  const def = queryPublicReceipts(store, { limit: 50 });
+  assert.deepEqual(def.receipts.map(r => r.title), ["Real room-less PR work"]);
+  assert.equal(def.testTraffic.hiddenCount, 1);
+  const anchored = queryPublicReceipts(store, { cursor: rows[0].id, limit: 10 });
+  assert.equal(anchored.error, undefined); // a room-less real receipt is a valid default cursor
+  const inc = queryPublicReceipts(store, { limit: 50, test: "include" });
+  assert.equal(inc.receipts.find(r => r.id === rows[1].id)?.testTraffic, true);
+  assert.ok(!("testTraffic" in (inc.receipts.find(r => r.id === rows[0].id) ?? {})) || inc.receipts.find(r => r.id === rows[0].id)?.testTraffic !== true);
+});
+
 test("test=include serves everything, test rows marked, SQL and JS twins agree", t => {
   const store = serve(t);
   const page = queryPublicReceipts(store, { limit: 50, test: "include" });
