@@ -38,7 +38,7 @@ function serve(t, rows = ROWS) {
     (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, verification_state, hashes_json, at, start_href, agent_ids_json)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const row of rows) {
-    insert.run(row.id, row.title, row.source, row.roomId, row.roomId, null, JSON.stringify(row.agents), "[]",
+    insert.run(row.id, row.title, row.source, row.roomId, row.roomId, null, row.agentsJson ?? JSON.stringify(row.agents), "[]",
       row.pullRequest ?? null, row.pullRequest ? row.at : null, null, "[]", row.at, "/?start=room", "[]");
   }
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -164,6 +164,64 @@ test("HTML wall: default view discloses the hidden count, include view marks the
   assert.ok(inc.includes("Test traffic")); // the per-card mark
   assert.ok(inc.includes("Showing all receipts, including test traffic"));
   assert.ok(inc.includes('href="/receipts"')); // the way back
+});
+
+test("whitespace-padded persona names are test traffic in both twins, room or no room", t => {
+  // REV-4558 F1: the JS twin trims credited names, the SQL twin did
+  // not, so a padded drill persona was marked testTraffic in include
+  // mode yet served uncounted on the default wall. The JS verdict
+  // governs (the wall exists to hide drills): both twins trim.
+  assert.equal(isTestTraffic({ roomId: null, agents: ["  Jill QA-2  "] }), true);
+  assert.equal(isTestTraffic({ roomId: null, agents: ["\tUT Coldstart\n"] }), true);
+  const rows = [
+    { id: `pwr_${hex("3", 64)}`, title: "Padded drill, with room", source: "public-work", roomId: "public-work-garden", agents: ["  Jill QA-2  "], at: "2026-10-05T00:00:00.000Z" },
+    { id: `wir_${hex("4", 32)}`, title: "Padded drill, no room", source: "work-item", roomId: null, agents: ["\tUT Coldstart\n"], at: "2026-10-04T00:00:00.000Z" },
+    { id: `pwr_${hex("5", 64)}`, title: "Real garden work", source: "public-work", roomId: "public-work-garden", agents: ["zai_glm"], at: "2026-10-03T00:00:00.000Z" },
+  ];
+  const store = serve(t, rows);
+  const def = queryPublicReceipts(store, { limit: 50 });
+  assert.deepEqual(def.receipts.map(r => r.title), ["Real garden work"]);
+  assert.equal(def.testTraffic.hiddenCount, 2);
+  const inc = queryPublicReceipts(store, { limit: 50, test: "include" });
+  assert.equal(inc.receipts.find(r => r.id === rows[0].id)?.testTraffic, true);
+  assert.equal(inc.receipts.find(r => r.id === rows[1].id)?.testTraffic, true);
+  assert.notEqual(inc.receipts.find(r => r.id === rows[2].id)?.testTraffic, true);
+});
+
+test("malformed agents_json never fails the list read; the room leg still judges the row", t => {
+  // REV-4558 N1: json_each over malformed JSON threw and failed the
+  // whole default list. The guarded SQL twin iterates an empty array
+  // for such a row: it falls back to not-test-traffic on its names,
+  // exactly the read path's parseJson tolerance — unless its room leg
+  // catches it.
+  const rows = [
+    { id: `pwr_${hex("6", 64)}`, title: "Corrupt agents, real room", source: "public-work", roomId: "public-work-garden", agents: [], agentsJson: "not-json{", at: "2026-10-05T00:00:00.000Z" },
+    { id: `pwr_${hex("7", 64)}`, title: "Corrupt agents, drill room", source: "public-work", roomId: CANARY, agents: [], agentsJson: "not-json{", at: "2026-10-04T00:00:00.000Z" },
+  ];
+  const store = serve(t, rows);
+  const def = queryPublicReceipts(store, { limit: 50 });
+  assert.deepEqual(def.receipts.map(r => r.title), ["Corrupt agents, real room"]);
+  assert.equal(def.testTraffic.hiddenCount, 1);
+  const inc = queryPublicReceipts(store, { limit: 50, test: "include" });
+  assert.equal(inc.receipts.length, 2);
+  assert.notEqual(inc.receipts.find(r => r.id === rows[0].id)?.testTraffic, true);
+});
+
+test("scalar (non-array) agents_json is no credited names in both twins, and include mode survives it", t => {
+  // REV-4558 N2: a JSON string in agents_json parsed to the raw string
+  // and crashed isTestTraffic in include mode ((agents).some on a
+  // string). Non-array means no credited names, in both twins.
+  assert.equal(isTestTraffic({ roomId: null, agents: "Jill QA-2" }), false);
+  const rows = [
+    { id: `pwr_${hex("8", 64)}`, title: "Scalar agents row", source: "public-work", roomId: "public-work-garden", agents: [], agentsJson: '"Jill QA-2"', at: "2026-10-05T00:00:00.000Z" },
+  ];
+  const store = serve(t, rows);
+  const def = queryPublicReceipts(store, { limit: 50 });
+  assert.deepEqual(def.receipts.map(r => r.title), ["Scalar agents row"]);
+  assert.equal(def.testTraffic.hiddenCount, 0);
+  const inc = queryPublicReceipts(store, { limit: 50, test: "include" });
+  assert.equal(inc.receipts.length, 1);
+  assert.notEqual(inc.receipts[0]?.testTraffic, true);
 });
 
 test("an all-test index reads truthfully in the default view, not as an empty wall", t => {

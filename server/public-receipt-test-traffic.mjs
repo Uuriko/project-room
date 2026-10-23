@@ -28,9 +28,10 @@
 // the list filters in SQL (before pagination, so pages never come back
 // short) and marks rows in JS; both forms must reach the same verdict
 // for the same row — the tests pin that agreement. Matching is exact:
-// room id equality, and agent names compared whole (case-insensitively)
-// against the credited names in agents_json — never substring, so a
-// real agent whose name merely contains a persona's name is untouched.
+// room id equality, and agent names compared whole (case-insensitively,
+// surrounding whitespace trimmed in BOTH twins) against the credited
+// names in agents_json — never substring, so a real agent whose name
+// merely contains a persona's name is untouched.
 
 // Rooms minted for fleet drills and QA waves, per the 2026-10-22
 // census: CN-3/CN-4 canary + poison rooms, the CN-2 rota calibration
@@ -59,10 +60,13 @@ const ROOM_SET = new Set(TEST_TRAFFIC_ROOM_IDS);
 const NAME_SET = new Set(TEST_TRAFFIC_AGENT_NAMES.map(name => name.toLowerCase()));
 
 // JS form: verdict for one receipt-shaped value ({ roomId, agents }),
-// where agents are credited display names as served.
+// where agents are credited display names as served. A non-array agents
+// value (a corrupted scalar agents_json parses to the scalar itself)
+// carries no credited names — it must never throw here.
 export function isTestTraffic({ roomId = null, agents = [] } = {}) {
   if (typeof roomId === "string" && ROOM_SET.has(roomId)) return true;
-  return (agents ?? []).some(name => typeof name === "string" && NAME_SET.has(name.trim().toLowerCase()));
+  const names = Array.isArray(agents) ? agents : [];
+  return names.some(name => typeof name === "string" && NAME_SET.has(name.trim().toLowerCase()));
 }
 
 // SQL form: a positive-match predicate over a public_receipts row, in
@@ -70,17 +74,30 @@ export function isTestTraffic({ roomId = null, agents = [] } = {}) {
 // fragments. Returns the fragment and its params (rooms first, then
 // agent names); consumers negate it for exclusion or use it as-is for
 // counting. The agent leg matches whole credited names via json_each —
-// the same exactness as the JS form. The room leg is COALESCE-wrapped:
-// a receipt with no room (room_id NULL — the census found one, and
-// projected work-claim receipts carry none) is judged on its credited
-// names only, exactly as the JS form judges it; an unwrapped IN would
-// make the predicate NULL for such rows and a NOT over it would drop
-// them from the default view entirely.
+// the same exactness as the JS form, including the trim: credited names
+// are trimmed of surrounding whitespace (space, tab, newline and the
+// rest of the JS trim set SQLite can name) before the whole-name
+// compare, because the JS form trims and the wall's purpose is hiding
+// drills — a padded persona name is test traffic in both twins. The
+// json_each source is guarded: malformed agents_json text, or JSON that
+// is not an array, iterates an empty array instead of throwing (which
+// would fail the whole list read) or yielding a scalar (which the JS
+// form reads as no credited names) — such a row is judged on its room
+// leg alone, matching the read path's parseJson tolerance. The room leg
+// is COALESCE-wrapped: a receipt with no room (room_id NULL — the
+// census found one, and projected work-claim receipts carry none) is
+// judged on its credited names only, exactly as the JS form judges it;
+// an unwrapped IN would make the predicate NULL for such rows and a NOT
+// over it would drop them from the default view entirely.
 export function testTrafficMatchSql() {
   const roomMarks = TEST_TRAFFIC_ROOM_IDS.map(() => "?").join(",");
   const nameMarks = TEST_TRAFFIC_AGENT_NAMES.map(() => "?").join(",");
+  const guardedAgents = `CASE WHEN json_valid(public_receipts.agents_json)
+    THEN CASE WHEN json_type(public_receipts.agents_json) = 'array'
+      THEN public_receipts.agents_json ELSE '[]' END
+    ELSE '[]' END`;
   const sql = `(COALESCE(public_receipts.room_id IN (${roomMarks}), 0)
-    OR EXISTS (SELECT 1 FROM json_each(public_receipts.agents_json)
-               WHERE lower(json_each.value) IN (${nameMarks})))`;
+    OR EXISTS (SELECT 1 FROM json_each(${guardedAgents})
+               WHERE lower(trim(json_each.value, char(32,9,10,11,12,13))) IN (${nameMarks})))`;
   return { sql, params: [...TEST_TRAFFIC_ROOM_IDS, ...TEST_TRAFFIC_AGENT_NAMES.map(name => name.toLowerCase())] };
 }
