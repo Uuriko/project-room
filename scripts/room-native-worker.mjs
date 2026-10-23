@@ -9,7 +9,7 @@ import { observeLaptop, laptopBudget } from "../client/laptop-resources.mjs";
 import { discoverLaptopWorkers, dispatchLaptopTask } from "../client/laptop-work-dispatch.mjs";
 
 const [mode, ...args] = process.argv.slice(2);
-const usage = "room-native-worker status STATE | resources STATE POLICY | serve CONNECTION FILE TRANSFER RECIPIENT REFERENCE_JSON | receive CONNECTION REFERENCE_JSON CACHE | upload CONNECTION FILE OPERATION MESSAGE | download CONNECTION REFERENCE_JSON CACHE OUTPUT | run CONNECTION GRANT STATE REQUEST | watch CONNECTION GRANT STATE";
+const usage = "room-native-worker status STATE | discover CONNECTION | submit CONNECTION TASK_JSON OPERATION JOURNAL | resources STATE POLICY | serve CONNECTION FILE TRANSFER RECIPIENT REFERENCE_JSON | receive CONNECTION REFERENCE_JSON CACHE | upload CONNECTION FILE OPERATION MESSAGE | download CONNECTION REFERENCE_JSON CACHE OUTPUT | run CONNECTION GRANT STATE REQUEST | watch CONNECTION GRANT STATE";
 try {
   if (mode === "status" && args.length === 1) console.log(JSON.stringify(workerStatus(args[0])));
   else if (mode === "discover" && args.length === 1) console.log(JSON.stringify(await discoverLaptopWorkers(readAgentConnection(args[0]))));

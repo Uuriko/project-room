@@ -128,7 +128,8 @@ export async function runNativeRequest({ connection, requestMessageId, grantPath
       const output = await uploadArtifact({ connection, bytes: resultBytes, operationId: binding.attemptId, messageId, signal });
       return JSON.stringify({ version: 1, adapter: originalTask.adapter, inputSha256: originalTask.inputSha256,
         resultSha256, output, accepted, execution: result.passed === false ? "failed" : "finished",
-        modelUsage: ["node-test-v1", "recipe-v1"].includes(originalTask.adapter) ? "not_measured" : false });
+        modelUsage: ["node-test-v1", "recipe-v1"].includes(originalTask.adapter) ? "not_measured" : false,
+        ...(result.state === "needs_agent" ? { handback: { state: "needs_agent", question: result.question } } : {}) });
     };
     // An interrupted output upload can be resumed from a durable local result.
     // Never reconstruct missing execution evidence or silently change its basis.

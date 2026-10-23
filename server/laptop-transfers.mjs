@@ -7,7 +7,7 @@ import { validId, ownMember } from "../src/events.js";
 export const laptopTransferLimits = Object.freeze({ chunkBytes: 524288, maxBytes: 64 * 1024 ** 3, sessions: 16, perSender: 2, ttlMs: 120000 });
 const stores = new WeakMap();
 const fail = (status, code) => { throw new ServiceError(status, code, code.replaceAll("_", " ")); };
-const check = (yes, code = "invalid_transfer") => { if (!yes) fail(422, code); };
+const check = (yes, code = "invalid_laptop_transfer") => { if (!yes) fail(422, code); };
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
