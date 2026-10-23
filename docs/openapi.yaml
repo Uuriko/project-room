@@ -9023,7 +9023,9 @@ paths:
       summary: Readiness
       description: >-
         Open (also HEAD). On the Worker, 200 `{ status: ready, mode, do }`
-        only when invite-only-pilot answers `SELECT 1` within one second;
+        when invite-only-pilot answers `SELECT 1` within one second
+        (`do.status: ok`), or when it timed out but this isolate saw the object
+        answer within the last 30 s (`do.status: busy`, with `lastOkAgeMs`);
         otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
         `error`). The Node process answers 200 `{ status: ready }` when its
         store answers and 503 `{ status: unavailable }` when storage is down.
