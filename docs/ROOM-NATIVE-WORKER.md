@@ -152,6 +152,15 @@ death is not automatically stolen: inspect the old process and attempt first.
 
 ## Qualification
 
+This remains a pilot, not an unattended fleet release. The watch loop does not
+automatically reconcile `needs_attention` attempts; use the explicit `run`
+command to deliver a validated saved result. Abrupt process death can leave
+the admission lock requiring inspection. Advertisements are not refreshed while
+a long job is executing, so that worker can disappear from discovery until the
+job returns. File transfer uses fixed polling; independent loopback tests found
+the default polling interval materially limits throughput. Bounded long polling,
+long-job presence and restart recovery need qualification before broad rollout.
+
 Run the affected tests and repository gates. Local tests exercise authenticated
 Room HTTP, artifact visibility, resumable upload/download, 10 MiB laptop transfer,
 receiver restart, request acknowledgement loss, local grants, module pins,
