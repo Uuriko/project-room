@@ -11,11 +11,32 @@
 // same bound covers a local workerd isolate's first boot.
 export const HEALTH_PROBE_TIMEOUT_MS = 1000;
 
+// A warm object is single-threaded: SELECT 1 waits behind whatever request,
+// alarm or cron job holds it, and large room projections (3.6 MB in
+// production) make those turns long. On Oct 22 that queue wait pushed 24 of
+// 32 reads past the 1 s bound while the object was serving. A timeout within
+// this window of a probe that did answer means "busy", not "down"; a cold or
+// wedged object (no answer inside the window) still reads degraded.
+export const HEALTH_PROBE_BUSY_GRACE_MS = 30_000;
+
 export function createHealthProbe() {
   let inflight = null;
-  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil }) {
+  // When the object last answered a probe, on time or late. Per isolate: a
+  // fresh isolate has no evidence and keeps the old cold-start answer.
+  let lastOkAt = null;
+  const noteOk = value => { lastOkAt = performance.now(); return value; };
+  return async function probe({ start: rawStart, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready: rawUnready, onBusy, busyGraceMs = HEALTH_PROBE_BUSY_GRACE_MS, waitUntil }) {
     const started = performance.now();
     const timing = () => ({ elapsedMs: Math.round(performance.now() - started), timeoutMs });
+    const start = async () => noteOk(await rawStart());
+    // Only a timeout can be "busy"; an error is never softened.
+    const onUnready = (readiness, time) => {
+      if (readiness === "timeout" && typeof onBusy === "function" && lastOkAt !== null) {
+        const lastOkAgeMs = Math.round(performance.now() - lastOkAt);
+        if (lastOkAgeMs <= busyGraceMs) return onBusy({ ...time, lastOkAgeMs });
+      }
+      return rawUnready(readiness, time);
+    };
     // A returned health response must not cancel the probe. The runtime drops
     // in-flight I/O that is not passed to waitUntil, which would abort the
     // constructor every 200 ms and never let the object become ready.
@@ -109,6 +130,22 @@ export function readyProbeResponse(snapshot, request, { mode, deployment, elapse
     ...(knownPolicy ? { emailVerification: policy, emailVerificationScope: "durable-object" } : {}),
     ...(deployment ? { deployment } : {}),
     do: { status: "ok", statusCode: snapshot.status, ...(Number.isFinite(elapsedMs) ? { ms: elapsedMs } : {}) }
+  };
+  return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
+  });
+}
+
+// 200 with do.status "busy": the probe timed out, but this isolate saw the
+// object answer lastOkAgeMs ago. Monitors that want strict latency can read
+// do.status; ready/not-ready stays a liveness answer.
+export function readyBusyResponse(request, { mode, deployment, elapsedMs, timeoutMs, lastOkAgeMs }) {
+  const body = {
+    status: "ready",
+    mode,
+    ...(deployment ? { deployment } : {}),
+    do: { status: "busy", timeoutMs: timeoutMs ?? HEALTH_PROBE_TIMEOUT_MS, ...(Number.isFinite(elapsedMs) ? { ms: elapsedMs } : {}), ...(Number.isFinite(lastOkAgeMs) ? { lastOkAgeMs } : {}) }
   };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 200,

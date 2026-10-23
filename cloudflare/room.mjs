@@ -39,7 +39,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyBusyResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -689,7 +689,8 @@ export default {
         },
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
-        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
+        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' }),
+        onBusy: timing => ({ response: readyBusyResponse(request, { mode, deployment, ...timing }), servedBy: 'worker' })
       });
       return finish(probed.response, probed.servedBy);
     }
