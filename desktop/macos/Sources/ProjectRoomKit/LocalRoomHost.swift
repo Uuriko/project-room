@@ -70,9 +70,17 @@ public final class LocalRoomHost {
     // Caller holds lock. Desired receiving survives app shutdown, never a user disconnect.
     private func saveReceiving(_ enabled: Bool) throws {
         let url = directory.appendingPathComponent("receiving.json")
-        try JSONEncoder().encode(ReceivingPreference(enabled: enabled, scope: scope)).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        receivingEnabled = enabled
+        // A failed disk write must not undo a user's disconnect in this process.
+        if !enabled { receivingEnabled = false }
+        do {
+            try JSONEncoder().encode(ReceivingPreference(enabled: enabled, scope: scope)).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            receivingEnabled = enabled
+        } catch {
+            // Missing intent restores disabled. Never recursively remove an unexpected directory.
+            if !enabled { _ = Darwin.unlink(url.path) }
+            throw error
+        }
     }
     public func configure(_ url: URL) throws { try configure(url, restoring: false) }
     private func configure(_ url: URL, restoring: Bool) throws {
@@ -159,8 +167,14 @@ public final class LocalRoomHost {
         let fd = Darwin.open(directory.appendingPathComponent("desktop-owner.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LocalToolFailure("host_lock_unavailable") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw LocalToolFailure("another_desktop_host_running") }
+        let previouslyEnabled = receivingEnabled
         do { try saveReceiving(true); pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
-        catch { close(fd); throw error }
+        catch {
+            // A failed first start cannot arm a future automatic launch. An existing
+            // receiving preference remains available for an interrupted host's retry.
+            if !previouslyEnabled { try? saveReceiving(false) }
+            close(fd); throw error
+        }
         ownerFD = fd; stopping = false; session = nil; launchTime = Date(); lastMessage = "Starting agent…"
         lastExit = "none"
         let child = pid; finished.enter()
