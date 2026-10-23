@@ -33,7 +33,13 @@ export function schemaAt(revision, git = args => command(['git', ...args])) {
     const text = git(['show', `${revision}:server/writer-fence.mjs`]);
     const matches = [...text.matchAll(/^export const STORE_SCHEMA_VERSION = (\d+);\s*$/gm)];
     if (matches.length !== 1 || !knownSchema(Number(matches[0][1]))) return null;
-    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob: git(['rev-parse', `${revision}:server/writer-fence.mjs`]).trim() };
+    const blob = git(['rev-parse', `${revision}:server/writer-fence.mjs`]).trim();
+    // The recovery allowed-table set also comes from table lists writer-fence
+    // imports (e.g. ABUSE_RATE_TABLES, OAUTH_PROVIDER_TABLES); pin those blobs too.
+    const imports = [...new Set([...text.matchAll(/^\s*import\s[^;]*?\sfrom\s+["']\.\/([\w.-]+\.mjs)["']/gm)].map(match => `server/${match[1]}`))].sort();
+    const pinned = [['server/writer-fence.mjs', blob], ...imports.map(path => [path, git(['rev-parse', `${revision}:${path}`]).trim()])];
+    if (!pinned.every(([, sha]) => shaPattern.test(sha))) return null;
+    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
   } catch { return null; }
 }
 export function allocation(status) {
@@ -66,7 +72,9 @@ export function automaticRollbackDecision(previous, candidateSchema, candidateSo
     || !shaPattern.test(candidateSource?.revision ?? '') || !shaPattern.test(prior?.blob ?? '')
     || prior?.version !== previous.codeSchemaVersion || prior?.revision !== previous.sourceRevision)
     return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
-  if (prior.blob !== candidateSource.blob)
+  if (typeof prior.definitions !== 'string' || typeof candidateSource.definitions !== 'string')
+    return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
+  if (prior.blob !== candidateSource.blob || prior.definitions !== candidateSource.definitions)
     return { eligible: false, reason: 'writer-fence definitions changed; prior recovery may reject new tables' };
   return { eligible: true, reason: 'schema floor and exact writer-fence definition match; row/runtime compatibility is not established by this check' };
 }

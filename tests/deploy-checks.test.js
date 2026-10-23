@@ -416,7 +416,7 @@ const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
 const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
-const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob });
+const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, definitions: `server/writer-fence.mjs@${blob}` });
 const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema, schemaSource: fenceProof(schema, recoveryRevision) });
 
 test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
@@ -666,4 +666,28 @@ test("deploymentStatus uses REST only after wrangler keeps returning a malformed
   assert.deepEqual([runs, rests], [1, 0], "other failures never fall back");
   runs = rests = 0;
   await assert.rejects(deploymentStatus("prod", () => { runs++; throw malformed(); }, { ...noWait, attempts: 2 }, async () => { throw new Error("Cloudflare deployments REST HTTP 502"); }), /REST HTTP 502/);
+});
+
+test("automatic rollback refuses when a table list imported by writer-fence changes but writer-fence itself does not", () => {
+  // writer-fence.mjs builds the recovery allowed-table set partly from imports
+  // (ABUSE_RATE_TABLES, OAUTH_PROVIDER_TABLES). A new table added there leaves
+  // the writer-fence blob identical while the prior build's recovery rejects it.
+  const fence = 'import { ABUSE_RATE_TABLES } from "./abuse-rate-buckets.mjs";\nexport const STORE_SCHEMA_VERSION = 42;\n';
+  const oldRev = "1".repeat(40), newRev = "2".repeat(40);
+  const blobs = { [`${oldRev}:server/writer-fence.mjs`]: "f".repeat(40), [`${newRev}:server/writer-fence.mjs`]: "f".repeat(40),
+    [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40) };
+  const git = args => {
+    if (args[0] === "show") return fence;
+    if (args[0] === "rev-parse" && blobs[args[1]]) return `${blobs[args[1]]}\n`;
+    throw new Error(`unexpected git ${args.join(" ")}`);
+  };
+  const prior = schemaAt(oldRev, git), candidate = schemaAt(newRev, git);
+  assert.equal(prior.blob, candidate.blob, "fixture: writer-fence.mjs is byte-identical");
+  const previous = { known: true, versionId: recoveryOld, sourceRevision: oldRev, codeSchemaVersion: 42, schemaSource: prior };
+  const decision = automaticRollbackDecision(previous, 42, candidate);
+  assert.equal(decision.eligible, false);
+  assert.match(decision.reason, /definitions changed/);
+  // Same imported blobs on both sides stays eligible.
+  blobs[`${newRev}:server/abuse-rate-buckets.mjs`] = "3".repeat(40);
+  assert.equal(automaticRollbackDecision(previous, 42, schemaAt(newRev, git)).eligible, true);
 });
