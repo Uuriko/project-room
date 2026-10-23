@@ -1,3 +1,4 @@
+import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -61,6 +62,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+import "./entry-started.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
@@ -860,6 +862,14 @@ const signinUI = createAuthSigninUI({
   }
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
+const verificationIntentKey = "project-room:verify-email:v1";
+let verificationIntent = null;
+try {
+  if (initialAuthLink.kind === "notice" && initialAuthLink.notice === "verify") {
+    verificationIntent = { email: initialAuthLink.email, at: Date.now() };
+    sessionStorage.setItem(verificationIntentKey, JSON.stringify(verificationIntent));
+  } else verificationIntent = JSON.parse(sessionStorage.getItem(verificationIntentKey) || "null");
+} catch { /* Same-document intent remains available when storage is disabled. */ }
 const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
@@ -966,7 +976,39 @@ async function openPersonalRoomAfterSignup() {
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
+// The verification resume is a convenience on top of the normal landing. A
+// failed read must fall through to that landing, not strand the tab (the
+// intent stays in sessionStorage for 30 minutes and would repeat on reload).
+async function resumeEmailVerification() {
+  try { return await resumeEmailVerificationOnce(); } catch { return false; }
+}
+async function resumeEmailVerificationOnce() {
+  if (!verificationIntent) return false;
+  const intent = verificationIntent;
+  const clear = () => {
+    verificationIntent = null;
+    try { sessionStorage.removeItem(verificationIntentKey); } catch { /* Storage unavailable. */ }
+  };
+  if (typeof intent.email !== "string" || !Number.isFinite(intent.at)
+    || Date.now() - intent.at > 30 * 60 * 1000 || intent.at > Date.now()) { clear(); return false; }
+  const owned = await ensureAccountSession();
+  if (!owned?.authenticated) return false;
+  const methods = await accountClient.request("/api/auth/methods", { session: owned });
+  if (accountClient.session !== owned) return false;
+  // A link is navigation intent, never proof or permission to change accounts.
+  if (!methods.methods?.some(method => method.email?.toLowerCase() === intent.email.toLowerCase())
+    || methods.emailVerification?.status !== "unverified") { clear(); return false; }
+  showAccountWorkspace();
+  await openAccountSettings();
+  if (accountClient.session !== owned) return false;
+  const code = $("#account-settings-body").querySelector('[data-form="email-verify"] [name="code"]');
+  if (!code) return false;
+  code.focus();
+  clear();
+  return true;
+}
 async function landAfterSignIn() {
+  if (await resumeEmailVerification()) return;
   if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
@@ -2712,6 +2754,15 @@ let searchCollapsed = false;
 const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
+  const resultsOnly = query.trim().toLowerCase() === "has:result";
+  $("#results-panel").hidden = !resultsOnly;
+  $("#search-list").hidden = resultsOnly;
+  if (resultsOnly) {
+    $("#search-results").hidden = searchCollapsed;
+    $("#clear-search").hidden = false;
+    setText("#search-count", uiText("result.searchCount", { count: completedResults(state).length }));
+    return;
+  }
   const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
@@ -2842,7 +2893,7 @@ function syncRequestComposer() {
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
   setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
-  $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
+  $("#request-refresh").hidden = !request || !changed || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
@@ -3941,15 +3992,21 @@ const replyToSharedResult = createResultFeedback({
   getState: () => state, getConversation: () => conversation,
   isBlocked: () => busy || requestReading || pendingMessage || composerFiles.some(file => file.status === "uploading"),
   getDraft: destination => destination === composerKey()
-    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value } : drafts.get(destination),
+    ? { pending: pendingMessage, toMemberId: $("#message-to-select").value,
+      body: $("#message-input").value, files: composerFiles, replyToId } : drafts.get(destination),
   onBlocked: () => notice(uiText("result.replyBlocked")),
   openThread(message, destination) {
     setActiveChannel(messageChannelId(message));
     revealMessage(message.id);
     switchThread(destination, true);
   },
-  setReply(messageId) {
+  setReply(messageId, quote) {
     replyToId = messageId;
+    if (quote) {
+      const input = $("#message-input");
+      if (!input.value.startsWith(quote)) input.value = quote + input.value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     updateReply(); saveComposer(); persistDrafts();
     $("#message-input").focus();
   }
@@ -5059,7 +5116,15 @@ let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 const noteReaderScroll = () => { readerScrollAt = performance.now(); timelinePin.clear(); };
-addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
+addEventListener("wheel", event => {
+  noteReaderScroll();
+  // A conversation at its end cannot emit a scroll event for a downward
+  // wheel: a short list has nothing to scroll, and a longer list already at
+  // the bottom has nowhere to go. A downward wheel over its visible
+  // messages still expresses reading through to the end.
+  const list = $("#message-list");
+  if (event.deltaY > 0 && list.contains(event.target) && nearBottomOfList()) scheduleHorizonAdvance();
+}, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
 addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
 $("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
@@ -5593,6 +5658,16 @@ function syncAcquisitionControls() {
     joinControl.hidden = !isOwner;
     if (isOwner) { joinBox.checked = state.room.joinLink?.enabled === true; joinBox.disabled = acquisitionBusy; }
   }
+  const invitation = $("#agent-page-invitation");
+  if (invitation) {
+    invitation.hidden = !isOwner;
+    if (!invitation.hidden) {
+      const href = roomSetupLink(location.origin, state.room.id, state.room.publicPage?.enabled === true);
+      $("#agent-page-link").href = href;
+      $("#agent-page-prompt").value = roomSetupPrompt(href);
+      $("#agent-page-copy").disabled = acquisitionBusy;
+    }
+  }
   const member = state && viewerId ? state.members[viewerId] : null;
   if (nameControl && nameBox) {
     nameControl.hidden = !member;
@@ -5633,6 +5708,17 @@ $("#public-page-toggle")?.addEventListener("change", () => {
 $("#join-link-toggle")?.addEventListener("change", () => {
   if (session?.member?.id !== state?.room?.ownerId) return;
   sendAcquisition(T.ROOM_JOIN_LINK_SET, { enabled: $("#join-link-toggle").checked });
+});
+$("#agent-page-copy")?.addEventListener("click", async () => {
+  const field = $("#agent-page-prompt");
+  if (!field || $("#agent-page-invitation").hidden) return;
+  field.hidden = false;
+  field.focus(); field.select();
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard unavailable")), 800))]);
+    notice("Setup prompt copied.");
+  } catch { notice("Copy the selected setup prompt."); }
 });
 $("#public-name-toggle")?.addEventListener("change", () => {
   if (!session?.member?.id) return;
@@ -6061,8 +6147,8 @@ $("#room-overview-dialog").addEventListener("click", event => {
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;
-  dialog.classList.toggle("results-only", panelId === "results-panel");
-  $("#settings-title").textContent = panelId === "results-panel" ? "Results" : "Settings";
+  if (panelId === "results-panel") { selectWorkView("results"); return; }
+  $("#settings-title").textContent = "Settings";
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
@@ -6074,10 +6160,6 @@ function openSettings(panelId) {
   }
   renderRecordPanel();
 }
-$("#results-panel > summary").addEventListener("click", event => {
-  event.preventDefault();
-  openSettings("results-panel");
-});
 function openCatchUp() {
   updatesUi?.close();
   const dialog = $("#catchup-dialog");
@@ -6088,7 +6170,14 @@ function openCatchUp() {
   loadReturnBrief();
 }
 function selectWorkView(view) {
-  if (view === "results") openSettings("results-panel");
+  if (view !== "results") return;
+  if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#search-form").hidden = false;
+  $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
+  $("#message-search").value = "has:result";
+  searchCollapsed = false;
+  renderSearch();
+  $("#message-search").focus({ preventScroll: true });
 }
 function resultRow(item) {
   const result = currentResult(item), title = esc(item.title);
@@ -6104,9 +6193,10 @@ const { close: closeResult, sync: resultStatus, preserveFocus: preserveResultFoc
   storage: recovery.storage, recoveryScope: () => session ? draftScope(session) : null,
   isBusy: () => busy,
   canDiscuss: () => !pendingMessage && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading"),
-  memberLabel, workRecord, focusRecord, clearResultComparison, loadResultComparison,
-  onDiscuss(message) { return replyToSharedResult(message.id); },
+  memberLabel: name, workRecord, focusRecord, clearResultComparison, loadResultComparison,
+  onDiscuss(message, selection) { return replyToSharedResult(message.id, selection); },
   onOriginal(messageId) {
+    searchCollapsed = true; $("#search-results").hidden = true;
     history.replaceState(null, "", recordHref("message", messageId)); revealMessage(messageId);
   }
 });
@@ -6569,7 +6659,7 @@ function ownsPresenceRequest(request) {
 }
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
-const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
+const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
   notificationBefore = null; notificationLoading = false;
@@ -6610,7 +6700,7 @@ function renderNotifications() {
       : item.requestId ? (item.note ?? "").slice(0, 80)
       : (state.workItems[item.workItemId]?.title ?? item.workItemId);
     const actor = item.kind === "access_request" && item.displayName ? item.displayName : memberLabel(item.actorId);
-    const label = `${actor} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
+    const label = `${actor} ${item.kind === "access_decision" ? (item.outcome === "approved" ? "approved your access request" : "declined your access request") : NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
   humanPushUi?.refresh();
@@ -7307,7 +7397,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   renderContribution(contributions, owned);
   setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
-  $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
+
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
@@ -7315,7 +7405,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
     preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
-    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#room-results-list").focus({ preventScroll: true });
     resultStatus();
     syncResultComparisons();
     syncActionForm();
@@ -7540,10 +7630,6 @@ $("#advanced-room-tools").addEventListener("toggle", event => {
   if (!event.currentTarget.open) closeSecondaryBoards();
 });
 $("#topbar-settings").addEventListener("click", () => openSettings());
-$("#room-results-open").addEventListener("click", () => {
-  if (!state || !session || busy) return;
-  selectWorkView("results");
-});
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
 $("#settings-close").addEventListener("click", () => { closeSecondaryBoards(); $("#settings-dialog").close(); });
 $("#topbar-search-toggle").addEventListener("click", () => {
@@ -7621,6 +7707,7 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  if (await resumeEmailVerification()) return;
   if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {

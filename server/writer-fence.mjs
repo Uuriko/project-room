@@ -235,6 +235,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // purely additive and intentionally NOT fenced: older writers have no code
   // path to them, and the lifecycle module owns its schema.
   "mention_states",
+  "mention_observations", // Durable acknowledgment/reply facts; additive lifecycle-owned schema.
   "room_mention_settings",
   // agent_key_registry (integration map slice 9): Ed25519 public-key
   // directory with validity windows and rotation overlap. Purely additive
