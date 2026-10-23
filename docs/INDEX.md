@@ -4,7 +4,7 @@ Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md)
 
 Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
 
-Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md).
+Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md) and [collaboration controllers and simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md).
 
 Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
