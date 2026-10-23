@@ -349,10 +349,10 @@ export async function joinSharedInvite(origin, linkToken, displayName, options =
     throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
   return value;
 }
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, options = {}) {
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
-    body: { roomId, title, purpose, kind, displayName } }, options);
+    body: { roomId, title, purpose, kind, displayName, requestId, starter } }, options);
   if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
   return value;
@@ -652,6 +652,17 @@ export class RoomAgentClient {
         || request.status !== "open" || !integer(request.revision))
         throw new RoomClientError(200, "invalid_response", "Invalid request identity in work observation");
       ids.add(request.id);
+    }
+    // Optional for older servers. Unknown future reasons still mean blocked;
+    // malformed metadata must never silently turn into permission to prepare.
+    if (Object.hasOwn(value, "blockedBy")) {
+      const blockers = value.blockedBy;
+      if (!blockers || typeof blockers !== "object" || Array.isArray(blockers)
+        || Object.entries(blockers).some(([id, reasons]) => !ids.has(id)
+          || !Array.isArray(reasons) || reasons.length === 0
+          || reasons.some(reason => typeof reason !== "string" || !reason.trim())
+          || new Set(reasons).size !== reasons.length))
+        throw new RoomClientError(200, "invalid_response", "Invalid blockers in work observation");
     }
     for (const [id, run] of Object.entries(value.runs)) {
       if (!ids.has(id) || !run || !["working", "unknown", "result_ready", "needs_attention", "delivered"].includes(run.state)
@@ -1213,6 +1224,10 @@ export class RoomAgentClient {
   accessRequests({ status } = {}, { signal } = {}) {
     const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
     return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
+  }
+  requestMemberPermissions({ permissions, requestId, note } = {}, { signal } = {}) {
+    return this.#accessAdmin("/members/me/permission-requests",
+      { permissions, requestId, ...(note === undefined ? {} : { note }) }, { signal });
   }
   decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
     return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
