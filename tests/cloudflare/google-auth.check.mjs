@@ -1,11 +1,12 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
 for (const legacy of [false, true]) test(`configured Google sign-in starts on Workers (legacy schema: ${legacy})`, async () => {
- const bundled = await build({ entryPoints: ['google-auth.test-fixture.mjs'], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+ const bundled = await build({ entryPoints: [fileURLToPath(new URL('./google-auth.test-fixture.mjs', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
  const origin = 'https://room.example.test';
  let jwk, token, redirectProvider = false, untrustedRequests = 0;
  const mf = new Miniflare({ outboundService: async request => {

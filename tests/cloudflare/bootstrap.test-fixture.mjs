@@ -1,7 +1,7 @@
 // LOCAL TEST ONLY: exposes the bootstrap outcome of the real ProjectRoom
 // constructor so bootstrap.check.mjs can prove an expired or malformed operator
 // window is logged and skipped instead of failing every request. Never deploy.
-import entry, { ProjectRoom } from './room.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
 
 const warnings = [];
 const warn = console.warn;

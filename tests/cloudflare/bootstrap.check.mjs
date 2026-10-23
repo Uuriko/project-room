@@ -4,8 +4,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { RoomStore } from '../server/store.mjs';
-import { bootstrapRoom, bootstrapConfigurationProblem, resetBootstrapWarning } from './bootstrap.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { bootstrapRoom, bootstrapConfigurationProblem, resetBootstrapWarning } from '../../cloudflare/bootstrap.mjs';
 
 test('operator bootstrap is explicit, atomic, one-time, hash-only and expires', () => {
   const now = Date.now(), store = new RoomStore(':memory:', { now: () => now });
