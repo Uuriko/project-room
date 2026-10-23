@@ -9,7 +9,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
-import { buildReplyCommand, validReplyArguments, replyTools, validateReplyRead, replyRefusal } from "../client/reply-actions.mjs";
+import { buildReplyCommand, validReplyArguments, replyTools, validateReplyRead, replyRefusal, submitReplyAction } from "../client/reply-actions.mjs";
 import { confirmsAgentCommand } from "../client/work-actions.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
@@ -872,7 +872,7 @@ test("automatic pickup reports one connection failure per outage and reports a l
   const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
   let reads = 0;
   const gateway = createServer(async (req, res) => {
-    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+    if (req.url === "/api/rooms/commons/agent-work") {
       reads++;
       if (reads !== 3) {
         res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "Temporary outage" } }));
@@ -1010,4 +1010,29 @@ test("automatic pickup surfaces unavailable isolation without reserving work or 
   }), { code: "host_isolation_unavailable" });
   assert.deepEqual(notices, []);
   assert.equal((await f.client.requestRuns()).runs[requestMessageId], undefined);
+});
+
+
+test("implicit private replies confirm over HTTP without changing retry input or accepting forged fields", async t => {
+  const f = await fixture(t);
+  f.store.command(f.keys.owner, "commons", { id: "private-parent", type: "message.posted", data: { messageId: "private-parent", toMemberId: "producer", body: "Private clarification" } });
+  const args = { requestId: "private-child", replyToId: "private-parent", body: "Confirmed response" }, original = structuredClone(args);
+  const first = await f.client.replyAction("room_reply", args);
+  assert.equal(first.status, "recorded");
+  const retry = await f.client.replyAction("room_reply", args);
+  assert.equal(retry.status, "recorded"); assert.equal(retry.duplicate, true); assert.equal(retry.sequence, first.sequence);
+  assert.deepEqual(args, original);
+  const nested = await f.client.replyAction("room_reply", { requestId: "nested-private-child", replyToId: first.messageId, body: "Nested clarification" });
+  assert.equal(nested.status, "recorded");
+  const explicit = await f.client.replyAction("room_reply", { requestId: "explicit-private-child", replyToId: "private-parent", toMemberId: "owner", body: "Explicit clarification" });
+  assert.equal(explicit.status, "recorded");
+  const command = buildReplyCommand(f.identity, "room_reply", args);
+  const receipt = await f.client.command(command);
+  for (const mutate of [r => { r.event.data.toMemberId = "reviewer"; }, r => { r.event.data.body = "forged"; }, r => { r.event.actorId = "owner"; }, r => { r.event.data.extra = true; }]) {
+    const altered = structuredClone(receipt); mutate(altered);
+    const client = { command: async () => altered, messageThread: (...a) => f.client.messageThread(...a) };
+    assert.equal((await submitReplyAction(client, f.identity, "room_reply", args)).status, "unconfirmed");
+  }
+  const unavailable = { command: async () => receipt, messageThread: async () => { throw new Error("parent unavailable"); } };
+  assert.equal((await submitReplyAction(unavailable, f.identity, "room_reply", args)).status, "unconfirmed");
 });

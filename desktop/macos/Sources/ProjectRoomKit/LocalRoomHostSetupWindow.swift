@@ -18,8 +18,8 @@ import AppKit
     private let issue = NSTextField(wrappingLabelWithString: "")
     private let writes = NSButton(checkboxWithTitle: "Allow changes inside the selected workspace", target: nil, action: nil)
     private let host: LocalRoomHost
-    private let completion: () -> Void
-    init(host: LocalRoomHost, completion: @escaping () -> Void) {
+    private let completion: (Bool) -> Void
+    init(host: LocalRoomHost, completion: @escaping (Bool) -> Void) {
         self.host = host; self.completion = completion
         super.init()
         panel.title = "Set up your room agent"
@@ -56,7 +56,7 @@ import AppKit
         loginButton.target = self; loginButton.action = #selector(signIn); loginButton.bezelStyle = .rounded
         stack.addArrangedSubview(loginButton)
         stack.addArrangedSubview(writes)
-        let permissions = NSTextField(wrappingLabelWithString: "Computer control is separate. After saving, use Connect Mac tools to choose observation or app control. Saving does not start an agent.")
+        let permissions = NSTextField(wrappingLabelWithString: "Computer control is separate. After saving, use Connect Mac tools to choose observation or app control. Saving connects the agent and starts receiving work.")
         permissions.textColor = .secondaryLabelColor; stack.addArrangedSubview(permissions); permissions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         issue.textColor = .systemRed; stack.addArrangedSubview(issue); issue.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         saveButton.target = self; saveButton.action = #selector(saveSetup); saveButton.bezelStyle = .rounded
@@ -92,7 +92,7 @@ import AppKit
     @objc private func toggleAdvanced(_ sender: NSButton) { for row in advancedRows { row.isHidden = sender.state != .on }; panel.setContentSize(NSSize(width: 680, height: sender.state == .on ? 680 : 500)) }
     @objc private func cancelSetup() {
         if operation.isRunning { closing = true; operation.cancel(); issue.stringValue = "Cancelling setup…"; return }
-        panel.sheetParent?.endSheet(panel); completion()
+        panel.sheetParent?.endSheet(panel); completion(false)
     }
     private func setBusy(_ value: Bool) {
         for button in choosingButtons + [joinButton, loginButton, saveButton] { button.isEnabled = !value }
@@ -110,7 +110,7 @@ import AppKit
                 self?.receive(event)
             }, onFinish: { [weak self] success in
                 guard let self else { return }; self.setBusy(false)
-                if self.closing { self.panel.sheetParent?.endSheet(self.panel); self.completion(); return }
+                if self.closing { self.panel.sheetParent?.endSheet(self.panel); self.completion(false); return }
                 if !success { self.issue.stringValue = "Setup could not finish. Check the link, installed runtime and network, then retry. Saved setup is retained." }
             })
         } catch { setBusy(false); issue.stringValue = "Could not start setup. Check the installed runtime in Advanced." }
@@ -157,8 +157,8 @@ import AppKit
             }
             if NSWorkspace.shared.open(url) { issue.stringValue = "Complete sign-in in your browser. Cancel stops this attempt." }
             else { operation.cancel(); issue.stringValue = "Could not open the sign-in page. Retry after checking your default browser." }
-        case "authentication_not_required": issue.stringValue = "This provider does not require sign-in. Save setup, then start the agent."
-        case "credentials_present": issue.stringValue = "Provider credentials present. Save setup, then start the agent. A model task has not been verified yet."
+        case "authentication_not_required": issue.stringValue = "This provider does not require sign-in. Save setup to connect the agent."
+        case "credentials_present": issue.stringValue = "Provider credentials present. Save setup to connect the agent. A model task has not been verified yet."
         case "cancelled": issue.stringValue = "Sign-in cancelled."
         case "timeout": issue.stringValue = "Sign-in timed out. Try again when ready."
         default: issue.stringValue = "Setup did not finish. Check the link or provider sign-in and retry."
@@ -175,7 +175,7 @@ import AppKit
         do {
             let url = try LocalRoomHostSetup.save(.init(node: urls[3], script: urls[4], codex: urls[5], workspace: urls[1], profile: urls[2], connection: urls[0], allowWrites: writes.state == .on), directory: directory)
             generated = url; try host.configure(url)
-            panel.sheetParent?.endSheet(panel); completion()
+            panel.sheetParent?.endSheet(panel); completion(true)
         } catch {
             if let generated { try? FileManager.default.removeItem(at: generated.deletingLastPathComponent()) }
             switch (error as? LocalToolFailure)?.code {

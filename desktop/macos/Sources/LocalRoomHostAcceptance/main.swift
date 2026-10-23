@@ -204,6 +204,35 @@ try Data("invalid".utf8).write(to: preference)
 let corrupt = try LocalRoomHost(directory: dir.appendingPathComponent("managed"))
 try corrupt.resumeReceiving()
 check(corrupt.snapshot()["running"] as? Bool == false, "corrupt preference never starts receiver")
+// A failed preference write must never retain live receiving intent.
+let (failedDisconnect, failedDir) = try fixture("failed-disconnect")
+try failedDisconnect.start()
+check(failedDisconnect.stopAndWait(), "failed-write fixture shuts down without clearing receiving")
+let failedPreference = failedDir.appendingPathComponent("managed/receiving.json")
+try fm.removeItem(at: failedPreference)
+try fm.createDirectory(at: failedPreference, withIntermediateDirectories: false)
+try Data("fixture".utf8).write(to: failedPreference.appendingPathComponent("blocker"))
+var disconnectFailed = false
+do { try failedDisconnect.disconnect() } catch { disconnectFailed = true }
+check(disconnectFailed, "disconnect surfaces preference persistence failure")
+check(failedDisconnect.snapshot()["receivingEnabled"] as? Bool == false, "failed disconnect immediately clears in-memory intent")
+try failedDisconnect.resumeReceiving()
+check(failedDisconnect.snapshot()["receivingEnabled"] as? Bool == false && failedDisconnect.snapshot()["running"] as? Bool == false, "failed disconnect persistence cannot reenable receiving in this process")
+// A binary can disappear or become invalid after configuration succeeds.
+let (failedStart, startDir) = try fixture("failed-start")
+let invalidNode = startDir.appendingPathComponent("invalid-node")
+try Data("not an executable format".utf8).write(to: invalidNode)
+try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: invalidNode.path)
+let invalidManifest = startDir.appendingPathComponent("host.json")
+try write(["version":1,"node":invalidNode.path,"script":startDir.appendingPathComponent("runtime.json").path,"runtimeConfig":startDir.appendingPathComponent("runtime.json").path,"roomConnection":startDir.appendingPathComponent("connection").path], invalidManifest.path)
+try failedStart.configure(invalidManifest)
+var startFailed = false
+do { try failedStart.start() } catch { startFailed = true }
+check(startFailed, "first start reports executable spawn failure")
+check(failedStart.snapshot()["receivingEnabled"] as? Bool == false, "failed first start does not arm future automatic receiving")
+let failedStartRestored = try LocalRoomHost(directory: startDir.appendingPathComponent("managed"))
+try failedStartRestored.resumeReceiving()
+check(failedStartRestored.snapshot()["receivingEnabled"] as? Bool == false, "failed first start remains disabled after relaunch")
 for mode in ["wrongpid","stale","unverified","exit"] {
     let (other,_) = try fixture(mode); try other.start(); Thread.sleep(forTimeInterval:0.4)
     check(!(other.snapshot()["message"] as? String ?? "").hasPrefix("Listening"), "\(mode) status cannot claim listening")
