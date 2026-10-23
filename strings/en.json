@@ -531,5 +531,6 @@
   "composer.saved": "Message saved. ",
   "composer.savedHistoryPending": "Message saved; history is reconnecting. ",
   "composer.viewSaved": "View message",
-  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery."
+  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery.",
+  "usage.roomSizeNearLimit": "Near the limit. Ask the room owner to archive older messages."
 }
