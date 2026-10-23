@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {rmSync,mkdirSync} from 'node:fs';
-import {chromium} from 'playwright';
+import {chromium,webkit} from 'playwright';
 import {createAcceptanceFixture} from './acceptance-fixture.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {signInFixture} from './auth-signin.mjs';
+const engine=process.env.ROOM_BROWSER_ENGINE??'chromium';
+if(!['chromium','webkit'].includes(engine))throw new Error('ROOM_BROWSER_ENGINE must be chromium or webkit');
+test('assistant setup guidance respects audience and owner authority across host states', {timeout:90000}, async()=>{
 const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`;
-const browser=await chromium.launch({headless:true});
+const browser=await (engine==='webkit'?webkit:chromium).launch({headless:true});
 const errors=[];
 try {
  const page=await browser.newPage({viewport:{width:1280,height:900}});page.on('pageerror',e=>errors.push(e.message));
@@ -51,3 +55,4 @@ try {
  }
  assert.deepEqual(errors,[]); console.log('PASS owner/member setup, keyboard action, private audience, waiting/paused/connected states; desktop/phone and light/dark; no page errors.');
 }finally{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true});}
+});
