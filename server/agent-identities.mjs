@@ -297,7 +297,7 @@ const SIGNUP_NEXT = Object.freeze([
     description: "Ask to join a room without an invite code. Send this identity secret as the bearer token. The room owner decides; poll the request status." }),
   Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest",
     description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface." }),
-  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
     description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   // Burs-IA steal A1: the mint response names the tools-list surface so a
   // cold agent learns its capabilities without reading llms.txt.
