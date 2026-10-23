@@ -31,6 +31,9 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
     private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
+    private let signInSurface = NSStackView()
+    private let signInProgress = NSProgressIndicator()
+    private let signInHint = NSTextField(wrappingLabelWithString: "Continue in your browser")
     private var localTools: LocalToolsWindow?
     private let acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)?
     private let localAgentNotice = NSTextField(wrappingLabelWithString: "")
@@ -116,6 +119,28 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             bar.widthAnchor.constraint(equalTo: chrome.widthAnchor), localAgentNoticeRow.widthAnchor.constraint(equalTo: chrome.widthAnchor),
             webView.topAnchor.constraint(equalTo: chrome.bottomAnchor, constant: 8), webView.bottomAnchor.constraint(equalTo: container.bottomAnchor), webView.leadingAnchor.constraint(equalTo: container.leadingAnchor), webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
+        // Keep the account webview fenced during OAuth without a blank window.
+        // This view has no second sign-in action; Cancel remains in the toolbar.
+        let signInTitle = NSTextField(labelWithString: "PROJECT ROOM")
+        signInTitle.font = .systemFont(ofSize: 22, weight: .semibold)
+        signInHint.font = .systemFont(ofSize: 14)
+        signInHint.textColor = .secondaryLabelColor
+        signInHint.alignment = .center
+        signInProgress.style = .spinning
+        signInProgress.controlSize = .small
+        signInSurface.orientation = .vertical
+        signInSurface.alignment = .centerX
+        signInSurface.spacing = 16
+        for view in [signInTitle, signInProgress, signInHint] { signInSurface.addArrangedSubview(view) }
+        signInSurface.identifier = NSUserInterfaceItemIdentifier("native-sign-in-pending")
+        signInSurface.isHidden = true
+        signInSurface.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(signInSurface)
+        NSLayoutConstraint.activate([
+            signInSurface.centerXAnchor.constraint(equalTo: webView.centerXAnchor),
+            signInSurface.centerYAnchor.constraint(equalTo: webView.centerYAnchor),
+            signInSurface.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, constant: -48)
+        ])
         window.center()
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
@@ -184,7 +209,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                     guard self.currentAuthentication(attempt) else { return }
                     guard let tuple = slot as? String else { self.endAuthentication(attempt); return }
                     self.signInSlot = tuple
-                    self.webView.isHidden = true
+                    self.showSignInSurface(true)
                     self.beginAuthentication(attempt, provider: provider)
                 } catch {
                     guard self.currentAuthentication(attempt) else { return }
@@ -193,6 +218,14 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                 }
             }
         }
+    }
+    private func showSignInSurface(_ visible: Bool) {
+        webView.isHidden = visible
+        signInSurface.isHidden = !visible
+        if visible {
+            signInHint.stringValue = "Continue in your browser"
+            signInProgress.startAnimation(nil)
+        } else { signInProgress.stopAnimation(nil) }
     }
     private func currentAuthentication(_ attempt: UUID) -> Bool {
         signInPending && signInAttempt == attempt
@@ -266,9 +299,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
         cancelSignInButton.isHidden = true
         cookieCommitPending = false; cookieCommitWaitExpired = false
-        signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
+        signInSlot = nil; pendingDestination = nil; authentication = nil; showSignInSurface(false)
     }
     private func completeAuthentication(code: String, verifier: String, attempt: UUID) async {
+        signInHint.stringValue = "Finishing sign-in…"
         defer { endAuthentication(attempt) }
         var request = URLRequest(url: origin.appendingPathComponent("api/auth/desktop/session"))
         request.httpMethod = "POST"
@@ -311,7 +345,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
             cookieCommitPending = false; cookieCommitWaitExpired = false
             status.stringValue = "Signed in"
-            webView.isHidden = false
+            showSignInSurface(false)
             // A new WK store has no browser account hint. Explicitly restore
             // the freshly installed session while retaining the original room,
             // invitation fragment and other destination parameters.

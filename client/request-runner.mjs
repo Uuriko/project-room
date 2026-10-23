@@ -159,10 +159,12 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
  * Whether a reply request is eligible to be (re)run. The second disjunct
  * covers retrying a locally-saved response — it must still require the
  * request to be open, or closed/cancelled requests would be re-run (G-L2).
+ * Standing blockers suppress new work only; saved delivery still revalidates
+ * through the service and must not be stranded by an execution-only pause.
  */
-export function isRequestEligible(request, { owned, runState, hasPendingDelivery }) {
+export function isRequestEligible(request, { owned, runState, hasPendingDelivery, blocked = false }) {
   if (request?.status !== "open") return false;
-  if (!owned) return true;
+  if (!owned) return !blocked;
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
@@ -174,11 +176,12 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
   while (!signal?.aborted) {
     let cursor = null;
     try {
-      const { requests, evaluatedThrough, runs } = await client.agentWork({ signal });
+      const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
       const eligible = requests.filter(request => isRequestEligible(request, {
         owned: owned(request),
+        blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
         hasPendingDelivery: owned(request) && runs[request.id]?.state !== "needs_attention" && Boolean(pending(request)),
       }));
