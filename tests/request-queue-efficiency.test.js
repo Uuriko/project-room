@@ -5,10 +5,10 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { openRequestJournal, runRequestQueue } from "../client/request-runner.mjs";
+import { openRequestJournal, runRequestQueue, isRequestEligible } from "../client/request-runner.mjs";
 
 // Count actual authorized HTTP responses, not mocked client call shapes.
-test("idle queue excludes cancelled history and does not read run metadata", { timeout: 15000 }, async t => {
+for (const blocked of [false, true]) test(`idle queue excludes cancelled history and avoids blocked preparation: ${blocked}`, { timeout: 15000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
   const controller = new AbortController(), reads = [], notices = [];
   const db = openRequestJournal(join(f.directory, "queue.sqlite"));
@@ -41,6 +41,11 @@ test("idle queue excludes cancelled history and does not read run metadata", { t
     f.store.command(f.keys.owner, "commons", { id: `cancel-${i}`, type: "reply_request.cancelled", data: {
       requestMessageId: id, expectedRequestRevision: 0, reason: "No longer needed" } });
   }
+  if (blocked) {
+    f.store.command(f.keys.owner, "commons", { id: "blocked-open", type: "message.posted", data: {
+      messageId: "blocked-open", requestKind: "reply", toMemberId: "producer", body: "Current request" } });
+    f.store.dmConsents.block("commons", "owner", "producer");
+  }
   const before = f.store.room("commons").sequence;
   await listen(gateway);
   await runRequestQueue({ connection: { version: 1, origin: `http://127.0.0.1:${gateway.address().port}`,
@@ -54,7 +59,19 @@ test("idle queue excludes cancelled history and does not read run metadata", { t
   assert.equal(f.store.room("commons").sequence, before);
   const listing = reads.find(read => read.path.endsWith("/agent-work"));
   assert.equal(reads.length, 1, "one combined read replaces preflight and separate lists");
-  assert.deepEqual(listing.body.requests, [], "closed history must not cross the queue's HTTP boundary");
+  assert.deepEqual(listing.body.requests.map(r => r.id), blocked ? ["blocked-open"] : [], "closed history must not cross the queue's HTTP boundary");
+  if (blocked) assert.deepEqual(listing.body.blockedBy, { "blocked-open": ["dm_blocked"] });
   assert.equal(reads.filter(read => read.path.endsWith("/request-runs")).length, 0);
   t.diagnostic(`idle request listing: ${listing.bytes} bytes; ${reads.length} completed HTTP reads before next scan`);
+});
+
+// A standing observation suppresses new execution, never discards a saved answer.
+test("blocked pickup preserves local recovery and ownership fences", () => {
+  const request = { id: "q", status: "open" };
+  assert.equal(isRequestEligible(request, { owned: false, blocked: true }), false);
+  assert.equal(isRequestEligible(request, { owned: false, blocked: false }), true);
+  assert.equal(isRequestEligible(request, { owned: true, blocked: true, runState: "result_ready", hasPendingDelivery: true }), true);
+  assert.equal(isRequestEligible(request, { owned: true, blocked: true, runState: "result_ready", hasPendingDelivery: false }), false);
+  assert.equal(isRequestEligible(request, { owned: true, blocked: true, runState: "needs_attention", hasPendingDelivery: true }), false);
+  assert.equal(isRequestEligible({ ...request, status: "closed" }, { owned: true, blocked: true, runState: "result_ready", hasPendingDelivery: true }), false);
 });
