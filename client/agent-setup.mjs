@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, previewSharedInvite, joinSharedInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
-import { edgeDoorApiPath, ROOM_ORIGIN } from "../server/agent-discovery.mjs";
+import { edgeDoorApiPath, ROOM_ORIGIN } from "../src/service-origin.js";
 import { parseShareInviteCode } from "../src/share-invite-code.js";
+import { ACCESS_PRESETS } from "../src/access-presets.js";
 import { validId } from "../src/events.js";
 
 const canonicalOrigin = value => {
@@ -15,17 +16,23 @@ const canonicalOrigin = value => {
 export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
   if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: canonicalOrigin(origin), code: value.toUpperCase() };
-  const shortCode = parseShareInviteCode(value);
-  if (shortCode) {
-    // The tolerant parser accepts a full URL carrying the code; when no
-    // configured origin was passed, the URL's own origin applies.
-    let resolvedOrigin = origin;
-    if (!resolvedOrigin) {
-      try { resolvedOrigin = new URL(value).origin; } catch { /* bare code: origin required */ }
+  let url;
+  try { url = new URL(value); } catch { /* Bare invitation codes are handled below. */ }
+  if (url) {
+    assertServiceOrigin(url.origin);
+    if (url.username || url.password) throw new Error("Room URLs must not contain credentials");
+    if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
+    // Recognize structural room paths before the tolerant short-code parser:
+    // a nine-character room name is not an invitation code.
+    const page = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(?:\.json)?\/?$/.exec(url.pathname);
+    if (page) {
+      if (url.hash || [...url.searchParams.keys()].some(key => key !== "ref")) throw new Error("Use the public room page URL");
+      return { origin: canonicalOrigin(url.origin), publicRoom: page[1] };
     }
-    return { origin: canonicalOrigin(resolvedOrigin), sharedToken: shortCode };
   }
-  const url = new URL(value); assertServiceOrigin(url.origin);
+  const shortCode = parseShareInviteCode(value);
+  if (shortCode) return { origin: canonicalOrigin(url?.origin ?? origin), sharedToken: shortCode };
+  if (!url) throw new Error("Choose an invite or Room URL");
   // Self-serve join links: /join/RM-XXX (or /room/join/RM-XXX on the www door).
   const joinPath = /^(?:\/room)?\/join\/(RM-[a-z0-9]+)\/?$/i.exec(url.pathname);
   if (joinPath && !url.hash) {
@@ -46,9 +53,37 @@ const signature = preview => JSON.stringify({ roomId: preview.roomId, permission
 
 // All mutation inputs are saved before the first request. Repeating this operation
 // resumes the same identity and admission; it never silently replaces a connection.
-export async function connectRoom({ target, directory, origin, name = "Room agent", accept = false, identityFrom, fetchImpl = globalThis.fetch }) {
+export async function connectRoom({ target, directory, origin, name = "Room agent", accept = false, expectedPreview, identityFrom, access = "chat", fetchImpl = globalThis.fetch }) {
   if (typeof name !== "string" || !name.trim() || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Choose an agent name of 1–80 characters");
-  const destination = setupTarget(target, origin), journal = openSetupJournal(directory);
+  if (!Object.hasOwn(ACCESS_PRESETS, access)) throw new Error("Choose access: chat, work, collaborate, or maximum");
+  const requestedAccess = { preset: access, permissions: [...ACCESS_PRESETS[access].permissions], requiresReview: access !== "chat" };
+  const destination = setupTarget(target, origin);
+  if (destination.publicRoom) {
+    // Resolve without credentials or redirects. A public page is a stable door,
+    // not an authority to send this identity to a different service or room.
+    const response = await fetchImpl(`${destination.origin}/r/${destination.publicRoom}.json`, {
+      redirect: "error", credentials: "omit", signal: AbortSignal.timeout(15000),
+      headers: { Accept: "application/json", "User-Agent": "project-room-agent" },
+    });
+    if (!response.ok) throw new Error("Public room page unavailable; ask for an invitation or check the room URL");
+    const page = await response.json();
+    if (page.schema !== "project-room-public-room/1" || page.slug !== destination.publicRoom
+        || !["link", "request"].includes(page.join?.mode)) throw new Error("Invalid public room entrance");
+    destination.roomId = destination.publicRoom;
+    if (page.join.mode === "link") {
+      const href = new URL(page.join.href, destination.origin);
+      if (href.origin !== destination.origin || href.username || href.password || href.pathname !== "/"
+          || [...href.searchParams.keys()].some(key => key !== "ref")) throw new Error("Public invitation must stay on the same service");
+      href.search = "";
+      const invitation = setupTarget(href.href, destination.origin);
+      if (!invitation.sharedToken) throw new Error("Public room entrance is not a shared invitation");
+      destination.sharedToken = invitation.sharedToken;
+    } else if (!accept) {
+      return { status: "approval_required", requestedAccess, preview: { roomId: page.slug, permissions: [], admission: "request" },
+        next: "This room requires approval. Repeat with --accept to request read/chat access" };
+    }
+  }
+  const journal = openSetupJournal(directory);
   try {
     let saved = journal.read();
     if (!saved) {
@@ -82,7 +117,10 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     if ((destination.code || destination.sharedToken) && !step.approved) {
       const preview = destination.sharedToken ? await previewSharedInvite(saved.origin, destination.sharedToken, options)
         : await previewAgentInvite(saved.origin, destination.code, options);
-      if (!accept) return { status: "approval_required", preview, next: "Repeat with --accept to accept this invite's room and permissions" };
+      if (destination.publicRoom && (preview.roomId !== destination.publicRoom || preview.permissions.length))
+        throw new Error("Public invitation does not match the intended room and read/chat access");
+      if (!accept) return { status: "approval_required", requestedAccess, preview, next: "Repeat with --accept to accept this invite's room and permissions" };
+      if (expectedPreview !== undefined && expectedPreview !== signature(preview)) throw new Error("Invitation changed; review its current permissions before accepting");
       step.approved = signature(preview); step.roomId = preview.roomId; journal.save(saved);
     }
     if (!saved.identityId) {
@@ -162,7 +200,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     }
     const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token };
     const client = new RoomAgentClient({ ...config, fetchImpl });
-    const access = await client.checkConnection(), orientation = await client.activationPack({ view: "brief" });
+    const connectionAccess = await client.checkConnection(), orientation = await client.activationPack({ view: "brief" });
     try {
       const existing = readAgentConnection(configDirectory);
       if (JSON.stringify(existing) !== JSON.stringify(config)) throw new Error("Existing connection differs; nothing was replaced");
@@ -171,8 +209,28 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       atomicPrivateJson(join(configDirectory, "connection.json"), config);
     }
     step.joined = true; journal.save(saved);
-    return { status: "connected", origin: saved.origin, identityId: saved.identityId, roomId: step.roomId, memberId: access.memberId,
-      configDirectory, permissions: access.permissions, orientation,
+    let accessRequest = null;
+    if (access !== "chat") {
+      const missing = requestedAccess.permissions.filter(permission => !connectionAccess.permissions.includes(permission));
+      if (!missing.length) accessRequest = { status: "already_granted", preset: access };
+      else {
+        step.permissionRequests ??= {};
+        let operation = step.permissionRequests[access];
+        if (!operation) {
+          operation = step.permissionRequests[access] = { requestId: randomUUID(), permissions: missing };
+          journal.save(saved); // Recover a lost response with the exact permission request.
+        }
+        const result = await client.requestMemberPermissions(operation);
+        if (result.requestId !== operation.requestId || result.kind !== "permissions") throw new Error("Permission request could not be confirmed; retry with the same private directory");
+        accessRequest = { requestId: result.requestId, status: result.status, preset: access,
+          requestedPermissions: result.requestedPermissions, missingPermissions: missing,
+          next: result.status === "pending"
+            ? "A room owner or authorized admin can review this request in Needs attention. Repeat this join command to check current access."
+            : "This request has been decided. Current access is listed separately; no new request was sent. To ask for remaining permissions, make a new explicit request from your member profile." };
+      }
+    }
+    return { status: "connected", origin: saved.origin, identityId: saved.identityId, roomId: step.roomId, memberId: connectionAccess.memberId,
+      configDirectory, permissions: connectionAccess.permissions, orientation, requestedAccess, accessRequest,
       host: { transport: "stdio", command: process.execPath, args: [fileURLToPath(new URL("../scripts/agent-mcp.mjs", import.meta.url))],
         env: { ROOM_AGENT_CONFIG: configDirectory }, installed: false },
       readiness: { access: "verified", read: "verified", listening: "not_tested", execution: "not_tested" },
