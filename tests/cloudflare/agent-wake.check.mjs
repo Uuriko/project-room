@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { AgentWakeClient } from '../../client/agent-wake.mjs';
 
 // Fixture-only setup/revocation/state. Every adapter read/register/poll/ACK
 // traverses the real production Worker entry and authenticated HTTP routes.
 const fixture = `
-import entry, { ProjectRoom } from './room.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { AgentRooms } from '../../server/agent-rooms.mjs';
 export class WakeTestRoom extends ProjectRoom {
  async fetch(request) {
   const path = new URL(request.url).pathname;

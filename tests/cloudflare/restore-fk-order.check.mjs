@@ -16,11 +16,11 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
-import { initialRoom } from "../server/bootstrap.mjs";
-import { event, EVENT_TYPES as T } from "../src/events.js";
-import { exportNdjsonStream } from "../server/room-export.mjs";
-import { writeKvBackup } from "./room-backup.mjs";
+import { RoomStore } from "../../server/store.mjs";
+import { initialRoom } from "../../server/bootstrap.mjs";
+import { event, EVENT_TYPES as T } from "../../src/events.js";
+import { exportNdjsonStream } from "../../server/room-export.mjs";
+import { writeKvBackup } from "../../cloudflare/room-backup.mjs";
 
 const source = process.env.ROOM_SOURCE_ROOT || process.cwd();
 const require = createRequire(join(source, "cloudflare/package.json"));

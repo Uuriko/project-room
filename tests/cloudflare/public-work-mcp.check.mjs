@@ -7,14 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { PUBLIC_WORK_MCP_TOOLS } from '../src/room-mcp-join.js';
+import { PUBLIC_WORK_MCP_TOOLS } from '../../src/room-mcp-join.js';
 
 // Only setup and state observation are fixture routes. All MCP, review,
 // artifact and credential revocation requests traverse the production entry,
 // Node bridge and authenticated production HTTP handlers inside real workerd.
 const fixture = `
-import entry, { ProjectRoom } from './room.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
 export class PublicMcpTestRoom extends ProjectRoom {
  async fetch(request) {
   const path = new URL(request.url).pathname;
