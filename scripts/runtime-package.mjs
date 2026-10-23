@@ -410,6 +410,8 @@ optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs"
 // Retired UI files remain recognized only when an historical commit contains them.
 // They are not advertised or required by the current runtime.
 const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board"].map(name => `src/${name}.js`);
+optional.push("client/room-artifact-transfer.mjs", "client/room-native-worker.mjs", "client/laptop-artifacts.mjs", "client/laptop-resources.mjs", "client/laptop-recipes.mjs", "client/laptop-work-dispatch.mjs", "server/laptop-transfers.mjs", "server/laptop-workers.mjs", "server/routes/laptop-transfers.mjs", "server/routes/laptop-workers.mjs", "scripts/room-native-worker.mjs", "docs/ROOM-NATIVE-WORKER.md");
+
 export const allowed = new Set([...required, ...optional, ...historicalAssets]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

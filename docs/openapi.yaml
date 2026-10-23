@@ -1935,6 +1935,41 @@ paths:
           description: Only the squad owner can disband it (squad_owner_required)
         '404':
           description: No such squad in this room (squad_not_found)
+  /api/rooms/{roomId}/laptop-transfers/{transferId}:
+    post:
+      x-room-permission: member
+      summary: Exchange a bounded transient chunk between authorized laptop peers
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: path, name: transferId, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [action], properties: {action: {type: string, enum: [offer, inspect, want, put, take, complete, cancel]}}}
+      responses:
+        '200': {description: Transient transfer state or verified chunk}
+        '403': {description: Identity, direction or membership refused}
+        '404': {description: Session expired, unavailable or invisible; resume from local checkpoint}
+        '409': {description: Chunk pending or transfer contract conflict}
+        '429': {description: Bounded relay capacity exhausted}
+  /api/rooms/{roomId}/laptop-workers:
+    parameters:
+      - {in: path, name: roomId, required: true, schema: {type: string}}
+    get:
+      summary: Discover currently advertised laptops willing to accept this member's tasks
+      responses:
+        '200': {description: Current host-reported capabilities; not execution grants}
+    post:
+      x-room-permission: member
+      summary: Refresh this member's bounded local worker advertisement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Advertisement refreshed with server expiry}
   /api/rooms/{roomId}/typing:
     post:
       summary: Send a typing heartbeat
