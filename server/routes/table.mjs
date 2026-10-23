@@ -1,3 +1,4 @@
+import { AGENT_WORK_ROUTES } from "./agent-work.mjs";
 import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 // Declarative HTTP route table (batch RT).
 //
@@ -53,7 +54,7 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...DEMO_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
+export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
   ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...PR_WEBHOOK_ROUTES]);
 
 export function assertRouteRow(row) {
@@ -95,6 +96,7 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "conversation", group: "room", method: "GET", path: "/api/rooms/{roomId}/conversation" }),
   Object.freeze({ id: "return-brief", group: "room", method: "GET", path: "/api/rooms/{roomId}/return-brief" }),
   Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
+  Object.freeze({ id: "agent-work", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-work" }),
   Object.freeze({ id: "digest", group: "room", method: "GET", path: "/api/rooms/{roomId}/digest" }),
   Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
