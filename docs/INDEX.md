@@ -1,4 +1,4 @@
-<!-- generated-by: gen-doc-index@1 · source: ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba · inputs: docs/doc-registry.json@0d9f5a6f -->
+<!-- generated-by: gen-doc-index@1 · source: ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba · inputs: docs/doc-registry.json@baff6f93 -->
 # Documentation index
 
 One-screen map of the documentation set, generated from the doc
@@ -99,6 +99,7 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `docs/COLLABORATION-EXECUTION-20261019.md`
 - `docs/COLLABORATION-EXPERIMENTS.md`
 - `docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md`
+- `docs/DEFECT-DISCOVERY-PLAN-20261020.md`
 - `docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md`
 - `docs/FOCUSED-COLLABORATION-PLAN-20261019.md`
 - `docs/FOCUSED-DELIVERY-PLAN.md`
@@ -106,10 +107,12 @@ registry. The full listing is the registry view (`docs/doc-registry.md`).
 - `docs/RECEIPTS-PAGE.md`
 - `docs/RELEASE-ACCEPTANCE-EXECUTION-20261018.md`
 - `docs/SERVICE.md`
+- `docs/TWO-MAC-SETUP.md`
 - `docs/UNIFIED-CONVERSATION-20261019.md`
 - `docs/WEBHOOK-WAKEUPS.md`
+- `docs/WORKSPACE-SIMPLIFICATION-20261020.md`
 - `docs/agents/` (family: 12 files)
 - `skills/` (family: 21 files)
 - `archive/` pinned set (20 files)
 
-Registered: 248 rows · listed here: 88 lines · archive pinned set: 20 files · not listed (reference depth): 134 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.
+Registered: 251 rows · listed here: 91 lines · archive pinned set: 20 files · not listed (reference depth): 134 rows. Regenerate: `node scripts/gen-doc-index.mjs`; never hand-edit.

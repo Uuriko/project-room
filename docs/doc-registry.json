@@ -8924,6 +8924,114 @@
    "census_size": null,
    "last_change": "2026-10-07"
   }
+ },
+ {
+  "path": "docs/DEFECT-DISCOVERY-PLAN-20261020.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-20",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by CURE-DOCS-4398 (2026-10-23): defect discovery and repair plan dated 2026-10-20 (status: execution starts with the campaign it describes; not retired). It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": 16394,
+   "last_change": "2026-10-20"
+  }
+ },
+ {
+  "path": "docs/TWO-MAC-SETUP.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-22",
+  "size_cap_bytes": 20480,
+  "budget_bytes": 20480,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by CURE-DOCS-4398 (2026-10-23): design decision dated 2026-10-22, 'Two Macs, one room' (one path: Join, Connect, Share, Test); an active design decision, not retired. It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": 16389,
+   "last_change": "2026-10-22"
+  }
+ },
+ {
+  "path": "docs/WORKSPACE-SIMPLIFICATION-20261020.md",
+  "kind": "file",
+  "type": "WORKING",
+  "topic": null,
+  "owner_role": "docs-steward",
+  "audience": [
+   "human",
+   "agent"
+  ],
+  "source_of_truth": {
+   "kind": "none",
+   "refs": []
+  },
+  "ttl_days": 90,
+  "last_reviewed": "2026-10-20",
+  "size_cap_bytes": 15360,
+  "budget_bytes": 15360,
+  "status": "active",
+  "seed_state": "classified",
+  "classification_note": null,
+  "existence": "present",
+  "planned_via": null,
+  "decision_refs": [],
+  "supersedes": null,
+  "exception": null,
+  "verified_at": null,
+  "note": "Registered by CURE-DOCS-4398 (2026-10-23): conversation-first workspace audit dated 2026-10-20 (status: implementation in progress, not released; not retired). It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census.",
+  "seed_rule": "programme §2.6",
+  "seed": {
+   "census_grade": null,
+   "census_disposition": "NOT-IN-CENSUS",
+   "census_size": 10397,
+   "last_change": "2026-10-20"
+  }
  }
  ],
  "families": [

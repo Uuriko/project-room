@@ -2,7 +2,7 @@
 
 <!-- GENERATED from doc-registry.json by fleet-tools/doc-registry/render-view.mjs — do not edit by hand. The JSON is the registry of record (Docs Programme D-1). -->
 
-Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). Base: ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba. Rows: 248 (7 family, 0 UNCLASSIFIED, 10 planned, 6 served).
+Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). Base: ebdc12b8c76c9ed885ae875f0876d27d80e7e9ba. Rows: 251 (7 family, 0 UNCLASSIFIED, 10 planned, 6 served).
 
 ## ARCHIVE (21)
 
@@ -37,7 +37,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | **repo-agent-skills** — `.agents/skills/` (3 members) | agent-surface | 180 | 25.0 KB | 22.7 KB | active | machine-executed repo skills; governed with the skills trees (B5 runs through skills-sync machinery) |
 | .github/PULL_REQUEST_TEMPLATE.md | docs-steward | 180 | 25.0 KB | 578 B | active |  |
 | **examples** — `(examples)` (14 members) | agent-surface | 180 | 25.0 KB | 14.9 KB | active | worked examples + scorers; members enumerated (D-5) |
-| **component-readmes** — `(per-directory)` (11 members) | component-owner | 180 | 25.0 KB | 62.1 KB | active | component READMEs — one family row, members enumerated (D-5 counting rule) |
+| **component-readmes** — `(per-directory)` (11 members) | component-owner | 180 | 25.0 KB | 66.1 KB | active | component READMEs — one family row, members enumerated (D-5 counting rule) |
 | AGENTS.md | docs-steward | 180 | 10.0 KB | 2.5 KB | active |  |
 | CHALLENGE.md | agent-surface | 180 | 25.0 KB | 5.7 KB | active |  |
 | CHANGELOG.md | human-surface | 180 | 25.0 KB | 16.4 KB | active |  |
@@ -61,7 +61,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/BUG-BOUNTY.md | money-surface | 180 | 25.0 KB | 1.9 KB | active |  |
 | docs/CHAOS.md | operator | 180 | 25.0 KB | 8.0 KB | active |  |
 | docs/CLAUDE-CHANNEL.md | agent-surface | 180 | 25.0 KB | 5.7 KB | active |  |
-| docs/CODEX-ROOM-HOST.md | agent-surface | 180 | 25.0 KB | 7.8 KB | active |  |
+| docs/CODEX-ROOM-HOST.md | agent-surface | 180 | 25.0 KB | 15.3 KB | active |  |
 | docs/COLD-AGENT-WALKTHROUGH.md | agent-surface | 180 | 25.0 KB | 8.7 KB | active |  |
 | docs/CONNECT-AGENT-QUICKSTART.md | agent-surface | 180 | 5.0 KB | 3.4 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md. |
 | docs/CONNECT-RECEIVE.md | human-surface | 180 | 25.0 KB | 3.2 KB | active |  |
@@ -88,7 +88,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/JOIN-ANY-AGENT.md | agent-surface | 180 | 5.0 KB | 3.2 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/AGENT-START-HERE.md. |
 | docs/join.md | human-surface | 180 | 5.0 KB | 1.6 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/join/team.md | human-surface | 180 | 25.0 KB | 7.2 KB | active |  |
-| docs/JOINING.md | human-surface | 180 | 10.0 KB | 8.6 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
+| docs/JOINING.md | human-surface | 180 | 10.0 KB | 10.5 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/JOURNEY-COVERAGE-MAP.md | qa-surface | 180 | 25.0 KB | 16.5 KB | active |  |
 | docs/legal/acceptable-use.md | legal/privacy | 180 | 25.0 KB | 1.3 KB | active |  |
 | docs/legal/privacy.md | legal/privacy | 180 | 25.0 KB | 4.7 KB | active | frozen until PR #4201 lands (§4.3) |
@@ -96,7 +96,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/MATCHMAKING.md | human-surface | 180 | 25.0 KB | 5.3 KB | active |  |
 | docs/ONBOARDING-PROBE.md | qa-surface | 180 | 25.0 KB | 4.9 KB | active |  |
 | docs/onboarding-probe/results.md | human-surface | 180 | 25.0 KB | 1.8 KB | active |  |
-| docs/openapi.yaml | contract | 90 | 25.0 KB | 818.9 KB | active | oversize on day one is by design (the sweep's oversize check fires here until AC-3) |
+| docs/openapi.yaml | contract | 90 | 25.0 KB | 820.7 KB | active | oversize on day one is by design (the sweep's oversize check fires here until AC-3) |
 | docs/OPERATOR-GUIDE.md | operator | 180 | 10.0 KB | planned | active | programme §2.1 #7 — merged survivor of OPERATOR + ADMIN-GUIDE + fragments |
 | docs/PAID-WORK-AND-DISPUTES.md | money-surface | 180 | 8.0 KB | planned | active | programme §2.1 #4 — NEW |
 | docs/PERF-BUDGET.md | operator | 180 | 25.0 KB | 3.6 KB | active |  |
@@ -189,13 +189,13 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | .well-known/agent-card.json | agent-surface | — | — | served | active | served agent card, stamped from its own door's origin (DP-13); the MCP card is served alongside and is registered jointly until AC-4 names its route |
 | /openapi.json | contract | — | — | served | active | served contract artefact; re-sourced from route rows under Option B (AC-2) |
 | **agents-html** — `docs/agents/` (0 members) | agent-surface | — | — | 0 B | active | runtime-package outputs generated from the per-host .md sources at packaging; not tree files (existence=served) |
-| docs/INDEX.md | docs-steward | — | 4.0 KB | 3.4 KB | active | one-screen map, generated from the registry (programme §2.1 #12); over-cap exception retired at the W-D1 landing — the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap. Cap raised 3,072 -> 4,096 at the ruling 31 registry refresh (2026-10-20, REFRESH-DOCS-2): main's front-page headlines joined the map (13 rows + the inbox scope note); the map remains one screen (3,399 B at the refresh). |
+| docs/INDEX.md | docs-steward | — | 4.0 KB | 3.5 KB | active | one-screen map, generated from the registry (programme §2.1 #12); over-cap exception retired at the W-D1 landing — the generator (scripts/gen-doc-index.mjs) and this registry land in the same change, and the generated index is under the 3,072 B cap. Cap raised 3,072 -> 4,096 at the ruling 31 registry refresh (2026-10-20, REFRESH-DOCS-2): main's front-page headlines joined the map (13 rows + the inbox scope note); the map remains one screen (3,399 B at the refresh). |
 | **procedures** — `docs/procedures/` (4 members) | operator | — | 25.0 KB | 7.1 KB | active | served wiki sources — product surface (D-12a); the served pages are generated from these sources |
 | kits.txt | agent-surface | — | — | served | active | served; absorbs join/join-team/agents-paste depth |
 | llms-full.txt | agent-surface | — | — | served | active | served; absorbs SWARM/QUICKSTART reference depth |
 | llms.txt | agent-surface | — | 35.0 KB | served | active | served; absorbs door depth per journeys R-4; 32,455 B measured live at census |
 | ROOM-STATE.md | agent-surface | — | 5.0 KB | 823 B | active | Registered by DOCS-DS4-R (2026-10-21): GENERATED machine board produced by scripts/room rebuild (stamp 2026-09-16T18:27:34Z, board Uuriko/project-room#266, do-not-hand-edit). Registered GENERATED so the full-tree join accounts for it without prose stewardship. |
-| skills/project-room/references/errors-catalog.md | contract | — | — | 212.8 KB | active | single stored copy; plugins/ mirror is machinery (mirrors declaration) |
+| skills/project-room/references/errors-catalog.md | contract | — | — | 212.9 KB | active | single stored copy; plugins/ mirror is machinery (mirrors declaration) |
 
 ## RUNBOOK (18)
 
@@ -207,7 +207,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/BACKUP-DR.md | operator | 90 | 20.0 KB | 9.9 KB | active |  |
 | docs/BACKUPS.md | operator | 90 | 20.0 KB | 11.9 KB | active |  |
 | docs/BROWSER-SANDBOX.md | qa-surface | 90 | 5.0 KB | 1.7 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO canonical doc for its topic (named at execution) (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
-| docs/DEPLOY-LANE.md | operator | 90 | 20.0 KB | 8.1 KB | active | frozen until PR #4166 lands (§4.3); fragments also feed OPERATOR-GUIDE |
+| docs/DEPLOY-LANE.md | operator | 90 | 20.0 KB | 8.3 KB | active | frozen until PR #4166 lands (§4.3); fragments also feed OPERATOR-GUIDE |
 | docs/I18N-HARNESS.md | qa-surface | 90 | 5.0 KB | 4.1 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class MERGE-INTO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. Census merge target: docs/HOW-TO-TEST.md. |
 | docs/INCIDENT-1101-RUNBOOK.md | operator | 90 | 20.0 KB | 3.7 KB | active |  |
 | docs/INCIDENT-RUNBOOK.md | operator | 90 | 20.0 KB | 12.2 KB | active |  |
@@ -220,7 +220,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | ops/STATE.md | operator | 90 | 16.0 KB | 4.2 KB | active | DS-4 disposition (2026-10-19, base eabb0011): the operator journal — docs/BACKUPS.md:86 designates this file as the record sink for restore-drill results, and its entries are dated operator prose (2026-10-07 backups + restore drill, 2026-10-10 GitHub polling). That corrects the DS-1 seed premise: the file is operator-written, not machine-written. Exclusion-as-state-artefact was rejected: nothing in code writes or reads it (the STATE.md hits in scripts/room are ROOM-STATE.md, a different file), and a name-based exclusion would be ambiguous against that machine board while hiding a designated record from the registry join. RUNBOOK (90-day clock) with BACKUPS.md as its governing runbook; when the cap approaches, the owner rotates old entries to the archive rather than growing the file. |
 | research/SETTLEMENT-OPS-RUNBOOK.md | operator | 90 | 10.0 KB | 7.0 KB | active | Registered by DOCS-DS4-R (2026-10-21): settlement ops runbook (200-hard-tasks #17). Post-seed full-tree drift file. |
 
-## WORKING (57)
+## WORKING (60)
 
 | Path | Owner | TTL | Cap | Size | Status | Note |
 |---|---|---|---|---|---|---|
@@ -235,11 +235,12 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md | docs-steward | 90 | 20.0 KB | 17.0 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
 | docs/BUILD-TO-COMPLETION-PLAN.md | docs-steward | 90 | 20.0 KB | 17.2 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
 | docs/CHAT-RESULT-IMPLEMENTATION-20261019.md | docs-steward | 90 | 40.0 KB | 35.6 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
-| docs/COLLABORATION-COMPONENTS-PLAN-20261019.md | docs-steward | 90 | 70.0 KB | 66.9 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
+| docs/COLLABORATION-COMPONENTS-PLAN-20261019.md | docs-steward | 90 | 70.0 KB | 67.0 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/COLLABORATION-EXECUTION-20261019.md | docs-steward | 90 | 10.0 KB | 7.4 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/COLLABORATION-EXPERIMENTS.md | docs-steward | 90 | 15.0 KB | 11.8 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): on main at 6d84149b this doc was reachable from docs/INDEX.md only through the hand-written index's link chain (via docs/COLLABORATION-COMPONENTS-PLAN-20261019.md); the generated index (the design of record) does not reproduce link chains, so it is registered here to be listed. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/CONTINUITY-BUILD-PLAN.md | docs-steward | 90 | 15.0 KB | 11.6 KB | active | Registered by DOCS-DS4-R (2026-10-21): build prompt and evidence-gated execution plan (continuity programme). Post-seed full-tree drift file. |
 | docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md | docs-steward | 90 | 20.0 KB | 17.7 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
+| docs/DEFECT-DISCOVERY-PLAN-20261020.md | docs-steward | 90 | 20.0 KB | 16.0 KB | active | Registered by CURE-DOCS-4398 (2026-10-23): defect discovery and repair plan dated 2026-10-20 (status: execution starts with the campaign it describes; not retired). It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census. |
 | docs/ENTITY-PROJECTION-CHECKPOINT.md | docs-steward | 90 | 10.0 KB | 5.2 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
 | docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md | docs-steward | 90 | 10.0 KB | 6.8 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/EXACT-REVIEW-PACKET-20261013.txt | qa-surface | 90 | 5.0 KB | 2.4 KB | active | Registered by DOCS-DS4-R (2026-10-21): exact review preparation packet (2026-10-13), dated working artefact. Post-seed full-tree drift file. |
@@ -265,6 +266,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/ROOM-KITS-HARNESS-JEV-ROY.md | docs-steward | 90 | 10.0 KB | 5.6 KB | active | Registered by DOCS-DS4-R (2026-10-21): kits / harness / Jev / Roy ladder doc. Post-seed full-tree drift file. |
 | docs/ROOM-SCORER.md | qa-surface | 90 | 10.0 KB | 5.8 KB | active | Registered by DOCS-DS4-R (2026-10-21): Room Scorer — warp-shaped LLM judge description. Post-seed full-tree drift file. |
 | docs/STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md | docs-steward | 90 | 20.0 KB | 19.0 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
+| docs/TWO-MAC-SETUP.md | docs-steward | 90 | 20.0 KB | 16.0 KB | active | Registered by CURE-DOCS-4398 (2026-10-23): design decision dated 2026-10-22, 'Two Macs, one room' (one path: Join, Connect, Share, Test); an active design decision, not retired. It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census. |
 | docs/UNIFIED-CONVERSATION-20261019.md | docs-steward | 90 | 10.0 KB | 6.1 KB | active | Registry refresh under Jill ruling 31 (2026-10-20): headlined by main's hand-written docs front page at 6d84149b; added so the generated index (the design of record) lists it. Seeded by REFRESH-DOCS-2, not the DS-1 census. |
 | docs/video-walkthrough-script.md | human-surface | 30 | 16.0 KB | 9.9 KB | active | DS-4 disposition (2026-10-19, base eabb0011): WORKING, as a recorded exception to governance §1.6 (working papers live in the workspace corpus) — the DS-1 seed note's own second candidate. Grounds: it is a production asset with a live in-repo test consumer (tests/video-walkthrough-shots.test.js loads it as SCRIPT and verifies every grounding citation resolves) and a docs-link-check ORPHAN_EXCEPTIONS entry naming that gate. The archive-with-the-video branch cannot execute today: no produced video exists in the tree — the script states it is written so the video can be recorded tomorrow. At TTL expiry the Steward re-runs this disposition: recorded -> archive the script with the video; abandoned -> retire via the C-5 evidence pass. Queue note (DS-4 correction, 2026-10-19): open PR #3692 (operator status surface 4/4) touches this file (+1/-3 — a grounding-line edit keeping the script's citations true); C-5 leg 4 therefore records a HIT for this row. The classification is unaffected, and the touch is itself evidence of live maintenance. |
 | docs/WEEKLY-LEARNINGS.md | docs-steward | 90 | 5.0 KB | 665 B | active | Registered by DOCS-DS4-R (2026-10-21): hand-appended weekly learnings queue read by scripts/weekly-learnings.mjs. Post-seed full-tree drift file. |
@@ -274,6 +276,7 @@ Seeded 2026-10-19 by DS-1-REGISTRY lane (Docs Programme, ratified 2026-10-18). B
 | docs/WORK-ITEM-SESSION.md | docs-steward | 90 | 10.0 KB | 5.3 KB | active | Registered by DOCS-DS4-R (2026-10-21): work item session notes. Post-seed full-tree drift file. |
 | docs/WORK-LIFECYCLE-BUILD-PLAN.md | docs-steward | 90 | 15.0 KB | 10.8 KB | active | Registered by DOCS-DS4-R (2026-10-21): work lifecycle and authority build plan. Post-seed full-tree drift file. |
 | docs/WORKITEMS-BOARD-STEP0.md | docs-steward | 90 | 25.0 KB | 21.0 KB | active | Registered by DOCS-RECONCILE (2026-10-20), the R4 reconciliation handed forward by REFRESH-DOCS-2: named by main's docs front page but absent from the registry. DS-1 census class ARCHIVE-OUT-OF-REPO (grade C) is preserved in the seed block for the W-D2 cut lane; this registration does not execute the census cut. |
+| docs/WORKSPACE-SIMPLIFICATION-20261020.md | docs-steward | 90 | 15.0 KB | 10.2 KB | active | Registered by CURE-DOCS-4398 (2026-10-23): conversation-first workspace audit dated 2026-10-20 (status: implementation in progress, not released; not retired). It landed on main after the DS-1 seed and reached this branch in the merge-up unregistered, leaving it unreachable from docs/INDEX.md (contract docs-link-check failure at 90ae67d40). Registered on the programme §2.6 reference shelf with the dated-plan cohort. Seeded by CURE-DOCS-4398, not the DS-1 census. |
 | perf/BASELINE-local.md | qa-surface | 90 | 5.0 KB | 2.2 KB | active | Registered by DOCS-DS4-R (2026-10-21): local perf baseline (REL-20). Post-seed full-tree drift file. |
 | perf/herdr-bench-RESULTS.md | qa-surface | 90 | 10.0 KB | 8.5 KB | active | Registered by DOCS-DS4-R (2026-10-21): herdr-bench session-substrate benchmark results (lane P1). Post-seed full-tree drift file. |
 | plugins/project-room/commands/room-pull.md | agent-surface | 90 | 5.0 KB | 602 B | active | Registered by DOCS-DS4-R (2026-10-21): plugin slash-command definition (Claude Code command frontmatter). Post-seed full-tree drift file. |
