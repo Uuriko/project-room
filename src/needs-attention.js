@@ -1,3 +1,4 @@
+import { ACCESS_PRESETS, permissionLabel } from "./access-presets.js";
 // #662 owner attention rollup, plus MEMBER-PERMS reviewed access requests.
 // Admins see only the existing access-request queue their authority permits;
 // the broader rollup remains owner-only. Requester controls share this module
@@ -304,13 +305,8 @@ export function createNeedsAttentionCard(options) {
 }
 
 // MEMBER-PERMS: the requester uses the same authenticated, reviewed API as REST.
-const WORK_PERMISSIONS = ["accept_work", "complete_work"];
-// Members read these words, not the permission ids the server stores.
-const permissionLabel = permission => WORK_PERMISSION_LABELS[permission] ?? permission.replaceAll("_", " ");
-const WORK_PERMISSION_LABELS = { accept_work: "Accept work", complete_work: "Complete work" };
-
 export function installMemberPermissions({ client, getState, getSession }) {
-  let scope = null, operation = null, busy = false, message = "", retry = false;
+  let scope = null, operation = null, busy = false, message = "", retry = false, preset = "work";
   const current = () => {
     const session = getSession(), state = getState();
     const member = session && state?.members?.[session.member.id];
@@ -321,35 +317,48 @@ export function installMemberPermissions({ client, getState, getSession }) {
     return now && value.session === now.session && value.generation === now.generation && value.state.room.id === now.state.room.id;
   };
   function reset() {
-    scope = null; operation = null; busy = false; message = ""; retry = false;
+    scope = null; operation = null; busy = false; message = ""; retry = false; preset = "work";
     document.querySelectorAll("[data-member-permissions]").forEach(node => node.remove());
   }
   function sync() {
     const value = current();
     if (!value) { reset(); return; }
     if (!scope || !owns(scope)) { reset(); scope = value; }
-    const missing = WORK_PERMISSIONS.filter(permission => !value.member.permissions.includes(permission));
+    const missing = ACCESS_PRESETS[preset].permissions.filter(permission => !value.member.permissions.includes(permission));
+    if (!missing.length && !busy && operation?.status === "pending") operation = null;
     const row = document.querySelector(`[data-member-record-id="${CSS.escape(value.member.id)}"] .member-profile-body`);
     if (!row) return;
     let group = row.querySelector("[data-member-permissions]");
-    if (!missing.length && !message && !operation) return;
+    if (ACCESS_PRESETS.maximum.permissions.every(permission => value.member.permissions.includes(permission)) && !message && !operation) return;
     if (!group) {
       group = document.createElement("div"); group.dataset.memberPermissions = value.member.id;
       const button = document.createElement("button"); button.type = "button"; button.className = "text-button";
       button.dataset.requestPermissions = ""; button.addEventListener("click", request);
       const status = document.createElement("p"); status.className = "form-hint"; status.dataset.permissionRequestStatus = "";
       status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-      group.append(button, status); row.append(group);
+      const select = document.createElement("select"); select.setAttribute("aria-label", "Access to request");
+      for (const [key, choice] of Object.entries(ACCESS_PRESETS)) {
+        if (key === "chat") continue;
+        const option = document.createElement("option"); option.value = key; option.textContent = choice.label; select.append(option);
+      }
+      select.value = preset;
+      select.addEventListener("change", () => {
+        if (busy || operation && ["pending", "unknown"].includes(operation.status)) { select.value = preset; return; }
+        preset = select.value; operation = null; message = ""; retry = false; sync();
+      });
+      group.append(select, button, status); row.append(group);
     }
     const button = group.querySelector("button"), status = group.querySelector("[role=status]");
+    const select = group.querySelector("select");
+    select.disabled = busy || Boolean(operation && ["pending", "unknown"].includes(operation.status));
     button.hidden = !missing.length; button.disabled = busy;
-    button.textContent = busy ? "Sending request…" : retry ? "Retry request" : operation?.status === "pending" ? "Check request" : "Ask to take work";
-    status.textContent = !missing.length ? "You can take work now." : message || `Ask for: ${missing.map(permission => WORK_PERMISSION_LABELS[permission] ?? permission).join(", ")}. A room owner or admin reviews the request.`;
+    button.textContent = busy ? "Sending request…" : retry ? "Retry request" : operation?.status === "pending" ? "Check request" : preset === "work" ? "Ask to take work" : "Request access";
+    status.textContent = !missing.length ? (preset === "work" ? "You can take work now." : "You have this access now.") : message || `Ask for: ${missing.map(permissionLabel).join(", ")}. A room owner or admin reviews the request. Room permissions do not grant access to a computer or paid services.`;
   }
   async function request() {
     const value = current();
     if (busy || !value || !owns(scope)) return;
-    const missing = WORK_PERMISSIONS.filter(permission => !value.member.permissions.includes(permission));
+    const missing = ACCESS_PRESETS[preset].permissions.filter(permission => !value.member.permissions.includes(permission));
     if (!missing.length) { sync(); return; }
     if (!client.ownsAccountSession()) { client.endAccess(); return; }
     if (!operation || !["pending", "unknown"].includes(operation.status)) {
