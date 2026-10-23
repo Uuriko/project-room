@@ -316,7 +316,22 @@ async function planAndJournal({ connection, items, env, execute, runner, now, ex
     journal = setCursor(readJournalFile(filename), extra.cursor);
     writeJournalFile(filename, journal);
   }
-  return { journal, plans, executed, filename };
+  // Reservation means an attempt may have acted, not that its work is done.
+  // Keep it visible on later polls without retrying or exposing journal contents.
+  const pendingReconciliations = distinct.flatMap(item => {
+    const key = attentionKey(item);
+    if (Object.hasOwn(journal.handled, key)) return [];
+    const receipt = dispatchPath(filename, connection, key);
+    if (!existsSync(receipt)) return [];
+    let saved;
+    try { saved = JSON.parse(readFileSync(receipt, "utf8")); } catch { /* preserve unknown outcome */ }
+    const exited = saved?.key === key && saved.status === "process_exited" && Number.isInteger(saved.code);
+    return [{ key, roomId: item.roomId, messageId: item.kind === "mention" || item.kind === "dm" ? item.id : null,
+      workItemId: item.kind === "work" || item.kind === "handoff" ? item.id : null,
+      stage: exited ? saved.code === 0 ? "result_unverified" : "process_failed" : "outcome_unknown",
+      exitCode: exited ? saved.code : null, action: "inspect_result_before_retry" }];
+  });
+  return { journal, plans, executed, filename, pendingReconciliations };
 }
 
 export async function pull({ env = process.env, fetchImpl = fetch, execute = false, runner, now = Date.now } = {}) {
@@ -340,7 +355,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   const result = await planAndJournal({
     connection, items, env, execute, runner, now, extra: { cursor: cursor ?? null }
   });
-  const silent = result.plans.length === 0;
+  const silent = result.plans.length === 0 && result.pendingReconciliations.length === 0;
   const rooms = [...new Set([
     connection.roomId,
     ...(cursor && typeof cursor.rooms === "object" ? Object.keys(cursor.rooms) : []),
@@ -369,6 +384,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     seen: items.length,
     planned: result.plans,
     executed: result.executed,
+    pendingReconciliations: result.pendingReconciliations,
     hasMore,
     pages,
     cursor: cursor ?? null,
@@ -378,7 +394,9 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
     kinds: countKinds(result.plans.map(plan => plan.item)),
     swarm,
     tags,
-    next: silent
+    next: result.pendingReconciliations.length
+      ? "Inspect prior attempts and their Room results before retrying; execution does not confirm completion."
+      : silent
       ? (tags.some(tag => tag.messageId) ? "A tag is waiting. text reply <messageId> | note: ... | room: <room>" : emptyAttentionNext({ execute }))
       : "Review planned items; --execute starts Grok."
   };
@@ -390,7 +408,7 @@ export async function ingestWake({ env = process.env, body, execute = false, run
   const result = await planAndJournal({
     connection, items: [item], env, execute, runner, now
   });
-  return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
+  return { ok: true, planned: result.plans, executed: result.executed, pendingReconciliations: result.pendingReconciliations, key: result.plans[0]?.key ?? null };
 }
 
 // H-20: head+tail capped byte buffer. A noisy child previously had every
@@ -712,7 +730,7 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
   const parsed = parseRoomText(line);
   if (parsed.verb === "pull") {
     const result = await pull({ env, fetchImpl, execute: false });
-    return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length };
+    return { ok: true, verb: "pull", silent: result.silent, planned: result.planned.length, pendingReconciliations: result.pendingReconciliations, next: result.next };
   }
   if (parsed.verb === "claim") {
     const leaseHours = parsed.leaseUntil ? leaseHoursFromUntil(parsed.leaseUntil) : undefined;
