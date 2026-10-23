@@ -85,9 +85,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     try {
       const options = await loadSigninOptions();
       if (options?.providers?.mail?.configured === false) {
+        const inputs = [...(surface()?.querySelectorAll("input[name]") ?? [])];
+        const focused = inputs.find(input => input === input.ownerDocument.activeElement);
+        const selection = focused && [focused.selectionStart, focused.selectionEnd];
+        const values = new Map(inputs.map(input => [input.name, input.value]));
         mailConfigured = false;
         if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }
         render();
+        for (const input of surface()?.querySelectorAll("input[name]") ?? []) {
+          if (values.has(input.name)) input.value = values.get(input.name);
+          if (input.name === focused?.name) {
+            input.focus();
+            if (selection?.[0] != null) input.setSelectionRange(...selection);
+          }
+        }
       }
       // The OAuth anchors are static HTML outside this component; the host
       // owns them. Hand it the same feed answer so an OAuth provider this

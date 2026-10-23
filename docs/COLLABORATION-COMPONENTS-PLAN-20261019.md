@@ -8,6 +8,8 @@ Baseline: origin/main 8a895d36 includes PR4260 and the prior conversation releas
 
 ## Work sequence
 
+Follow-up execution: [defect discovery and qualification](DEFECT-DISCOVERY-PLAN-20261020.md) and [workspace simplification](WORKSPACE-SIMPLIFICATION-20261020.md).
+
 ### A. Establish component ownership (execute first)
 
 1. Keep a separate current-main checkout and preserve peer focus-rescue PR4285.
