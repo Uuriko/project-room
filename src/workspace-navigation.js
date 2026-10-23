@@ -11,7 +11,10 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
   function showRoomList(push = false) {
     browsing = true;
     const url = new URL(location.href);
-    url.searchParams.delete("room"); url.hash = "#pr-view/room-list";
+    url.searchParams.delete("room");
+    // Browsing is a new destination, not a retry of the original sign-in link.
+    url.searchParams.delete("next");
+    url.hash = "#pr-view/room-list";
     if (url.href !== location.href) history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + url.hash);
     onNavigate(); sync(); onRooms();
   }
@@ -32,13 +35,20 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
 export function nameBeforeFirstRoom({ askName, ensure, session }) {
   let flight = null;
   return () => {
-    if (flight) return flight;
     const owned = session();
-    flight = (async () => {
+    if (!owned) return Promise.resolve(null);
+    if (flight?.session === owned) return flight.promise;
+    const attempt = { session: owned, promise: null };
+    flight = attempt;
+    attempt.promise = (async () => {
       try { await askName?.(); } catch { /* setup is optional; the room is still made */ }
       if (session() !== owned) return null;
-      return ensure();
-    })().finally(() => { flight = null; });
-    return flight;
+      const result = await ensure();
+      return session() === owned ? result : null;
+    })().finally(() => {
+      // An old account's completion must not unlock a newer account's setup.
+      if (flight === attempt) flight = null;
+    });
+    return attempt.promise;
   };
 }
