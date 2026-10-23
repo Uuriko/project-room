@@ -15,6 +15,7 @@ import {
   publicWorkTablesReadable,
   lotReceiptVisible,
 } from "./public-visibility.mjs"; // the one visibility definition every public read applies
+import { isTestTraffic, testTrafficMatchSql } from "./public-receipt-test-traffic.mjs"; // the one test-traffic definition shaping the default receipts list
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
 const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
@@ -802,7 +803,7 @@ const receiptFilter = (room, needle) => {
   return { clauses, params };
 };
 
-export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
+export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20, test = null } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "room filter must be a room id" } };
   }
@@ -812,8 +813,27 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "limit must be an integer from 1 to 50" } };
   }
+  if (test != null && test !== "include") {
+    return { error: { status: 422, code: "invalid_receipt_query", message: "test filter must be include" } };
+  }
+  const includeTest = test === "include";
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
+  // Test traffic (the fleet's own drills and QA runs, defined once in
+  // server/public-receipt-test-traffic.mjs) is excluded from the default
+  // list in SQL, before pagination — the same discipline as the
+  // visibility filter below, so pages never come back short and a test
+  // receipt is not a valid default-view cursor. With test=include the
+  // exclusion lifts and test rows are served marked instead. The
+  // receipts stay public either way: detail reads, the sitemap, and
+  // room pages never apply this filter.
+  const testMatch = testTrafficMatchSql();
+  const listClauses = [...filter.clauses];
+  const listParams = [...filter.params];
+  if (!includeTest) {
+    listClauses.push(`NOT ${testMatch.sql}`);
+    listParams.push(...testMatch.params);
+  }
   // The rows this list could serve: filter matches, minus both kinds of
   // hidden (operator-unpublished, owner-toggled-off). The page query and
   // the cursor lookup apply the same set, so a served nextCursor always
@@ -833,20 +853,51 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
     // owner public-receipts toggle (the owner leg). Same 422 as a
     // never-existent id.
-    const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
-    const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
+    const where = `WHERE ${[...listClauses, "id=?", ...visibility].join(" AND ")}`;
+    const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...listParams, cursor);
     if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
-  const clauses = [...filter.clauses, ...visibility];
+  const clauses = [...listClauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
-    .all(...filter.params, ...afterParams, limit + 1);
-  const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
+    .all(...listParams, ...afterParams, limit + 1);
+  const page = rows.slice(0, limit).map(row => {
+    const pub = receiptWithOutcome(store, row);
+    if (includeTest && isTestTraffic({ roomId: row.room_id, agents: pub.agents })) pub.testTraffic = true;
+    return pub;
+  });
   const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
-  return { receipts: page, nextCursor };
+  // The test-traffic summary rides every list response so both faces
+  // (JSON and the HTML wall) can say what the default view is not
+  // showing and where it lives. hiddenCount counts what this list's
+  // own filters (room/agent + visibility) would serve as test traffic.
+  let hiddenCount = 0;
+  if (!includeTest) {
+    const countWhere = [...filter.clauses, ...visibility, testMatch.sql].join(" AND ");
+    hiddenCount = store.db.prepare(`SELECT COUNT(*) AS n FROM public_receipts WHERE ${countWhere}`)
+      .get(...filter.params, ...testMatch.params).n;
+  }
+  const listHref = include => {
+    const q = new URLSearchParams();
+    if (room) q.set("room", room);
+    if (agent) q.set("agent", agent);
+    if (include) q.set("test", "include");
+    const s = q.toString();
+    return s ? `/receipts?${s}` : "/receipts";
+  };
+  return {
+    receipts: page,
+    nextCursor,
+    testTraffic: {
+      included: includeTest,
+      hiddenCount,
+      includeHref: listHref(true),
+      defaultHref: listHref(false),
+    },
+  };
 }
 
 export function publicReceiptById(store, id) {

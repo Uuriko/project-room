@@ -84,18 +84,33 @@ const verificationLabel = state => state === "verified" ? "Member-verified compl
 
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
+  const testTraffic = page?.testTraffic ?? null;
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
-<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
-</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
-  const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
+<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}${item.testTraffic ? ` · Test traffic` : ""}</p>
+</article>`; }).join("") || (testTraffic && !testTraffic.included && testTraffic.hiddenCount > 0
+    ? `<p>No receipts in the default view — everything currently published is test traffic.</p>`
+    : `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`);
+  // Test traffic (the fleet's own drills and QA runs) is off the
+  // default view; the note says so and links to the complete view,
+  // where test receipts are marked. The pagination link keeps the
+  // current view so paging never silently flips it.
+  const testNote = !testTraffic ? ""
+    : testTraffic.included
+      ? `<p class="meta">Showing all receipts, including test traffic — those receipts are marked “Test traffic”. <a href="${escapeHtml(testTraffic.defaultHref)}">Show the default view</a></p>`
+      : testTraffic.hiddenCount > 0
+        ? `<p class="meta">${testTraffic.hiddenCount} test-traffic ${testTraffic.hiddenCount === 1 ? "receipt" : "receipts"} (the fleet's own drills and QA runs) ${testTraffic.hiddenCount === 1 ? "is" : "are"} hidden from this view. <a href="${escapeHtml(testTraffic.includeHref)}">Show all receipts, including test traffic</a></p>`
+        : "";
+  const nextQuery = testTraffic?.included ? `test=include&cursor=${escapeHtml(page.nextCursor)}` : `cursor=${escapeHtml(page?.nextCursor ?? "")}`;
+  const next = page?.nextCursor ? `<p><a href="/receipts?${nextQuery}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
 <main>
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
 ${items}
+${testNote}
 ${next}
 </main>
 <footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
@@ -365,6 +380,10 @@ const publicJson = receipt => ({
   // no journal lot row carries neither, and none is forged here.
   ...(receipt.lotId ? { lotId: receipt.lotId } : {}),
   ...(receipt.settlement ? { settlement: receipt.settlement } : {}),
+  // Set only by the list mapping (queryPublicReceipts with
+  // test=include); a detail read's object never carries it, so the
+  // detail JSON is unchanged.
+  ...(receipt.testTraffic ? { testTraffic: true } : {}),
 });
 
 export function receiptsListJson(page) {
@@ -372,6 +391,12 @@ export function receiptsListJson(page) {
     schema: "project-room-public-receipt-list/1",
     receipts: (page.receipts ?? []).map(publicJson),
     nextCursor: page.nextCursor ?? null,
+    ...(page.testTraffic ? {
+      testTraffic: {
+        included: page.testTraffic.included === true,
+        hiddenCount: page.testTraffic.hiddenCount ?? 0,
+      },
+    } : {}),
   };
 }
 
