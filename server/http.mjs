@@ -96,7 +96,7 @@ import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLI
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
-import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP, PUBLIC_ROOM_SETUP_CSP } from "./public-rooms.mjs";
 import { roomProofView } from "./proof-page.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
@@ -2225,7 +2225,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
         return res.end(req.method === "HEAD" ? undefined : xml);
       }
-      // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
+      // --- GR2 public acquisition pages. Hash-authorized copy helper; indexable without a query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
@@ -2235,7 +2235,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
-        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60") => {
+        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60", policy = PUBLIC_PAGE_CSP) => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
           res.setHeader("Cache-Control", cacheControl);
           res.setHeader("Link", publicPageLinks(url, canonical));
@@ -2245,7 +2245,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_PAGE_CSP));
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), policy));
           // JDOT-PUBLIC-CSP-RUM end
           const body = Buffer.from(html);
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
@@ -2304,7 +2304,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // (the owner flipping public receipts off must bite immediately).
           return sendPage(200, proof.html, proofPage[2] ? proof.document : null, `/r/${proofPage[1]}/proof`, "no-store");
         }
-        const page = publicRoomView(store, roomPage[1], { ref });
+        const page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin() });
         // A browser opening /r/<slug> for a room that is unknown or not
         // published gets the same styled 404 as any other public path, not
         // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
@@ -2319,7 +2319,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // titles, so like the receipts routes it must never sit in a shared
         // cache — a response cached while public would keep disclosing a
         // room's receipts after the owner switches privacy off.
-        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store");
+        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store", PUBLIC_ROOM_SETUP_CSP);
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
