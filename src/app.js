@@ -1,3 +1,4 @@
+import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
@@ -61,6 +62,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+import "./entry-started.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
@@ -5662,6 +5664,16 @@ function syncAcquisitionControls() {
     joinControl.hidden = !isOwner;
     if (isOwner) { joinBox.checked = state.room.joinLink?.enabled === true; joinBox.disabled = acquisitionBusy; }
   }
+  const invitation = $("#agent-page-invitation");
+  if (invitation) {
+    invitation.hidden = !isOwner;
+    if (!invitation.hidden) {
+      const href = roomSetupLink(location.origin, state.room.id, state.room.publicPage?.enabled === true);
+      $("#agent-page-link").href = href;
+      $("#agent-page-prompt").value = roomSetupPrompt(href);
+      $("#agent-page-copy").disabled = acquisitionBusy;
+    }
+  }
   const member = state && viewerId ? state.members[viewerId] : null;
   if (nameControl && nameBox) {
     nameControl.hidden = !member;
@@ -5702,6 +5714,17 @@ $("#public-page-toggle")?.addEventListener("change", () => {
 $("#join-link-toggle")?.addEventListener("change", () => {
   if (session?.member?.id !== state?.room?.ownerId) return;
   sendAcquisition(T.ROOM_JOIN_LINK_SET, { enabled: $("#join-link-toggle").checked });
+});
+$("#agent-page-copy")?.addEventListener("click", async () => {
+  const field = $("#agent-page-prompt");
+  if (!field || $("#agent-page-invitation").hidden) return;
+  field.hidden = false;
+  field.focus(); field.select();
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard unavailable")), 800))]);
+    notice("Setup prompt copied.");
+  } catch { notice("Copy the selected setup prompt."); }
 });
 $("#public-name-toggle")?.addEventListener("change", () => {
   if (!session?.member?.id) return;
@@ -6642,7 +6665,7 @@ function ownsPresenceRequest(request) {
 }
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
-const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
+const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
   notificationBefore = null; notificationLoading = false;
@@ -6683,7 +6706,7 @@ function renderNotifications() {
       : item.requestId ? (item.note ?? "").slice(0, 80)
       : (state.workItems[item.workItemId]?.title ?? item.workItemId);
     const actor = item.kind === "access_request" && item.displayName ? item.displayName : memberLabel(item.actorId);
-    const label = `${actor} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
+    const label = `${actor} ${item.kind === "access_decision" ? (item.outcome === "approved" ? "approved your access request" : "declined your access request") : NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
   humanPushUi?.refresh();
