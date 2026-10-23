@@ -336,6 +336,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
+  jobHealth = nodeJobHealth, // job records for the owner overview; the Worker passes its heartbeat view
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
@@ -2371,7 +2372,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         if (url.searchParams.getAll("window").length > 1) reject(422, "invalid_overview_query", "window must be a single value");
-        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth: nodeJobHealth }, token, binding, Date.now(),
+        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth }, token, binding, Date.now(),
           { window: url.searchParams.get("window") ?? "7d", after: url.searchParams.get("after") }));
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
