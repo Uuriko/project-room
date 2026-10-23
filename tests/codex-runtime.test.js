@@ -211,3 +211,23 @@ test("durable completed reconciliation keeps only final answer after disconnect"
   assert.deepEqual(await host.reconcile(binding), { status: "completed", body: "Verified answer" });
   assert.deepEqual(await host.reconcile({ ...binding, attemptId: "another" }), { status: "not_started" });
 });
+
+
+test("structured tool approval refusal survives completed turn and adapter restart", async t => {
+  const { host, rpc, db } = setup(t, { complete: false });
+  const executing = host(input, { binding });
+  await waitUntil(() => rpc.calls.some(x => x.method === "turn/start"));
+  const item = { id: "blocked-input", type: "mcpToolCall", status: "failed",
+    error: { message: "MCP tool call requires approval, but approval policy is never" } };
+  rpc.event("item/completed", { threadId: "foreign", turnId: "turn-one", item });
+  assert.equal(db.prepare("SELECT count(*) n FROM codex_runtime_tool_blocks").get().n, 0);
+  rpc.event("item/completed", { threadId: "thread-one", turnId: "turn-one", item });
+  rpc.finish();
+  assert.deepEqual(await executing, { body: "Reviewed result", attention: "tool_approval_required" });
+  const resumed = createCodexRuntimeHost({ db, rpc, scope: binding, cwd: "/tmp/project",
+    policy: { approvalPolicy: "never", sandbox: "read-only" }, authorize: async () => {} });
+  assert.deepEqual(await resumed.reconcile(binding), {
+    status: "completed", body: "Reviewed result", attention: "tool_approval_required"
+  });
+  assert.equal(rpc.calls.filter(x => x.method === "turn/start").length, 1);
+});

@@ -161,6 +161,24 @@ test("verification navigation does not select a different signed-in account", as
   assert.equal(await second.evaluate(() => sessionStorage.getItem("project-room:verify-email:v1")), null);
 });
 
+for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) test(`a failed methods read during verification resume still lands the signed-in tab (${label})`, { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open(viewport);
+  const email = "journey-resume-error@example.invalid";
+  assert.equal(await signUp(page, f.origin, email), 202);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
+  const account = (await f.session(page)).account.id;
+  // Service outage while the link's intent is stored.
+  await page.route("**/api/auth/methods", route => route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "Synthetic outage" } } }));
+  await page.goto(mail.link);
+  await page.locator("#main").waitFor({ state: "visible" });
+  // A later plain load of the same tab is not held hostage by the stored intent.
+  await page.goto(f.origin);
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#auth-panel").isVisible(), false);
+  assert.equal((await f.session(page)).account.id, account, "recovery must preserve the signed-in account");
+});
+
 async function magicLinkReuse(t) {
   const f = await setup(t);
   const desk = await f.open(DESK);
@@ -209,8 +227,8 @@ test("on a phone, a wrong password says so and the right one signs in", { timeou
   assert.equal((await f.session(fresh)).authenticated, true);
 });
 
-// Still broken on main (auth audit 2026-10-09). Flip to a plain test with its fix.
-test("TODO: a reused magic link's refusal is shown once, not twice", { todo: "auth-signin-ui shows it in two alerts (Codex)" }, async t => {
+// Refusal must remain singular across the outer panel and mounted sign-in form.
+test("a reused magic link's refusal is shown once, not twice", async t => {
   const again = await magicLinkReuse(t);
   assert.equal(await visibleCount(again, "not valid"), 1);
 });
