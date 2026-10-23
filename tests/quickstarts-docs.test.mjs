@@ -1,7 +1,10 @@
 // O012/O013: quickstart docs must cite only real product surface.
-// Contract: every button, command, endpoint, and tool named in the two
+// Contract: every button, command, endpoint, and tool named in the
 // quickstarts exists in the checked-in product. This catches docs drift
 // when the UI copy, the join command, or the hosted-MCP snippet changes.
+// The inbox quickstart is retired (DOCS-RECONCILE): its three tests below
+// pin the retired state instead — stub absent from docs/, the v1 deferral
+// carried by the docs INDEX scope note, historical guide archived.
 // Distinct from docs-relative-links (link resolution) and
 // entry-docs-start-here (AGENT-START-HERE shape): those never assert that
 // a cited UI element actually exists.
@@ -14,7 +17,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const html = () => read("index.html");
-const inboxDoc = () => read("docs/INBOX-QUICKSTART.md");
+const archivedInboxDoc = () => read("archive/deferred-email/INBOX-QUICKSTART.md");
+const indexDoc = () => read("docs/INDEX.md");
 const connectDoc = () => read("docs/CONNECT-AGENT-QUICKSTART.md");
 
 const orderedSteps = (doc) =>
@@ -30,19 +34,29 @@ const assertOrdered = (doc, file) => {
   );
 };
 
-test("inbox quickstart exists with ordered numbered steps", () => {
-  assert.ok(existsSync(join(ROOT, "docs/INBOX-QUICKSTART.md")), "docs/INBOX-QUICKSTART.md is missing");
-  assertOrdered(inboxDoc(), "docs/INBOX-QUICKSTART.md");
+test("inbox quickstart is retired from docs/ with the historical guide archived", () => {
+  assert.ok(
+    !existsSync(join(ROOT, "docs/INBOX-QUICKSTART.md")),
+    "docs/INBOX-QUICKSTART.md is retired (DOCS-RECONCILE) and must not reappear in docs/",
+  );
+  assert.ok(
+    existsSync(join(ROOT, "archive/deferred-email/INBOX-QUICKSTART.md")),
+    "archive/deferred-email/INBOX-QUICKSTART.md (the historical guide) is missing",
+  );
 });
 
-test("former inbox quickstart explains v1 deferral and points to room conversation", () => {
-  assert.match(inboxDoc(), /not available in v1/);
-  assert.match(inboxDoc(), /room conversation/);
+test("inbox v1 deferral is carried by the docs INDEX scope note and no inbox UI ships", () => {
+  const index = indexDoc();
+  assert.match(index, /Inbox is deferred from v1/);
+  assert.ok(
+    index.includes("archive/deferred-email/INBOX-QUICKSTART.md"),
+    "INDEX scope note no longer points at the archived quickstart",
+  );
   assert.doesNotMatch(html(), /id="nav-inbox"|id="inbox-panel"/);
 });
 
-test("inbox quickstart links to depth instead of duplicating it", () => {
-  const doc = inboxDoc();
+test("archived inbox quickstart links to depth instead of duplicating it", () => {
+  const doc = archivedInboxDoc();
   assert.ok(doc.includes("HUMAN-ONBOARDING.md"), "no depth link to the full human guide");
   assert.ok(existsSync(join(ROOT, "docs/HUMAN-ONBOARDING.md")), "HUMAN-ONBOARDING.md is missing");
 });
