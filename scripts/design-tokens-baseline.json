@@ -59,7 +59,6 @@
     "src/styles.css ::: #search-mentions[aria-pressed=\"true\"] { color: var(--text); background: #212b38; }": 1,
     "src/styles.css ::: #session-menu-panel #connection-details > summary { min-height: 32px; font-size: .875rem; }": 1,
     "src/styles.css ::: #share-settings-summary { display: block; padding-left: 1rem; font-size: .8rem; margin-top: .2rem; }": 1,
-    "src/styles.css ::: #sidebar-workspace .workspace-nav button[aria-current=\"page\"] { background: #37374e; }": 1,
     "src/styles.css ::: #work-options > summary { cursor: pointer; padding: .65rem 0; min-height: 44px; font-size: .875rem; }": 1,
     "src/styles.css ::: #work-options-summary { display: block; padding-block: .25rem; font-size: .8rem; color: var(--muted); }": 1,
     "src/styles.css ::: .access-preview h4 { margin: 0; font-size: .8rem; color: var(--text); }": 1,
