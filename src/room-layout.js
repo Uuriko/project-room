@@ -58,7 +58,7 @@ export function installRoomLayout() {
     if (layout === nextLayout) return;
     layout = nextLayout;
     for (const { node, anchor, destination } of entries) {
-      if (room && (node.id !== "workspace-nav" || !compact.matches)) { if (node.parentNode !== destination) destination.append(node); }
+      if (room) { if (node.parentNode !== destination) destination.append(node); }
       else if (node.previousSibling !== anchor) anchor.after(node);
     }
     // A menu left open in one destination must not carry over to another.
