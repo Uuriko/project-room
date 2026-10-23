@@ -72,8 +72,8 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
   const out = { version: 1, scope: { roomId: connection.roomId, memberId: connection.memberId, readOnly: true },
     connection: { status: 'unconfirmed' }, toolProfile: { transport: 'hosted_mcp', profile: 'full' }, contextVersion: null, authoritySummary: null,
     observedThroughBySource: {}, attention: [], ownClaims: [], obligations: [], pendingReconciliations: { status: 'not_read' },
-    incompleteSources: [], nextReads: [], metrics };
-  if (focus === 'replies') Object.assign(out, { focus, openRequests: [], optionalConversations: [] });
+    incompleteSources: [], nextReads: [], openRequests: [], optionalConversations: [], metrics };
+  if (focus === 'replies') out.focus = focus;
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
   const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error), httpStatus: error instanceof RoomClientError ? error.status : 0 });
   const contextRead = async version => {
@@ -137,9 +137,9 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       out.nextReads.push({ source: 'attention', action: 'continue_with_returned_cursor' });
     }
   } catch (error) { incomplete('attention', error); }
-  if (focus === 'replies') {
+  {
     // Optional conversation observations are a bounded delta, not an unhandled inbox.
-    out.optionalConversations = out.attention;
+    out.optionalConversations = out.attention.filter(item => ['mention', 'dm'].includes(item.kind));
     try {
       // Current obligations are read independently of any observation continuation.
       const listing = await client.replyRequests({ direction: 'incoming', status: 'open', signal: stop });
@@ -150,7 +150,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       }));
       const requiredIds = new Set(out.openRequests.map(request => request.id));
       out.attention = out.attention.filter(item => !requiredIds.has(item.id));
-      out.optionalConversations = out.attention;
+      out.optionalConversations = out.attention.filter(item => ['mention', 'dm'].includes(item.kind));
       out.nextReads = out.nextReads.filter(read => read.source !== 'attention' || read.action);
       for (const item of out.attention) out.nextReads.push({ source: 'attention', ...item.nextRead });
       out.observedThroughBySource.openRequests = { evaluatedThrough: listing.evaluatedThrough, selection: { direction: 'incoming', status: 'open' } };
@@ -199,7 +199,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     }
   } catch (error) {
     out.contextVersion = null; out.authoritySummary = null; out.observedThroughBySource = {};
-    if (focus === 'replies') { out.openRequests = []; out.optionalConversations = []; }
+    out.openRequests = []; out.optionalConversations = [];
     out.attention = []; out.obligations = []; out.ownClaims = []; out.nextReads = [];
     out.pendingReconciliations = { status: 'not_read' };
     incomplete('connection', error);
