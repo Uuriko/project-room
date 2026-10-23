@@ -75,9 +75,11 @@ import CoreGraphics
         refresh()
     }
     @objc private func setupHost() {
-        setupWindow = LocalRoomHostSetupWindow(host: host) { [weak self] in
+        setupWindow = LocalRoomHostSetupWindow(host: host) { [weak self] saved in
             guard let self else { return }
-            self.setupWindow = nil; self.hostIssue = nil
+            self.setupWindow = nil
+            guard saved else { self.refresh(); return }
+            self.hostIssue = nil
             do { try self.host.start() }
             catch { self.hostIssue = "Setup saved. Check the connection and start the agent again." }
             self.refresh()
