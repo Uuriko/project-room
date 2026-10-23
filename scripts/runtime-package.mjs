@@ -22,7 +22,7 @@ export const publicAssets = ["src/work-reducers.js", "src/message-reducers.js", 
 // obligation, and every other advertised asset remains fail-closed below.
 export const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
   "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html",
-  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html"]);
+  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "faq.html"]);
 // Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.

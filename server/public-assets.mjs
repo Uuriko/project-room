@@ -11,4 +11,4 @@ export const publicAssetPaths = Object.freeze(['src/work-reducers.js', 'src/mess
 // contain them (scripts/runtime-package.mjs keeps the same set for its
 // standalone filter, pinned equal by test), and the Node server answers 404
 // for them while they are absent rather than failing the request.
-export const generatedAgentPages = Object.freeze(['docs/agents/index.html', 'docs/agents/paste.html', 'docs/agents/claude-code.html', 'docs/agents/codex.html', 'docs/agents/cursor.html', 'docs/agents/cline.html', 'docs/agents/vscode.html', 'docs/agents/aider.html', 'docs/agents/openai-agents-sdk.html', 'docs/agents/langgraph.html', 'docs/agents/crewai.html']);
+export const generatedAgentPages = Object.freeze(['docs/agents/index.html', 'docs/agents/paste.html', 'docs/agents/claude-code.html', 'docs/agents/codex.html', 'docs/agents/cursor.html', 'docs/agents/cline.html', 'docs/agents/vscode.html', 'docs/agents/aider.html', 'docs/agents/openai-agents-sdk.html', 'docs/agents/langgraph.html', 'docs/agents/crewai.html', 'faq.html']);
