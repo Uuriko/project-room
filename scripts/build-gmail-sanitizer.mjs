@@ -16,7 +16,7 @@ for (const file of Object.keys(result.metafile.inputs).filter(p => p.includes('n
   while (dir !== '.' && (!existsSync(join(dir, 'package.json')) || !JSON.parse(readFileSync(join(dir, 'package.json'))).name)) dir = dirname(dir);
   if (dir === '.' || packages.has(dir)) continue;
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json')));
-  const license = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-MIT.txt'].find(name => existsSync(join(dir, name)));
+  const license = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-MIT.txt', 'license', 'license.txt'].find(name => existsSync(join(dir, name)));
   if (!license && pkg.name !== 'launder') throw new Error('Missing license for ' + pkg.name);
   packages.set(dir, `${pkg.name}@${pkg.version}\n${readFileSync(license ? join(dir, license) : 'scripts/vendor-licenses/apostrophe.txt', 'utf8')}`);
 }
