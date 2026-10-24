@@ -82,6 +82,13 @@ test("anonymous /agents and the public directory omit test identities and legal 
     (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, provenance)
     VALUES (?, ?, 'room', 'owner-seed', 0, 0, 0, 'self')`)
     .run("room-only", JSON.stringify(card("Room Only Agent", "Visible to room members, not the public page.")));
+  // A listed flag stuffed into card_json is not the column. The column
+  // backfills 0, so this row stays off the public page.
+  insertEntry.run("json-flag", "Json Flag", "Listed only inside the card JSON.", "2026-10-01T00:00:00.000Z");
+  store.db.prepare(`INSERT INTO agent_directory_cards
+    (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, provenance)
+    VALUES (?, ?, 'public', 'owner-seed', 0, 0, 0, 'self')`)
+    .run("json-flag", JSON.stringify({ ...card("Json Flag", "Listed only inside the card JSON."), listed: true }));
 
   const page = await fetch(`${origin}/agents`);
   assert.equal(page.status, 200);
@@ -96,6 +103,7 @@ test("anonymous /agents and the public directory omit test identities and legal 
     "QA Sentinel", "qa-sentinel", "Dogfood", "dogfood-peer",
     "Test Runner", "test-runner", "QA Stale", "Mina Cho", "id_Stale99",
     "Seeded Placeholder", "Room Only Agent", "Quiet Maker", "quiet-maker",
+    "Json Flag", "json-flag",
   ]) {
     assert.equal(html.includes(leakedText), false, leakedText);
   }

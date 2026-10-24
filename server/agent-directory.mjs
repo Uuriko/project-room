@@ -21,7 +21,7 @@ import { excludedFromPublicDirectory, presentPublicCard, scrubPublicDirectoryTex
 // list and search with a visibility policy, and build the frozen directory
 // document served at the directory endpoint (see agent-plugin-manifest.mjs
 // for the canonical URL). Visibility "public" is not the public index:
-// a card appears there only when publish set listed true. "room" cards
+// a card appears there only when publish set the listed column true. "room" cards
 // are visible only to room members (omitted from the public document);
 // "private" cards are listed to no one but their owner agent.
 //

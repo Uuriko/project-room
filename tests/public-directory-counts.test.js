@@ -44,9 +44,9 @@ function seedIdentity(store, identityId, roomId, memberId) {
 
 function seedCard(store, agentId, identityId, name) {
   store.db.prepare(`INSERT INTO agent_directory_cards
-    (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn)
-    VALUES (?,?, 'public', ?, 0, 0, 0)`)
-    .run(agentId, JSON.stringify({ name, description: "", skills: [], listed: true }), identityId);
+    (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, listed)
+    VALUES (?,?, 'public', ?, 0, 0, 0, 1)`)
+    .run(agentId, JSON.stringify({ name, description: "", skills: [] }), identityId);
   syncDirectoryCard(store, agentId);
 }
 

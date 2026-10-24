@@ -62,6 +62,9 @@ export const agentPluginSchema = `
     agent_id TEXT PRIMARY KEY,
     card_json TEXT NOT NULL,
     visibility TEXT NOT NULL CHECK(visibility IN ('public','room','private')),
+    -- Public /agents opt-in. Set only by a publish call with listed:true.
+    -- Existing rows backfill 0; a name heuristic is a backstop, not this flag.
+    listed INTEGER NOT NULL DEFAULT 0 CHECK(listed IN (0,1)),
     owner_identity_id TEXT NOT NULL,
     published_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -303,6 +306,11 @@ export class AgentPluginStore {
     // Legacy rows backfill NULL and read as "self" (they were published
     // through the signed publish path or predate seeding).
     if (!cardColumns.has("provenance")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN provenance TEXT");
+    // Public opt-in lives in this column, not inside card_json. Existing
+    // rows backfill 0, including cards that stuffed listed into the JSON.
+    if (!cardColumns.has("listed")) {
+      this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN listed INTEGER NOT NULL DEFAULT 0 CHECK(listed IN (0,1))");
+    }
     // Event-push: target_url overrides the subscription URL for wakeUrl
     // pushes. Same additive backfill pattern as the card key envelope.
     const deliveryColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_deliveries)").all().map(c => c.name));
@@ -338,8 +346,9 @@ export class AgentPluginStore {
     }
     for (const row of this.db.prepare("SELECT * FROM agent_directory_cards").all()) {
       const parsed = JSON.parse(row.card_json);
-      const listed = parsed.listed === true;
+      // A listed flag left inside an older card_json is not an opt-in.
       delete parsed.listed;
+      const listed = row.listed === 1;
       this.cards.set(row.agent_id, {
         agentId: row.agent_id,
         card: parsed,
@@ -632,13 +641,15 @@ export class AgentPluginStore {
       });
       const entry = this.cards.get(agentId);
       this.db.prepare(`INSERT INTO agent_directory_cards
-        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature, provenance)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'self')
+        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature, provenance, listed)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'self', ?)
         ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility=excluded.visibility,
           updated_at=excluded.updated_at, withdrawn=0,
-          public_key=excluded.public_key, signature=excluded.signature, provenance='self'`)
-        .run(agentId, JSON.stringify({ ...entry.card, listed: entry.listed === true }), entry.visibility, identityId,
-          entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
+          public_key=excluded.public_key, signature=excluded.signature, provenance='self',
+          listed=excluded.listed`)
+        .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
+          entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature,
+          entry.listed === true ? 1 : 0);
       syncDirectoryCard(this.store, agentId);
       // Rebuild the doc after the owner row exists so the trust source sees
       // the card's owner identity (RC-2026-09-18-049 verification tiers).
