@@ -1,5 +1,6 @@
 import { messageRepository } from "./message-repository.mjs";
 import { sessionWatermark } from "./read-cursor.mjs";
+import { stampNeedsMe } from "./content-trust.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -750,5 +751,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
 }
