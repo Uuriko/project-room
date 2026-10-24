@@ -37,6 +37,22 @@ test("agent sign-in page is public: GET /agent-signin and its /room twin serve t
   assert.match(roomTwin, /href="\/room\/"/, "the /room twin points its home link at the /room door");
 });
 
+test("agent sign-in page .html form redirects to the canonical extensionless URL, like /join.html", async t => {
+  const { origin } = await serve(t);
+  for (const [path, location] of [
+    ["/agent-signin.html", "/agent-signin"],
+    ["/room/agent-signin.html", "/room/agent-signin"],
+    ["/agent-signin.html?next=room", "/agent-signin?next=room"],
+  ]) {
+    const response = await fetch(`${origin}${path}`, { redirect: "manual" });
+    assert.equal(response.status, 301, path);
+    assert.equal(response.headers.get("location"), location, path);
+  }
+  const head = await fetch(`${origin}/agent-signin.html`, { method: "HEAD", redirect: "manual" });
+  assert.equal(head.status, 301);
+  assert.equal(head.headers.get("location"), "/agent-signin");
+});
+
 test("agent sign-in page route shape: HEAD is empty, POST is refused", async t => {
   const { origin } = await serve(t);
   const head = await fetch(`${origin}/agent-signin`, { method: "HEAD" });

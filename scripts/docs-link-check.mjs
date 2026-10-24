@@ -88,6 +88,7 @@ export const ORPHAN_EXCEPTIONS = {
   "docs/a2a-receipt-extension.md": "cited by server/agent-discovery.mjs and spec/core/receipt.md",
   "docs/analytics/EVENTS.md": "pinned by tests/analytics-catalog.test.js",
   "docs/legal/acceptable-use.md": "runtime-read legal page (server/legal-pages.mjs)",
+  "docs/legal/contact.md": "runtime-read legal page (server/legal-pages.mjs)",
   "docs/legal/privacy.md": "runtime-read legal page (server/legal-pages.mjs)",
   "docs/legal/terms.md": "runtime-read legal page (server/legal-pages.mjs)",
   "docs/procedures/claim-protocol.md": "baked into server/procedures-index.mjs; served at /procedures",

@@ -82,7 +82,7 @@ async function login(origin, store, email, password) {
 
 test("legal pages are cacheable, indexed, and listed in the sitemap", async t => {
   const { origin } = await serve(t, { operator: "" });
-  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
+  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal", "/contact"]) {
     const page = await raw(origin, path);
     assert.equal(page.status, 200, path);
     assert.equal(page.headers.get("cache-control"), "public, max-age=3600", path);
@@ -126,12 +126,12 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
   }
   const sitemap = await raw(origin, "/sitemap.xml");
   assert.equal(sitemap.status, 200);
-  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
+  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal", "/contact"]) {
     assert.match(sitemap.text, new RegExp(path.replace("/", "\\/")));
   }
   const denied = await raw(origin, "/terms", { method: "POST" });
   assert.equal(denied.status, 405);
-  for (const name of ["terms.md", "privacy.md", "acceptable-use.md", "subprocessors.json"]) {
+  for (const name of ["terms.md", "privacy.md", "acceptable-use.md", "subprocessors.json", "contact.md"]) {
     assert.equal(EMBEDDED_LEGAL[name], readFileSync(new URL(`../docs/legal/${name}`, import.meta.url), "utf8"));
   }
 });
@@ -296,11 +296,26 @@ test("unpublish is refused when no operator account is configured", async t => {
 
 test("legal pages carry a description and allow the analytics beacon the privacy policy names", async () => {
   const { LEGAL_PAGE_CSP, legalPageHtml } = await import("../server/legal-pages.mjs");
-  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
+  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal", "/contact"]) {
     const html = legalPageHtml(path);
     assert.match(html, /<meta name="description" content="[^"]+ for Project Room/, path);
   }
   assert.match(LEGAL_PAGE_CSP, /script-src https:\/\/static\.cloudflareinsights\.com/);
   assert.match(LEGAL_PAGE_CSP, /connect-src 'self' https:\/\/cloudflareinsights\.com/);
   assert.match(EMBEDDED_LEGAL["privacy.md"], /static\.cloudflareinsights\.com/);
+});
+
+test("contact page serves the address the room-entry footer promises", async () => {
+  const { legalPageHtml, LEGAL_SITEMAP_PATHS } = await import("../server/legal-pages.mjs");
+  const { isLegalPath } = await import("../server/legal-routes.mjs");
+  // server/room-entry.mjs links /contact from every room-door footer; the
+  // legal family must actually serve it (it 404ed while all five sibling
+  // legal links returned 200 — X-RAY UX-FRICTION register #2).
+  assert.ok(LEGAL_SITEMAP_PATHS.includes("/contact"));
+  assert.equal(isLegalPath("/contact"), true);
+  assert.equal(isLegalPath("/room/contact"), true);
+  const html = legalPageHtml("/contact");
+  assert.match(html, /potter@trydemigod\.com/);
+  assert.match(html, /href="\/report"/);
+  assert.equal(EMBEDDED_LEGAL["contact.md"], readFileSync(new URL("../docs/legal/contact.md", import.meta.url), "utf8"));
 });

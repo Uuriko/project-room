@@ -2841,8 +2841,10 @@ paths:
         Each entry carries only roomId, title, purpose, kind, memberCount,
         and listedAt — rebuilt field-by-field in the module; member ids,
         handles, emails, identity links, permissions, DMs, and invite codes
-        never leave. Archived rooms never appear. Cursor `after` is a room
-        id; `limit` is capped at 100 (default 50).
+        never leave. Archived rooms never appear. A room is listed only
+        while its public page is published with public receipts on, so
+        every listed roomId resolves at /r/{roomId} and /r/{roomId}/proof.
+        Cursor `after` is a room id; `limit` is capped at 100 (default 50).
       security: []
       parameters:
         - name: after
