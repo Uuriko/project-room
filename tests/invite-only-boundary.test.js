@@ -137,6 +137,10 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public door funnel (DOOR-FUNNEL-READ): counts-only weekly joins/mints
+  // aggregates; public by design, answers 200 with honest zeros on an
+  // empty store.
+  "GET /api/public/door-funnel": [undefined, 200],
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
