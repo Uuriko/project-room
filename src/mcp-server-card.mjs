@@ -28,6 +28,7 @@ function projectTools(tools) {
 
 export function renderMcpServerCardJson({
   publicTools,
+  lobbyTools,
   enrolledTools,
   url,
   mint,
@@ -41,8 +42,8 @@ export function renderMcpServerCardJson({
     || MCP_SERVER_CARD_DESCRIPTION.length > 100) {
     throw new Error("MCP server card description must be 1..100 characters");
   }
-  if (!Array.isArray(publicTools) || !Array.isArray(enrolledTools)) {
-    throw new Error("MCP server card requires the live public and enrolled tool lists");
+  if (!Array.isArray(publicTools) || !Array.isArray(lobbyTools) || !Array.isArray(enrolledTools)) {
+    throw new Error("MCP server card requires the live public, lobby and enrolled tool lists");
   }
   return JSON.stringify({
     $schema: MCP_SERVER_CARD_SCHEMA,
@@ -77,6 +78,7 @@ export function renderMcpServerCardJson({
     ttlMs: MCP_DISCOVERY_TTL_MS,
     tools: {
       public: projectTools(publicTools),
+      lobby: projectTools(lobbyTools),
       enrolled: projectTools(enrolledTools)
     }
   }, null, 2) + "\n";

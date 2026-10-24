@@ -78,14 +78,23 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
 // bearer with a current room membership gets from tools/list with no profile
 // argument. It is NOT the non-member list — an identity with no memberships
 // is served the public-work lobby list at the door (the "public_work" focus
-// branch above), which is a different subject (#3769).
+// branch above), which is a different subject (#3769). The card renders
+// that lobby list as its own named tier (UT-HOSTS F-2): a host planning
+// from the card otherwise sees enrolled room_create/room_join and expects
+// a saved identity to reach them, while the live roomless list withholds
+// both until membership exists.
 export function liveEnrolledMcpTools() {
   return listedMcpTools("core", false, null);
+}
+
+export function liveLobbyMcpTools() {
+  return listedMcpTools("core", false, { memberships: [] });
 }
 
 export function liveMcpServerCardJson() {
   return renderMcpServerCardJson({
     publicTools: livePublicMcpTools(),
+    lobbyTools: liveLobbyMcpTools(),
     enrolledTools: liveEnrolledMcpTools(),
     url: ROOM_MCP_PUBLIC_URL,
     mint: `${ROOM_ORIGIN}/api/agent-identities`,
