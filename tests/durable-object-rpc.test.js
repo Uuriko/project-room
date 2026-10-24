@@ -256,7 +256,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   await Promise.all(pending);
   assert.equal(name, "invite-only-pilot");
   assert.deepEqual([...new Set(invoked)].sort(), [...new Set(expected)]);
-  assert.equal(invoked.filter(method => method === "runSlowJob").length, 4);
+  assert.equal(invoked.filter(method => method === "runSlowJob").length, 5);
 });
 
 test("inbound mail is rejected while the inbox consumer is not durable", async () => {
