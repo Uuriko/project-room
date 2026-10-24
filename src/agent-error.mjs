@@ -37,6 +37,231 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  // Laptop execution and transient artifact relay recovery.
+  invalid_laptop_transfer: {
+    "status": "action_required",
+    "hint": "Transfer metadata is invalid.",
+    "next": [
+      {
+        "command": "Correct the action fields, transfer identifier, byte length and SHA-256 before resending."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Correct the action fields, transfer identifier, byte length and SHA-256 before resending."
+    }
+  },
+  transfer_checksum_mismatch: {
+    "status": "action_required",
+    "hint": "Transfer bytes do not match the declared digest.",
+    "next": [
+      {
+        "command": "Stop the transfer and verify the local source and checkpoint; do not accept or execute corrupt bytes."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Stop the transfer and verify the local source and checkpoint; do not accept or execute corrupt bytes."
+    }
+  },
+  transfer_recipient_unavailable: {
+    "status": "action_required",
+    "hint": "The transfer recipient is not active.",
+    "next": [
+      {
+        "command": "Read current Room membership and select an active authorized recipient before offering a transfer."
+      }
+    ],
+    "catalog": {
+      "http": 404,
+      "retry": "re-list",
+      "recovery": "Read current Room membership and select an active authorized recipient before offering a transfer."
+    }
+  },
+  transfer_conflict: {
+    "status": "action_required",
+    "hint": "The transfer identifier already binds different content or participants.",
+    "next": [
+      {
+        "command": "Inspect the original transfer and keep its exact metadata on retry; use a new identifier only for deliberately new work."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Inspect the original transfer and keep its exact metadata on retry; use a new identifier only for deliberately new work."
+    }
+  },
+  transfer_capacity: {
+    "status": "action_required",
+    "hint": "The transient relay has reached its session limit.",
+    "next": [
+      {
+        "command": "Wait with bounded backoff for sessions to complete or expire, then retry the exact offer."
+      }
+    ],
+    "catalog": {
+      "http": 429,
+      "retry": "wait",
+      "recovery": "Wait with bounded backoff for sessions to complete or expire, then retry the exact offer."
+    }
+  },
+  transfer_not_found: {
+    "status": "action_required",
+    "hint": "The transfer is absent, expired or unavailable to this member.",
+    "next": [
+      {
+        "command": "Verify access and ask the original sender to reoffer the same transfer; retain validated local checkpoints."
+      }
+    ],
+    "catalog": {
+      "http": 404,
+      "retry": "re-read",
+      "recovery": "Verify access and ask the original sender to reoffer the same transfer; retain validated local checkpoints."
+    }
+  },
+  transfer_membership_revoked: {
+    "status": "action_required",
+    "hint": "A transfer participant is no longer active.",
+    "next": [
+      {
+        "command": "Stop transfer polling and check Room access; resume only after access is restored."
+      }
+    ],
+    "catalog": {
+      "http": 403,
+      "retry": "no",
+      "recovery": "Stop transfer polling and check Room access; resume only after access is restored."
+    }
+  },
+  transfer_recipient_required: {
+    "status": "action_required",
+    "hint": "This action requires the transfer recipient.",
+    "next": [
+      {
+        "command": "Use the original recipient worker for receive actions; do not change identity to bypass this refusal."
+      }
+    ],
+    "catalog": {
+      "http": 403,
+      "retry": "no",
+      "recovery": "Use the original recipient worker for receive actions; do not change identity to bypass this refusal."
+    }
+  },
+  transfer_sender_required: {
+    "status": "action_required",
+    "hint": "This action requires the transfer sender.",
+    "next": [
+      {
+        "command": "Use the original sender worker for upload actions; do not change identity to bypass this refusal."
+      }
+    ],
+    "catalog": {
+      "http": 403,
+      "retry": "no",
+      "recovery": "Use the original sender worker for upload actions; do not change identity to bypass this refusal."
+    }
+  },
+  transfer_complete: {
+    "status": "action_required",
+    "hint": "The transfer is already complete.",
+    "next": [
+      {
+        "command": "Reconcile the existing receiver result and its digest instead of requesting further chunks."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Reconcile the existing receiver result and its digest instead of requesting further chunks."
+    }
+  },
+  transfer_chunk_not_requested: {
+    "status": "action_required",
+    "hint": "The uploaded chunk is not currently requested.",
+    "next": [
+      {
+        "command": "Inspect the transfer and send only its current wanted chunk; stop when complete."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "re-read",
+      "recovery": "Inspect the transfer and send only its current wanted chunk; stop when complete."
+    }
+  },
+  transfer_chunk_pending: {
+    "status": "action_required",
+    "hint": "The requested chunk is not ready.",
+    "next": [
+      {
+        "command": "Wait with bounded backoff and retry the same chunk while the sender remains available."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "wait",
+      "recovery": "Wait with bounded backoff and retry the same chunk while the sender remains available."
+    }
+  },
+  invalid_transfer_action: {
+    "status": "action_required",
+    "hint": "The transfer action is unsupported.",
+    "next": [
+      {
+        "command": "Choose offer, inspect, want, put, take, complete or cancel with the documented fields."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Choose offer, inspect, want, put, take, complete or cancel with the documented fields."
+    }
+  },
+  invalid_worker_advertisement: {
+    "status": "action_required",
+    "hint": "The worker capability advertisement is invalid.",
+    "next": [
+      {
+        "command": "Correct the version, state, slots, input limit, requester list, adapters and recipe names before advertising."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Correct the version, state, slots, input limit, requester list, adapters and recipe names before advertising."
+    }
+  },
+  worker_directory_full: {
+    "status": "action_required",
+    "hint": "The worker directory is at capacity.",
+    "next": [
+      {
+        "command": "Wait for stale advertisements to expire, then retry the same worker advertisement with bounded backoff."
+      }
+    ],
+    "catalog": {
+      "http": 429,
+      "retry": "wait",
+      "recovery": "Wait for stale advertisements to expire, then retry the same worker advertisement with bounded backoff."
+    }
+  },
+  room_bearer_required: {
+    "status": "action_required",
+    "hint": "This endpoint requires a Room bearer credential.",
+    "next": [
+      {
+        "command": "Check the saved Room connection and use its authorized credential; an account session is insufficient."
+      }
+    ],
+    "catalog": {
+      "http": 403,
+      "retry": "no",
+      "recovery": "Check the saved Room connection and use its authorized credential; an account session is insufficient."
+    }
+  },
   // Operator archive: refuse unsafe requests with an explicit recovery.
   invalid_archive_request: {
     "status": "action_required",

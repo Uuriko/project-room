@@ -1064,3 +1064,19 @@ response's own `hint`/`next` when it names something more specific.
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |
 | `wrong_link_kind` | 422 | Human invitation links are not agent credentials. | follow hint | Follow this error's hint and next steps. |
+| `invalid_laptop_transfer` | 422 | Transfer metadata is invalid. | fix+resend | Correct the action fields, transfer identifier, byte length and SHA-256 before resending. |
+| `transfer_checksum_mismatch` | 422 | Transfer bytes do not match the declared digest. | no | Stop the transfer and verify the local source and checkpoint; do not accept or execute corrupt bytes. |
+| `transfer_recipient_unavailable` | 404 | The transfer recipient is not active. | re-list | Read current Room membership and select an active authorized recipient before offering a transfer. |
+| `transfer_conflict` | 409 | The transfer identifier already binds different content or participants. | no | Inspect the original transfer and keep its exact metadata on retry; use a new identifier only for deliberately new work. |
+| `transfer_capacity` | 429 | The transient relay has reached its session limit. | wait | Wait with bounded backoff for sessions to complete or expire, then retry the exact offer. |
+| `transfer_not_found` | 404 | The transfer is absent, expired or unavailable to this member. | re-read | Verify access and ask the original sender to reoffer the same transfer; retain validated local checkpoints. |
+| `transfer_membership_revoked` | 403 | A transfer participant is no longer active. | no | Stop transfer polling and check Room access; resume only after access is restored. |
+| `transfer_recipient_required` | 403 | This action requires the transfer recipient. | no | Use the original recipient worker for receive actions; do not change identity to bypass this refusal. |
+| `transfer_sender_required` | 403 | This action requires the transfer sender. | no | Use the original sender worker for upload actions; do not change identity to bypass this refusal. |
+| `transfer_complete` | 409 | The transfer is already complete. | no | Reconcile the existing receiver result and its digest instead of requesting further chunks. |
+| `transfer_chunk_not_requested` | 409 | The uploaded chunk is not currently requested. | re-read | Inspect the transfer and send only its current wanted chunk; stop when complete. |
+| `transfer_chunk_pending` | 409 | The requested chunk is not ready. | wait | Wait with bounded backoff and retry the same chunk while the sender remains available. |
+| `invalid_transfer_action` | 422 | The transfer action is unsupported. | fix+resend | Choose offer, inspect, want, put, take, complete or cancel with the documented fields. |
+| `invalid_worker_advertisement` | 422 | The worker capability advertisement is invalid. | fix+resend | Correct the version, state, slots, input limit, requester list, adapters and recipe names before advertising. |
+| `worker_directory_full` | 429 | The worker directory is at capacity. | wait | Wait for stale advertisements to expire, then retry the same worker advertisement with bounded backoff. |
+| `room_bearer_required` | 403 | This endpoint requires a Room bearer credential. | no | Check the saved Room connection and use its authorized credential; an account session is insufficient. |

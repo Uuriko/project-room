@@ -240,7 +240,14 @@ function catalogRowFor(code, http) {
 
 const nextTextOf = ax => ax.next.map(s => s.command ?? s.path ?? `tool:${s.tool}`).join(" ; ");
 
+const LAPTOP_CODES = ["invalid_laptop_transfer", "invalid_transfer_action", "invalid_worker_advertisement", "room_bearer_required", "transfer_capacity", "transfer_checksum_mismatch", "transfer_chunk_not_requested", "transfer_chunk_pending", "transfer_complete", "transfer_conflict", "transfer_membership_revoked", "transfer_not_found", "transfer_recipient_required", "transfer_recipient_unavailable", "transfer_sender_required", "worker_directory_full"];
+
 const REGISTRY_FIXTURES = [
+  ...LAPTOP_CODES.map(code => [code, { httpStatus: ERROR_REGISTRY[code].catalog.http }, ax => {
+    assert.equal(ax.reason, code);
+    assert.doesNotMatch(ax.hint, /^Unknown error/);
+    assert.ok(ax.next.length > 0);
+  }]),
   ...["invalid_archive_request", "invalid_room_id", "invalid_keep_newest", "reason_required", "dry_run_required", "read_only", "archive_not_ready"].map(code => [code, { httpStatus: ERROR_REGISTRY[code].catalog.http }, ax => {
     assert.equal(ax.reason, code);
     assert.equal(ax.status, "action_required");
@@ -341,7 +348,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
   assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
-    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
+    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work", ...LAPTOP_CODES].sort(),
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });
