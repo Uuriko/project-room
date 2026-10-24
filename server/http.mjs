@@ -64,8 +64,8 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "./room-entry.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
-// Board v2 is retired. Its routes answer 410 board_v2_retired. The
-// board_vtwo_* tables stay in place; nothing here drops them.
+// Board v2 is retired. Any /board/v2 path answers 410 board_v2_retired.
+// The board_vtwo_* tables stay in place; nothing here drops them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -3936,27 +3936,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
       const creditsEpochMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/epoch\/close$/.exec(url.pathname);
       const creditsMatch = creditsBalancesMatch ?? creditsHistoryMatch ?? creditsTransferMatch ?? creditsEpochMatch;
-      // Board v2 (RC-2026-09-27-2720): the durable claims board mounted under
-      // the room funnel. One anchored regex per concrete route — the
-      // route-docs gate (scripts/open-routes.mjs) expands only ([^/]{1,N})
-      // groups, so a subtree regex would fail the check. The board itself is
-      // deployment-wide (one per room database); :roomId selects the auth
-      // context. Literal segments (heartbeat/release/receipts) sit on their
-      // own templates so they are never mistaken for a task id.
-      const boardV2ClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims$/.exec(url.pathname);
-      const boardV2HeartbeatMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/heartbeat$/.exec(url.pathname);
-      const boardV2ReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/release$/.exec(url.pathname);
-      const boardV2ReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/receipts$/.exec(url.pathname);
-      const boardV2NotesMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/notes$/.exec(url.pathname);
-      const boardV2FindingsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/findings$/.exec(url.pathname);
-      const boardV2DecisionsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/decisions$/.exec(url.pathname);
-      const boardV2BoardMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/board$/.exec(url.pathname);
-      const boardV2EventsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/events$/.exec(url.pathname);
-      const boardV2MirrorMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/mirror-map$/.exec(url.pathname);
-      const boardV2HealthMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/health$/.exec(url.pathname);
-      const boardV2Match = boardV2ClaimsMatch ?? boardV2HeartbeatMatch ?? boardV2ReleaseMatch ?? boardV2ReceiptsMatch
-        ?? boardV2NotesMatch ?? boardV2FindingsMatch ?? boardV2DecisionsMatch ?? boardV2BoardMatch
-        ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
+      // Board v2 is retired. One prefix answers every path under /board/v2
+      // with 410. A regex literal would have to be one fully expanded
+      // template per route (scripts/open-routes.mjs), so this pattern is a
+      // RegExp and the route gates keep the retired templates themselves.
+      // :roomId still selects the auth context. /board/v2extra does not match.
+      const boardV2Match = new RegExp("^/api/rooms/([^/]{1,384})/board/v2(?:/|$)").exec(url.pathname);
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
