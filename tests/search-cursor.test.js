@@ -1,4 +1,5 @@
 import test from "node:test";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,11 +10,11 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-async function serve(t) {
+async function serve(t, clockStart = Date.parse("2026-10-10T00:00:00Z")) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-search-cursor-"));
   // A fake clock that moves 2 s per post keeps the per-member chat flood
   // guard (burst 30, 1 post per 2 s) out of a 200+ message fixture.
-  let clock = Date.parse("2026-10-10T00:00:00Z");
+  let clock = clockStart;
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock });
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
@@ -29,7 +30,7 @@ async function serve(t) {
   const addHuman = memberId => { send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind: "human", permissions: [] }); keyFor(memberId); };
   const post = (body, extra = {}) => send(extra.as ?? "owner", T.MESSAGE_POSTED, { messageId: extra.messageId ?? randomUUID(), body, ...(extra.toMemberId ? { toMemberId: extra.toMemberId } : {}) }).event.data.messageId;
   const reply = (body, replyToId, messageId) => send("owner", T.MESSAGE_POSTED, { messageId, body, replyToId, alsoSendToChannel: true }).event.data.messageId;
-  return { get, getAs, post, send, keyFor, addHuman, reply };
+  return { get, getAs, post, send, keyFor, addHuman, reply, origin };
 }
 
 const errorShape = body => ({ code: body.code ?? body.error?.code, message: body.message ?? body.error?.message });
@@ -249,4 +250,27 @@ test("a channel-copy shaped anchor still needs a valid source id", () => {
     const cursor = encodeSearchCursor("deploy", "messages", anchor);
     assert.throws(() => decodeSearchCursor(cursor, "deploy", "messages"), err => err.code === "invalid_search_cursor" || err.status === 422 || /invalid_search_cursor/.test(String(err.message) + JSON.stringify(err)));
   }
+});
+
+
+test("agent client follows opaque search cursors and preserves server refusal boundaries", async t => {
+  const { origin, keyFor, post, send } = await serve(t, Date.now());
+  send("owner", T.MEMBER_ADDED, { memberId: "reader", displayName: "Search agent", kind: "agent", permissions: [] });
+  const client = new RoomAgentClient({ origin, roomId: "commons", memberId: "reader", token: keyFor("reader") });
+  const ids = Array.from({ length: 7 }, (_, i) => post(`cursor-client match ${i}`));
+  const first = await client.search("cursor-client", { kind: "messages", limit: 3 });
+  assert.ok(first.nextCursor);
+  assert.deepEqual(first.messages.map(message => message.id), ids.slice(-3));
+  const second = await client.search("cursor-client", { kind: "messages", limit: 3, before: first.nextCursor });
+  assert.deepEqual(second.messages.map(message => message.id), ids.slice(1, 4));
+  const last = await client.search("cursor-client", { kind: "messages", limit: 3, before: second.nextCursor });
+  assert.deepEqual(last.messages.map(message => message.id), ids.slice(0, 1));
+  assert.equal(last.nextCursor, undefined);
+  await assert.rejects(client.search("different", { kind: "messages", before: first.nextCursor }),
+    error => error.status === 422 && error.code === "invalid_search_cursor");
+  await assert.rejects(client.search("cursor-client", { kind: "all", before: first.nextCursor }),
+    error => error.status === 422 && error.code === "invalid_search_cursor");
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(client.search("cursor-client", { kind: "messages", before: first.nextCursor, signal: controller.signal }),
+    error => error.name === "AbortError");
 });
