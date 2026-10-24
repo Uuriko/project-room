@@ -56,7 +56,9 @@
 //   both directions (a served message with no posting event is named too).
 // - claim_legality: work_claim.updated events are validated against
 //   CLAIM_LIFECYCLE (server/work-claims.mjs) plus the lease sweep's release
-//   (releaseExpired: an active claim may return to unclaimed). Held states
+//   (releaseExpired: an active claim may return to unclaimed) and the
+//   PR-outcome settle (settlePullRequest: pr_merged completes an active
+//   claim, pr_closed releases one). Held states
 //   (and done) must carry an owner, unclaimed must not; a claim taken while
 //   held, or changing owner while held outside a reassign, is a
 //   double-claim. At the head, the shadow is compared with the work_claims
@@ -65,9 +67,10 @@
 //   (rc_<claimId>, receiptOf in server/work-claim-routes.mjs), so the
 //   per-event form checks the done item itself: a claim the patrol watched
 //   reach done must sit in the registry with an owner (the receipt's
-//   creator) and exactly one "state:done" history stamp — the receipts
-//   surface's own stated invariant ("Done is immutable, so there is
-//   exactly one").
+//   creator) and exactly one completion history stamp — "state:done",
+//   or the "pr_merged" stamp a merge settle leaves on a
+//   deliveryMode-merged claim — the receipts surface's own stated
+//   invariant ("Done is immutable, so there is exactly one").
 //
 // Findings are a journal, not an alarm that re-fires: patrol_findings is
 // unique on (room, invariant, kind, subject, sequence), so a divergence is
@@ -101,11 +104,24 @@ const bodyHashOf = message => (typeof message?.body === "string" ? sha256(messag
 
 const HELD_STATES = new Set(["claimed", "in_progress", "blocked", "delivered"]);
 const OWNER_REQUIRED_STATES = new Set([...HELD_STATES, "done"]);
-// CLAIM_LIFECYCLE governs the /update verbs. The lease sweep is the one
+// CLAIM_LIFECYCLE governs the /update verbs. The lease sweep is one
 // other designed path: releaseExpired returns an active claim to
 // unclaimed, so that move is legal from every active state.
 const LEGAL_NEXT = new Map(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) => [state, new Set(Object.values(row))]));
 for (const state of ACTIVE_CLAIM_STATES) LEGAL_NEXT.get(state)?.add("unclaimed");
+// The PR-outcome settle (settlePullRequest, server/claim-coordination.mjs)
+// is the other designed state-mover: a merged PR completes a live claim
+// (claimed / in_progress / blocked -> done, history stamp pr_merged) and
+// a closed PR releases a live claim to unclaimed (stamp pr_closed). Those
+// moves are legal only under the settle actions — the verb table above
+// stays strict, so a verb-shaped claimed -> done still files
+// illegal_transition.
+const SETTLE_MOVES = new Map([
+  ["pr_merged", "done"],
+  ["pr_closed", "unclaimed"]
+]);
+const isSettleMove = (action, priorState, nextState) =>
+  SETTLE_MOVES.get(action) === nextState && ACTIVE_CLAIM_STATES.includes(priorState);
 
 export const PATROL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS patrol_cursor (
@@ -596,7 +612,8 @@ function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedC
   if (!CLAIM_STATES.includes(nextState)) {
     file(sequence, eventId, "claim_legality", "unknown_state", claimId, { state: nextState, action });
   } else if (prior) {
-    if (nextState !== prior.state && !(LEGAL_NEXT.get(prior.state)?.has(nextState) ?? false)) {
+    if (nextState !== prior.state && !isSettleMove(action, prior.state, nextState)
+      && !(LEGAL_NEXT.get(prior.state)?.has(nextState) ?? false)) {
       file(sequence, eventId, "claim_legality", "illegal_transition", claimId,
         { from: prior.state, to: nextState, action });
     }
@@ -740,7 +757,12 @@ function patrolAgreements({ store, file, snapshot, claimWork, claimPrior, messag
       if (!item.owner) {
         file(shadow.doneSequence, doneEvent?.id ?? null, "receipt_linkage", "done_without_owner", claimId, {});
       }
-      const stamps = (Array.isArray(item.history) ? item.history : []).filter(entry => entry?.action === "state:done").length;
+      const history = Array.isArray(item.history) ? item.history : [];
+      // A merge-settled claim (settlePullRequest) carries a pr_merged
+      // stamp instead of state:done: on a deliveryMode-merged claim that
+      // stamp is its one completion stamp.
+      const stamps = history.filter(entry => entry?.action === "state:done").length
+        + (item.deliveryMode === "merged" ? history.filter(entry => entry?.action === "pr_merged").length : 0);
       if (stamps !== 1) {
         file(shadow.doneSequence, doneEvent?.id ?? null, "receipt_linkage", "done_stamp_count", claimId, { stamps });
       }

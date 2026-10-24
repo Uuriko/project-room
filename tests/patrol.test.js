@@ -20,8 +20,9 @@ import { patrolPending, patrolStatus } from "../server/patrol.mjs";
 import { operatorStatus } from "../server/operator-status.mjs";
 import { jobByName } from "../server/jobs.mjs";
 import { applyOutcomes, jobHealthView, runCronJobs } from "../cloudflare/job-heartbeat.mjs";
-import { claimWork, createWork, updateWork } from "../server/work-claims.mjs";
+import { appendWorkPullRequest, claimHistoryLength, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
+import { recordPullOutcome, settlePullRequest } from "../server/claim-coordination.mjs";
 import { event as makeEvent, EVENT_TYPES } from "../src/events.js";
 
 function openStore(roomId = "alpha") {
@@ -556,5 +557,107 @@ test('large idempotency look-back stays within Workers SQL binding limits', () =
     assert.equal(result.errors,undefined);
     assert.ok(lookbacks>0);
     assert.ok(store.patrolFindings().some(f=>f.code==='idempotency_duplicate' || f.kind==='idempotency_duplicate'));
+  } finally { store.close(); }
+});
+
+// PR-outcome settle (settlePullRequest): the third designed claim
+// state-mover. A merged PR completes a live claim (stamping pr_merged,
+// never state:done); a closed PR releases a live claim to unclaimed.
+// Patrol must file nothing for those moves, while a verb-shaped
+// claimed -> done keeps filing illegal_transition.
+const SETTLE_PR = "https://github.com/Uuriko/project-room/pull/4599";
+function claimedClaim(store, id, roomId = "alpha") {
+  const now = Date.now();
+  let item = createWork({ id, title: `Task ${id}` }, { now, agentId: "owner" });
+  driveClaim(store, item, "created", now, roomId);
+  item = claimWork(item, "owner", { now: now + 1 });
+  driveClaim(store, item, "claimed", now + 1, roomId);
+  return { item, now };
+}
+function blockedClaim(store, id, roomId = "alpha") {
+  const { item, now } = honestClaim(store, id, roomId);
+  const blocked = updateWork(item, "owner", { state: "blocked", now: now + 3 });
+  driveClaim(store, blocked, "state_changed", now + 3, roomId);
+  return { item: blocked, now };
+}
+// Link a PR, record its outcome and settle through the designed path,
+// receipting the settle with its event exactly as the poller does. The
+// link itself emits no event (pr_linked is a history stamp only).
+function settleClaim(store, item, now, outcome, roomId = "alpha") {
+  const linked = appendWorkPullRequest(item, "owner", {
+    pullRequest: SETTLE_PR, expectedClaimedAt: item.claimedAt,
+    expectedHistoryLength: claimHistoryLength(item), now: now + 5
+  });
+  store.workClaims.set(roomId, linked);
+  const recorded = recordPullOutcome(linked, SETTLE_PR, outcome, now + 6);
+  const settled = settlePullRequest(recorded, outcome, now + 6);
+  assert.ok(settled, "a live claim with a ready PR settles");
+  driveClaim(store, settled.item, settled.action, now + 6, roomId);
+  return settled.item;
+}
+
+test("PR merge settle from claimed files nothing, and pr_merged is the one completion stamp", () => {
+  const store = openStore();
+  try {
+    const { item, now } = claimedClaim(store, "task-merge-from-claimed");
+    const done = settleClaim(store, item, now, "merged");
+    assert.equal(done.state, "done");
+    assert.equal(done.deliveryMode, "merged");
+    assert.equal(done.history.filter(entry => entry.action === "pr_merged").length, 1);
+    assert.equal(done.history.filter(entry => entry.action === "state:done").length, 0,
+      "a merge settle leaves no state:done stamp — the receipt leg must count pr_merged instead");
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("PR merge settle from in_progress files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = honestClaim(store, "task-merge-from-progress");
+    const done = settleClaim(store, item, now, "merged");
+    assert.equal(done.state, "done");
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("PR close settle from blocked files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = blockedClaim(store, "task-close-from-blocked");
+    const released = settleClaim(store, item, now, "closed");
+    assert.equal(released.state, "unclaimed");
+    assert.equal(released.owner, null);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("verb-shaped claimed -> done still files illegal_transition", () => {
+  const store = openStore();
+  try {
+    const { item, now } = claimedClaim(store, "task-verb-done");
+    // The registry row is moved claimed -> done under a verb action, with
+    // an honest single state:done stamp so only the legality leg can
+    // file: the settle allowance is gated on the pr_merged action, not
+    // on the target state.
+    const forged = {
+      ...item, state: "done",
+      history: [...item.history, { at: new Date(now + 5).toISOString(), agentId: "owner", action: "state:done", note: "verified" }]
+    };
+    driveClaim(store, forged, "state_changed", now + 5);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 1);
+    const findings = store.patrolFindings();
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].invariant, "claim_legality");
+    assert.equal(findings[0].kind, "illegal_transition");
+    assert.deepEqual(
+      [findings[0].detail.from, findings[0].detail.to, findings[0].detail.action],
+      ["claimed", "done", "state_changed"]);
   } finally { store.close(); }
 });
