@@ -187,6 +187,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
   paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
+  paths.add('server/public-agent-page.mjs'); // Public agent page (imported by server/store.mjs)
+  paths.add('server/routes/public-agent-page.mjs'); // Public agent page routes (imported by server/routes/table.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
