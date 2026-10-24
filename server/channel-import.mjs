@@ -74,7 +74,7 @@ export async function prepareTelegramFixturePage({ store, token, binding, connec
 }
 
 // Verified raw updates are journaled in the store (pending_channel_updates, see
-// channel-journal.mjs) until the account owner imports them through the
+// server/journal.mjs) until the account owner imports them through the
 // recorded-page path, so they survive a restart. Nothing is fetched or sent.
 export class ChannelWebhookInbox {
   #store;
