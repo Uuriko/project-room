@@ -466,7 +466,7 @@ export class ConversationDrafts {
 // dropped, so the next send is a new message rather than a near-duplicate
 // of the one already in the room. Unchanged pendings, request-mode pendings
 // (the composer is locked to that exact retry), and pendings with no landed
-// message are left alone. `retain` skips a command whose response or a later
+// message are left alone. The retain hook skips a command whose response or a later
 // confirmation is still in flight, so this cannot take the pending away
 // from that confirmation. Returns one entry per reconciled draft.
 export function reconcileLandedDrafts(drafts, messages, { retain = null } = {}) {
