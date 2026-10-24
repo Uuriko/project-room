@@ -70,8 +70,11 @@ export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
         ? review.basis.deliveryDigest === (item.delivery?.digest ?? null)
         : (review.basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1));
     // Delivered work is reviewable too — recordReview accepts it, and the
-    // verdict on the delivery is the review that matters (#3754).
-    const reviewable = open || item.state === "delivered" || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);
+    // verdict on the delivery is the review that matters (#3754). Only the
+    // kernel's reviewable states count (active + delivered,
+    // REVIEWABLE_CLAIM_STATES in work-claims.mjs): a done/closed claim with
+    // an open PR is not reviewable, however its PR looks (#3909 F10).
+    const reviewable = open || item.state === "delivered";
     if (reviewer && reviewable && item.owner && !reviewed) { out.reviews.push({ item }); continue; }
     if ((reviewer || tagged(item, "build-", viewerId, viewerSlug)) && (open || item.state === "unclaimed")) out.partnered.push({ item });
   }
