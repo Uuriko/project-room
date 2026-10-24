@@ -5,13 +5,15 @@ import { buildReplyCommand } from '../reply-actions.mjs';
 import { queueJobArtifacts } from './artifacts.mjs';
 import { canonical, digest, requireThat } from './store.mjs';
 import { policy, submit, runJob, getJob, admission, observe } from './executor.mjs';
+import { validateDataInputs } from './data-inputs.mjs';
 
 export const prefix = 'Project Room capability v1\n';
 export function parseCapabilityTask(body) {
   requireThat(typeof body === 'string' && body.startsWith(prefix) && Buffer.byteLength(body) <= 8192, 'invalid_capability_task');
   const task = JSON.parse(body.slice(prefix.length));
-  requireThat(task && canonical(Object.keys(task).sort()) === canonical(['capability', 'input', 'version']) && task.version === 1
+  requireThat(task && canonical(Object.keys(task).sort()) === canonical(task.dataInputs === undefined ? ['capability', 'input', 'version'] : ['capability', 'dataInputs', 'input', 'version']) && task.version === 1
     && typeof task.capability === 'string', 'invalid_capability_task');
+  if (task.dataInputs !== undefined) validateDataInputs(task.dataInputs);
   return task;
 }
 export async function runRoomCapability(store, { connection, requestMessageId, signal, observeResources = () => observe(store.directory) }) {
@@ -58,7 +60,7 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
     let job;
     const preflight = () => {
       authorize();
-      job = submit(store, { room: connection.roomId, operation, capability: task.capability, input: task.input, dispatch: 'room' });
+      job = submit(store, { room: connection.roomId, operation, capability: task.capability, input: task.input, dataInputs: task.dataInputs, dispatch: 'room' });
       if (job.state === 'queued') requireThat(admission(store, job, observeResources()).allowed, 'device_not_available');
       else requireThat(['completed', 'needs_attention', 'cancelled'].includes(job.state), 'job_requires_reconciliation');
     };
@@ -73,7 +75,8 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
           ...context.current.answerBasis, responseOutcome: 'answered', toMemberId: prepared.request.requesterId,
           workItemId: prepared.request.workItemId };
         store.db.prepare('INSERT OR IGNORE INTO room_results VALUES(?,?,?,?)').run(operation, job.id, canonical(binding), canonical(response));
-        if (job.state === 'queued') await runJob(store, job.id, { signal: prepared.signal, observation: observeResources(), dispatch: 'room' });
+        if (job.state === 'queued') await runJob(store, job.id, { signal: prepared.signal, observation: observeResources(), dispatch: 'room',
+          dataContext: { connection, requestMessageId, requesterId: context.request.requesterId, roomCreatedEventId: context.roomCreatedEventId } });
         const result = getJob(store, job.id);
         requireThat(['completed', 'needs_attention', 'cancelled'].includes(result.state), 'job_requires_reconciliation');
         queueEvidence(result, response);

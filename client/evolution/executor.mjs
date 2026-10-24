@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { observeResources, resourceGate } from './resources.mjs';
 import { canonical, digest, event, requireThat, transaction } from './store.mjs';
 import { activation, getPackage, verifyPackage } from './registry.mjs';
+import { validateDataInputs, materializeDataInputs } from './data-inputs.mjs';
 
 export function configure(store, policy) {
   requireThat(Array.isArray(policy?.rooms) && policy.rooms.length > 0 && policy.rooms.every(r => typeof r === 'string' && r.length > 0)
@@ -27,10 +28,11 @@ export function getJob(store, jobId) {
   const row = store.db.prepare('SELECT * FROM jobs WHERE id=?').get(jobId); requireThat(row, 'job_not_found');
   return { ...row, payload: JSON.parse(row.payload), result: row.result ? JSON.parse(row.result) : null };
 }
-export function submit(store, { room, operation, capability, input, candidateHash, dispatch = 'local' }) {
+export function submit(store, { room, operation, capability, input, dataInputs, candidateHash, dispatch = 'local' }) {
   requireThat(['local', 'room'].includes(dispatch), 'invalid_dispatch');
   requireThat([room, operation, capability].every(v => typeof v === 'string' && v.length > 0 && v.length <= 200), 'invalid_job');
-  const payload = canonical({ capability, input, candidateHash: candidateHash ?? null }); requireThat(Buffer.byteLength(payload) <= 65536, 'input_too_large');
+  if (dataInputs !== undefined) validateDataInputs(dataInputs);
+  const payload = canonical({ capability, input, ...(dataInputs === undefined ? {} : { dataInputs }), candidateHash: candidateHash ?? null }); requireThat(Buffer.byteLength(payload) <= 65536, 'input_too_large');
   return transaction(store, () => {
     const previous = store.db.prepare('SELECT * FROM jobs WHERE room=? AND operation=?').get(room, operation);
     if (previous) {
@@ -128,13 +130,14 @@ function artifactTree(directory, prefix = '') {
   }
   return files;
 }
-async function executeStep(store, job, step, ordinal, pack, directory, inputPath, outputPath, signal) {
+async function executeStep(store, job, step, ordinal, pack, directory, inputPath, outputPath, signal, dataPath) {
   verifyPackage(store, job.pin);
   const stdoutPath = join(directory, `${ordinal}.stdout`), stderrPath = join(directory, `${ordinal}.stderr`);
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(pack.directory, step.module), ...step.args], { detached: true, cwd: directory,
-      env: { PATH: '/usr/bin:/bin', ROOM_TASK_INPUT: inputPath, ROOM_TASK_OUTPUT: outputPath, ROOM_TASK_CPU_SLOTS: String(pack.manifest.resources.cpu) }, stdio: ['ignore', 'pipe', 'pipe'] });
+      env: { PATH: '/usr/bin:/bin', ROOM_TASK_INPUT: inputPath, ROOM_TASK_OUTPUT: outputPath, ROOM_TASK_CPU_SLOTS: String(pack.manifest.resources.cpu),
+        ...(dataPath ? { ROOM_TASK_DATA: dataPath } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
     const stdout = [], stderr = []; let total = 0, reason = null;
     const stop = why => { reason ??= why; try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Process already ended. */ } };
     const abort = () => stop('cancelled');
@@ -162,7 +165,7 @@ async function executeStep(store, job, step, ordinal, pack, directory, inputPath
     });
   });
 }
-export async function runJob(store, jobId, { signal, observation, dispatch = 'local' } = {}) {
+export async function runJob(store, jobId, { signal, observation, dispatch = 'local', dataContext } = {}) {
   const owner = randomUUID();
   const admitted = transaction(store, () => {
     const job = getJob(store, jobId);
@@ -187,11 +190,13 @@ export async function runJob(store, jobId, { signal, observation, dispatch = 'lo
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     mkdirSync(outputPath, { mode: 0o700 });
     writeFileSync(inputPath, canonical(job.payload.input), { mode: 0o400, flag: 'wx' });
+    requireThat(dispatch !== 'room' || !job.payload.dataInputs?.length || dataContext, 'data_room_context_required');
+    const data = job.payload.dataInputs?.length ? await materializeDataInputs(store, job, directory, { context: dataContext, signal }) : null;
     for (const [ordinal, step] of pack.manifest.steps.entries()) {
       signal?.throwIfAborted();
       const current = getJob(store, jobId); requireThat(current.state === 'running' && current.owner === owner, 'job_ownership_changed');
       store.db.prepare("INSERT INTO steps VALUES(?,?,'running',NULL)").run(jobId, ordinal);
-      const receipt = await executeStep(store, job, step, ordinal, pack, directory, inputPath, outputPath, signal);
+      const receipt = await executeStep(store, job, step, ordinal, pack, directory, inputPath, outputPath, signal, data?.path);
       transaction(store, () => {
         const current = getJob(store, jobId); requireThat(current.owner === owner && current.attempt === job.attempt, 'job_ownership_changed');
         store.db.prepare('UPDATE steps SET state=?,receipt=? WHERE job=? AND ordinal=?').run(receipt.passed ? 'completed' : 'failed', canonical(receipt), jobId, ordinal);
@@ -201,6 +206,7 @@ export async function runJob(store, jobId, { signal, observation, dispatch = 'lo
     }
     const artifacts = artifactTree(outputPath), passed = receipts.length === pack.manifest.steps.length && receipts.every(r => r.passed);
     const result = { passed, pin: job.pin, steps: receipts, artifacts, artifactDigest: digest(canonical(artifacts)), artifactDirectory: outputPath,
+      ...(data ? { dataInputs: data.manifest.entries.map(({ name, sha256, bytes, provenance, observedAt }) => ({ name, sha256, bytes, provenance, observedAt })) } : {}),
       elapsedMs: Date.now() - started, modelCalls: 'not_instrumented', acceptance: 'script_exit_and_artifact_hashes' };
     transaction(store, () => {
       const current = getJob(store, jobId); requireThat(current.owner === owner && current.attempt === job.attempt && ['running', 'cancelling'].includes(current.state), 'job_ownership_changed');
