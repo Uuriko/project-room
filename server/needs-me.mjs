@@ -62,12 +62,16 @@ const clip = text => {
 // the whole Board to learn what a listed claim is about. Source order: the
 // first acceptance criterion (what "done" looks like), else the newest
 // history note (create / finish / review notes ride the claim's history).
-const claimSnippet = claim => {
+const SYSTEM_HISTORY_ACTIONS = new Set(["claimed", "renewed", "retention_ack"]);
+export const claimSnippet = claim => {
   const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
   const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
   if (criterion) return clip(criterion);
   const history = Array.isArray(claim?.history) ? claim.history : [];
   for (let index = history.length - 1; index >= 0; index -= 1) {
+    // Bookkeeping notes (lease length, assignment, retention acks) say nothing
+    // about the work, so they never become the snippet.
+    if (SYSTEM_HISTORY_ACTIONS.has(history[index]?.action)) continue;
     const note = history[index]?.note;
     if (typeof note === "string" && note.trim()) return clip(note);
   }
