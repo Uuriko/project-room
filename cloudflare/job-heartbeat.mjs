@@ -239,8 +239,13 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     // That is a stall, not a wait — degrade so the surface (and anything
     // polling it) can see it; still not a 503: no tick has failed, the
     // work is late, and the streak fields below carry its age.
+    // Escrow unreachable (#4128): the keeper's stuck-state census found
+    // bounties no due branch can ever reach, in the last summary. An
+    // independent condition on a different summary field than the overdue
+    // streak; the two rules compose in either order (overdue first here).
     const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
-      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue' : null;
+      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue'
+      : enabled && !stale && !failing && record.lastSummary?.unreachable > 0 ? 'escrow_unreachable' : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,

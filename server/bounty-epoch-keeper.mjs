@@ -54,6 +54,34 @@ function query(store, sql, params = []) {
   catch { return null; } // a store that has never run escrow has no tables
 }
 
+// The stuck-state census (#4128): nonterminal bounties no DUE_WHERE
+// branch can ever reach. Every other nonterminal state becomes due with
+// time alone — proposed/funded/claimed/submitted at their (NOT NULL)
+// deadline, accepted at its challenge end, disputed unsettled at the
+// timeout or on a terminal dispute record, approved immediately. The
+// complement is exactly:
+// - accepted with challenge_ends_ms NULL: acceptWork always stamps the
+//   window, so a NULL is a legacy/corrupt row the due-scan skips forever;
+// - disputed with dispute_id NULL: no dispute exists to time out or
+//   resolve, so no branch fires;
+// - disputed with resolution_json already set: a resolution is recorded
+//   only by the transaction that also moves the bounty out of `disputed`,
+//   so this shape means that transaction's second half never landed —
+//   the due-scan requires resolution NULL and finalize agrees.
+// Observation only: the census never settles anything; it counts, and
+// jobs.mjs keeps a slow wake alive while the count is non-zero so job
+// health can grade the room degraded instead of the row rotting silently.
+const UNREACHABLE_WHERE = `(
+     (b.state = 'accepted' AND b.challenge_ends_ms IS NULL)
+  OR (b.state = 'disputed' AND (b.dispute_id IS NULL OR b.resolution_json IS NOT NULL))
+)`;
+
+export function escrowUnreachableCount(store) {
+  const rows = query(store,
+    `SELECT COUNT(*) AS n FROM bounty_records b WHERE ${UNREACHABLE_WHERE}`);
+  return rows ? Number(rows[0]?.n ?? 0) : 0;
+}
+
 function dueCount(store, now, { excludeApproved = false } = {}) {
   const rows = query(store,
     `SELECT COUNT(*) AS n FROM bounty_records b WHERE ${DUE_WHERE}${excludeApproved ? " AND b.state != 'approved'" : ""}`,
@@ -95,11 +123,17 @@ export function escrowEpochNextDueAt(store, now) {
 //            health instead of silent;
 // - failed / errors: per-bounty failures (closeEpoch already isolates
 //            them in its summary; a whole-room throw counts once). errors
-//            mirrors failed so the schedulers mark the tick failed.
+//            mirrors failed so the schedulers mark the tick failed;
+// - unreachable: the stuck-state census (#4128) — nonterminal bounties
+//            no due branch can ever reach. Computed before the due
+//            early-return: an unreachable-only room has due 0 and must
+//            still report its count, or the census would be invisible
+//            exactly where it matters.
 export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } = {}) {
   const summary = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 };
   if (!store?.db?.prepare) return summary;
+  summary.unreachable = escrowUnreachableCount(store);
   summary.due = dueCount(store, now);
   if (summary.due === 0) return summary;
   const roomRows = query(store,
