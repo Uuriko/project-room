@@ -1033,7 +1033,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
         // #3265: the poll door carries the heartbeat door's truncation
         // flag — a full page says whether more signals are waiting.
+        // BUILD-HEARTBEAT-CADENCE: it also carries the server-assigned
+        // cadenceSeconds — the poll is the contract door for pull-only
+        // seats that may never read a heartbeat response.
         return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+          cadenceSeconds: immediate.cadenceSeconds,
           more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
@@ -1055,6 +1059,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+        cadenceSeconds: fresh.cadenceSeconds,
         more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
