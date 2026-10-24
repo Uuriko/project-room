@@ -65,6 +65,6 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
  } catch (error) {
   if (error instanceof ServiceError && error.status === 401) return mcpCallError(requestId, { reason: 'auth_required', tool: name, hint: 'Use your current saved identity secret in the Authorization bearer header; public contributions require no Room admission.' });
   return result(requestId, error instanceof ServiceError ? { status: error.status, code: error.code, message: error.message }
-   : { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
+   : { status: 500, code: 'internal', message: 'The server hit an internal error and produced no result. Retry the request once; if it repeats, report code "internal" with the request id.' }, true);
  }
 }

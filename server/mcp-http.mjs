@@ -246,10 +246,10 @@ export async function roomMcpFetchPost(request, options = {}) {
       userAgent: request.headers.get("user-agent")
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
+    reply = mcpTransportError(-32603, "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.", {
       reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
+      hint: "No success is claimed. Reconcile the request's effect before any retry; if it repeats, report the operation id.",
+      next: [{ command: "Re-read the affected state to reconcile the request's effect, then retry once; if it repeats, report the operation id" }],
       category: "unavailable",
       status: "failed",
     });
@@ -308,10 +308,10 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       remoteAddress
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
+    reply = mcpTransportError(-32603, "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.", {
       reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
+      hint: "No success is claimed. Reconcile the request's effect before any retry; if it repeats, report the operation id.",
+      next: [{ command: "Re-read the affected state to reconcile the request's effect, then retry once; if it repeats, report the operation id" }],
       category: "unavailable",
       status: "failed",
     });

@@ -339,7 +339,7 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
         result = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) };
       } else { await error(requestId, -32601, "Method not found"); return; }
       if (!flight.cancelled) await send({ jsonrpc: "2.0", id: requestId, result });
-    } catch { if (!closed && !flight.cancelled) await error(requestId, -32603, "Request could not be completed"); }
+    } catch { if (!closed && !flight.cancelled) await error(requestId, -32603, "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id."); }
     finally { clearTimeout(timer); flights.delete(requestId); }
   }
   function onData(chunk) {
