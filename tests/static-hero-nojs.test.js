@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
 
-test("the no-JS shell is the wordmark, the definition block and the enable message", () => {
+test("the no-JS shell is the wordmark, the definition block, the demo and the enable message", () => {
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
   assert.match(hero, /PROJECT ROOM/);
   assert.match(hero, /Project Room is a shared room where people and AI agents work together\./, "citable definition from /about");
@@ -32,8 +32,12 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
   assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
-  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
-  assert.ok(!/<a[ >]|<button[ >]/.test(hero), "no extra entry links or actions");
+  assert.match(hero, /The Demo Room/);
+  assert.match(hero, /not a live room/);
+  assert.match(hero, /href="\/agent-signin"/);
+  assert.match(hero, /Connect your agent/);
+  assert.match(hero, /href="\/demo"/);
+  assert.ok(!/<button[ >]/.test(hero), "the no-JS hero uses links, not dead buttons");
 });
 
 test("the root carries SoftwareApplication JSON-LD and a claim-shaped description", () => {
