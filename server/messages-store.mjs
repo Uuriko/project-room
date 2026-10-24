@@ -666,10 +666,11 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
   for (const row of rows) {
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
-    // Before the 6h cadence. A standing park on an already-certified event
-    // clears on the next tick, including a quiet room whose head never moved.
+    // A stamped park on an already-certified event clears here, ahead of
+    // the 6h wait, including a quiet room whose head never moved. An
+    // unstamped row only starts its cadence clock below.
     try {
-      if (adoptCommittedProjection(store, row.room_id, row.sequence, row.event_id)) continue;
+      if (row.last_diagnosed_at && adoptCommittedProjection(store, row.room_id, row.sequence, row.event_id)) continue;
     } catch { /* the standing park remains; the diagnosis below can refresh it */ }
     if (head !== row.head_seq) {
       const block = rediagnoseBlock(store.db, row.room_id, row.sequence);

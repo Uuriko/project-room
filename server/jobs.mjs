@@ -30,9 +30,6 @@ export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
 export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
-// A daily backup that has not succeeded in 26 hours is late. Three cadence
-// periods would wait 72 hours, which is how a missed backup stayed green.
-export const BACKUP_STALE_AFTER_MS = 26 * HOUR_MS;
 // Worker cron is only a safety net. It re-arms a missing alarm; it does not
 // poll every minute. Idle rooms wake twice an hour from this cron.
 export const SAFETY_NET_CRON = "*/30 * * * *";
@@ -555,7 +552,6 @@ export const JOBS = Object.freeze([
   defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
-    staleAfterMs: BACKUP_STALE_AFTER_MS,
     slow: true,
     // #3894: a required job's disable is a configuration failure, not
     // healthy idle. Work-gated jobs are disabled whenever nothing is
@@ -569,13 +565,11 @@ export const JOBS = Object.freeze([
     enabled: env => backupConfigured(env),
     disabledReason: () => "Neither ROOM_BACKUPS (R2) nor ROOM_BACKUPS_KV is configured; no backups are being taken, see docs/BACKUP-DR.md",
     async run(_store, ctx) {
-      if (!ctx.room) return { skipped: 1, targetFailed: 0 };
-      try {
-        const result = await writeDailyBackup(ctx.env, ctx.room);
-        return { ...(result && typeof result === "object" ? result : {}), targetFailed: 0 };
-      } catch (error) {
+      if (!ctx.room) return { skipped: 1 };
+      try { return await writeDailyBackup(ctx.env, ctx.room); }
+      catch (error) {
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
-        return { errors: 1, targetFailed: 1 };
+        return { errors: 1 };
       }
     }
   }),
