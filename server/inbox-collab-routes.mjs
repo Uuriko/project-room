@@ -21,6 +21,7 @@
 import { ServiceError } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
+import { feedbackForAgent, resultCardForProposal } from "./result-card.mjs";
 
 const STATUS_BY_CODE = new Map(Object.entries({
   assign_invalid: 422, assign_conflict: 409, assign_forbidden: 403, assign_not_assigned: 404,
@@ -214,7 +215,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         }
         if (req.method === "GET") {
           const status = url.searchParams.get("status");
-          return json(res, 200, { proposals: collab.listApprovals(roomId, { status }) });
+          const proposals = collab.listApprovals(roomId, { status });
+          // cards: the same rows as result cards (step trail, waiting on,
+          // "Nothing sent yet") for the room UI and needs-you.
+          return json(res, 200, { proposals, cards: proposals.map(resultCardForProposal) });
         }
         return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
@@ -239,7 +243,9 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           editedBody: fields.editedBody ?? null,
           reason: fields.note ?? null,
         });
-        return json(res, 200, { proposal });
+        // feedback: the verdict as the proposing agent reads it, so a reject
+        // reason or requested edit reaches the agent instead of stopping here.
+        return json(res, 200, { proposal, feedback: feedbackForAgent(proposal) });
       }
       case "approval-resubmit": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
