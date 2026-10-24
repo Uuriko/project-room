@@ -31,7 +31,7 @@ test("message.posted names data.body when text is sent or body is missing", () =
   assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "  " } }), error => {
     assert.equal(error.status, 422);
     assert.equal(error.code, "invalid_command");
-    assert.equal(error.message, "body must contain non-whitespace text");
+    assert.equal(error.message, "body must contain text");
     return true;
   });
   assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: 7 } }), /Invalid field: body/);

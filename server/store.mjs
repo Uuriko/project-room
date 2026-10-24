@@ -809,35 +809,21 @@ function unknownCommandTypeMessage(type) {
   return `Unknown command type${given ? ` "${given}"` : ""}.${suggestion}${listed}`;
 }
 
-// Hidden characters that survive in a stored body let a caller smuggle text
-// into agent context and spoof mentions. ZWSP, word joiner and BOM never
-// carry a letter. A ZWJ stays only inside an emoji sequence. A ZWNJ stays
-// only between letters when one of them is outside ASCII, where it changes
-// the word (Arabic, Persian). Stray joiners are removed before the body is
-// stored.
-function stripHiddenMessageCharacters(body) {
+// Hidden characters in a stored body let a caller smuggle text into agent
+// context. U+200B, U+200C, U+2060 and U+FEFF are refused. A ZWJ (U+200D)
+// is refused unless it joins an emoji sequence. The body is not rewritten.
+function refusesHiddenMessageCharacter(body) {
   const chars = Array.from(body);
-  const emojiBefore = index => {
-    let cursor = index - 1;
-    while (cursor >= 0 && (chars[cursor] === "\uFE0F" || /\p{Emoji_Modifier}/u.test(chars[cursor]))) cursor -= 1;
-    return cursor >= 0 && /\p{Extended_Pictographic}/u.test(chars[cursor]);
+  const emojiBeside = (index, step) => {
+    let cursor = index + step;
+    while (cursor >= 0 && cursor < chars.length && (chars[cursor] === "\uFE0F" || /\p{Emoji_Modifier}/u.test(chars[cursor]))) cursor += step;
+    return cursor >= 0 && cursor < chars.length && /\p{Extended_Pictographic}/u.test(chars[cursor]);
   };
-  const emojiAfter = index => {
-    let cursor = index + 1;
-    while (cursor < chars.length && (chars[cursor] === "\uFE0F" || /\p{Emoji_Modifier}/u.test(chars[cursor]))) cursor += 1;
-    return cursor < chars.length && /\p{Extended_Pictographic}/u.test(chars[cursor]);
-  };
-  return chars.filter((char, index) => {
-    if (char === "\u200B" || char === "\u2060" || char === "\uFEFF") return false;
-    if (char === "\u200D") return emojiBefore(index) && emojiAfter(index);
-    if (char === "\u200C") {
-      const prev = chars[index - 1];
-      const next = chars[index + 1];
-      if (!prev || !next || !/\p{L}/u.test(prev) || !/\p{L}/u.test(next)) return false;
-      return /[^\u0000-\u007F]/u.test(prev) || /[^\u0000-\u007F]/u.test(next);
-    }
-    return true;
-  }).join("");
+  return chars.some((char, index) => {
+    if (char === "\u200B" || char === "\u200C" || char === "\u2060" || char === "\uFEFF") return true;
+    if (char === "\u200D") return !(emojiBeside(index, -1) && emojiBeside(index, 1));
+    return false;
+  });
 }
 
 export function validateCommand(command) {
@@ -871,16 +857,12 @@ export function validateCommand(command) {
     if (raw.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
     if (!raw.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
     if (/[\u202A-\u202E\u2066-\u2069]/u.test(raw)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
-    if (raw.trim() === "") fail(422, "invalid_command", "body must contain non-whitespace text");
-    const body = stripHiddenMessageCharacters(raw);
-    // r217 (reply-crew QA): ZWSP, Hangul filler and bare combining marks
-    // passed the trim() empty check, so a blank bubble posted and counted as
-    // unread. Refuse a body with no visible characters after stripping
-    // whitespace, default-ignorable code points and combining marks. ZWJ
-    // emoji, "e\u0301" and LRM/RLM marks keep working. Stray joiners are
-    // removed above so they are not stored beside real text.
-    if (!body.replace(/[\s\p{Default_Ignorable_Code_Point}\p{M}]/gu, "")) fail(422, "invalid_command", "body must contain visible characters (whitespace, zero-width and combining-mark-only bodies are refused)");
-    command.data.body = body;
+    if (raw.trim() === "") fail(422, "invalid_command", "body must contain text");
+    if (refusesHiddenMessageCharacter(raw)) fail(422, "invalid_command", "body must not contain hidden characters (U+200B, U+200C, U+2060, U+FEFF) outside an emoji sequence");
+    // r217 (reply-crew QA): Hangul filler and bare combining marks passed
+    // the trim() empty check, so a blank bubble posted and counted as unread.
+    // ZWJ emoji, "e\u0301" and LRM/RLM marks keep working.
+    if (!raw.replace(/[\s\p{Default_Ignorable_Code_Point}\p{M}]/gu, "")) fail(422, "invalid_command", "body must contain visible characters (whitespace, zero-width and combining-mark-only bodies are refused)");
   }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
