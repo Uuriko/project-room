@@ -1472,13 +1472,15 @@ export class AgentPluginStore {
     };
     if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room link between fan-out and dispatch is skipped,
+    // identity lost its room seat between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
     // pending, so a re-linked identity still receives it on a later drain.
-    const link = this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
-      .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return skip();
+    // #3881: the seat check goes through the shared guest-aware resolver
+    // (identity_links first, guest_members fallback), the same resolution
+    // the fan-out used. Probing identity_links only here skipped every
+    // trial seat's deliveries at every drain — never delivered, never
+    // dead-lettered.
+    if (row.room_id && memberIdForWakeIdentity(this.db, row.room_id, row.agent_id) === null) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
@@ -1642,13 +1644,22 @@ export class AgentPluginStore {
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
     // dead-letter as before.
+    // #3881: the seating test matches the fan-out and the dispatch
+    // re-check — an identity_links row OR a guest_members trial seat.
+    // The guest EXISTS is added only when the table exists, so a
+    // pre-schema database keeps the old query shape instead of throwing
+    // (the wake legs' never-throw posture, one layer down).
+    const guestSeatExists = this.db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='guest_members'").get()
+      ? " OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id)"
+      : "";
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
        WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)${guestSeatExists})))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
     const isolated = [];
