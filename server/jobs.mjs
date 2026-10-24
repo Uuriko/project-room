@@ -290,6 +290,17 @@ export function measureStoreGrowth(store) {
 
 // The name of the first gauge past its limit, or null. The projection
 // line is judged first: it is the nearer, per-room-actionable cap.
+// The relief outcome as flat, public-safe counts (no room ids).
+export function reliefCounts(relief) {
+  if (!relief || typeof relief !== "object") return {};
+  const out = {};
+  for (const [key, name] of [["attempted", "reliefAttempted"], ["relieved", "reliefRelieved"],
+    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"]]) {
+    if (Number.isFinite(relief[key])) out[name] = relief[key];
+  }
+  return out;
+}
+
 export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
   if (Number(gauges?.maxProjectionBytes) > limits.maxProjectionBytes) return "maxProjectionBytes";
   if (Number(gauges?.dbBytes) > limits.dbBytes) return "dbBytes";
@@ -600,7 +611,9 @@ export const JOBS = Object.freeze([
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
         relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
-        gauges = { ...measureStoreGrowth(store), relief };
+        // Flat counts: the heartbeat keeps only top-level numbers, so a
+        // nested relief object never reached /api/health/jobs.
+        gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
       }
       const breach = storeGrowthBreach(gauges);
       if (!breach) return gauges;
