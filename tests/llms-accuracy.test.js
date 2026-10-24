@@ -172,3 +172,25 @@ test("Routes compact core set names the same tools as the 18-tool paragraph", ()
       `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
   }
 });
+
+test("wake-poll sentence states the three-case hostId contract (#3640)", () => {
+  // The packet's one WAKE_POLL_INSTRUCTION sentence taught the
+  // pre-derivation contract ("Polling without `hostId` returns 422")
+  // after hostId derivation landed, misstating the common single-host
+  // cold start. The server (pollWakes, server/agent-plugin-routes.mjs)
+  // derives an omitted hostId from exactly one registered host: 404
+  // agent_not_registered with none, a successful poll with one, 422
+  // invalid_wake_poll with several; docs/openapi.yaml states the same
+  // contract. tests/agent-wake-poll.test.js pins the behaviour; this
+  // pins the packet sentence so the prose cannot drift back.
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!packet.includes("Polling without `hostId` returns 422"),
+      `${label} must not teach the pre-derivation wake-poll contract`);
+    assert.ok(packet.includes("with no registered host it returns 404 `agent_not_registered`"),
+      `${label} wake-poll sentence must state the no-host 404 case`);
+    assert.ok(packet.includes("with exactly one registered host the `hostId` is derived and the poll succeeds"),
+      `${label} wake-poll sentence must state the one-host derivation case`);
+    assert.ok(packet.includes("with several registered hosts it returns 422 `invalid_wake_poll`"),
+      `${label} wake-poll sentence must state the several-hosts 422 case`);
+  }
+});
