@@ -199,8 +199,15 @@ test("agent mode: the claimant cannot accept their own work, even as designated 
   // Kills BE-15 (acceptWork's distinct-from-claimant check removed). The
   // approver-authorization check passes here — the claimant IS the
   // designated verifier — so only the self-acceptance leg can refuse.
-  const { escrow } = makeEscrow();
-  const bounty = runToSubmitted(escrow, { approvalMode: "agent", verifier: GROK });
+  // DISPUTE-CORE: claimBounty now refuses a claim by the designated
+  // verifier outright, so this composition is no longer reachable through
+  // the API; the acceptWork leg remains the defense for rows recorded
+  // before that guard. Construct the legacy shape by row surgery: a clean
+  // agent-mode lifecycle under a distinct verifier, then the verifier
+  // column rewritten to the claimant.
+  const { escrow, db } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { approvalMode: "agent", verifier: INSTINCT });
+  db.prepare("UPDATE bounty_records SET verifier=? WHERE bounty_id=?").run(GROK, bounty.bountyId);
   expectCode(() => escrow.acceptWork(ROOM, bounty.bountyId,
     { acceptor: GROK, verifierAttestation: attest() }), "not_authorized");
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "submitted");

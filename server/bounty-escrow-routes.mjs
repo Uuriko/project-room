@@ -230,8 +230,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
-      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
+    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "disputeDeciderId", "approvalMode", "rubric", "idempotencyKey"] }))
+      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, disputeDeciderId?, approvalMode?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
       // #3269: bounty_post is a priced operation — charge it through the
       // shared spend path (chargeSpendBeforeCall, the same helper the MCP
@@ -245,12 +245,13 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       const spend = typeof credential === "string" && credential.length > 0
         ? chargeSpendBeforeCall(store, credential, "bounty_post", { roomId })
         : null;
-      const { bounty, receipt } = escrow.postBounty(roomId,
+      const { bounty, receipt, warnings } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
+          disputeDeciderId: payload.disputeDeciderId ?? null,
           approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
       spend?.settle();
-      return { roomId, bounty, receipt };
+      return { roomId, bounty, receipt, warnings };
     });
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —

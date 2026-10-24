@@ -433,13 +433,21 @@ test("no designated verifier: the dispute is refused before the bond locks (#372
 });
 
 test("a designated verifier who cannot sit (verifier is the claimant) also refuses the dispute (#3727)", () => {
-  const { escrow } = makeEscrow();
-  const bounty = post(escrow, { amount: 4, verifierId: GROK }); // verifier = future claimant
+  const { escrow, db } = makeEscrow();
+  const bounty = post(escrow, { amount: 4, verifierId: GROK }); // verifier = the claimant below
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
-  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
-  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+  // DISPUTE-CORE: claimBounty now refuses a claim by the designated verifier
+  // (or decider) before the bond locks, so this composition can no longer be
+  // built through the API. The dispute-time refusal remains the defense for
+  // rows whose claimant was recorded before that guard — construct that
+  // legacy shape by direct row surgery, the same technique as the #3727
+  // legacy-timeout test below: a clean lifecycle under a neutral claimant,
+  // then the claimant column rewritten to the verifier.
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: CODEX });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: CODEX,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  db.prepare("UPDATE bounty_records SET claimant=? WHERE bounty_id=?").run(GROK, bounty.bountyId);
   const challengerBefore = bal(escrow, INSTINCT);
   expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 1, grounds: "meh" }), "dispute_unavailable");
   assert.deepEqual(bal(escrow, INSTINCT), challengerBefore);
