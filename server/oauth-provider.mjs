@@ -9,6 +9,8 @@
 // - RFC 6749 authorization code flow with PKCE (S256 required)
 // - RFC 7009 token revocation
 // - RFC 8414 authorization server metadata (served by http.mjs)
+// - RFC 7591 dynamic client registration (registerDynamicClient;
+//   http.mjs serves the door and the RFC 9728 metadata that points to it)
 //
 // Scopes map to Project Room capabilities:
 //   rooms:read   list and read rooms the user belongs to
@@ -53,6 +55,66 @@ const base64url = bytes => Buffer.from(bytes).toString("base64url");
 const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
+
+// CURE-4445-SCOPE: the normal form for the reserved client-name
+// comparison in registerDynamicClient. One function, applied to BOTH
+// sides (candidate and provisioned names), so a provisioned name can
+// never become unmatchable by its own normalisation:
+//   1. NFKC — folds compatibility forms (fullwidth ＣｈａｔＧＰＴ reads
+//      as ChatGPT) and composes decomposed accents (Cafe + U+0301
+//      reads as Café) without stripping legitimate letters;
+//   2. strip Unicode format characters (category Cf — zero-width
+//      space/joiners, bidi controls, soft hyphen, tag characters) and
+//      the remaining default-ignorable code points (combining grapheme
+//      joiner U+034F, the Hangul fillers, Khmer inherent marks,
+//      variation selectors), so "ChatGPT" + U+200B reads as "ChatGPT";
+//   3. fold Cyrillic/Greek letters that are visual confusables of
+//      Latin letters (UTS #39 confusables) to the Latin letter, so a
+//      homoglyph "СhatGPT" (Cyrillic Es) reads as "ChatGPT" — NFKC
+//      alone folds none of these;
+//   4. the pre-cure trim + lowercase.
+// The form is comparison-only: names are stored exactly as given.
+const NAME_IGNORABLE_PATTERN =
+  /[\p{Cf}\u034F\u115F\u1160\u17B4\u17B5\u3164\uFE00-\uFE0F\uFFA0\u{E0100}-\u{E01EF}]/gu;
+const NAME_CONFUSABLES = new Map([
+  // Cyrillic lookalikes of Latin letters.
+  ["А", "A"], ["а", "a"], ["В", "B"], ["Е", "E"], ["е", "e"],
+  ["К", "K"], ["к", "k"], ["М", "M"], ["м", "m"], ["Н", "H"],
+  ["н", "h"], ["О", "O"], ["о", "o"], ["Р", "P"], ["р", "p"],
+  ["С", "C"], ["с", "c"], ["Т", "T"], ["т", "t"], ["У", "Y"],
+  ["у", "y"], ["Х", "X"], ["х", "x"], ["і", "i"], ["ј", "j"],
+  ["ѕ", "s"], ["һ", "h"], ["ԁ", "d"],
+  // Greek lookalikes of Latin letters.
+  ["Α", "A"], ["Β", "B"], ["Ε", "E"], ["Ζ", "Z"], ["Η", "H"],
+  ["Ι", "I"], ["Κ", "K"], ["Μ", "M"], ["Ν", "N"], ["Ο", "O"],
+  ["Ρ", "P"], ["Τ", "T"], ["Χ", "X"], ["α", "a"], ["ι", "i"],
+  ["κ", "k"], ["μ", "u"], ["ν", "v"], ["ο", "o"], ["ρ", "p"],
+  ["χ", "x"],
+  // CURE-4445-LOOKALIKE: Cherokee capitals that read as Latin capitals.
+  ["\u13AA", "A"], ["\u13F4", "B"], ["\u13DF", "C"], ["\u13A0", "D"],
+  ["\u13AC", "E"], ["\u13C0", "G"], ["\u13BB", "H"], ["\u13AB", "J"],
+  ["\u13E6", "K"], ["\u13DE", "L"], ["\u13B7", "M"], ["\u13E2", "P"],
+  ["\u13A1", "R"], ["\u13DA", "S"], ["\u13A2", "T"], ["\u13D9", "V"],
+  ["\u13B3", "W"], ["\u13C3", "Z"],
+  // Latin small capitals (NFKC leaves these alone).
+  ["\u0299", "b"], ["\u1D04", "c"], ["\u1D05", "d"], ["\u1D07", "e"],
+  ["\u0262", "g"], ["\u029C", "h"], ["\u026A", "i"], ["\u1D0A", "j"],
+  ["\u1D0B", "k"], ["\u029F", "l"], ["\u1D0D", "m"], ["\u0274", "n"],
+  ["\u1D0F", "o"], ["\u1D18", "p"], ["\u0280", "r"], ["\uA731", "s"],
+  ["\u1D1B", "t"], ["\u1D1C", "u"], ["\u1D20", "v"], ["\u1D21", "w"],
+  ["\u028F", "y"], ["\u1D22", "z"],
+]);
+// CURE-4445-LOOKALIKE: combining marks are dropped for the comparison only,
+// so "Cha\u0301tGPT" reads as "chatgpt". Names are still stored as given, and
+// an accented name registers unless it folds onto a provisioned name.
+const NAME_MARKS_PATTERN = /\p{M}/gu;
+const clientNameNormalForm = value => {
+  let folded = "";
+  for (const ch of value.normalize("NFKC").replace(NAME_IGNORABLE_PATTERN, "")) {
+    folded += NAME_CONFUSABLES.get(ch) ?? ch;
+  }
+  return folded.normalize("NFD").replace(NAME_MARKS_PATTERN, "").trim().toLowerCase();
+};
 
 export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent, isGrantAgentRemoved } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
@@ -125,11 +187,130 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     return Object.freeze({ clientId, name, redirectUris: Object.freeze([...redirectUris]) });
   };
 
+  // AGENT-DOOR-AUTH stage 3 (RFC 7591): dynamic client registration.
+  // The server mints the client_id (public door: no client-proposed ids),
+  // always under the `dcr_` prefix, so a dynamic registration can never
+  // hand out — or collide with — a provisioned client's id (a provisioned
+  // first-party client keeps its own principal treatment at approval).
+  // Dynamic clients inherit the provisioned-client TTL exactly: 30 days,
+  // refreshed when an identical registration (same name + same redirect
+  // URIs, order-sensitive like registerClient) arrives while the client
+  // is live — the repeat registration returns the same client instead of
+  // minting a duplicate. Validation failures carry the RFC 7591 error
+  // names; the HTTP door maps them verbatim.
+  // CURE-4445-DCR: a provisioned client's name is reserved here (the
+  // public door must not mint a look-alike of a connector the operator
+  // provisioned), and the accepted scope set is stored on the record.
+  const DYNAMIC_CLIENT_PREFIX = "dcr_";
+  const registerDynamicClient = ({ name, redirectUris, scopes } = {}) => {
+    const invalidMetadata = message => fail("invalid_client_metadata", message);
+    if (typeof name !== "string" || name.length === 0 || name.length > 80) {
+      invalidMetadata("client_name must be a non-empty string up to 80 chars");
+    }
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+      invalidMetadata("redirect_uris must be a non-empty array");
+    }
+    for (const uri of redirectUris) {
+      if (typeof uri !== "string") invalidMetadata("every redirect_uri must be a string");
+      let parsed;
+      try { parsed = new URL(uri); } catch { fail("invalid_redirect_uri", `redirect_uri is not a URL: ${uri}`); }
+      const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if (!(parsed.protocol === "https:" || (parsed.protocol === "http:" && isLocalhost))) {
+        fail("invalid_redirect_uri", "redirect_uri must be https (http allowed only for localhost)");
+      }
+      if (parsed.hash) fail("invalid_redirect_uri", "redirect_uri must not contain a fragment");
+    }
+    // CURE-4445-DCR (P2): the accepted scopes are stored on the client
+    // record — until now the door echoed the requested set in the
+    // registration response while nothing stored it. What is stored (and
+    // reported) is the intersection with the server's requestable set:
+    // unsupported scopes are dropped, and a request carrying nothing
+    // requestable refuses, exactly as the door refused unknown scopes
+    // before. No scopes argument means the full requestable set.
+    let storedScopes;
+    if (scopes === undefined) {
+      storedScopes = [...OAUTH_SCOPES];
+    } else {
+      if (!Array.isArray(scopes) || !scopes.every(s => typeof s === "string")) {
+        invalidMetadata("scope must be an array of scope strings");
+      }
+      storedScopes = [...new Set(scopes.filter(s => OAUTH_SCOPES.includes(s)))];
+      if (storedScopes.length === 0) {
+        invalidMetadata("scope must include at least one scope this server supports");
+      }
+    }
+    // CURE-4445-DCR (P1): a provisioned client's name is reserved at this
+    // public door. The reserved set is derived from the registry itself —
+    // every live-or-dormant record whose id the dynamic door did not mint
+    // (no `dcr_` prefix) is a provisioned client, registered by the
+    // operator through registerClient — so the set can never drift from
+    // the provisioned registry the way a hand-typed list would. Matching
+    // is on the CURE-4445-SCOPE normal form (clientNameNormalForm:
+    // NFKC + ignorable-stripped + confusable-folded + trim/lowercase),
+    // applied to both sides. The check runs over the whole registry
+    // before any identical-re-registration is honoured, so a pre-cure
+    // copycat record cannot refresh its way past the reservation.
+    const normalizeName = clientNameNormalForm;
+    const wantedName = normalizeName(name);
+    if (wantedName.length === 0) {
+      invalidMetadata("client_name is empty once formatting and ignorable characters are removed");
+    }
+    let identical = null;
+    if (typeof clientStore.values === "function") {
+      for (const existing of clientStore.values()) {
+        if (!existing || typeof existing.clientId !== "string") continue;
+        if (!existing.clientId.startsWith(DYNAMIC_CLIENT_PREFIX)) {
+          if (typeof existing.name === "string" && normalizeName(existing.name) === wantedName) {
+            invalidMetadata("client_name matches a provisioned client; that name is reserved");
+          }
+          continue;
+        }
+        if (isExpired(existing, now)) continue;
+        const sameName = existing.name === name;
+        const sameUris = existing.redirectUris.length === redirectUris.length
+          && existing.redirectUris.every((uri, index) => uri === redirectUris[index]);
+        if (sameName && sameUris) identical = existing;
+      }
+    }
+    if (identical) {
+      const issuedAt = identical.issuedAt ?? (identical.expiresAt - CLIENT_TTL_MS);
+      identical.expiresAt = now() + CLIENT_TTL_MS;
+      // A refresh with an explicit scope set replaces the stored set;
+      // without one the stored set (or the full set, for a pre-cure
+      // record that has none) stands.
+      identical.scopes = scopes === undefined
+        ? (Array.isArray(identical.scopes) ? identical.scopes : [...OAUTH_SCOPES])
+        : [...storedScopes];
+      clientStore.set(identical.clientId, identical);
+      return Object.freeze({
+        clientId: identical.clientId, name, redirectUris: Object.freeze([...redirectUris]), issuedAt,
+        scopes: Object.freeze([...identical.scopes]),
+      });
+    }
+    let clientId;
+    do { clientId = DYNAMIC_CLIENT_PREFIX + newSecret(18); } while (clientStore.get(clientId));
+    const issuedAt = now();
+    const client = {
+      clientId, name, redirectUris: Object.freeze([...redirectUris]),
+      expiresAt: issuedAt + CLIENT_TTL_MS, issuedAt, scopes: Object.freeze([...storedScopes]),
+    };
+    clientStore.set(clientId, client);
+    return Object.freeze({
+      clientId, name, redirectUris: client.redirectUris, issuedAt,
+      scopes: Object.freeze([...storedScopes]),
+    });
+  };
+
   const getClient = clientId => {
     const client = clientStore.get(clientId);
     if (!client) return null;
     if (isExpired(client, now)) { clientStore.delete(clientId); return null; }
-    return Object.freeze({ clientId: client.clientId, name: client.name, redirectUris: Object.freeze([...client.redirectUris]) });
+    return Object.freeze({
+      clientId: client.clientId, name: client.name, redirectUris: Object.freeze([...client.redirectUris]),
+      // The scope set stored at registration (dynamic clients); null for
+      // provisioned clients, which carry no per-client scope set.
+      scopes: Array.isArray(client.scopes) ? Object.freeze([...client.scopes]) : null,
+    });
   };
 
   const validateScopes = scopes => {
@@ -150,6 +331,21 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(typeof redirectUri === "string" && client.redirectUris.includes(redirectUri),
       "redirect_uri must exactly match a registered redirect URI");
     const validScopes = validateScopes(scopes);
+    // CURE-4445-SCOPE: a client with a stored registration set — the
+    // dynamic (dcr_) clients whose accepted scopes CURE-4445-DCR stored
+    // on the record; getClient returns null scopes for provisioned
+    // clients, which keep the pre-cure behaviour exactly — may not be
+    // authorized beyond that set. The cap is enforced here, at
+    // validation, so the consent screen only ever lists within-set
+    // scopes, and the code -> token -> refresh chain (which only ever
+    // carries the validated/record scopes forward) has no widening
+    // path around the consent screen.
+    if (Array.isArray(client.scopes)) {
+      const beyond = validScopes.filter(scope => !client.scopes.includes(scope));
+      if (beyond.length > 0) {
+        fail("invalid_scope", `scopes beyond this client's registered set: ${beyond.join(", ")}`);
+      }
+    }
     // state is optional per RFC but recommended; pass through opaque.
     check(state === undefined || (typeof state === "string" && state.length <= 1024),
       "state must be a string up to 1024 chars if given");
@@ -524,6 +720,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
 
   return Object.freeze({
     registerClient,
+    registerDynamicClient,
     getClient,
     validateAuthorizationRequest,
     issueCode,

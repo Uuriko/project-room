@@ -118,7 +118,7 @@ import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: ope
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
-import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { createOAuthProvider, OAUTH_SCOPES, OAuthProviderError } from "./oauth-provider.mjs";
 import { createGrantAgentResolver, createGrantAgentRemovalCheck } from "./oauth-grant-agents.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -904,6 +904,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!granted) reject(403, "insufficient_scope", `OAuth token lacks the ${scope} scope`);
     }
   }
+  // AGENT-DOOR-AUTH stage 3 (RFC 9728 §5.1): a 401 for an OAuth bearer
+  // token carries the resource_metadata challenge pointer so a client
+  // can discover the protected-resource metadata (and, through it, this
+  // authorization server + the registration door). Only the OAuth-token
+  // 401 sites use it — every other 401 consumer keeps its exact shape.
+  const oauthChallengeHeaders = () => ({
+    "WWW-Authenticate": `Bearer realm="project-room", resource_metadata="${expectedOrigin()}/.well-known/oauth-protected-resource", charset="UTF-8"`,
+  });
   function roomAuth(selected, roomId, fence) {
     if (selected.mode === "account") return store.authenticateAccountSession(selected.token, roomId, fence);
     if (selected.mode === "oauth") {
@@ -913,7 +921,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // store then proves membership only. No session binding, no CSRF
       // token — an OAuth grant is not a session.
       const grant = selected.oauthGrant ?? oauthProvider.verifyAccessToken(selected.token);
-      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       // AGENT-DOOR-AUTH stage 2 (REV-4092-S1 note N1, seam 2 of 3): the
       // grant's principal decides the binding. Connector grants bind to
       // the owned AGENT member; account-principal grants (the first-party
@@ -926,7 +934,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } else if (grant.principal === "account") {
         bound = store.authenticateOAuthAccount(grant.userId, roomId);
       } else {
-        reject(401, "unauthenticated", "Session or key expired or revoked");
+        reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       }
       return { ...bound, credentialHash: rateHash(selected.token), credentialScope: "oauth", kind: "oauth",
         oauthClientId: grant.clientId, oauthScopes: grant.scopes,
@@ -942,7 +950,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Unknown/expired/revoked/deactivated-account tokens all verify as
       // null and fail with the same 401 shape as any other bad credential.
       const grant = oauthProvider.verifyAccessToken(bearerToken);
-      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked");
+      if (!grant) reject(401, "unauthenticated", "Session or key expired or revoked", oauthChallengeHeaders());
       const selected = { token: bearerToken, bearer: true, mode: "oauth", oauthGrant: grant };
       enforceOAuthRouteScope(req, url, grant.scopes);
       return selected;
@@ -1725,11 +1733,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           authorization_endpoint: issuer + "/oauth/authorize",
           token_endpoint: issuer + "/oauth/token",
           revocation_endpoint: issuer + "/oauth/revoke",
+          registration_endpoint: issuer + "/oauth/register",
           response_types_supported: ["code"],
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
           scopes_supported: [...OAUTH_SCOPES],
           token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
+        });
+      }
+      // GET /.well-known/oauth-protected-resource — protected-resource
+      // metadata (RFC 9728). The resource is the whole API on this
+      // origin, so the bare well-known form is the applicable one (the
+      // path-suffixed form exists for resources identified by a path).
+      // Unauthenticated like the other well-known metadata on this door;
+      // the 401 challenges on both resource doors point here (§5.1).
+      if (url.pathname === "/.well-known/oauth-protected-resource" && req.method === "GET") {
+        const resource = expectedOrigin();
+        return json(res, 200, {
+          resource,
+          authorization_servers: [resource],
+          scopes_supported: [...OAUTH_SCOPES],
+          bearer_methods_supported: ["header"],
+          resource_documentation: resource + "/llms.txt",
         });
       }
       // GET /.well-known/feedback — /feedback standard discovery metadata.
@@ -1783,7 +1808,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
           }
         } catch (error) {
-          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          // CURE-4445-SCOPE: provider errors carry their RFC 6749 error
+          // name (invalid_scope for a beyond-registration-set ask) —
+          // pass them through like the registration door does, instead
+          // of flattening every refusal to invalid_request.
+          const code = error instanceof ServiceError || error instanceof OAuthProviderError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
         }
         const scopeLabels = {
@@ -1818,7 +1847,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const nativeAccountLabel = [nativeAccountName, nativeAccountEmail].filter(Boolean).join(" · ") || "Current signed-in account";
         const nativeConsentWarning = validated.client.clientId === "project-room-macos"
           ? `<p data-native-account>Account: ${esc(nativeAccountLabel)}</p><p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>` : "";
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul>${agentConsentNote}<p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        // CURE-4445-DCR: a dynamically registered client (only the public
+        // registration door mints dcr_ ids) must not borrow a provisioned
+        // client's trust. Its consent screen names the redirect host the
+        // flow will deliver to — plus any other hosts it registered — and
+        // marks the client as self-registered and not verified, in the
+        // consent decision area directly above the Allow/Deny form.
+        // Provisioned clients keep the exact pre-cure screen.
+        const dynamicClientNote = validated.client.clientId.startsWith("dcr_")
+          ? (() => {
+              const hostOf = uri => { try { return new URL(uri).host; } catch { return uri; } };
+              const redirectHost = hostOf(validated.redirectUri);
+              const otherHosts = [...new Set(validated.client.redirectUris.map(hostOf))]
+                .filter(host => host !== redirectHost);
+              return `<p data-dynamic-client><strong>${esc(validated.client.name)}</strong> registered itself with Project Room; it is not verified or approved by Project Room. If you allow, your browser will be sent to <strong>${esc(redirectHost)}</strong>${otherHosts.length ? ` (it also registered ${otherHosts.map(host => esc(host)).join(", ")})` : ""}. Only continue if you recognise that address.</p>`;
+            })()
+          : "";
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul>${agentConsentNote}<p>${esc(revocationHelp)}</p>${nativeConsentWarning}${dynamicClientNote}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Referrer-Policy", "same-origin");
         // Browsers apply form-action to every redirect hop of the Allow POST,
@@ -1879,7 +1924,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
           }
         } catch (error) {
-          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          const code = error instanceof ServiceError || error instanceof OAuthProviderError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
         }
         const decision = data.decision;
@@ -1961,6 +2006,71 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         oauthProvider.revoke(data.token);
         return json(res, 200, {});
+      }
+      // POST /oauth/register — dynamic client registration (RFC 7591),
+      // AGENT-DOOR-AUTH stage 3. Public door for public clients: the
+      // server mints the client_id (never client-proposed, so a dynamic
+      // registration cannot claim a provisioned client's identity), no
+      // secret is issued (token_endpoint_auth_method "none" + PKCE,
+      // exactly as the RFC 8414 document advertises), and the registered
+      // client still faces the human consent screen before any token
+      // exists. Errors use the RFC 7591 §3.2.2 names. Rate limited per
+      // address under the same rate() discipline as the other OAuth
+      // endpoints: registration writes a durable client, so it takes
+      // the authorize family's tighter budget, not the token family's.
+      if (url.pathname === "/oauth/register" && req.method === "POST") {
+        rate(`oauth-register:${remoteAddress}`, 30);
+        const data = await body(req);
+        const invalidMetadata = message => json(res, 400, { error: "invalid_client_metadata", error_description: message });
+        if (data.grant_types !== undefined
+          && (!Array.isArray(data.grant_types) || data.grant_types.length === 0
+            || !data.grant_types.every(g => g === "authorization_code" || g === "refresh_token")
+            || !data.grant_types.includes("authorization_code"))) {
+          return invalidMetadata("grant_types must include authorization_code (refresh_token optional); no other grant types are supported");
+        }
+        if (data.response_types !== undefined
+          && (!Array.isArray(data.response_types) || data.response_types.length === 0
+            || !data.response_types.every(r => r === "code"))) {
+          return invalidMetadata("response_types must be [\"code\"]");
+        }
+        if (data.token_endpoint_auth_method !== undefined && data.token_endpoint_auth_method !== "none") {
+          return invalidMetadata("token_endpoint_auth_method must be \"none\" (public clients with PKCE)");
+        }
+        // CURE-4445-DCR: the requested scopes go to the provider, which
+        // stores the requestable intersection on the client record; the
+        // response reports the stored set, not an echo of the request.
+        // A request carrying no supported scope still refuses with
+        // invalid_client_metadata (provider), as unknown scopes did here
+        // before. An absent or empty scope means the full set.
+        let requestedScopes;
+        if (data.scope !== undefined) {
+          if (typeof data.scope !== "string") return invalidMetadata("scope must be a space-separated string");
+          const parsedScopes = data.scope.split(" ").filter(Boolean);
+          if (parsedScopes.length > 0) requestedScopes = parsedScopes;
+        }
+        let registered;
+        try {
+          registered = oauthProvider.registerDynamicClient({
+            name: data.client_name === undefined ? "Dynamic client" : data.client_name,
+            redirectUris: data.redirect_uris,
+            scopes: requestedScopes,
+          });
+        } catch (error) {
+          if (error instanceof OAuthProviderError) {
+            return json(res, 400, { error: error.code, error_description: error.message });
+          }
+          throw error;
+        }
+        return json(res, 201, {
+          client_id: registered.clientId,
+          client_id_issued_at: Math.floor(registered.issuedAt / 1000),
+          client_name: registered.name,
+          redirect_uris: [...registered.redirectUris],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+          scope: registered.scopes.join(" "),
+        });
       }
       // GET /api/oauth/sessions — list the signed-in account's active OAuth
       // sessions (F-02). One entry per live token family: client, issued-at,
