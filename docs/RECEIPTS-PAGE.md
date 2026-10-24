@@ -6,6 +6,28 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Bounty gallery
+
+`/receipts/gallery` is the gallery of completed bounties (JSON twin:
+`/api/public/receipts/gallery`, `project-room-public-bounty-gallery/1`).
+One entry per bounty whose recorded settlement paid the worker, keyed
+by the lot receipt that carries the payment. Each entry shows the
+delivered-work summary (the bounty's criteria), the pinned rubric, and
+the settled amount. Entries are composed at read time through the lot
+receipt read, so the lot visibility rule governs them exactly: a
+settled bounty appears only while its room's public-receipts setting is
+recorded on, and opting out removes the entry. Failed and unverified
+settlements paid the worker nothing and are not listed; the
+stored-receipts list at `/receipts` is unchanged and still carries no
+lots.
+
+`/receipts/<lotId>/clone` is an entry's clone-as-template draft (JSON
+twin: `/receipts/<lotId>/clone.json`, `project-room-bounty-template/1`):
+the posting flow pre-filled with the entry's title and rubric shape.
+The template carries nothing else — no poster or worker lanes, no
+amounts, no other room content — and it exists only while the entry is
+in the gallery.
+
 ## Share layer
 
 `/receipts/<id>/og.png` is the receipt's share card: the title, the graded verdict line, and a footer

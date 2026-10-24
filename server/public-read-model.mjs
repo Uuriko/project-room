@@ -1124,6 +1124,146 @@ export function publicLotReceiptById(store, id) {
   };
 }
 
+
+// --- Public bounty gallery (#3526) ---------------------------------------
+//
+// The gallery of completed bounties: one entry per bounty whose recorded
+// settlement paid the worker (settlement.workerMillis > 0), keyed by the
+// lot receipt that carries the payment — the payout lot of an epoch
+// settlement, the approve lot of a dispute split. Entries are composed
+// through publicLotReceiptById, so the gallery applies exactly the lot
+// visibility rule the detail page applies (the one definition in
+// public-visibility.mjs): operator unpublish, the room's recorded
+// public-receipts opt-in (#3594 — never recorded and recorded off are
+// both private), and the owner's directory receipts toggle. Opting out
+// removes the entry, because every read re-composes it. Failed and
+// unverified settlements paid the worker nothing and are not worked
+// examples; unsettled bounties have no settlement and never compose.
+//
+// Entry fields are public by construction: the title and criteria the
+// poster wrote for the bounty (the delivered-work summary), the pinned
+// rubric, and the settlement's own amounts. Poster/worker lanes, journal
+// movements, and hashes stay on the lot detail receipt, not the gallery.
+
+const GALLERY_BOUNTY_SCAN_CAP = 500;
+
+function galleryRubricOf(store, bountyId) {
+  let row = null;
+  try {
+    row = store.db.prepare("SELECT criteria, rubric_json FROM bounty_records WHERE bounty_id=?").get(bountyId);
+  } catch { row = null; }
+  const summary = cleanText(row?.criteria, 500);
+  let parsed = [];
+  try { parsed = JSON.parse(row?.rubric_json ?? "null"); } catch { parsed = []; }
+  const criteria = (Array.isArray(parsed) ? parsed : [])
+    .map(criterion => ({
+      criterionId: cleanText(criterion?.criterionId, 64),
+      description: cleanText(criterion?.description, 500),
+    }))
+    .filter(criterion => criterion.criterionId && criterion.description)
+    .slice(0, 50);
+  // A bounty posted without an explicit rubric carries the pinned v1
+  // derived from its criteria (bounty-escrow's defaultRubricFor); a row
+  // whose pin predates rubric_json reads the same way here.
+  if (!criteria.length && summary) criteria.push({ criterionId: "c1", description: summary });
+  return { summary, criteria };
+}
+
+function galleryEntryForLot(store, receipt) {
+  const { summary, criteria } = galleryRubricOf(store, receipt.lot.bountyId);
+  const settlement = receipt.lot.settlement ?? {};
+  return {
+    id: receipt.id,
+    title: receipt.title,
+    source: "bounty-lot",
+    room: receipt.room ?? null,
+    at: settlement.settledAt ?? receipt.at,
+    summary,
+    rubric: {
+      version: receipt.lot.rubricVersion ?? null,
+      hash: receipt.lot.rubricHash ?? null,
+      criteria,
+    },
+    settled: {
+      kind: settlement.kind ?? null,
+      amountCredits: settlement.workerCredits ?? null,
+      settledAt: settlement.settledAt ?? null,
+    },
+    awardCredits: receipt.lot.awardCredits ?? null,
+    receiptHref: `/receipts/${receipt.id}`,
+    cloneHref: `/receipts/${receipt.id}/clone`,
+  };
+}
+
+export function queryPublicBountyGallery(store, { cursor = null, limit = 20 } = {}) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    return { error: { status: 422, code: "invalid_receipt_query", message: "limit must be an integer from 1 to 50" } };
+  }
+  if (cursor != null && (typeof cursor !== "string" || !LOT_RECEIPT_ID.test(cursor))) {
+    return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+  }
+  let bountyIds = [];
+  try {
+    bountyIds = store.db.prepare("SELECT DISTINCT bounty_id AS bountyId FROM bounty_journal WHERE bounty_id IS NOT NULL ORDER BY bounty_id ASC")
+      .all().map(row => row.bountyId).filter(id => typeof id === "string" && id);
+  } catch { return { entries: [], nextCursor: null }; } // a store with no escrow ledger has no gallery
+  const entries = [];
+  for (const bountyId of bountyIds.slice(0, GALLERY_BOUNTY_SCAN_CAP)) {
+    let lotIds = [];
+    try {
+      lotIds = store.db.prepare("SELECT DISTINCT lot_id AS lotId FROM bounty_journal WHERE bounty_id=? AND lot_id IS NOT NULL ORDER BY lot_id ASC")
+        .all(bountyId).map(row => row.lotId);
+    } catch { continue; }
+    const paid = [];
+    for (const lotId of lotIds) {
+      const receipt = publicLotReceiptById(store, lotId);
+      if (!receipt) continue;
+      const workerMillis = receipt.lot?.settlement?.workerMillis;
+      if (typeof workerMillis === "number" && workerMillis > 0) paid.push(receipt);
+    }
+    if (!paid.length) continue;
+    const representative = paid.find(receipt => receipt.lot.kind === "payout")
+      ?? paid.find(receipt => receipt.lot.kind === "approve")
+      ?? paid[0];
+    entries.push(galleryEntryForLot(store, representative));
+  }
+  entries.sort((a, b) => a.at === b.at ? (a.id < b.id ? -1 : 1) : (a.at < b.at ? 1 : -1));
+  let start = 0;
+  if (cursor != null) {
+    const index = entries.findIndex(entry => entry.id === cursor);
+    if (index < 0) {
+      return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+    }
+    start = index + 1;
+  }
+  const page = entries.slice(start, start + limit);
+  const nextCursor = start + limit < entries.length ? page.at(-1)?.id ?? null : null;
+  return { entries: page, nextCursor };
+}
+
+// Clone-as-template (#3526): the pre-filled bounty draft a gallery entry
+// opens. It carries only what the gallery itself publishes — the title
+// and the rubric shape — never poster/worker lanes, amounts, journal
+// data, or any other room content. The criteria text is rebuilt from the
+// rubric descriptions, so a clone posts against the same pinned shape
+// the original was judged by. Null for any lot the gallery would not
+// list: invisible, unsettled, or settled without paying the worker.
+export function publicBountyTemplate(store, lotId) {
+  const receipt = typeof lotId === "string" ? publicLotReceiptById(store, lotId) : null;
+  if (!receipt) return null;
+  const workerMillis = receipt.lot?.settlement?.workerMillis;
+  if (!(typeof workerMillis === "number" && workerMillis > 0)) return null;
+  const entry = galleryEntryForLot(store, receipt);
+  return {
+    schema: "project-room-bounty-template/1",
+    sourceReceiptId: receipt.id,
+    title: entry.title,
+    criteria: entry.rubric.criteria.map(criterion => `${criterion.criterionId}: ${criterion.description}`).join("\n"),
+    rubric: entry.rubric.criteria,
+    startHref: receipt.startHref,
+  };
+}
+
 export function collectPublicReceipts(store) {
   const visibility = receiptVisibilitySqlFor(store.db);
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()

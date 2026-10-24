@@ -24,6 +24,8 @@ import {
   publicReceiptById,
   listPublicReceiptSitemap,
   collectPublicReceipts,
+  queryPublicBountyGallery,
+  publicBountyTemplate,
   roomProofRows,
 } from "./public-read-model.mjs";
 
@@ -35,6 +37,8 @@ export {
   publicReceiptById,
   listPublicReceiptSitemap,
   collectPublicReceipts,
+  queryPublicBountyGallery,
+  publicBountyTemplate,
 };
 
 // Verify-at-read-time is part of this public receipts surface.
