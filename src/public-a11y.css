@@ -23,6 +23,9 @@
   .app-shell:has(> #workspace-nav:not([hidden])) { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
 }
 .join-page { max-width: 34rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+/* WCAG 2.5.8. Headless and desktop pointers are fine pointers, so the
+   coarse 44px floor never reaches these links. 24px is the minimum. */
+.join-page a { display: inline-block; max-width: 100%; min-height: 24px; }
 .join-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e2e2); border-radius: 12px; padding: 1.5rem; }
 .join-card h2 { font-size: 1.35rem; margin: 0 0 .5rem; font-weight: 650; }
 /* The error screen reads as an error state at a glance, not just another card. */

@@ -58,7 +58,7 @@ const pageStyle = () => `:root{color-scheme:dark}
 body{margin:0;background:#10141a;color:#e8eef6;font:17px/1.55 system-ui,sans-serif}
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
-a{color:#8eb6ff}
+a{color:#8eb6ff;display:inline-block;max-width:100%;min-height:24px}
 .card{border-top:1px solid #2a3340;padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .meta{color:#9aa6b2;font-size:.9rem}
 footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6b2}
