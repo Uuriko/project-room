@@ -765,3 +765,8 @@ export default {
     if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
+
+// Per-room objects stay classified and unwired. Fetch still names
+// invite-only-pilot. This re-export keeps the classification on the worker
+// import graph; it does not open a second Durable Object.
+export { tableHome } from '../server/room-shard.mjs';
