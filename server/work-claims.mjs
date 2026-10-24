@@ -50,6 +50,7 @@
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { isReservedId } from "../src/events.js";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -165,6 +166,20 @@ const dependsOnOf = (value, selfId) => {
   });
   return Object.freeze([...new Set(ids)].sort());
 };
+// BOARD-LIFECYCLE-1 (QA card qa-claim-id-unreachable): the ids a caller may
+// CREATE with. The route pattern ([A-Za-z0-9_-]{1,128}) accepts a leading
+// _ or - and the reserved prototype names, while the command layer's
+// validId (src/events.js) requires a leading alphanumeric and denies the
+// reserved names — so claims created as _draft, -wip, constructor,
+// prototype, or __proto__ list on the board but can never be read or
+// claimed. Creatable = the intersection of both rules: every id accepted
+// here is reachable on every path. Already-created residue ids are NOT
+// re-validated anywhere (workOf keeps reading them, owners can still
+// close them); they are named in the fixing PR as residue.
+export const CLAIM_ID_RULE = "a claim id that starts with a letter or digit, uses only letters, digits, _ or - (1..128 characters), and is not a reserved name (constructor, prototype, __proto__)";
+const CREATABLE_CLAIM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+export const isCreatableClaimId = value =>
+  typeof value === "string" && CREATABLE_CLAIM_ID_PATTERN.test(value) && !isReservedId(value);
 // Provenance (orch-provenance-rollback): parentClaimId names the claim whose
 // output or premise this claim builds on — the edge the provenance walk
 // follows downstream. evidenceRefs are documentary pointers (sha256: content
@@ -1664,6 +1679,57 @@ export function releaseExpired(items, now) {
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });
+}
+// BOARD-LIFECYCLE-1 (QA card qa-removed-member-leases): when a member's
+// access ends, their live claims release in the same act. Without this the
+// board strands the work — and every file lease it holds — until the lease
+// lapses: peers are refused with 409s naming a holder who is locked out
+// and cannot release. The clearing set mirrors releaseExpired (a round
+// ends: owner, lease, declared files, attestations, reviews, and the
+// round's delivery state all clear). Done work is not live and is never
+// touched — its record, and its author's attribution in history, stands.
+// Returns a new list; untouched entries keep their identity.
+export function releaseClaimsOfMember(items, memberId, { now } = {}) {
+  check(Array.isArray(items), "items must be a list");
+  check(typeof memberId === "string" && memberId.length > 0, "memberId must be a member id");
+  const atMs = nowMsOf(now);
+  return items.map(entry => {
+    const item = workOf(entry);
+    if (item.owner !== memberId || !ACTIVE_CLAIM_STATES.includes(item.state)) return item;
+    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
+      delivery: null, verification: null, deliveryGeneration: 0,
+      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    return withHistory(released, atMs, memberId, "released", "released on member removal");
+  });
+}
+// BOARD-LIFECYCLE-1 (QA card qa-closed-dependency-strands): a dependency
+// in the terminal "closed" state can never be finished, so a dependent
+// whose prerequisite was closed is stranded unless the edge is dropped —
+// and before this function there was no in-API way to drop one. The drop
+// is deliberately narrow: the requested list may only REMOVE entries,
+// and every removed entry must name a claim whose current state is
+// "closed" (stateOf is supplied by the caller, which owns the board).
+// Live or done dependencies keep their edges: finishing them, or having
+// a coordinator reassign the work, is the way through. Returns the item
+// unchanged when nothing was dropped.
+export function dropClosedDependencies(work, agentId, { dependsOn, stateOf, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof stateOf === "function", "stateOf must look up a dependency's current state");
+  const next = dependsOnOf(dependsOn ?? [], item.id);
+  const current = item.dependsOn ?? [];
+  const added = next.filter(id => !current.includes(id));
+  check(added.length === 0,
+    `dependsOn can only drop closed dependencies — adding ${added.map(id => `"${id}"`).join(", ")} is not a drop; claim with the dependency or open a new claim`);
+  const dropped = current.filter(id => !next.includes(id));
+  for (const id of dropped) {
+    const state = stateOf(id);
+    check(state === "closed",
+      `dependency "${id}" is ${state ?? "missing"} — only a closed dependency can be dropped; finish it or ask the coordinator to reassign the dependency`);
+  }
+  if (dropped.length === 0) return item;
+  const updated = { ...item, dependsOn: next };
+  return withHistory(updated, atMs, agent, "updated",
+    `dropped closed ${dropped.length === 1 ? "dependency" : "dependencies"}: ${dropped.map(id => `"${id}"`).join(", ")}`);
 }
 // Review-policy gate for the done transition. policy resolves from the
 // explicit option, then the work item, then self_attested. verifyMembers is

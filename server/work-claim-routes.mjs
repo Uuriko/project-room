@@ -41,6 +41,7 @@ import {
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
   openClaimCount, STALE_UNCLAIMED_DAYS,
+  CLAIM_ID_RULE, isCreatableClaimId, dropClosedDependencies, creatorOf,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -122,6 +123,17 @@ const invalidInput = (reject, expected) => reject(422, "invalid_claim_input", `E
 
 const claimIdOf = (reject, id) => {
   if (typeof id !== "string" || !CLAIM_ID_PATTERN.test(id)) invalidInput(reject, "a work id matching [A-Za-z0-9_-]{1,128}");
+  return id;
+};
+
+// BOARD-LIFECYCLE-1 (QA card qa-claim-id-unreachable): create validates the
+// id against the creatable rule (work-claims.mjs isCreatableClaimId) — the
+// intersection of the route pattern and the command layer's validId — so a
+// claim can never be created in a shape no read or claim path can reach.
+// claimIdOf above stays permissive on purpose: ids created before this
+// rule (residue) must remain readable and closable by their owner.
+const claimCreateIdOf = (reject, id) => {
+  if (!isCreatableClaimId(id)) invalidInput(reject, CLAIM_ID_RULE);
   return id;
 };
 
@@ -955,7 +967,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "acceptanceCriteria"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, acceptanceCriteria?}");
     requireWriter();
     requireEventBudget();
-    const id = claimIdOf(reject, raw.id);
+    const id = claimCreateIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -1060,8 +1072,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const unmet = effectiveDeps.filter(dep => !doneIds.has(dep));
       if (unmet.length) {
         const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
+        // BOARD-LIFECYCLE-1: a closed dependency can never be finished, so
+        // when one is among the unmet the message names the drop escape
+        // (the standalone dependsOn update below) instead of prescribing
+        // an impossible finish.
+        const closedUnmet = unmet.filter(id => stateOf(id) === "closed");
+        const escape = closedUnmet.length
+          ? ` ${closedUnmet.map(id => `"${id}"`).join(", ")} ${closedUnmet.length === 1 ? "is" : "are"} closed and can never finish — the room owner, a claim manager, or the member who created "${item.id}" can drop ${closedUnmet.length === 1 ? "it" : "them"}: POST /api/rooms/${roomId}/work-claims/${item.id}/update with {"dependsOn": [the dependencies to keep]}.`
+          : "";
         reject(409, "work_claim_dependencies_unmet",
-          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.${escape}`);
       }
     }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
@@ -1111,17 +1131,44 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength", "dependsOn"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?, dependsOn?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
       invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
     }
-    if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
+    if (data.state === undefined && data.note === undefined && data.readingAck === undefined && data.dependsOn === undefined) invalidInput(reject, "a state transition, a note, a reading ack, or a dependsOn drop");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
+    // BOARD-LIFECYCLE-1 (QA card qa-closed-dependency-strands): a standalone
+    // dependsOn update is the escape for a closed prerequisite — it may only
+    // drop dependencies whose state is closed (dropClosedDependencies
+    // enforces the shape). It carries its own authority — the claim's
+    // creator or a claim manager — because the dependent is typically
+    // unclaimed, so the holder-only gate below could never be the path.
+    // No other field may ride along: the requestId replay digest does not
+    // cover dependsOn, so a mixed update could replay or conflict against
+    // a digest that never saw the drop.
+    if (data.dependsOn !== undefined) {
+      const extra = ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"]
+        .filter(key => data[key] !== undefined);
+      if (extra.length) invalidInput(reject, "dependsOn on its own (dropping closed dependencies cannot be combined with other update fields)");
+      requireWriter();
+      requireEventBudget();
+      if (!mayManageAnyClaim(access) && creatorOf(item) !== caller) {
+        reject(403, "work_not_owner",
+          `Only the room owner, a claim manager, or the member who created "${item.id}" can drop its closed dependencies`);
+      }
+      const dropped = runPure(reject, () => dropClosedDependencies(item, caller, {
+        dependsOn: data.dependsOn,
+        stateOf: id => registry.get(roomId, id)?.state,
+        now: nowMs
+      }));
+      commit(dropped, "state_changed", { coalesce: true, previousState: item.state });
+      return json(res, 200, dropped);
+    }
     // #3546: two transitions on a delivered item belong to its reviewer,
     // not its owner — verify (delivered -> done) and the changes_requested
     // send-back (delivered -> in_progress). Each carries its own gate

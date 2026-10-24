@@ -26,7 +26,8 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, releaseClaimsOfMember, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { noteReadyWork } from "./work-wants.mjs";
 
 export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -1019,6 +1020,32 @@ function refuse(status, code, message) {
   error.status = status;
   error.code = code;
   throw error;
+}
+
+// BOARD-LIFECYCLE-1 (QA card qa-removed-member-leases): a member whose
+// access ends (member.access_changed active:false, from store.command's
+// removal side-effect block) has their live board claims released in the
+// same act — releaseClaimsOfMember does the state work; here each release
+// gets the room event and ready-work wake a route release produces, so
+// the board never strands a removed member's work behind its lease and
+// opted-in agents learn the work is ready again. Returns the released
+// claim ids.
+export function releaseRemovedMemberClaims(store, roomId, memberId, { actorId, now } = {}) {
+  const registry = store?.workClaims;
+  if (!registry || typeof registry.list !== "function" || typeof registry.set !== "function") return [];
+  const nowMs = Number.isFinite(now) ? now : (typeof store.now === "function" ? store.now() : Date.now());
+  const before = registry.list(roomId);
+  const after = releaseClaimsOfMember(before, memberId, { now: nowMs });
+  const releasedIds = [];
+  after.forEach((item, index) => {
+    if (item === before[index]) return;
+    registry.set(roomId, item);
+    emitWorkClaimEvent(store, roomId, { actorId, item, action: "released", previousOwnerId: memberId,
+      previousState: before[index].state, atMs: nowMs, paths: before[index].files ?? [] });
+    noteReadyWork(store, roomId, item, { actorId, now: nowMs });
+    releasedIds.push(item.id);
+  });
+  return releasedIds;
 }
 
 export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
