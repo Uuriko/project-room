@@ -84,6 +84,9 @@ test("projection components add up to the stored row and do not carry text", () 
   assert.equal(blank.readable, false);
   assert.equal(blank.projectionBytes, Buffer.byteLength("not-json"));
   assert.equal(JSON.stringify(blank).includes("not-json"), false);
+  const list = accountProjection(JSON.stringify([SENTINEL]));
+  assert.equal(list.readable, false);
+  assert.equal(JSON.stringify(list).includes(SENTINEL), false);
 });
 
 test("a room with no messages rows still compacts, and one stale row does not block the rest", t => {
@@ -100,9 +103,17 @@ test("a room with no messages rows still compacts, and one stale row does not bl
     const body = i === 3 ? `${token} ${"x".repeat(240)}` : `note ${i} `.padEnd(256, "x");
     send(T.MESSAGE_POSTED, { messageId: `m-${i}`, body });
   }
+  const historyNote = "history-size-token";
+  store.db.prepare("INSERT INTO work_entities (room_id, work_id, revision, digest, body) VALUES (?,?,?,?,?)").run(
+    "commons", "board-x", 1, "d".repeat(64), JSON.stringify({ id: "board-x", receiptHistory: [{ note: historyNote }] }));
+  store.db.prepare("INSERT INTO work_entities (room_id, work_id, revision, digest, body) VALUES (?,?,?,?,?)").run(
+    "commons", "board-bad", 1, "e".repeat(64), "not-json{");
   const before = accountStoredRoom(store.db, "commons");
   assert.equal(before.components.reduce((sum, component) => sum + component.bytes, 0), before.projectionBytes);
   assert.equal(JSON.stringify(before).includes(token), false);
+  assert.equal(before.outsideProjection.workEntityHistories.unbounded.receiptHistory.entries, 1);
+  assert.equal(before.outsideProjection.workEntityHistories.scanned, 2);
+  assert.equal(JSON.stringify(before).includes(historyNote), false);
   const reported = operatorStatus(store).largestProjection;
   assert.equal(reported.projectionBytes, before.projectionBytes);
   assert.equal(reported.components.reduce((sum, component) => sum + component.bytes, 0), reported.projectionBytes);
