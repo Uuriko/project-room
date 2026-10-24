@@ -199,7 +199,41 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_create_landing_record", "Create a landing record: the room-native Record that qualifies one PR head for landing. Same write as POST /api/rooms/:roomId/landing-records. The record binds pr + headSha + baseSha (full 40-char SHAs) and carries its evidence as typed links (kind suite, ci, verdict, or link; a verdict ref is a Verdict object id stored unresolved, never looked up) and any ruling-27-style priced flags as data. A record carrying flags cannot be created without acceptingAuthority, and each flag names its own (defaulting to the record's). Creating a record for a PR that already has a land-ready record at a different head supersedes the old record in the same call; the same head returns landing_record_exists with the existing record in detail. A record lands nothing by itself: the seat lands against it.", schema({
+    roomId: roomIdField,
+    pr: { type: "integer", minimum: 1, description: "GitHub pull request number." },
+    headSha: { type: "string", minLength: 40, maxLength: 40, description: "Full head SHA the record qualifies." },
+    baseSha: { type: "string", minLength: 40, maxLength: 40, description: "Full base SHA the head was verified against." },
+    evidence: { type: "array", maxItems: 50, items: { type: "object", properties: { kind: { type: "string", enum: ["suite", "ci", "verdict", "link"] }, ref: { type: "string", maxLength: 500 }, label: { type: "string", maxLength: 200 }, headSha: { type: "string", minLength: 40, maxLength: 40 } }, required: ["kind", "ref"] }, description: "Typed evidence links." },
+    flags: { type: "array", maxItems: 50, items: { type: "object", properties: { flag: { type: "string", maxLength: 500 }, acceptingAuthority: { type: "string", maxLength: 200 } }, required: ["flag"] }, description: "Priced flags; each names its accepting authority (default: the record's)." },
+    acceptingAuthority: { type: "string", maxLength: 200, description: "Required when flags are present: who accepts the priced aggregate." },
+    note: { type: "string", maxLength: 2000 }
+  }, ["roomId", "pr", "headSha", "baseSha"]), false),
+  tool("room_list_landing_records", "List landing records in a room, or read one when recordId is set. Same reads as GET /api/rooms/:roomId/landing-records and GET /api/rooms/:roomId/landing-records/:recordId. States are swept first: a land-ready record whose head the room's land queue has since observed elsewhere reads superseded, never stale land-ready. Optional filters: state (land-ready, landed, revoked, superseded), pr, mine=true (only records you created). Reading does not change any record beyond that sweep.", schema({
+    roomId: roomIdField,
+    recordId: { ...idField, description: "Omit to list. Set to read one record." },
+    state: { type: "string", enum: ["land-ready", "landed", "revoked", "superseded"] },
+    pr: { type: "integer", minimum: 1 },
+    mine: { type: "boolean" }
+  }, ["roomId"])),
+  tool("room_land_record", "Mark a landing record landed: the LAND_RECORD transition. Same write as POST /api/rooms/:roomId/landing-records/:recordId/land. Carries mergedSha and (when known) treeSha. Only the record's creator, the room owner, or a member with the decide permission. A record that is not land-ready (already landed, revoked, or superseded) returns landing_record_closed.", schema({
+    roomId: roomIdField,
+    recordId: { ...idField, description: "Landing record id (lr_...) from room_create_landing_record or room_list_landing_records." },
+    mergedSha: { type: "string", minLength: 40, maxLength: 40, description: "Full SHA of the merge commit on the base branch." },
+    treeSha: { type: "string", minLength: 40, maxLength: 40, description: "Full tree SHA of the merged result, when known." }
+  }, ["roomId", "recordId", "mergedSha"]), false),
+  tool("room_revoke_landing_record", "Revoke a land-ready landing record (issued in error, or the PR is abandoned). Same write as POST /api/rooms/:roomId/landing-records/:recordId/revoke. reason is optional and stored on the record. Only the record's creator, the room owner, or a member with the decide permission. A landed record cannot be revoked; it stands as history.", schema({
+    roomId: roomIdField,
+    recordId: { ...idField, description: "Landing record id (lr_...)." },
+    reason: { type: "string", maxLength: 500 }
+  }, ["roomId", "recordId"]), false),
+  tool("room_supersede_landing_record", "Mark a land-ready landing record superseded because its PR's head moved, naming the new headSha. Same write as POST /api/rooms/:roomId/landing-records/:recordId/supersede. Supersession also happens automatically when the room's land queue observes a different head, or when a replacement record is created at the new head — this tool is the out-of-band path (for example the landing watch). Only the record's creator, the room owner, or a member with the decide permission.", schema({
+    roomId: roomIdField,
+    recordId: { ...idField, description: "Landing record id (lr_...)." },
+    headSha: { type: "string", minLength: 40, maxLength: 40, description: "The PR's new head SHA that superseded this record's head." },
+    note: { type: "string", maxLength: 500 }
+  }, ["roomId", "recordId", "headSha"]), false)
 
 ];
 

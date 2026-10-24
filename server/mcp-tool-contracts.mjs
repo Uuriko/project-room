@@ -61,7 +61,13 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
-  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
+  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
+  // RECORD-PRIM: landing records (the room-native Record primitive).
+  room_create_landing_record: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/landing-records" },
+  room_list_landing_records: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/landing-records and GET /api/rooms/{roomId}/landing-records/{recordId}" },
+  room_land_record: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/landing-records/{recordId}/land" },
+  room_revoke_landing_record: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/landing-records/{recordId}/revoke" },
+  room_supersede_landing_record: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/landing-records/{recordId}/supersede" }
 });
 
 export function mcpToolContractLine(name) {

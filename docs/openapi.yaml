@@ -1935,6 +1935,266 @@ paths:
           description: Only the squad owner can disband it (squad_owner_required)
         '404':
           description: No such squad in this room (squad_not_found)
+  /api/rooms/{roomId}/landing-records:
+    get:
+      summary: List landing records
+      description: |
+        RECORD-PRIM (mig-primitives Primitive 3). Every landing record in
+        the room: id, pr, head/base SHAs, state, typed evidence links,
+        priced flags, accepting authority, and lifecycle stamps. Members
+        only. Records are swept before the read: a land-ready record
+        whose head the room's land queue has since observed elsewhere
+        reads `superseded`, never stale land-ready. Query: `state`
+        filters by state (land-ready, landed, revoked, superseded);
+        `pr` filters by pull request number; `mine=1` lists only the
+        caller's records.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [land-ready, landed, revoked, superseded] }
+          description: Only records in this state
+        - name: pr
+          in: query
+          required: false
+          schema: { type: integer }
+          description: Only records for this pull request number
+        - name: mine
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Only the caller's records (mine=true; mine=1 also accepted)
+      responses:
+        '200':
+          description: Landing record list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      x-room-permission: member
+      summary: Create a landing record
+      description: |
+        RECORD-PRIM. Create the record that qualifies one PR head for
+        landing. `pr`, `headSha`, and `baseSha` are required; the SHAs are
+        full 40-character hex. `evidence` carries typed links (kind
+        `suite`, `ci`, `verdict`, or `link`; a `verdict` ref is a Verdict
+        object id stored unresolved, never looked up). `flags` carries
+        ruling-27-style priced flags: a record with flags cannot be
+        created without `acceptingAuthority`, and each flag names its own
+        accepting authority (defaulting to the record's). Creating a
+        record for a PR that already has a land-ready record at a
+        different head supersedes the old record in the same call and
+        links both ways; the same head returns 409
+        `landing_record_exists` with the existing record in `existing`.
+        A record lands nothing by itself — the seat lands against it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pr, headSha, baseSha]
+              properties:
+                pr: { type: integer, description: GitHub pull request number }
+                headSha: { type: string, description: Full 40-char head SHA the record qualifies }
+                baseSha: { type: string, description: Full 40-char base SHA the head was verified against }
+                evidence:
+                  type: array
+                  description: Typed evidence links
+                  items:
+                    type: object
+                    required: [kind, ref]
+                    properties:
+                      kind: { type: string, enum: [suite, ci, verdict, link] }
+                      ref: { type: string, description: Run/CI/verdict reference or URL }
+                      label: { type: string }
+                      headSha: { type: string, description: The exact head this evidence ran at }
+                flags:
+                  type: array
+                  description: Priced flags on the record's aggregate
+                  items:
+                    type: object
+                    required: [flag]
+                    properties:
+                      flag: { type: string }
+                      acceptingAuthority: { type: string, description: Who accepts this flag (default the record's acceptingAuthority) }
+                acceptingAuthority: { type: string, description: Required when flags are present }
+                note: { type: string, description: Qualifiers evidence cannot carry, at most 2000 chars }
+      responses:
+        '201':
+          description: Record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '409':
+          description: A land-ready record already exists for this PR at this head (landing_record_exists; the existing record rides in `existing`)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/landing-records/{recordId}:
+    get:
+      summary: Read one landing record
+      description: |
+        RECORD-PRIM. Read a landing record by id (`lr_…`). Members only.
+        The record is swept first, so a record whose head moved reads
+        `superseded`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Landing record id (lr_…)
+      responses:
+        '200':
+          description: The landing record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such landing record in this room (landing_record_not_found)
+  /api/rooms/{roomId}/landing-records/{recordId}/land:
+    post:
+      x-room-permission: member
+      summary: Mark a landing record landed
+      description: |
+        RECORD-PRIM. The LAND_RECORD transition: mark a land-ready record
+        landed, carrying the merge's `mergedSha` and (when known)
+        `treeSha`. Only the record's creator, the room owner, or a
+        member with the decide permission. A record that is not
+        land-ready returns 409 `landing_record_closed`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Landing record id (lr_…)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mergedSha]
+              properties:
+                mergedSha: { type: string, description: Full 40-char SHA of the merge commit }
+                treeSha: { type: string, description: Full 40-char tree SHA of the merged result }
+      responses:
+        '200':
+          description: The landed record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Not the record's creator, the room owner, or a decide member (landing_record_not_authority)
+        '404':
+          description: No such landing record in this room (landing_record_not_found)
+        '409':
+          description: The record is not land-ready (landing_record_closed)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/landing-records/{recordId}/revoke:
+    post:
+      x-room-permission: member
+      summary: Revoke a landing record
+      description: |
+        RECORD-PRIM. Revoke a land-ready record (issued in error, or the
+        PR is abandoned). `reason` is optional and stored on the record.
+        Only the record's creator, the room owner, or a member with the
+        decide permission. A landed record cannot be revoked.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Landing record id (lr_…)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: Why the record is revoked, at most 500 chars }
+      responses:
+        '200':
+          description: The revoked record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Not the record's creator, the room owner, or a decide member (landing_record_not_authority)
+        '404':
+          description: No such landing record in this room (landing_record_not_found)
+        '409':
+          description: The record is not land-ready (landing_record_closed)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/landing-records/{recordId}/supersede:
+    post:
+      x-room-permission: member
+      summary: Mark a landing record superseded
+      description: |
+        RECORD-PRIM. Mark a land-ready record superseded because its
+        PR's head moved, naming the new `headSha`. Supersession also
+        happens automatically when the room's land queue observes a
+        different head, or when a replacement record is created at the
+        new head — this operation is the out-of-band path. Only the
+        record's creator, the room owner, or a member with the decide
+        permission.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Landing record id (lr_…)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [headSha]
+              properties:
+                headSha: { type: string, description: The PR's new full 40-char head SHA }
+                note: { type: string, description: At most 500 chars }
+      responses:
+        '200':
+          description: The superseded record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LandingRecordResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Not the record's creator, the room owner, or a decide member (landing_record_not_authority)
+        '404':
+          description: No such landing record in this room (landing_record_not_found)
+        '409':
+          description: The record is not land-ready (landing_record_closed)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/typing:
     post:
       summary: Send a typing heartbeat
@@ -17645,6 +17905,78 @@ components:
         roomId: { type: string }
         squad:
           $ref: '#/components/schemas/Squad'
+    LandingRecordEvidence:
+      type: object
+      description: One typed evidence link on a landing record
+      required: [kind, ref]
+      properties:
+        kind: { type: string, enum: [suite, ci, verdict, link], description: suite = a suite run; ci = a CI read at the exact head; verdict = a Verdict object id (stored unresolved); link = any other reference }
+        ref: { type: string, description: Run/CI/verdict reference or URL }
+        label: { type: string }
+        headSha: { type: string, description: The exact head this evidence ran at }
+    LandingRecordFlag:
+      type: object
+      description: One ruling-27-style priced flag on a landing record
+      required: [flag, acceptingAuthority]
+      properties:
+        flag: { type: string }
+        acceptingAuthority: { type: string, description: Who accepts this flag }
+    LandingRecord:
+      type: object
+      description: A room-scoped landing record (RECORD-PRIM)
+      required: [id, pr, headSha, baseSha, state, evidence, flags, createdBySeat, createdAt]
+      properties:
+        id: { type: string, description: Landing record id (lr_…) }
+        pr: { type: integer, description: GitHub pull request number }
+        headSha: { type: string, description: Full head SHA the record qualifies }
+        baseSha: { type: string, description: Full base SHA the head was verified against }
+        state: { type: string, enum: [land-ready, landed, revoked, superseded] }
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/LandingRecordEvidence'
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/LandingRecordFlag'
+        acceptingAuthority: { type: [string, 'null'], description: Who accepts the record's priced aggregate; required at creation when flags are present }
+        note: { type: [string, 'null'] }
+        createdBySeat:
+          type: object
+          required: [memberId]
+          properties:
+            memberId: { type: string }
+            displayName: { type: [string, 'null'] }
+            kind: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        landedAt: { type: [string, 'null'], format: date-time }
+        landedBy: { type: [string, 'null'], description: Member id that marked the record landed }
+        mergedSha: { type: [string, 'null'] }
+        treeSha: { type: [string, 'null'] }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        revokeReason: { type: [string, 'null'] }
+        supersededBy: { type: [string, 'null'], description: The record that superseded this one, when superseded by a replacement record }
+        supersededByHeadSha: { type: [string, 'null'], description: The head that superseded this record's head }
+        supersedes: { type: array, items: { type: string }, description: Earlier records for the same PR this record superseded }
+        history: { type: array, items: { type: object }, description: Lifecycle stamps (created, landed, revoked, superseded) }
+    LandingRecordList:
+      type: object
+      description: Body of GET /api/rooms/{roomId}/landing-records
+      required: [roomId, records]
+      properties:
+        roomId: { type: string }
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/LandingRecord'
+    LandingRecordResult:
+      type: object
+      description: Body of the single-record reads and writes (create, read one, land, revoke, supersede)
+      required: [roomId, record]
+      properties:
+        roomId: { type: string }
+        record:
+          $ref: '#/components/schemas/LandingRecord'
     ChannelConnection:
       type: object
       description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.

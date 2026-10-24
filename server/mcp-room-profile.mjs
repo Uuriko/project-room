@@ -56,6 +56,7 @@ import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { landingRecordEnv, createLandingRecord, listLandingRecords, getLandingRecord, landLandingRecord, revokeLandingRecord, supersedeLandingRecord } from "./landing-records.mjs"; // RECORD-PRIM: landing records
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -147,6 +148,20 @@ function validRoomArgs(name, args) {
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
     return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  }
+  if (name === "room_create_landing_record") {
+    return Number.isSafeInteger(args.pr) && args.pr >= 1
+      && typeof args.headSha === "string" && /^[0-9a-f]{40}$/.test(args.headSha)
+      && typeof args.baseSha === "string" && /^[0-9a-f]{40}$/.test(args.baseSha);
+  }
+  if (name === "room_list_landing_records") {
+    return (args.recordId === undefined || typeof args.recordId === "string" && args.recordId.length >= 1 && args.recordId.length <= 128)
+      && (args.state === undefined || ["land-ready", "landed", "revoked", "superseded"].includes(args.state))
+      && (args.pr === undefined || Number.isSafeInteger(args.pr) && args.pr >= 1)
+      && (args.mine === undefined || typeof args.mine === "boolean");
+  }
+  if (name === "room_land_record" || name === "room_revoke_landing_record" || name === "room_supersede_landing_record") {
+    return typeof args.recordId === "string" && args.recordId.length >= 1 && args.recordId.length <= 128;
   }
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
@@ -532,6 +547,42 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
   }
   if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
+  if (name === "room_create_landing_record") {
+    const auth = store.authenticate(secret, roomId);
+    const input = { pr: args.pr, headSha: args.headSha, baseSha: args.baseSha };
+    if (args.evidence !== undefined) input.evidence = args.evidence;
+    if (args.flags !== undefined) input.flags = args.flags;
+    if (args.acceptingAuthority !== undefined) input.acceptingAuthority = args.acceptingAuthority;
+    if (args.note !== undefined) input.note = args.note;
+    return createLandingRecord(landingRecordEnv(store), roomId, auth.member.id, input);
+  }
+  if (name === "room_list_landing_records") {
+    const auth = store.authenticate(secret, roomId);
+    if (args.recordId !== undefined) return getLandingRecord(landingRecordEnv(store), roomId, auth.member.id, args.recordId);
+    const filter = {};
+    if (args.state !== undefined) filter.state = args.state;
+    if (args.pr !== undefined) filter.pr = args.pr;
+    if (args.mine !== undefined) filter.mine = args.mine;
+    return listLandingRecords(landingRecordEnv(store), roomId, auth.member.id, filter);
+  }
+  if (name === "room_land_record") {
+    const auth = store.authenticate(secret, roomId);
+    const input = { mergedSha: args.mergedSha };
+    if (args.treeSha !== undefined) input.treeSha = args.treeSha;
+    return landLandingRecord(landingRecordEnv(store), roomId, auth.member.id, args.recordId, input);
+  }
+  if (name === "room_revoke_landing_record") {
+    const auth = store.authenticate(secret, roomId);
+    const input = {};
+    if (args.reason !== undefined) input.reason = args.reason;
+    return revokeLandingRecord(landingRecordEnv(store), roomId, auth.member.id, args.recordId, input);
+  }
+  if (name === "room_supersede_landing_record") {
+    const auth = store.authenticate(secret, roomId);
+    const input = { headSha: args.headSha };
+    if (args.note !== undefined) input.note = args.note;
+    return supersedeLandingRecord(landingRecordEnv(store), roomId, auth.member.id, args.recordId, input);
+  }
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
@@ -1000,6 +1051,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
+  "room_create_landing_record", "room_land_record", "room_revoke_landing_record", "room_supersede_landing_record",
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
