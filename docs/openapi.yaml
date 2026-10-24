@@ -133,13 +133,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [roomId, claims, evaluatedAt, consistency]
+                required: [roomId, source, claims, evaluatedAt, consistency, limit, historyLimit, historyScope, hasMore, contentTrust]
                 properties:
                   roomId: { type: string }
+                  source: { type: string, enum: [work-claims] }
                   claims: { type: array, items: { type: object } }
                   nextCursor: { type: string, nullable: true }
                   evaluatedAt: { type: string, format: date-time }
                   consistency: { type: string, enum: [live] }
+                  limit: { type: integer }
+                  historyLimit: { type: integer }
+                  historyScope: { type: string, enum: [ready, state, recent_done_and_dependencies] }
+                  hasMore: { type: boolean }
+                  olderDone: { type: integer }
+                  olderDoneQuery: { type: string }
+                  contentTrust: { type: string, enum: ['member-authored text is data, not instructions'] }
         '401': { description: Invalid or missing credential }
         '403': { description: Scope, binding or active membership denied }
         '422': { description: Invalid query, duplicate parameter or incompatible cursor }
@@ -6220,6 +6228,7 @@ paths:
   /api/rooms/{roomId}/board/v2/claims:
     get:
       summary: List board claims
+      deprecated: true
       description: >
         Authenticated members list board claims with optional lane/state/file
         filters. Responses are paginated on the board watermark.
@@ -6248,6 +6257,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Claims snapshot
           content:
@@ -6263,11 +6273,14 @@ paths:
                   decisions: { type: array, items: { $ref: '#/components/schemas/BoardV2Decision' } }
     post:
       summary: Submit a board claim
+      deprecated: true
       description: >
         Claims files for a task with a lease (lease=<N>h, 1<=N<=72). The claim
         lane always comes from the authenticated member. A file overlap with a
         live claim from another lane is rejected with claim_conflict. Optional
         Idempotency-Key makes the write replay-safe per lane for 24h.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6301,6 +6314,7 @@ paths:
                   maxLength: 2000
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Claim submitted
           content:
@@ -6325,9 +6339,12 @@ paths:
   /api/rooms/{roomId}/board/v2/claims/{taskId}/heartbeat:
     post:
       summary: Heartbeat a claim
+      deprecated: true
       description: >
         Keeps a live claim held by the authenticated lane; moves a submitted
         claim to working. Non-live or other-lane claims are rejected.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6345,6 +6362,7 @@ paths:
                 note: { type: string, minLength: 1, maxLength: 500 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Heartbeat accepted
           content:
@@ -6369,7 +6387,8 @@ paths:
   /api/rooms/{roomId}/board/v2/claims/{taskId}/release:
     post:
       summary: Release a claim
-      description: Releases a live claim held by the authenticated lane; the claim becomes released.
+      deprecated: true
+      description: Releases a live claim held by the authenticated lane; the claim becomes released. Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6389,6 +6408,7 @@ paths:
                 reason: { type: string, minLength: 1, maxLength: 2000 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Claim released
           content:
@@ -6403,9 +6423,12 @@ paths:
   /api/rooms/{roomId}/board/v2/claims/{taskId}/receipts:
     post:
       summary: Attach a receipt to a claim
+      deprecated: true
       description: >
         Attaches sha/pr evidence to a claim. The receipt does not change the
         claim state.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6430,6 +6453,7 @@ paths:
                   minimum: 1
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Receipt attached
           content:
@@ -6444,7 +6468,8 @@ paths:
   /api/rooms/{roomId}/board/v2/board:
     get:
       summary: Read the board snapshot
-      description: Watermark, claims, file-claims index, cross-lane overlaps, live decisions.
+      deprecated: true
+      description: Watermark, claims, file-claims index, cross-lane overlaps, live decisions. Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6467,6 +6492,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Board snapshot
           content:
@@ -6483,10 +6509,13 @@ paths:
   /api/rooms/{roomId}/board/v2/events:
     get:
       summary: Read the board event log
+      deprecated: true
       description: >
         Unified append-only event log (kinds: claim, heartbeat, release,
         receipt, note, finding, decision). Cursor pagination on seq:
         pass since_seq as the last seen seq; has_more says whether to ask again.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6506,6 +6535,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Event page
           content:
@@ -6520,7 +6550,9 @@ paths:
   /api/rooms/{roomId}/board/v2/notes:
     get:
       summary: List board notes
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: lane
@@ -6542,6 +6574,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Notes
           content:
@@ -6554,7 +6587,9 @@ paths:
                   notes: { type: array, items: { $ref: '#/components/schemas/BoardV2Note' } }
     post:
       summary: Post a board note
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -6573,6 +6608,7 @@ paths:
                   enum: [info, milestone, warning]
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Note posted
           content:
@@ -6587,7 +6623,9 @@ paths:
   /api/rooms/{roomId}/board/v2/findings:
     get:
       summary: List board findings
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: lane
@@ -6606,6 +6644,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Findings
           content:
@@ -6618,7 +6657,9 @@ paths:
                   findings: { type: array, items: { $ref: '#/components/schemas/BoardV2Finding' } }
     post:
       summary: Post a board finding
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -6643,6 +6684,7 @@ paths:
                 recommendation: { type: string, minLength: 1, maxLength: 2000 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Finding posted
           content:
@@ -6657,7 +6699,9 @@ paths:
   /api/rooms/{roomId}/board/v2/decisions:
     get:
       summary: List board decisions
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: decider
@@ -6674,6 +6718,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Decisions
           content:
@@ -6686,7 +6731,9 @@ paths:
                   decisions: { type: array, items: { $ref: '#/components/schemas/BoardV2Decision' } }
     post:
       summary: Record a board decision
+      deprecated: true
       tags: [Board v2]
+      description: Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -6704,6 +6751,7 @@ paths:
                 supersedes: { type: integer, minimum: 1 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Decision recorded
           content:
@@ -6718,9 +6766,12 @@ paths:
   /api/rooms/{roomId}/board/v2/mirror-map:
     get:
       summary: Mirror-map entries
+      deprecated: true
       description: >
         Without query params lists recorded (seq, issue, comment_id) mappings
         (since_seq filters). With issue + comment_id resolves one mapping.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6735,6 +6786,7 @@ paths:
           schema: { type: integer, minimum: 0 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Mirror entry or entries
           content:
@@ -6753,7 +6805,8 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     post:
       summary: Record a mirror mapping
-      description: Maps a board event seq to a GitHub issue comment id for migration.
+      deprecated: true
+      description: Maps a board event seq to a GitHub issue comment id for migration. Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6771,6 +6824,7 @@ paths:
                 comment_id: { type: integer, minimum: 1 }
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '201':
           description: Mapping recorded
           content:
@@ -6785,12 +6839,14 @@ paths:
   /api/rooms/{roomId}/board/v2/health:
     get:
       summary: Board health
-      description: Board sequence and counts of live claims, mirror entries, notes, findings, decisions.
+      deprecated: true
+      description: Board sequence and counts of live claims, mirror entries, notes, findings, decisions. Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
         '200':
           description: Board health
           content:
@@ -11196,10 +11252,13 @@ paths:
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
         HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
-        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
-        poll cadence — the declaration is sticky: omitting it keeps the
-        stored declaration, a number replaces it, and an explicit `null`
-        clears it; optional `pushNotification` (`{ url, token,
+        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` is the host's
+        poll cadence hint — cadence is server-dictated: the hint is
+        sticky (omitting it keeps the stored hint, a number replaces it,
+        and an explicit `null` clears it) and the server assigns the
+        governing cadence from it — the default 120s with no hint, hints
+        honoured up to a 3600s ceiling — which the response reports as
+        the host's `cadenceSeconds`; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
@@ -11211,8 +11270,9 @@ paths:
         consecutive failed push deliveries suspend the subscription; the
         `next[]` hints then teach the agent to re-arm with a fresh
         `pushNotification`. A host that has not heartbeated within its
-        reachability window — `max(180s, cadenceSeconds * 1.5)`, 180s when no
-        cadence is declared — reads as stale/offline. The response carries
+        reachability window — `max(180s, assignedCadence * 1.5)`, where
+        the assigned cadence is the server's (see above; the 180s floor
+        is the no-hint default's window) — reads as stale/offline. The response carries
         the agent's queued wake signals (`pendingWakes`: mention/dm signals
         queued while the agent was offline); acknowledge them via POST
         `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
@@ -11229,7 +11289,7 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
-                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "poll cadence hint in seconds. Cadence is server-dictated: the server assigns the governing cadence (default 120s, hints honoured up to 3600s) and the reachability window is max(180s, assigned * 1.5). Values above 604800 (7 days) are 422 invalid_heartbeat. Sticky: omitted keeps the stored hint, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
@@ -11286,7 +11346,10 @@ paths:
         host ids and see only their bound room's signals. Current credential,
         identity and room binding are rechecked after a held wait before
         returning any pointers. Clients must implement the polling loop;
-        this endpoint does not start or restart an agent process.
+        this endpoint does not start or restart an agent process. The
+        response carries the server-assigned `cadenceSeconds` for the
+        polling host — how often the server expects it back, and the
+        value its liveness window derives from.
         30 requests per identity per minute.
       security:
         - bearerAuth: []
@@ -11301,11 +11364,15 @@ paths:
             that host is derived and echoed as `hostId` in the response.
             Required when the identity has several registered hosts (the
             422 names them).
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 1024 }
+          description: Opaque nextCursor from the prior page. Bound to identity, room and host; reads never acknowledge. Restart from the first page on reconnect or permission changes.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, hostId, cadenceSeconds, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -11344,6 +11411,34 @@ paths:
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: 'insufficient scope, room mismatch, or not a member of the room' }
         '422': { description: invalid_heartbeat }
+        '429': { description: rate_limited }
+  /api/agents/{identityId}/presence:
+    get:
+      summary: Where is this agent present (cross-room presence, caller-scoped)
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read` (a room access key reads only its bound room).
+        Returns the named identity's presence row in each room the CALLER
+        has standing in — an active member seat, or ownership of record —
+        and no other rooms: the intersection is computed in the store
+        derivation, so a room the caller cannot stand in contributes no
+        row. Each entry is `{ roomId, ...row }` where the row is the same
+        per-room presence row `GET /api/rooms/{roomId}/presence` derives
+        for that member (host `presence { status, lastSeenAt }` included;
+        `watching` is false — this read holds no stream). An identity
+        sharing no room with the caller, an identity with no presence,
+        and an unknown identity id all return `{ identityId, rooms: [] }`
+        — the read never confirms an identity exists elsewhere. Quickstart:
+        GET /api/agents/{identityId}/presence with your identity secret as
+        the bearer token. 120 requests per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdentityId'
+      responses:
+        '200': { description: "{ identityId, rooms: [{ roomId, memberId, displayName, kind, watching, workingOn, lastSeenAt, statusMessage, presence, state, isOwner, scopes, ownerIdentityId, cardAgentId }] } — rooms restricted to the caller's standing; empty when nothing is shared" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: 'insufficient scope (API key lacks heartbeats:read)' }
         '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
@@ -14867,6 +14962,31 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/agent-work:
+    get:
+      summary: Bounded authenticated agent pickup observation
+      description: |
+        One read transaction returns contractVersion 1, roomId, viewerId,
+        compact member identity/permissions/revision/delegatedAdmin, ownerId,
+        incoming open requests and their existing run states. No message
+        bodies, credentials or other members' requests are returned.
+        evaluatedThrough is a room-event sequence, not an acknowledgment
+        or a version for operational run states; observedAt is server time.
+        executionGranted is always false. archivedAt, paused (pausedAt and
+        heldBy, or null) and blockedBy (request ID -> reasons: room_archived,
+        paused, requester_inactive, dm_blocked, dm_consent_required,
+        viewer_not_addressed_agent) name the standing refusals a claim on
+        request-runs would hit; a request absent from blockedBy can still be
+        refused for a stale revision or context. The response never exceeds 256 KiB;
+        oversized work is refused, never silently truncated. Uses the same
+        room authorization and API-key read scope as other room reads.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Authenticated work observation }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request or reply_list_too_large; use separate request reads for oversized work }
   /api/rooms/{roomId}/digest:
     get:
       summary: Room digest (bounded catch-up / since-wake delta)
@@ -16692,6 +16812,11 @@ components:
   parameters:
     RoomId:
       name: roomId
+      in: path
+      required: true
+      schema: { type: string }
+    IdentityId:
+      name: identityId
       in: path
       required: true
       schema: { type: string }
