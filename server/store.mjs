@@ -809,6 +809,37 @@ function unknownCommandTypeMessage(type) {
   return `Unknown command type${given ? ` "${given}"` : ""}.${suggestion}${listed}`;
 }
 
+// Hidden characters that survive in a stored body let a caller smuggle text
+// into agent context and spoof mentions. ZWSP, word joiner and BOM never
+// carry a letter. A ZWJ stays only inside an emoji sequence. A ZWNJ stays
+// only between letters when one of them is outside ASCII, where it changes
+// the word (Arabic, Persian). Stray joiners are removed before the body is
+// stored.
+function stripHiddenMessageCharacters(body) {
+  const chars = Array.from(body);
+  const emojiBefore = index => {
+    let cursor = index - 1;
+    while (cursor >= 0 && (chars[cursor] === "\uFE0F" || /\p{Emoji_Modifier}/u.test(chars[cursor]))) cursor -= 1;
+    return cursor >= 0 && /\p{Extended_Pictographic}/u.test(chars[cursor]);
+  };
+  const emojiAfter = index => {
+    let cursor = index + 1;
+    while (cursor < chars.length && (chars[cursor] === "\uFE0F" || /\p{Emoji_Modifier}/u.test(chars[cursor]))) cursor += 1;
+    return cursor < chars.length && /\p{Extended_Pictographic}/u.test(chars[cursor]);
+  };
+  return chars.filter((char, index) => {
+    if (char === "\u200B" || char === "\u2060" || char === "\uFEFF") return false;
+    if (char === "\u200D") return emojiBefore(index) && emojiAfter(index);
+    if (char === "\u200C") {
+      const prev = chars[index - 1];
+      const next = chars[index + 1];
+      if (!prev || !next || !/\p{L}/u.test(prev) || !/\p{L}/u.test(next)) return false;
+      return /[^\u0000-\u007F]/u.test(prev) || /[^\u0000-\u007F]/u.test(next);
+    }
+    return true;
+  }).join("");
+}
+
 export function validateCommand(command) {
   if (!command || Array.isArray(command) || typeof command !== "object" || Object.keys(command).some(k => !["id", "type", "data", "causationId"].includes(k))) fail(422, "invalid_command", "Supply only id, type, data, and optional causationId");
   if (!validId(command.id)) fail(422, "invalid_command", "Invalid command id or type");
@@ -826,7 +857,7 @@ export function validateCommand(command) {
     const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
-  if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
+  if (command.type === T.MESSAGE_POSTED && typeof command.data.body !== "string") fail(422, "invalid_command", messageBody);
   const messageBodyCommand = command.type === T.MESSAGE_POSTED || command.type === T.MESSAGE_EDITED;
   // QA8 (2026-10-08, gap-hunt D-M2): message bodies accepted NUL and bidi
   // override characters verbatim, so "\u202Eexe.txt" rendered as "txt.exe"
@@ -836,16 +867,20 @@ export function validateCommand(command) {
   // override and isolate controls (U+202A-202E, U+2066-2069). LRM/RLM marks,
   // tabs, line breaks, ANSI escapes and emoji joiners stay allowed.
   if ((messageBodyCommand || command.type === T.DM_POSTED) && typeof command.data.body === "string") {
-    const body = command.data.body;
-    if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
-    if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
-    if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+    const raw = command.data.body;
+    if (raw.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
+    if (!raw.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
+    if (/[\u202A-\u202E\u2066-\u2069]/u.test(raw)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+    if (raw.trim() === "") fail(422, "invalid_command", "body must contain non-whitespace text");
+    const body = stripHiddenMessageCharacters(raw);
     // r217 (reply-crew QA): ZWSP, Hangul filler and bare combining marks
     // passed the trim() empty check, so a blank bubble posted and counted as
     // unread. Refuse a body with no visible characters after stripping
     // whitespace, default-ignorable code points and combining marks. ZWJ
-    // emoji, "e\u0301" and LRM/RLM marks keep working.
+    // emoji, "e\u0301" and LRM/RLM marks keep working. Stray joiners are
+    // removed above so they are not stored beside real text.
     if (!body.replace(/[\s\p{Default_Ignorable_Code_Point}\p{M}]/gu, "")) fail(422, "invalid_command", "body must contain visible characters (whitespace, zero-width and combining-mark-only bodies are refused)");
+    command.data.body = body;
   }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);

@@ -41,6 +41,23 @@ test("ordinary multilingual text, marks, tabs, ANSI escapes and emoji stay allow
   }
 });
 
+test("whitespace-only bodies say the text is missing, and stray joiners are not stored", () => {
+  for (const body of ["", "   ", "\n\t"]) {
+    refused(T.MESSAGE_POSTED, { body }, /non-whitespace text/);
+    refused(T.MESSAGE_EDITED, { messageId: "m1", body }, /non-whitespace text/);
+    refused(T.DM_POSTED, { to: "ai_x", messageId: "m2", body }, /non-whitespace text/);
+  }
+  const smuggled = { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "a\u200b\u200d\ufeffb" } };
+  assert.doesNotThrow(() => validateCommand(smuggled));
+  assert.equal(smuggled.data.body, "ab");
+  const kept = { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "family 👨‍👩‍👧 and e\u0301 \u200Fمرحبا ن\u200Cه" } };
+  assert.doesNotThrow(() => validateCommand(kept));
+  assert.equal(kept.data.body, "family 👨‍👩‍👧 and e\u0301 \u200Fمرحبا ن\u200Cه");
+  const stray = { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "a\u200cb\u200d" } };
+  assert.doesNotThrow(() => validateCommand(stray));
+  assert.equal(stray.data.body, "ab");
+});
+
 test("bodies made only of invisible characters are refused like empty ones (R217-1)", () => {
   // "   " is refused as empty, but zero-width spaces, a Hangul filler or bare
   // combining marks passed .trim() and posted as a blank bubble that still

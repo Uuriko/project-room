@@ -63,7 +63,7 @@ test("identical retries persist once; changed retries and invalid events roll ba
   assert.equal(second.duplicate, true);
   const before = store.snapshot(human, "commons");
   assert.throws(() => store.command(human, "commons", { ...c, data: { body: "different" } }), /different content/);
-  assert.throws(() => store.command(human, "commons", command(T.MESSAGE_POSTED, { body: " " })), /data\.body \(a string\), not text/);
+  assert.throws(() => store.command(human, "commons", command(T.MESSAGE_POSTED, { body: " " })), /body must contain non-whitespace text/);
   assert.deepEqual(store.snapshot(human, "commons"), before);
 });
 
