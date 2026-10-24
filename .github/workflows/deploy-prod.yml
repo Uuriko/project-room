@@ -24,8 +24,10 @@ name: deploy-prod
 # Steps: record the live prod and entry version ids (artifact), deploy the
 # canonical Worker (`wrangler deploy --env production --keep-vars`), then the
 # public entry (`wrangler deploy --keep-vars`), smoke, and recover only to
-# prior code meeting a known schema floor. Lower/unknown schemas require roll-forward. A receipt goes
-# to muse-room when the ROOM_RECEIPT_TOKEN secret exists.
+# prior code meeting a known schema floor. Lower/unknown schemas require roll-forward. The receipt is
+# first recorded as a run artifact + summary section from runner-local state
+# (it never depends on the production API it reports on), then delivered to
+# muse-room when the ROOM_RECEIPT_TOKEN secret exists.
 #
 # Actions secrets (names only, never values in git):
 #   CLOUDFLARE_API_TOKEN         required. Workers scripts/routes edit on the account.
@@ -296,41 +298,44 @@ jobs:
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
           retention-days: 90
-      - name: Receipt to muse-room
+      # The receipt is recorded BEFORE it is delivered (issue #3897): the
+      # record step builds it from runner-local state only and writes the
+      # durable GitHub-side record (artifact + run summary below), so a
+      # deploy that breaks production cannot break its own receipt.
+      - name: Record deploy receipt
+        id: receipt_record
         if: always() && steps.pre.outcome == 'success'
-        continue-on-error: true
         env:
-          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+          RECEIPT_DIR: ${{ runner.temp }}/deploy-receipt
           OUTCOME: ${{ job.status }}
           PROD_NEW: ${{ steps.prod.outputs.version }}
           ENTRY_NEW: ${{ steps.entry.outputs.version }}
           PROD_PRE: ${{ steps.pre.outputs.prod }}
           ENTRY_PRE: ${{ steps.pre.outputs.entry }}
-          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
           REASON: ${{ inputs.reason }}
           PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { recoveryDescription } from "./scripts/deploy-recovery.mjs";
-            const e = process.env, s = v => (v || "?").slice(0, 8);
-            let recovery = null;
-            try { recovery = JSON.parse(readFileSync(`${e.RUNNER_TEMP}/deploy-recovery.json`, "utf8")); } catch {}
-            const body = recovery
-              ? `PROD DEPLOY ${s(e.SHA)} FAILED · ${recoveryDescription(recovery)} · ${e.RUN_URL}`
-              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
-            const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
-            const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
-              method: "POST",
-              headers: { authorization: `Bearer ${e.ROOM_RECEIPT_TOKEN}`, "content-type": "application/json", origin: e.PROD_ORIGIN,
-                "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 project-room-deploy-prod" },
-              body: JSON.stringify(command),
-            });
-            console.log(`receipt: HTTP ${res.status}`);
-            if (!res.ok) process.exit(1);
-          '
+        run: node scripts/deploy-receipt.mjs record
+      # Delivery into muse-room stays best-effort and second: it is the
+      # receipt's only production-API dependency. continue-on-error keeps
+      # the job colour owned by the deploy steps; a delivery failure is
+      # visible via the failed step itself, its ::error annotation, the
+      # delivery status written into the durable record, and the Summary.
+      - name: Receipt to muse-room
+        id: receipt_deliver
+        if: always() && steps.pre.outcome == 'success'
+        continue-on-error: true
+        env:
+          RECEIPT_DIR: ${{ runner.temp }}/deploy-receipt
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+        run: node scripts/deploy-receipt.mjs deliver
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.pre.outcome == 'success'
+        with:
+          name: deploy-receipt-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/deploy-receipt
+          if-no-files-found: warn
+          retention-days: 90
       - name: Summary
         if: always()
         env:
@@ -339,6 +344,8 @@ jobs:
           PROD_PRE: ${{ steps.pre.outputs.prod }}
           ENTRY_PRE: ${{ steps.pre.outputs.entry }}
           ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          RECEIPT_RECORD: ${{ steps.receipt_record.outputs.record }}
+          RECEIPT_DELIVERY: ${{ steps.receipt_deliver.outputs.delivery }}
           PROBE_VERDICT: ${{ needs.probe.outputs.verdict }}
           PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
         run: |
@@ -361,5 +368,7 @@ jobs:
               console.log("Schema floor is necessary, not proof of same-schema row/runtime compatibility. Schema migrations are not reversed.");
             '
             echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
+            echo "Receipt record: ${RECEIPT_RECORD:-unknown} (artifact deploy-receipt-${SHA:0:8})"
+            echo "Receipt delivery to muse-room: ${RECEIPT_DELIVERY:-unknown}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"
