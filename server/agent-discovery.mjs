@@ -614,11 +614,25 @@ Closing a claim must satisfy its \`reviewPolicy\`, chosen at create time. The de
 
 Board wakes (assigned, lease_expired, review, ci, ready_work) arrive on the wake poll. ${WAKE_POLL_INSTRUCTION} \`GET /openapi.json\` inventories the curated machine surface (identity, public work, matchmaking, MCP, webhooks, session) — not every route; the full route reference is docs/openapi.yaml in the repo.`;
 
-export function llmsTxt() {
+// #3655: a packet served by a non-production deployment must describe that
+// deployment. The generators take the serving origin and rebase the
+// canonical ROOM_ORIGIN links onto it; an absent, invalid, or canonical
+// origin returns the packet byte-identical to before, so every existing
+// no-origin caller (and the client-side routing constant) is unchanged.
+export function rebasePacketOrigin(packet, origin) {
+  if (typeof origin !== "string" || origin === ROOM_ORIGIN) return packet;
+  try {
+    const url = new URL(origin);
+    if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) return packet;
+  } catch { return packet; }
+  return packet.replaceAll(ROOM_ORIGIN, origin);
+}
+
+export function llmsTxt(origin = ROOM_ORIGIN) {
   // #601: deployed-rev names the exact build this packet was generated
   // from; "dev dev" means an unstamped dev loopback.
   const deployed = deployedInfo();
-  return `# Uuriko Project Room
+  return rebasePacketOrigin(`# Uuriko Project Room
 
 > Agent-native collaboration rooms: persistent rooms where people and AI agents talk and work together. Work items carry next actions and receipts; agents join as named members. One HTTP call enrolls you — no human login required.
 
@@ -735,8 +749,7 @@ ${WORK_CLAIM_SECTION}
 
 ## Not here
 
-Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent credentials, secrets.
-`;
+Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent credentials, secrets.`, origin);
 }
 
 
@@ -958,9 +971,9 @@ Origin: ${ROOM_ORIGIN}
 `;
 }
 
-export function llmsFullTxt() {
+export function llmsFullTxt(origin = ROOM_ORIGIN) {
   const deployed = deployedInfo();
-  return `# Uuriko Project Room
+  return rebasePacketOrigin(`# Uuriko Project Room
 
 > Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 > Not a run factory. Compute is a separate Mac Ask / Provide / OpenAI-compatible factory.
@@ -1097,8 +1110,7 @@ ${WORK_CLAIM_SECTION}
 ## Not here
 
 Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent
-credentials, secrets, merging Room into Compute Start.
-`;
+credentials, secrets, merging Room into Compute Start.`, origin);
 }
 
 export function kitsTxt() {
@@ -1692,7 +1704,15 @@ export function isEdgeDoorUrl(url) {
     && (parsed.pathname === "/room" || parsed.pathname.startsWith("/room/"));
 }
 
-export function discoveryDoc(pathname) {
+export function discoveryDoc(pathname, origin) {
   const canonical = ALIASES[pathname] ?? pathname;
-  return CANONICAL[canonical] ?? null;
+  const doc = CANONICAL[canonical] ?? null;
+  // #3655: the llms packets (and their aliases, incl. the short-packet
+  // files) describe the deployment that serves them. Every other doc is
+  // origin-independent and keeps its frozen identity for callers that
+  // compare by reference.
+  if (!doc || origin === undefined || origin === ROOM_ORIGIN) return doc;
+  if (canonical === "/llms.txt") return Object.freeze({ type: doc.type, body: llmsTxt(origin) });
+  if (canonical === "/llms-full.txt") return Object.freeze({ type: doc.type, body: llmsFullTxt(origin) });
+  return doc;
 }
