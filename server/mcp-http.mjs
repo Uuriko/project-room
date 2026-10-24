@@ -144,13 +144,34 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
     return handleMcpJoinRpc(message, { mcpUrl });
   }
   if (typeof roomMcp !== "function") {
-    const requestId = message?.id;
-    const id = object(message) && Object.hasOwn(message, "id")
-      && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
-      ? requestId : null;
-    return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
+    return mcpAuthRequiredReply(message, "Authenticated room tools require the Room service");
   }
-  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
+  try {
+    return await roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
+  } catch (error) {
+    // #4493: a credential-validation failure inside the live service — an
+    // expired or stale token whose record throws instead of resolving to
+    // "unknown credential" — must still answer with the structured 401
+    // this door produces for bad bearers. An escaped throw is converted by
+    // callers to an internal error (or, at the worker door, a dropped
+    // connection), which tells the agent nothing and cannot be told apart
+    // from a network failure. Non-auth failures keep their existing path.
+    if (error?.status === 401 || error?.code === "unauthenticated") {
+      return mcpAuthRequiredReply(message, error.message || "Hosted room tools require a live identity or room token");
+    }
+    throw error;
+  }
+}
+
+// The structured 401 every credential failure at this door answers with:
+// MCP_AUTH_REQUIRED, so mcpRpcStatus maps it to HTTP 401 and
+// mcpAuthHeaders adds the WWW-Authenticate challenge.
+function mcpAuthRequiredReply(message, text) {
+  const requestId = message?.id;
+  const id = object(message) && Object.hasOwn(message, "id")
+    && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
+    ? requestId : null;
+  return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: text, data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
 }
 
 export function mcpRpcStatus(reply) {
