@@ -66,6 +66,8 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
+import { availableClaimsFromBoard } from "./available-work.mjs";
+import { boardDoorForRequest, recordBoardView } from "./analytics/board-views.mjs"; // #3588: board-view facts for the activation funnel.
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -856,8 +858,30 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+    const board = registry.list(roomId);
+    const page = { ...buildWorkClaimPage(board, roomId, caller,
+      url?.searchParams, nowMs), swept: sweptIds };
+    // #3588: one board-view fact per served in-room board list, with the
+    // claimable count the AvailableWork projection gives this viewer over
+    // the same board rows the page was built from. Fail-soft: a recording
+    // problem never changes the response.
+    let claimableCount = null;
+    try {
+      const { state } = store.room(roomId);
+      claimableCount = availableClaimsFromBoard(board, roomId, { viewerId: caller, state }).length;
+    } catch { claimableCount = null; }
+    if (claimableCount != null) {
+      recordBoardView(store.db, {
+        actorId: caller,
+        actorKind: auth?.member?.kind ?? null,
+        door: boardDoorForRequest(req),
+        roomId,
+        scope: "room",
+        claimableCount,
+        at: nowMs
+      });
+    }
+    return json(res, 200, page);
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected

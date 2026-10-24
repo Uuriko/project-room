@@ -158,6 +158,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
   paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
   paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
+  for (const path of ['server/analytics/board-views.mjs', 'server/analytics/catalog.mjs', 'server/analytics/context.mjs', 'server/analytics/schema.mjs']) paths.add(path); // #3588 board-view facts (imported by server/http.mjs, server/mcp-public-work.mjs, server/work-claim-routes.mjs)
   paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)

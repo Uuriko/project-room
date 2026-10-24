@@ -108,6 +108,12 @@ export const GROWTH_CATALOG = Object.freeze({
     artifact_kind: prop(string),
     is_bot: prop(boolean)
   }),
+  // #3588: a board view at one of the work doors, with the claimable count
+  // the response carried. Counts and timings only — no content, no titles.
+  board_viewed: defineEvent(1, [ACTORS.anonymous, ACTORS.human, ACTORS.agent], {
+    claimable_count: prop(number),
+    scope: prop(string, ["public", "room"])
+  }),
   public_artifact_cta_clicked: defineEvent(1, [ACTORS.anonymous, ACTORS.human], {
     cta: prop(string),
     to: prop(string)

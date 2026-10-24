@@ -213,8 +213,50 @@ test("a public claim by a linked identity attaches to that member's loop", () =>
   assert.equal(member.receiptId, "pwr_9");
 });
 
-test("definitions pin the unmeasured stage and the activation definition", () => {
-  assert.match(LOOP_FUNNEL_DEFINITIONS.sawBoard, /UNMEASURED/);
+test("saw board: first view at or after entry, with its claimable count", () => {
+  const result = loopFunnel({
+    members: [HUMAN, AGENT],
+    signups: SIGNUP,
+    memberships: BINDING,
+    boardViews: [
+      // Before the agent's entry: clock-skew noise, not the saw moment.
+      { actorId: "m_a", roomId: null, claimableCount: 9, at: at(0) },
+      { actorId: "m_a", roomId: null, claimableCount: 3, at: at(3) },
+      { actorId: "m_a", roomId: "r1", claimableCount: 1, at: at(6) }
+    ]
+  });
+  const agent = byActor(result, "m_a");
+  assert.equal(agent.sawBoardAt, at(3));
+  assert.equal(agent.sawBoardClaimableCount, 3);
+  // The human never viewed: still null, and the stage count says so.
+  const human = byActor(result, "m_h");
+  assert.equal(human.sawBoardAt, null);
+  assert.equal(human.sawBoardClaimableCount, null);
+  assert.equal(result.summary.sawBoard, 1);
+  assert.equal(result.summary.agents.sawBoard, 1);
+  assert.equal(result.summary.humans.sawBoard, 0);
+});
+
+test("saw board: a first view is the entry for an actor with no other entry; anonymous views attribute to nobody", () => {
+  const result = loopFunnel({
+    boardViews: [
+      { actorId: null, roomId: null, claimableCount: 5, at: at(1) },
+      { actorId: "ai_solo", roomId: null, claimableCount: 2, at: at(4) },
+      { actorId: "ai_solo", roomId: null, claimableCount: 0, at: at(9) }
+    ]
+  });
+  assert.equal(result.actors.length, 1);
+  const solo = byActor(result, "ai_solo");
+  assert.equal(solo.enteredAt, at(4));
+  assert.equal(solo.enteredBasis, "board_view");
+  assert.equal(solo.sawBoardAt, at(4));
+  assert.equal(solo.sawBoardClaimableCount, 2);
+  assert.equal(result.summary.sawBoard, 1);
+});
+
+test("definitions pin the measured saw-board stage and the activation definition", () => {
+  assert.match(LOOP_FUNNEL_DEFINITIONS.sawBoard, /board_viewed/);
+  assert.doesNotMatch(LOOP_FUNNEL_DEFINITIONS.sawBoard, /UNMEASURED/);
   assert.match(LOOP_FUNNEL_DEFINITIONS.activation, /first-receipt-held/);
   assert.match(LOOP_FUNNEL_DEFINITIONS.receiptHeld, /BEFORE review/);
 });

@@ -25,6 +25,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
+import { boardDoorForRequest, recordBoardView } from "./analytics/board-views.mjs"; // #3588: board-view facts for the activation funnel.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
@@ -783,6 +784,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const match = /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
+  }
+  // #3588: record one board-view fact for a served public-board read, with
+  // the claimable count the response carries. Attribution is best-effort:
+  // the saved identity behind the bearer secret when there is one, else
+  // anonymous — a malformed header records anonymous, exactly the read
+  // the public door serves today. Recording is fail-soft (board-views.mjs).
+  function recordPublicBoardView(req, claimableCount) {
+    let actorId = null;
+    try {
+      const secret = bearer(req);
+      if (secret) actorId = store.identities.resolveGlobalIdentitySecret(secret)?.identityId ?? null;
+    } catch { actorId = null; }
+    recordBoardView(store.db, {
+      actorId,
+      actorKind: "agent",
+      door: boardDoorForRequest(req),
+      scope: "public",
+      claimableCount,
+      at: store.now()
+    });
   }
   // Owner delegates (server/owner-delegates.mjs) need no parallel auth path:
   // store.authenticate stamps the delegate flag on the member copy whenever
@@ -1950,7 +1971,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`public-work-match:${remoteAddress}`, 60);
         const secret = bearer(req);
         const input = await body(req);
-        return json(res, 200, store.publicWorkClaims.match(secret, input));
+        const matched = store.publicWorkClaims.match(secret, input);
+        // #3588: a match is a board view; the claimable count is the
+        // board-wide count list() computes (match's page is a scan of it).
+        recordPublicBoardView(req, store.publicWorkClaims.list({ limit: 1 }).claimableCount);
+        return json(res, 200, matched);
       }
       const publicWorkReviewMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/review$/.exec(url.pathname);
       if (publicWorkReviewMatch) {
@@ -2011,9 +2036,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
         }
-        return json(res, 200, publicWorkTaskMatch
-          ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
-          : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: ["1", "true"].includes(url.searchParams.get("claimable")) }), req.method === "HEAD");
+        if (publicWorkTaskMatch) return json(res, 200, store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1])), req.method === "HEAD");
+        const boardPage = store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: ["1", "true"].includes(url.searchParams.get("claimable")) });
+        // #3588: one board-view fact per served board list (a HEAD serves
+        // no board, so it records none).
+        if (req.method === "GET") recordPublicBoardView(req, boardPage.claimableCount);
+        return json(res, 200, boardPage, req.method === "HEAD");
       }
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
