@@ -51,6 +51,7 @@ import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { compactRoomProjection } from "./projection-compact.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
@@ -6365,9 +6366,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
-        // Archive only at an exact certified head; unsafe transitions defer to
-        // backfill. This is the existing reversible format, not another store.
-        this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
+        // A room that still holds about four windows of history is the
+        // store-growth job's chunked settle. Doing that scan inside the
+        // posting request would spend the request budget on the whole log.
+        const count = state.messages.length;
+        if (count <= this.messageProjectionWindow * 4) {
+          const keepNewest = this.messageProjectionWindow;
+          const archived = this.archiveMessages(roomId, { keepNewest, dryRun: false });
+          const stillHot = archived?.ok && archived.archived > 0
+            ? 0
+            : (this.room(roomId).state.messages?.length ?? count);
+          if (stillHot > keepNewest * 2) compactRoomProjection(this, roomId, { keepNewest });
+        }
       }
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };

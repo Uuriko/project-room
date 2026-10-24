@@ -187,7 +187,7 @@ function textOrNull(value) {
 // Same rule as currentBody in server/redact-read.mjs. A deleted message
 // stores no text. An edit stores only the current body. PRIV-1 also rewrites
 // deleted wording out of the event log; this table never kept it.
-function storedBody(message) {
+export function storedBody(message) {
   if (!message || message.deletedAt || message.body == null) return null;
   return typeof message.body === "string" ? message.body : null;
 }
@@ -252,6 +252,28 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
     written += 1;
   }
   return written;
+}
+
+// Copy serving records into the messages table. Callers choose which ids and
+// sequences to write. An existing row whose body already differs is left
+// alone: a settled compact must not replace a row the projection no longer
+// matches. Shape drift (a matching body, a richer record) is rewritten.
+export function writeServingMessages(db, { roomId, state, sequenceById }) {
+  if (!sequenceById?.size) return 0;
+  const messages = state?.messages ?? [];
+  const eligible = new Map();
+  const bodyOf = db.prepare("SELECT body FROM messages WHERE room_id=? AND message_id=?");
+  for (const message of messages) {
+    if (!sequenceById.has(message?.id)) continue;
+    const row = bodyOf.get(roomId, message.id);
+    if (row && row.body !== storedBody(message)) continue;
+    eligible.set(message.id, sequenceById.get(message.id));
+  }
+  if (!eligible.size) return 0;
+  return writeMessageRows(db, {
+    roomId, state, sequenceById: eligible,
+    messageIndex: new Map(messages.map(message => [message.id, message]))
+  });
 }
 
 // Opt-in migration carrier: only transitions whose message writes are fully
@@ -1132,7 +1154,7 @@ function idsNamedAfter(db, roomId, afterSeq, candidates) {
 // certified messages table (parity at the room head). dryRun reports what
 // would move and changes nothing. Returns { ok, ... } and never throws for
 // "not ready" conditions.
-export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true, belowCursor = false } = {}) {
+export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true, belowCursor = false, settledProjection = false, keepMismatches = false } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
   if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
   return store.transaction(() => {
@@ -1144,11 +1166,15 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     // yet caught up) can still shed history the table already holds. Only
     // rows at or below the cursor's own exact-head fold may move, and only
     // messages no later event mentions; everything newer stays.
+    // settledProjection: the serving projection is the source of truth when
+    // parity never reached the head (a parked backfill). Messages with a
+    // matching row may move; messages with no row stay. One mismatched row
+    // does not abort the rest when keepMismatches is set.
     let limitSeq = head.sequence;
     if (belowCursor) {
       if (!cursor || !(cursor.applied_seq > 0) || !cursorMatches(db, roomId, cursor, head.sequence)) return { ok: false, reason: "messages_cursor_unusable" };
       limitSeq = cursor.applied_seq;
-    } else if (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence) return { ok: false, reason: "messages_table_not_certified" };
+    } else if (!settledProjection && (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence)) return { ok: false, reason: "messages_table_not_certified" };
     const state = store.room(roomId).state;
     const inProjection = state.messages ?? [];
     // Once migrated, only the bounded tail/dependency set needs inspection.
@@ -1158,7 +1184,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       .all(roomId, limitSeq, projectionIds).map(row => [row.message_id, row.seq]));
     // Below the cursor, a message with no row is newer than the cursor: it
     // sorts after every row and never moves.
-    if (!belowCursor && inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
+    if (!belowCursor && !settledProjection && inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
     const seqOf = message => seqs.get(message.id) ?? Infinity;
     const ordered = [...inProjection].sort((a, b) => {
       const x = seqOf(a), y = seqOf(b);
@@ -1180,22 +1206,18 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     for (const message of tail) keep.add(message.id);
     closeKeepSet(ordered, keep);
     const marker = archiveMarker(db, roomId);
-    const moving = ordered.filter(message => seqOf(message) < cutoff && !keep.has(message.id));
+    let moving = ordered.filter(message => seqOf(message) < cutoff && !keep.has(message.id));
     const scope = belowCursor ? { belowCursor: true, cursorSeq: limitSeq, touchedKept } : {};
     if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq, ...scope };
-    // throughSeq only ever grows: the archived prefix is never shortened.
-    const throughSeq = Math.max(marker.throughSeq, seqs.get(moving[moving.length - 1].id));
-    const movingIds = new Set(moving.map(message => message.id));
-    const retainedIds = ordered.filter(message => seqOf(message) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
-    // Every message at or below the cut that is not moving is explicitly retained.
-    const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
-    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq, ...scope };
     // Spot-check before anything moves (dry run too): every moving message has a
     // table row equal to its projection record, and a sample is tied back to its
-    // posting event in the log.
+    // posting event in the log. keepMismatches retains the bad row in the hot
+    // projection and still moves the rows that match.
     const rowFor = db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?");
     const eventAt = db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?");
     const step = Math.max(1, Math.floor(moving.length / 25));
+    const survivors = [];
+    let mismatches = 0;
     for (const [index, message] of moving.entries()) {
       const row = rowFor.get(roomId, message.id);
       let record = null;
@@ -1208,8 +1230,23 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
         const postedId = posted?.data?.messageId || posted?.id;
         ok = posted?.type === POSTED && (postedId === message.id || (Boolean(posted.data?.alsoSendToChannel) && `${postedId}:channel` === message.id));
       }
-      if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
+      if (!ok) {
+        if (!keepMismatches) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
+        mismatches += 1;
+        continue;
+      }
+      survivors.push(message);
     }
+    moving = survivors;
+    const mismatchNote = keepMismatches ? { mismatches } : {};
+    if (!moving.length) return { ok: true, dryRun, archived: 0, retained: mismatches, freedBytes: 0, throughSeq: marker.throughSeq, ...mismatchNote, ...scope };
+    // throughSeq only ever grows: the archived prefix is never shortened.
+    const throughSeq = Math.max(marker.throughSeq, seqs.get(moving[moving.length - 1].id));
+    const movingIds = new Set(moving.map(message => message.id));
+    const retainedIds = ordered.filter(message => seqOf(message) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
+    // Every message at or below the cut that is not moving is explicitly retained.
+    const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
+    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq, ...mismatchNote, ...scope };
     if (dryRun) return result;
     // Fill reducer-only history for pre-v39 rows at the migration boundary.
     // These bytes are never returned by current-message repository reads.
@@ -1223,7 +1260,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       .get(roomId, marker.throughSeq, marker.retainedJson, JSON.stringify(next.messages.map(message => message.id)));
     if (overlaps || next.messages.some(message => movingIds.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
     next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
-    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest, messageEntities: store.messageEntityProjection }), roomId);
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest, messageEntities: store.messageEntityProjection && !settledProjection }), roomId);
     return result;
   });
 }
