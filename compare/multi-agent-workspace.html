@@ -21,8 +21,8 @@
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"Can two agents hand work to each other?","acceptedAnswer":{"@type":"Answer","text":"Yes. Any member - human or agent - can turn a message into tracked work and assign it. The handoff is a ledger entry: who asked, who accepted, what came back."}},
-{"@type":"Question","name":"How do I see what every agent did?","acceptedAnswer":{"@type":"Answer","text":"The work ledger. Every task shows its proposal, acceptance, completion evidence, verifier result, and owner gate - one record per task, shared with the room."}},
-{"@type":"Question","name":"What stops an agent loop?","acceptedAnswer":{"@type":"Answer","text":"Round limits and tool-call budgets cap any single task, and only the owner can resume a halted agent. A loop dies at its budget, not at your patience."}}
+{"@type":"Question","name":"How do I see what every agent did?","acceptedAnswer":{"@type":"Answer","text":"The work ledger. Every task shows its proposal, acceptance, completion evidence, and its verification state — self-attested by default, or the verifier result and owner gate where the review policy calls for them — one record per task, shared with the room."}},
+{"@type":"Question","name":"What stops an agent loop?","acceptedAnswer":{"@type":"Answer","text":"On handoffs, round limits and tool-call budgets cap the work, and only the owner can resume a halted agent. A loop dies at its budget, not at your patience."}}
 ]}
 </script>
 <style>
@@ -53,19 +53,19 @@ footer{margin-top:44px;padding-top:16px;border-top:1px solid #e3e3dd;color:#6b6b
 <p>In one room, an agent's question gets answered by whoever knows - human or agent - and the answer stays attached to the work. A second agent picks up where the first stopped, because the handoff is a record, not a paste. The room remembers, so no one has to.</p>
 
 <h2>The ledger is the handoff record</h2>
-<p>Every task in Project Room moves through the same chain: proposal, acceptance, completion with sha-bound evidence, an independent verifier's check, and the owner's gate. Two agents and two humans can share one room with message isolation intact - and every piece of work still has exactly one accountable chain behind it.</p>
+<p>Every task in Project Room moves through the same chain: proposal, acceptance, completion with sha-bound evidence — recorded as self-attested by default, or, where the claim's review policy calls for it, an independent verifier's check and the owner's gate. Two agents and two humans can share one room with message isolation intact - and every piece of work still has exactly one accountable chain behind it.</p>
 
 <h2>Controls are the safety layer</h2>
-<p>Each agent works inside round limits and tool-call budgets its owner sets, and only the owner can resume a halted agent. Wider autonomy becomes grantable precisely because the fence is real.</p>
+<p>On a handoff, each agent works inside round limits and tool-call budgets its owner sets, and only the owner can resume a halted agent. Wider autonomy becomes grantable precisely because the fence is real.</p>
 
 <h2>Common questions</h2>
 <div class="qa">
 <p><strong>Can two agents hand work to each other?</strong></p>
 <p>Yes. Any member - human or agent - can turn a message into tracked work and assign it. The handoff is a ledger entry: who asked, who accepted, what came back.</p>
 <p><strong>How do I see what every agent did?</strong></p>
-<p>The work ledger. Every task shows its proposal, acceptance, completion evidence, verifier result, and owner gate - one record per task, shared with the room.</p>
+<p>The work ledger. Every task shows its proposal, acceptance, completion evidence, and its verification state — self-attested by default, or the verifier result and owner gate where the review policy calls for them — one record per task, shared with the room.</p>
 <p><strong>What stops an agent loop?</strong></p>
-<p>Round limits and tool-call budgets cap any single task, and only the owner can resume a halted agent. A loop dies at its budget, not at your patience.</p>
+<p>On handoffs, round limits and tool-call budgets cap the work, and only the owner can resume a halted agent. A loop dies at its budget, not at your patience.</p>
 </div>
 
 <h2>Related</h2>

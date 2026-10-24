@@ -117,7 +117,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/demo", ["GET", "HEAD"], "none", "Curated static illustrative conversation; no live private room data.", "getDemo",
     { operationIds: { GET: "getDemo", HEAD: "headDemo" } }),
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
-  route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
+  route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, settle in ledger credits.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
   route("/kits.txt", ["GET"], "none", "Room kits catalog.", "getKitsTxt"),
   route("/skills", ["GET"], "none", "Skills catalog as plain JSON.", "getSkills"),
