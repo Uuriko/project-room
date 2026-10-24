@@ -443,7 +443,7 @@ export class PublicWorkClaims {
         if (action === 'claim') {
           // Paid tasks gate the claim on the settlement lane + reputation
           // claim gate before any lease moves (no-op for unpaid tasks).
-          this.settlementService().assertClaimable(row.room_id, offerId, identity.identityId);
+          const claimLane = this.settlementService().assertClaimable(row.room_id, offerId, identity.identityId);
           if (item.state !== 'unclaimed') {
             // G4: name the holder and the lease expiry — a bare
             // "Task already claimed" teaches the raced agent nothing actionable.
@@ -467,6 +467,10 @@ export class PublicWorkClaims {
           item = updateWork(item, identity.identityId, { state: 'in_progress', now: this.store.now() });
           this.db.prepare('UPDATE public_work_tasks SET generation=generation+1 WHERE offer_id=?').run(offerId);
           row.generation += 1;
+          // Pin the claim-time settlement lane on the link row (#3907 F6),
+          // still inside this claim transaction: the finish settles through
+          // the lane the claim gates were evaluated for.
+          if (claimLane) this.settlementService().pinClaimLane(row.room_id, offerId, claimLane);
         } else {
           if (row.generation !== input.generation || !item.owner) {
             // G5: say which — the generation changed, or the claim expired —
@@ -490,6 +494,8 @@ export class PublicWorkClaims {
           if (action === 'release') {
             item = updateWork(item, identity.identityId, { state: 'claimed', now: this.store.now() });
             item = updateWork(item, identity.identityId, { state: 'unclaimed', now: this.store.now() });
+            // A released claim's settlement-lane pin is cleared (#3907 F6).
+            this.settlementService().clearClaimLane(row.room_id, offerId);
           }
         }
         this.store.workClaims.set(row.namespace_key, item);

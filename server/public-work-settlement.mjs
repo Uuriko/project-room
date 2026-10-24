@@ -168,6 +168,27 @@ export class PublicWorkSettlement {
     return lane;
   }
 
+  // Claim time (#3907 F6): pin the lane assertClaimable just gated on the
+  // link row, inside the claim's writer transaction, so attachSubmission
+  // settles through the same lane even if the claimant identity is
+  // re-linked to another member before the finish. A later fresh claim
+  // (after a release or a lapsed lease) re-pins through its own gate.
+  pinClaimLane(roomId, offerId, lane) {
+    const link = this.link(offerId);
+    if (!link || link.receipt_id || !lane) return;
+    this.db.prepare('UPDATE public_work_settlements SET claimant_lane=? WHERE offer_id=?')
+      .run(lane, offerId);
+  }
+
+  // Release time (#3907 F6): a released claim hands the task back, so its
+  // pin is cleared; the next claim pins its own gated lane.
+  clearClaimLane(roomId, offerId) {
+    const link = this.link(offerId);
+    if (!link || link.receipt_id) return;
+    this.db.prepare('UPDATE public_work_settlements SET claimant_lane=NULL WHERE offer_id=?')
+      .run(offerId);
+  }
+
   // Submission time: attach the public submission to the funded escrow
   // bounty (claim — locks the existing claim bond — then submit, with the
   // public-work receipt as the evidence pointer). Called inside the finish
@@ -180,7 +201,12 @@ export class PublicWorkSettlement {
       if (link.receipt_id === receipt.receiptId) return this.view(link);
       fail(409, 'settlement_already_attached', 'This task already has a settled submission');
     }
-    const lane = this.laneForIdentity(roomId, receipt.identityId);
+    // The settle lane is the lane pinned at claim time (#3907 F6): the
+    // claim-time gates (poster, probation) were evaluated for that lane, so
+    // a mid-claim identity re-link must not move the bond or the payout to a
+    // lane that never took the public claim. Fresh resolution is only the
+    // fallback for links whose claim predates pinning.
+    const lane = link.claimant_lane ?? this.laneForIdentity(roomId, receipt.identityId);
     if (!lane) fail(422, 'settlement_lane_unlinked',
       'Paid public work settles to a room-member ledger lane: the claimant identity is not linked to a member of the task room');
     const escrow = this.escrow();
@@ -240,7 +266,11 @@ export class PublicWorkSettlement {
     if (bounty?.state === 'paid' && link.claimant_lane) {
       const payout = this.escrow().history(link.room_id, link.claimant_lane)
         .find(entry => entry.bountyId === link.bounty_id && entry.kind === 'payout');
-      if (payout) payoutReceipt = { kind: 'payout', receiptId: payout.receiptId, amount: payout.amount,
+      // The escrow history entry's receiptId is the movement's lot id
+      // (first.lot_id ?? first.entry_id in BountyEscrow.history), NOT a
+      // signed bounty receipt id — name it lotId (#3907 F5). The actual
+      // signed payout receipt ids ride in signedReceiptIds.
+      if (payout) payoutReceipt = { kind: 'payout', lotId: payout.receiptId, amount: payout.amount,
         amountMillis: payout.amountMillis, entries: payout.entries, signedReceiptIds: payout.signedReceiptIds };
     }
     return { schema: 'public-work-settlement/1', taskId: link.offer_id, bountyId: link.bounty_id,
