@@ -14,7 +14,7 @@ import { readAgentConnection } from '../client/agent-connection.mjs';
 import { openRoomInteraction, readRoomInteraction } from '../client/evolution/interactions.mjs';
 import { publishJobArtifacts } from '../client/evolution/artifacts.mjs';
 import { runRoomCapability } from '../client/evolution/room-bridge.mjs';
-import { configure, submit, getJob, runJob, status, cancel, reconcile, feedback } from '../client/evolution/executor.mjs';
+import { configure, submit, getJob, runJob, status, readiness, cancel, reconcile, feedback } from '../client/evolution/executor.mjs';
 
 // One owner-private state directory per laptop, shared by all local room clients.
 // This CLI is a local authority boundary, not an unauthenticated network API.
@@ -46,6 +46,7 @@ export async function command(store, name, args = {}, signal) {
     case 'run': return runJob(store, args.jobId, { signal });
     case 'job': return getJob(store, args.jobId);
     case 'status': return status(store);
+    case 'readiness': return readiness(store);
     case 'events': return events(store, args.after ?? 0, args.limit ?? 100);
     case 'cancel': return cancel(store, args.jobId);
     case 'reconcile': return reconcile(store, args.jobId, args);
@@ -56,7 +57,7 @@ export async function command(store, name, args = {}, signal) {
 async function main() {
   const [name, input] = process.argv.slice(2);
   if (!name || name === '--help') {
-    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|metrics|first-job-prepare|first-job-verify|events|cancel|reconcile|feedback|room-run|room-watch|room-host|room-publish|interaction-open|interaction-read|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
+    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|readiness|metrics|first-job-prepare|first-job-verify|events|cancel|reconcile|feedback|room-run|room-watch|room-host|room-publish|interaction-open|interaction-read|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
   }
   const store = openEvolution(process.env.ROOM_EVOLUTION_DIRECTORY ?? defaultDirectory());
   const controller = new AbortController(); const stop = () => controller.abort();

@@ -396,3 +396,26 @@ historical local execution evidence, not current execution authorization or a
 claim of Room upload/peer connectivity. `summary.complete:false` means the entry
 budget was reached, not a complete folder scan. Native UI should display that
 limit and separately qualify Room artifact delivery and the second device.
+
+### Device resource readiness
+
+Local policy may opt into `reserveDiskBytes` (nonnegative safe integer bytes on
+**the evolution state filesystem**) and `requireNormalMemoryPressure` (boolean).
+Desktop onboarding should explicitly choose these settings; existing policies
+remain compatible and are not silently rewritten. A required unavailable sensor
+blocks admission. macOS pressure uses `kern.memorystatus_vm_pressure_level` with
+a bounded read cached for at most one second. Other platforms report unsupported.
+Disk headroom uses available blocks, not total free blocks or another volume.
+
+`room-evolution readiness` returns schema 1 local admission health, fresh observed
+capacity, reservations including interrupted jobs, guard settings and a reason.
+It omits grants, workspace paths and job payloads. Ready is not job authorization:
+package/workspace checks and shared transactional admission still run per job.
+Denied jobs stay queued at attempt zero and the watcher reevaluates them; recovery
+does not replay completed jobs. Reasons include `disk_headroom`,
+`disk_observation_unavailable`, `memory_pressure`, and `memory_pressure_unavailable`.
+
+These are admission guards, not filesystem quotas or OS process limits. They do
+not terminate running jobs, reserve bytes for future output, monitor other
+workspace volumes, or guarantee safe sustained saturation. Explicit cancellation
+remains available; continuous pressure-based draining is a separate next step.

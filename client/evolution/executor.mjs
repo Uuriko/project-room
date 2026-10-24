@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, realpat
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { availableParallelism, freemem, loadavg } from 'node:os';
+import { observeResources, resourceGate } from './resources.mjs';
 import { canonical, digest, event, requireThat, transaction } from './store.mjs';
 import { activation, getPackage, verifyPackage } from './registry.mjs';
 
@@ -13,6 +13,8 @@ export function configure(store, policy) {
     && Number.isInteger(policy.cpuSlots) && policy.cpuSlots > 0 && policy.cpuSlots <= 64
     && Number.isSafeInteger(policy.memoryBytes) && policy.memoryBytes >= 64 * 1024 ** 2
     && Number.isSafeInteger(policy.reserveMemoryBytes) && policy.reserveMemoryBytes >= 0
+    && (policy.reserveDiskBytes === undefined || (Number.isSafeInteger(policy.reserveDiskBytes) && policy.reserveDiskBytes >= 0))
+    && (policy.requireNormalMemoryPressure === undefined || typeof policy.requireNormalMemoryPressure === 'boolean')
     && typeof policy.paused === 'boolean', 'invalid_policy');
   transaction(store, () => {
     store.db.prepare("INSERT INTO settings VALUES('policy',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(canonical(policy));
@@ -42,8 +44,8 @@ export function submit(store, { room, operation, capability, input, candidateHas
     return getJob(store, jobId);
   });
 }
-export function observe() { return { at: Date.now(), cpuSlots: Math.max(0, availableParallelism() - Math.ceil(loadavg()[0])), memoryBytes: freemem() }; }
-export function admission(store, job, observation = observe()) {
+export function observe(directory) { return observeResources(directory); }
+export function admission(store, job, observation = observe(store.directory)) {
   const p = policy(store), manifest = getPackage(store, job.pin).manifest;
   if (p.paused) return { allowed: false, reason: 'paused' };
   if (manifest.workspaceScope || manifest.capability === 'workspace-inventory') {
@@ -56,8 +58,8 @@ export function admission(store, job, observation = observe()) {
     } catch { return { allowed: false, reason: 'workspace_unavailable' }; }
   }
   if (!p.rooms.includes(job.room) || !p.capabilities.includes(manifest.capability)) return { allowed: false, reason: 'job_not_authorized' };
-  if (!Number.isSafeInteger(observation.at) || observation.at > Date.now() || Date.now() - observation.at > 30000
-    || !Number.isFinite(observation.cpuSlots) || !Number.isFinite(observation.memoryBytes)) return { allowed: false, reason: 'stale_resources' };
+  const guard = resourceGate(p, observation);
+  if (!guard.allowed) return guard;
   // Unknown execution retains its reservation until a local operator reconciles it.
   const active = store.db.prepare("SELECT pin FROM jobs WHERE state IN ('running','cancelling','interrupted')").all();
   const used = active.reduce((sum, row) => { const r = getPackage(store, row.pin).manifest.resources; return { cpu: sum.cpu + r.cpu, memory: sum.memory + r.memoryBytes }; }, { cpu: 0, memory: 0 });
@@ -87,6 +89,20 @@ export function feedback(store, jobId, { category, note }) {
   requireThat(['correct', 'incorrect', 'slow', 'interruptions', 'other'].includes(category) && typeof note === 'string' && note.length <= 2000, 'invalid_feedback');
   getJob(store, jobId); event(store, 'job.feedback', jobId, { category, note, scope: 'this_job' });
   return { recorded: true, preferenceChanged: false };
+}
+export function readiness(store, observation = observe(store.directory)) {
+  const p = policy(store), guard = resourceGate(p, observation);
+  const reservations = store.db.prepare("SELECT pin FROM jobs WHERE state IN ('running','cancelling','interrupted')").all();
+  const reserved = reservations.reduce((sum, row) => {
+    const r = getPackage(store, row.pin).manifest.resources;
+    return { jobs: sum.jobs + 1, cpuSlots: sum.cpuSlots + r.cpu, memoryBytes: sum.memoryBytes + r.memoryBytes };
+  }, { jobs: 0, cpuSlots: 0, memoryBytes: 0 });
+  const reason = p.paused ? 'paused' : !guard.allowed ? guard.reason
+    : observation.cpuSlots < 1 || observation.memoryBytes <= p.reserveMemoryBytes ? 'resources_unavailable'
+    : reserved.jobs >= p.maxJobs || reserved.cpuSlots >= p.cpuSlots || reserved.memoryBytes >= p.memoryBytes ? 'resources_reserved' : null;
+  return { schema: 1, scope: 'local_admission', ready: reason === null, reason, observed: observation, reserved,
+    guards: { reserveDiskBytes: p.reserveDiskBytes ?? 0, requireNormalMemoryPressure: p.requireNormalMemoryPressure ?? false },
+    jobSpecificAdmissionRequired: true, physicalLimitsEnforced: false, runningJobsStopped: false };
 }
 export function status(store) {
   return { policy: policy(store), activations: store.db.prepare('SELECT * FROM activations ORDER BY capability').all(),

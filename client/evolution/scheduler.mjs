@@ -4,7 +4,7 @@ import { requireThat } from './store.mjs';
 
 // App-owned local queue, not a second execution authority. runJob claims and
 // reserves resources transactionally across every broker using this database.
-export async function watchLocalCapabilities(store, { signal, intervalMs = 1000, emit = () => {}, observeResources = observe } = {}) {
+export async function watchLocalCapabilities(store, { signal, intervalMs = 1000, emit = () => {}, observeResources = () => observe(store.directory) } = {}) {
   requireThat(Number.isInteger(intervalMs) && intervalMs >= 200 && intervalMs <= 60000, 'invalid_interval');
   const controller = new AbortController(), active = new Map();
   let after = 0, failure;

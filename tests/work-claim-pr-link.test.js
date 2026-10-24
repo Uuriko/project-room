@@ -397,7 +397,7 @@ test("re-linking a settled PR URL in a new round resets the link for re-polling"
   applyPullRequestWebhook(store, {
     action: "closed",
     pull_request: { html_url: URL_A, merged: false, state: "closed" },
-  });
+  }, { nowMs: now });
   const released = store.workClaims.get("commons", "relink-pr");
   assert.equal(released.state, "unclaimed");
   assert.equal(released.pullRequests[0].outcome, "closed");

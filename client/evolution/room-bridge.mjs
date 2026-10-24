@@ -14,7 +14,7 @@ export function parseCapabilityTask(body) {
     && typeof task.capability === 'string', 'invalid_capability_task');
   return task;
 }
-export async function runRoomCapability(store, { connection, requestMessageId, signal, observeResources = observe }) {
+export async function runRoomCapability(store, { connection, requestMessageId, signal, observeResources = () => observe(store.directory) }) {
   const client = new RoomAgentClient(connection);
   const context = await client.replyContext(requestMessageId, { limit: 50, signal });
   requireThat(context.viewerId === connection.memberId && context.request.recipientId === connection.memberId, 'request_identity_mismatch');
