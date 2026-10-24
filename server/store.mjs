@@ -448,7 +448,11 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
 // Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
 // headroom; a larger guard does not establish the deployed storage ceiling.
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// BUY-TIME (2026-10-22): guard raised to 5 MiB under the standing storage
+// ruling — land ONLY on the trigger (a room at 3.8 MB before SPILL-1's first
+// live run; largest room 3,554,944 B growing ~169 KB/day at the 2026-10-22
+// gauge). Buys ~8.5–10 days; a bridge to SPILL, not a fix.
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 5 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
