@@ -17,6 +17,7 @@
   "src/agent-error.mjs",
   "src/agent-first-run.js",
   "src/agent-invite-ui.js",
+  "src/agent-pause-header.js",
   "src/agent-signin-page.js",
   "src/agent-signin-ui.js",
   "src/app.js",

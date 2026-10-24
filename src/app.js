@@ -35,6 +35,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { pauseHeaderModel, renderPauseHeader } from "./agent-pause-header.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -377,6 +378,7 @@ let roomActionsContext = null;
 // roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
 // Remove button is waiting for its confirming second click.
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
+let pauseHeaderArmed = false, pauseHeaderFetched = null;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -601,6 +603,7 @@ const client = new RoomClient({
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
     $("#room-about").open = true;
     agentPauses = new Map(); armedRemoval = null;
+    pauseHeaderArmed = false; pauseHeaderFetched = null;
     $("#message-delivery").replaceChildren(); $("#message-delivery").hidden = true;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -1979,6 +1982,7 @@ function render() {
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
+  syncAgentPauseHeader(ownerView);
   const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
   // H4: agents that joined through a room link arrive with no permissions, so
   // they never appear as assignees. The click handler leaves owner-connected
@@ -4659,6 +4663,29 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   e.preventDefault();
   chooseMention(state.members[option.dataset.mentionId]);
 });
+function formatPauseSince(ms) {
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function pauseHeaderMembers() {
+  return Object.values(state.members).filter(member => member.id !== session.member.id && member.id !== state.room.ownerId);
+}
+function syncAgentPauseHeader(ownerView) {
+  const root = $("#agent-pause-header");
+  if (!root) return;
+  if (!ownerView) pauseHeaderArmed = false;
+  renderPauseHeader(root, pauseHeaderModel({
+    owner: ownerView,
+    members: ownerView ? pauseHeaderMembers() : [],
+    paused: [...agentPauses.values()],
+    armed: pauseHeaderArmed
+  }), formatPauseSince);
+  if (ownerView && pauseHeaderFetched !== client.generation) {
+    pauseHeaderFetched = client.generation;
+    void refreshAgentPauses();
+  }
+}
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.
 async function refreshAgentPauses() {
@@ -4778,6 +4805,43 @@ $("#presence-list").addEventListener("click", async e => {
     if (generation === client.generation && state) notice(error.message || "Action not saved. Try again.", true);
   } finally { memberActionBusy = false; }
 });
+$("#agent-pause-header")?.addEventListener("click", async event => {
+  const resume = event.target.closest("[data-pause-resume]");
+  const keep = event.target.closest("[data-pause-keep]");
+  const all = event.target.closest("[data-pause-all]");
+  if (!resume && !keep && !all) return;
+  event.preventDefault();
+  if (!state || !session || !ownsRoomActions(null) || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (keep) { pauseHeaderArmed = false; render(); $("#agent-pause-all")?.focus(); return; }
+  if (all && !pauseHeaderArmed) { pauseHeaderArmed = true; render(); $("#agent-pause-all")?.focus(); return; }
+  if (memberActionBusy) return;
+  const model = pauseHeaderModel({ owner: true, members: pauseHeaderMembers(), paused: [...agentPauses.values()], armed: true });
+  const targets = resume ? [resume.dataset.pauseResume] : model.targets;
+  if (!resume && targets.length === 0) { pauseHeaderArmed = false; notice(uiText("pause.header.empty")); render(); return; }
+  memberActionBusy = true;
+  const generation = client.generation;
+  const post = (action, memberId) => client.request(client.path("/agent-pause"), { method: "POST", data: { action, memberId, requestId: crypto.randomUUID(), ...(action === "pause" ? { reason: null } : {}) } });
+  try {
+    let view = null;
+    if (resume) view = await post("resume", targets[0]);
+    else for (const memberId of targets) {
+      view = await post("pause", memberId);
+      if (generation !== client.generation || !state) return;
+      if (view?.paused) agentPauses = new Map(view.paused.map(row => [row.memberId, row]));
+    }
+    if (generation !== client.generation || !state) return;
+    if (view?.paused) agentPauses = new Map(view.paused.map(row => [row.memberId, row]));
+    pauseHeaderArmed = false;
+    if (resume) {
+      const resumed = state.members[targets[0]]?.displayName;
+      if (resumed) notice(uiText("pause.header.resumed", { name: resumed }));
+    } else notice(uiText("pause.header.done"));
+    render();
+    $("#agent-pause-all")?.focus();
+  } catch (error) {
+    if (generation === client.generation && state) { notice(error.message || uiText("pause.header.failed"), true); render(); }
+  } finally { memberActionBusy = false; }
+});
 $("#presence-list").addEventListener("click", e => {
   if (!shouldAddressPresenceClick(e.target)) return;
   const row = e.target.closest(".presence-member");
@@ -4856,6 +4920,18 @@ document.addEventListener("keydown", event => {
   if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return;
   if (event.target?.closest?.("input, textarea, select, [contenteditable]")) { attentionKeyPrefix = null; return; }
   const key = event.key?.toLowerCase();
+  if (pauseHeaderArmed && event.key === "Escape") {
+    pauseHeaderArmed = false;
+    if (state) render();
+    $("#agent-pause-all")?.focus();
+    event.preventDefault();
+    return;
+  }
+  if (event.shiftKey && key === "p" && $("#agent-pause-header") && !$("#agent-pause-header").hidden) {
+    event.preventDefault();
+    $("#agent-pause-all")?.click();
+    return;
+  }
   if (attentionKeyPrefix === "g") {
     attentionKeyPrefix = null;
     clearTimeout(attentionKeyTimer);

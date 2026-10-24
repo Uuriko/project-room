@@ -1819,3 +1819,14 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 .result-options > div > button { display: block; width: 100%; text-align: left; }
 .result-options > div > button[hidden] { display: none; }
 @media (pointer: coarse) { .result-options > summary { min-width: 44px; min-height: 44px; } }
+
+.agent-pause-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); order: -1; max-width: 100%; min-width: 0; }
+.agent-pause-status { margin: 0; max-width: 100%; color: var(--muted); font-size: var(--text-xs); }
+.agent-pause-status ul { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; }
+.agent-pause-status li { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.agent-pause-header .topbar-button { min-height: 44px; }
+#agent-pause-all { border-color: var(--line); background: var(--panel-raised); }
+#agent-pause-all[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+@media (max-width: 520px) {
+  .room-topbar .agent-pause-header { flex: 1 1 100%; order: -1; }
+}

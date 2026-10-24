@@ -543,5 +543,17 @@ export default {
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "pause.header.pause": "Pause agents",
+  "pause.header.confirm": "Pause all agents",
+  "pause.header.keep": "Keep running",
+  "pause.header.resume": "Resume",
+  "pause.header.resume_name": "Resume {name}",
+  "pause.header.none": "No agents are paused.",
+  "pause.header.line": "{name}, until resumed",
+  "pause.header.since": "{name}, since {when}, until resumed",
+  "pause.header.empty": "No agents to pause.",
+  "pause.header.done": "Agents paused. Queued wakes will not start. A running attempt finishes.",
+  "pause.header.resumed": "{name} resumed.",
+  "pause.header.failed": "Pause was not saved. Try again."
 };
