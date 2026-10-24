@@ -451,6 +451,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // projection_bodies: Phase 1a message bodies at rest. Older writers have no
   // path to it; rooms.projection rows they write carry full bodies.
   "projection_bodies",
+  // projection_message_records: full message records beside the room row.
+  // Older writers have no path to it. Empty until side-table projection is on.
+  // A missing row means that message is still inline in rooms.projection.
+  "projection_message_records",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",

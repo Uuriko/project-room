@@ -33,6 +33,7 @@ export const ROOM_TABLE_KEYS = Object.freeze({
   messages: "room_id",
   owner_delegate_journal: "room_id",
   projection_bodies: "room_id",
+  projection_message_records: "room_id",
   projection_checkpoints: "room_id",
   rooms: "id",
   work_claim_config: "room_id",

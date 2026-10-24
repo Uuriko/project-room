@@ -346,6 +346,7 @@ optional.push("server/routes/agent-work.mjs"); // bounded agent pickup route
 optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
+optional.push("server/projection-message-records.mjs"); // side-table message records (imported by server/store.mjs and server/projection-at-rest.mjs)
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/agent-presence.mjs"); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)

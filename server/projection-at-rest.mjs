@@ -1,5 +1,6 @@
 import { hydrateWorkItems, referenceWorkItems } from "./work-repository.mjs";
 import { isMessageEntityRef, referenceMessageEntities, hydrateMessageEntities } from "./message-entity-projection.mjs";
+import { isSideMessageRef, referenceProjectionMessages, hydrateSideMessages } from "./projection-message-records.mjs";
 // Phase 1a: message bodies at rest outside the room projection row.
 //
 // The reducer, the cache and every reader keep full message bodies in
@@ -147,7 +148,17 @@ function releaseUnreferencedBodies(db, roomId, referenced) {
 export function storedProjection(db, roomId, state, options = {}) {
   return serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
 }
-function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [] } = {}) {
+function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [], sideMessages } = {}) {
+  // Side-table refs are storage only. Certified entity projection (#4738)
+  // owns the message list when it is on, so expand any `_m` refs first and
+  // let that path store them. Otherwise slim full messages before the body
+  // pass sees them.
+  if (messageEntities && state?.messages?.some(isSideMessageRef)) {
+    state = { ...state, messages: referenceProjectionMessages(db, roomId, state.messages, { enabled: false }) };
+  } else if (!messageEntities && Array.isArray(state?.messages)) {
+    const messages = referenceProjectionMessages(db, roomId, state.messages, { enabled: sideMessages });
+    if (messages !== state.messages) state = { ...state, messages };
+  }
   if (state?.messages?.some(isMessageEntityRef)) state = { ...state, messages: hydrateMessageEntities(db,roomId,state.messages) };
   if (messageEntities && Array.isArray(state?.messages)) {
     if (state.messages.some(message => typeof message?.bodyRef === "string" || hasMarker(message))) {
@@ -226,6 +237,7 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
 // which routes the caller to the same rebuild-from-log recovery.
 export function hydrateProjection(db, roomId, state, { verifyBodyHashes = false, workEntities = true } = {}) {
   if (workEntities) state = hydrateWorkItems(db, roomId, state);
+  if (state?.messages?.some(isSideMessageRef)) state = { ...state, messages: hydrateSideMessages(db, roomId, state.messages) };
   if (state?.messages?.some(isMessageEntityRef)) state.messages = hydrateMessageEntities(db,roomId,state.messages);
   const messages = Array.isArray(state?.messages) ? state.messages : [];
   const refs = messages.some(message => message && typeof message.bodyRef === "string");

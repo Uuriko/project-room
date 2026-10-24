@@ -50,6 +50,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
+import { PROJECTION_MESSAGE_RECORDS_SCHEMA, configureSideTableMessages, clearSideTableMemo } from "./projection-message-records.mjs";
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
@@ -1145,7 +1146,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, PROJECTION_MESSAGE_RECORDS_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1367,9 +1368,13 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto", sideTableMessages = false } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    // Message text in projection_message_records. Default off: existing
+    // readers of the raw projection keep full messages. The hosted object
+    // turns it on.
+    this.sideTableMessages = sideTableMessages === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
@@ -2081,6 +2086,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Phase 1a: message bodies at rest, content-addressed. The stamp
       // includes this DDL.
       this.db.exec(PROJECTION_BODIES_SCHEMA);
+      // Message records beside the room row. Unfenced and additive. Empty
+      // until a store is opened with sideTableMessages.
+      this.db.exec(PROJECTION_MESSAGE_RECORDS_SCHEMA);
       // WRITE-PATH-WINS win 4: the serializer releases unreferenced body
       // rows itself now; drop the json_each release trigger the schema
       // used to install, so existing databases lose it on this pass (the
@@ -2149,6 +2157,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     configureWorkRepository(this.db, this.workEntities);
+    configureSideTableMessages(this.db, this.sideTableMessages);
     if (this.workEntities && version < 42) this.migrateWorkProjections();
   }
 
@@ -3474,6 +3483,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
       this._dropProjectionCache();
+      // A rolled-back write undoes side-table upserts. Drop the memo that
+      // believed they landed, or the next write skips a record that is gone.
+      clearSideTableMemo(this.db);
       if (boundary) { frames.pop(); this._pendingAppends.clear(); }
       throw this.storageFailure(error, outermost);
     }
@@ -3583,12 +3595,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"_m\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
         // Migration validates stored authority, never a previously hydrated cache.
         this._dropProjectionCache();
         restoreArchivedMessages(this, id);
         const state = this.room(id).state;
-        this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
+        this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false, sideMessages: false }), id);
         this._projectionCache?.clear?.();
         count += 1;
       }

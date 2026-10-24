@@ -39,6 +39,8 @@ const EMPTY_UNTIL_CRON = new Set([
   "share_link_access",
   // Phase 1a: rows exist only once a room stores a large body at rest.
   "projection_bodies",
+  // Message records exist only when a store is opened with side-table projection.
+  "projection_message_records",
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
