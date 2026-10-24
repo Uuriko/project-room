@@ -10342,6 +10342,123 @@ paths:
         '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /oauth/authorize:
+    get:
+      summary: Show the OAuth consent screen for an authorization request
+      description: |
+        Authorization endpoint of the built-in OAuth 2.0 authorization
+        server (RFC 6749 section 4.1, authorization-code flow only, PKCE
+        S256 mandatory). The browser must hold an account session; without
+        one the endpoint answers 302 to the login page, carrying this
+        request as the return target. A valid request renders the consent
+        screen (200, text/html) naming the client and the scopes it asks
+        for; the screen's form posts the decision to POST /oauth/authorize.
+        An invalid request (missing or unknown client_id, a redirect_uri
+        that does not exactly match a registered URI, an unknown scope, a
+        missing or malformed code_challenge, or a code_challenge_method
+        other than S256) answers 400 with the flat OAuth error shape
+        ({ error, error_description }), not the canonical error envelope.
+        30 requests per minute per address. Quickstart example, as a bare
+        path: GET /oauth/authorize
+      security:
+        - accountSession: []
+      parameters:
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string, maxLength: 64 }
+          description: Registered client id.
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: { type: string }
+          description: Must exactly match one of the client's registered redirect URIs.
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string }
+          description: Space-delimited subset of rooms:read, chat:read, chat:write, work:read, work:write.
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, maxLength: 1024 }
+          description: Opaque value echoed back to the redirect_uri on completion.
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string, minLength: 43, maxLength: 128 }
+          description: PKCE S256 code challenge.
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string, enum: [S256] }
+          description: Must be S256.
+      responses:
+        '200':
+          description: Consent screen HTML for the signed-in account.
+          content:
+            text/html:
+              schema: { type: string }
+        '302': { description: No account session — redirect to the login page with this request as the return target }
+        '400': { description: "invalid_request — flat OAuth error shape { error, error_description }" }
+        '429': { description: rate_limited }
+    post:
+      x-room-permission: account
+      summary: Record the consent decision and redirect back to the client
+      description: |
+        Processes the consent decision for the request the GET form
+        carried. Accepts the server's own consent form
+        (application/x-www-form-urlencoded, csrf_token field in the body)
+        and JSON API clients (x-csrf-token header); either way the
+        presented token must equal the account session's CSRF token, and
+        the Origin check applies. The authorization request is validated
+        before the decision is acted on, so an invalid redirect_uri
+        answers 400 directly and never redirects. decision allow mints a
+        single-use authorization code (10 minute TTL) and answers 302 to
+        the registered redirect_uri carrying the code and, when given,
+        the state. Any other decision answers 302 to the redirect_uri
+        carrying error access_denied. Errors before validation use the
+        canonical envelope (401 account_session_required, 403 csrf_denied
+        or origin_denied); validation errors use the flat OAuth shape
+        ({ error, error_description }). 30 requests per minute per
+        address. Quickstart example, as a bare path: POST /oauth/authorize
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [client_id, redirect_uri, code_challenge, code_challenge_method, decision]
+              properties:
+                client_id: { type: string, maxLength: 64 }
+                redirect_uri: { type: string, description: "Must exactly match a registered redirect URI" }
+                scope: { type: string, description: "Space-delimited scopes, as carried from the authorization request" }
+                state: { type: string, maxLength: 1024 }
+                code_challenge: { type: string, minLength: 43, maxLength: 128 }
+                code_challenge_method: { type: string, enum: [S256] }
+                decision: { type: string, enum: [allow, deny], description: "Anything other than allow is treated as a denial" }
+                csrf_token: { type: string, description: "The account session's CSRF token; API clients may send the x-csrf-token header instead" }
+          application/json:
+            schema:
+              type: object
+              required: [client_id, redirect_uri, code_challenge, code_challenge_method, decision]
+              properties:
+                client_id: { type: string, maxLength: 64 }
+                redirect_uri: { type: string, description: "Must exactly match a registered redirect URI" }
+                scope: { type: string, description: "Space-delimited scopes, as carried from the authorization request" }
+                state: { type: string, maxLength: 1024 }
+                code_challenge: { type: string, minLength: 43, maxLength: 128 }
+                code_challenge_method: { type: string, enum: [S256] }
+                decision: { type: string, enum: [allow, deny], description: "Anything other than allow is treated as a denial" }
+                csrf_token: { type: string, description: "The account session's CSRF token; API clients may send the x-csrf-token header instead" }
+      responses:
+        '302': { description: Redirect to the registered redirect_uri — with the authorization code on allow, or error access_denied on denial; state echoed when given }
+        '400': { description: "invalid_request — flat OAuth error shape { error, error_description }" }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '429': { description: rate_limited }
   /api/oauth/sessions:
     get:
       summary: List the account's active OAuth sessions

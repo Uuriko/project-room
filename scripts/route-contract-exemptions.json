@@ -167,11 +167,6 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
-      "template": "/oauth/authorize",
-      "class": "protocol",
-      "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
-    },
-    {
       "template": "/oauth/revoke",
       "class": "protocol",
       "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
