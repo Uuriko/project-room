@@ -101,9 +101,37 @@ response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `approval_not_human` | 403 | ${field} must be a human identity — agents cannot clear their own drafts. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `assign_forbidden` | 403 | Only the assignee, the assigner, or the room owner can release an assignment. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `assign_invalid` | 422 | Invalid assignment input (the message names the field). | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `assignment_not_found` | 404 | Not found | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
+| `candidate_mismatch` | 403 | Only the bound candidate may deliver | no | Only the trial's bound candidate can deliver on this sign-off loop. Do not retry the same call as another member. |
+| `contract_rubric_mismatch` | 422 | Trial must bind pinned rubric weights | fix+resend | Resend against the trial's pinned rubric weights; do not substitute different weights. |
+| `contract_signoff_required` | 422 | Accepted contract-linked delivery required | no | Complete the contract-linked delivery and have it accepted first, then retry. |
+| `contract_trial_mismatch` | 422 | Verified trial must bind contract parties and terms | fix+resend | Use the verified trial that binds this contract's parties and terms. |
+| `envelope_checks_required` | 422 | Completing an envelope requires naming the acceptance checks that passed. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `envelope_expired` | 409 | This handoff has expired. Ask the sender for a new handoff. | no | Ask the sender for a new handoff; do not retry the expired envelope. |
+| `envelope_expiry_system_only` | 422 | Only the expiry sweep moves an envelope to expired. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `envelope_not_found` | 404 | No such envelope in this room. | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
+| `envelope_party_only` | 403 | Only the sender or recipient can escalate this envelope. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `envelope_recipient_only` | 403 | Only ${envelope.to} can ${status} this envelope. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `envelope_request_conflict` | 409 | This requestId was already used for a different handoff. | no | Read the handoff the original request created; use a fresh requestId for a different handoff. Do not reuse this requestId with new input. |
+| `envelope_sender_only` | 403 | Only ${envelope.from} can cancel this envelope. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `envelope_unknown_check` | 422 | checksPassed[${i}] is not a declared acceptance check | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `handoff_forbidden` | 403 | Only the handoff sender, recipient, or room owner can transition it. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
+| `handoff_no_account_scope` | 409 | No account scope is bound for this handoff; bind a human account to the room first. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
 | `invalid_archive_request` | 422 | Archive request has invalid fields or types | fix+resend | Correct the fields named in the response; use dryRun true to obtain a plan before a real run. |
+| `invalid_contract_rubric` | 422 | Numeric pinned score weights required | fix+resend | Pin every rubric score weight as a numeric decimal string and resend. |
+| `invalid_contract_worker` | 422 | Worker must be a distinct active member | fix+resend | Name a worker who is an active room member, distinct from the buyer and the room owner. |
+| `invalid_envelope_room` | 422 | Supply a room. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `invalid_envelope_status` | 422 | status must be one of proposed, accepted, completed, rejected, expired, escalated, cancelled | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
+| `invalid_envelope_transition` | 409 | A ${row.status} envelope cannot move to ${status}. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
+| `invalid_handoff_envelope` | 422 | Invalid handoff envelope (the message names the field). | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `invalid_room_id` | 422 | Archive roomId is not a valid room identifier | fix+resend | Use the exact room id from current Room access, rather than a room URL. |
 | `invalid_keep_newest` | 422 | Archive retention count is outside the supported range | fix+resend | Set keepNewest to an integer from 100 through 100000 and obtain a new dry run. |
+| `invalid_signoff_contract` | 422 | Contract must bind the trial parties | fix+resend | Link an active contract whose worker and buyer are the trial's candidate and buyer. |
+| `invalid_signoff_trial` | 422 | Submitted trial with bound buyer required | fix+resend | Submit the trial first and act as its bound buyer. |
+| `lock_not_found` | 404 | Not found | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
 | `reason_required` | 422 | Operator archive requires a bounded reason | fix+resend | Supply a reason containing 1 through 200 characters. |
 | `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
 | `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
