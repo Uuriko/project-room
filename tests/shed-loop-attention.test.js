@@ -185,9 +185,25 @@ test("shed loop retries a failed handoff on a later tick, then dedups the succes
   }, 45000, "the retry tick to complete");
 
   // Once a retry succeeds, the item is deduped again: no further attempts
-  // across another full poll interval.
+  // on later ticks. "Later ticks" must be an observed fact, not a fixed
+  // sleep: this used to wait a flat 20s and call that "another full poll
+  // interval", but on a loaded runner 20s can pass without the loop
+  // completing even one more tick (15s poll + tick work + scheduling
+  // delay), so the assertion passed without any later tick having run —
+  // and a tick boundary landing mid-sleep raced the count the other way.
+  // Instead, wait for the loop's own post-tick heartbeat to advance past
+  // the boundary the snapshot was gated on: a later tick has then
+  // demonstrably run to completion inside the observation window.
   const successAttempts = attempts();
-  await new Promise(r => setTimeout(r, 20000));
+  let snapshotHeartbeatTs = null;
+  await waitFor(() => {
+    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); if (typeof h?.ts === "string") { snapshotHeartbeatTs = h.ts; return true; } return false; }
+    catch { return false; }
+  }, 45000, "the snapshot-boundary heartbeat to be readable");
+  await waitFor(() => {
+    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); return typeof h?.detail?.items === "number" && typeof h.ts === "string" && h.ts > snapshotHeartbeatTs; }
+    catch { return false; }
+  }, 45000, "a full tick to run after the successful handoff");
   assert.equal(attempts(), successAttempts, "successful handoff is not repeated on later ticks");
 });
 
@@ -269,11 +285,20 @@ test("shed loop persists each handoff before the next: a mid-tick SIGKILL never 
   const restartTs = new Date().toISOString();
   child = spawn(process.execPath, [loop], { env, stdio: "ignore" });
   const heartbeatPath = join(stateDir, "heartbeat.json");
+  let firstTickTs = null;
   await waitFor(() => {
-    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); return h.ts >= restartTs && typeof h?.detail?.items === "number"; } catch { return false; }
+    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); if (h.ts >= restartTs && typeof h?.detail?.items === "number") { firstTickTs = h.ts; return true; } return false; } catch { return false; }
   }, 45000, "the restarted loop's first tick to complete");
-  // One more full poll interval: any wrongful re-hand would have happened.
-  await new Promise(r => setTimeout(r, 20000));
+  // One more FULL tick must demonstrably run: any wrongful re-hand would
+  // happen on a later tick. This used to be a flat 20s sleep called "one
+  // more poll interval" — on a loaded runner that can elapse without a
+  // single further tick completing, leaving the re-hand assertion below
+  // vacuous. Waiting for the next post-tick heartbeat makes the second
+  // tick an observed fact (same pattern as the #2878 dedup tail above).
+  await waitFor(() => {
+    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); return typeof h?.detail?.items === "number" && typeof h.ts === "string" && h.ts > firstTickTs; }
+    catch { return false; }
+  }, 45000, "a second post-restart tick to complete");
   try { child.kill("SIGKILL"); } catch { /* already gone */ }
 
   assert.equal(durableMidTick, true, "a completed handoff is persisted before the next item is attempted");
