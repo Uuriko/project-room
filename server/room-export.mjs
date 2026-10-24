@@ -491,7 +491,12 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // Durable alarm queue (server/durable-alarm-queue.mjs). Operational wake
+  // state, created only when ROOM_DURABLE_ALARM_QUEUE is on. A restored
+  // object enqueues again from the cron; replaying the rows would revive
+  // a slot that already ran.
+  "durable_alarm_queue"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";

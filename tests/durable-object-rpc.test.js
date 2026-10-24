@@ -259,6 +259,29 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   assert.equal(invoked.filter(method => method === "runSlowJob").length, 4);
 });
 
+test("ROOM_DURABLE_ALARM_QUEUE makes scheduled enqueue instead of running slow jobs", async () => {
+  const invoked = [];
+  const stub = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === "then") return undefined;
+      if (typeof ProjectRoom.prototype[prop] !== "function") {
+        return () => Promise.reject(new TypeError(`ProjectRoom has no RPC method ${String(prop)}`));
+      }
+      return (...args) => {
+        invoked.push({ method: String(prop), args });
+        return Promise.resolve({ ok: true });
+      };
+    }
+  });
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
+    ROOM_MAINTENANCE: "0",
+    ROOM_DURABLE_ALARM_QUEUE: "1",
+    ROOM: { getByName() { return stub; } }
+  }, { waitUntil() {} });
+  assert.deepEqual(invoked.map(call => call.method), ["ensureJobAlarm"]);
+  assert.deepEqual(invoked[0].args, [{ includeSlow: true }]);
+});
+
 test("inbound mail is rejected while the inbox consumer is not durable", async () => {
   let rawRead = false;
   const reasons = [];
