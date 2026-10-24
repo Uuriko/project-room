@@ -1,0 +1,155 @@
+{
+  "targetSha": "77df0e0b7ce777ca0bdfe61bddd7320b0b352c60",
+  "candidateSha": "ee97df6132c37f8a41cc8925a00792b6bbd26e1d",
+  "steps": [
+    {
+      "id": "R1 target replayNdjson",
+      "ok": true,
+      "result": {
+        "verified": true,
+        "events": 6,
+        "trailer": "verified",
+        "contentVerification": "full",
+        "consistent": true,
+        "recovery": {
+          "contractVersion": 1,
+          "schemaVersion": 38,
+          "platform": "node-sqlite"
+        },
+        "note": "full result object held in lane scratch (freezeprep); trimmed here to decision-relevant fields"
+      },
+      "error": null
+    },
+    {
+      "id": "R2 target boot on candidate file",
+      "ok": true,
+      "error": null
+    },
+    {
+      "id": "R2b table counts fixture vs target-boot",
+      "diffTables": {
+        "work_item_board_backfill": {
+          "fixture": 0,
+          "atBoot": 1
+        },
+        "work_item_board_divergence": {
+          "fixture": 0,
+          "atBoot": 1
+        }
+      }
+    },
+    {
+      "id": "R3 events hash compare",
+      "fixtureHash": "fe4bafec08b47d63590126357823c4f0593430136fe59a0ab3533cb15ef95550",
+      "targetHash": "fe4bafec08b47d63590126357823c4f0593430136fe59a0ab3533cb15ef95550",
+      "match": true,
+      "targetTrailerVersion": 2
+    },
+    {
+      "id": "R4a balances + conservation",
+      "balances": {
+        "owner": {
+          "payable": 100,
+          "locked": 0
+        },
+        "poster": {
+          "payable": 94,
+          "locked": 6
+        },
+        "worker": {
+          "payable": 99,
+          "locked": 1
+        },
+        "verifier": {
+          "payable": 100,
+          "locked": 0
+        },
+        "pool": {
+          "payable": 0,
+          "locked": 0
+        }
+      },
+      "matchFixture": true,
+      "conservation": {
+        "ok": true,
+        "violations": [],
+        "totalIssued": 400,
+        "byState": {
+          "payable": 393,
+          "locked": 7,
+          "attributed": 0,
+          "approved": 0
+        }
+      }
+    },
+    {
+      "id": "R4b bounty states",
+      "b1": "submitted",
+      "b2": "funded"
+    },
+    {
+      "id": "R4c public room read (target)",
+      "joinMode": "link",
+      "joinTokenMatchesFixture": true
+    },
+    {
+      "id": "R4d co_admin ceiling at target",
+      "granted": 6,
+      "neverGrantLeaks": [],
+      "permissionsTotal": 9,
+      "neverGrant": [
+        "manage_members",
+        "decide",
+        "invite_member"
+      ]
+    },
+    {
+      "id": "R5 target writes",
+      "messagePosted": true,
+      "newBounty": "COMMONS-3",
+      "newBountyState": "funded",
+      "conservationAfter": true
+    },
+    {
+      "id": "R5b write-attributed count deltas",
+      "writeDiff": {
+        "bounty_events": {
+          "atBoot": 7,
+          "afterWrites": 9
+        },
+        "bounty_journal": {
+          "atBoot": 10,
+          "afterWrites": 12
+        },
+        "bounty_records": {
+          "atBoot": 2,
+          "afterWrites": 3
+        },
+        "bounty_rubric_versions": {
+          "atBoot": 2,
+          "afterWrites": 3
+        },
+        "bounty_watchers": {
+          "atBoot": 2,
+          "afterWrites": 3
+        },
+        "commands": {
+          "atBoot": 4,
+          "afterWrites": 5
+        },
+        "credentials": {
+          "atBoot": 2,
+          "afterWrites": 3
+        },
+        "events": {
+          "atBoot": 6,
+          "afterWrites": 7
+        },
+        "messages": {
+          "atBoot": 1,
+          "afterWrites": 2
+        }
+      }
+    }
+  ]
+}
