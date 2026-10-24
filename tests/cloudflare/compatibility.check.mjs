@@ -5,9 +5,9 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare } from 'miniflare';
-import { RoomStore } from '../server/store.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { writerFenceDefinitions, WRITER_FUNCTION, STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { writerFenceDefinitions, WRITER_FUNCTION, STORE_SCHEMA_VERSION } from '../../server/writer-fence.mjs';
 
 const script = await readFile(new URL('./compatibility-worker.mjs', import.meta.url), 'utf8');
 const store = new RoomStore(':memory:');

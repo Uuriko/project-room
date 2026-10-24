@@ -1,5 +1,5 @@
 // LOCAL TEST ONLY. Not exported by the production Worker.
-import entry, { HttpTestRoom } from "./http-worker.test-fixture.mjs";
+import entry, { HttpTestRoom } from "../tests/cloudflare/http-worker.test-fixture.mjs";
 import { seedDigestJournal } from "../scripts/digest-journal-fixture.mjs";
 export class DigestTestRoom extends HttpTestRoom {
   async fetch(request) {

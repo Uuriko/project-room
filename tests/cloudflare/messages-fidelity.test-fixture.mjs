@@ -1,9 +1,9 @@
 // Synthetic local fixture only. Never deploy this entrypoint.
 import assert from 'node:assert/strict';
-import { RoomStore } from '../server/store.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { EVENT_TYPES as T } from '../src/events.js';
-import { DurableDatabase, durableStorage, durableFenceDefinitions } from './storage.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { EVENT_TYPES as T } from '../../src/events.js';
+import { DurableDatabase, durableStorage, durableFenceDefinitions } from '../../cloudflare/storage.mjs';
 
 function finish(store) {
   for (let i = 0; i < 20; i++) if (store.backfillMessages({ limit: 400 }).done) return;
