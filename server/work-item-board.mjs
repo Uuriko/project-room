@@ -513,6 +513,10 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     parentClaimId: existing?.parentClaimId ?? null,
     evidenceRefs,
     premiseFlag: null,
+    // The progress pointer is set through the claims API; a work item
+    // cannot express it, so an existing row's pointer survives the
+    // mapping (CURE-4396: workOf emits the field on every claim).
+    progressMessageId: existing?.progressMessageId ?? null,
     pullRequest: existing?.pullRequest ?? null,
     // Existing links and their polling outcomes belong to the board. Rebuilding
     // them from acquisition events erased board-added links and completed polls.
@@ -634,6 +638,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     parentClaimId: null,
     evidenceRefs: [],
     premiseFlag: null,
+    progressMessageId: null,
     pullRequest: null,
     pullRequests: [],
     updatedAt: isoOrNull(at) ?? iso(Date.now()),

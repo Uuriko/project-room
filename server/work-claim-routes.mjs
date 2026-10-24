@@ -814,6 +814,29 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!data || !("leaseHours" in data) || data.leaseHours !== null || mayOptOutOfLease(access)) return;
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
   };
+  // SCALE-HANDOFF F-2: a progress pointer (noteMessageId on the way in,
+  // progressMessageId on the claim) must name the holder's own public
+  // message in this room — the same validation the renew route applies to
+  // its progress citation, minus the lease-start freshness rule (a handoff
+  // may legitimately point at context posted earlier in the round).
+  const assertProgressPointer = data => {
+    const pointer = data.progressMessageId !== undefined ? data.progressMessageId : data.noteMessageId;
+    if (pointer === undefined || pointer === null) return;
+    if (typeof pointer !== "string" || !pointer.trim() || pointer.length > 128) invalidInput(reject, "noteMessageId/progressMessageId as a message id when citing progress");
+    const message = messageRepository(store, roomId).get(pointer);
+    if (!message || message.deletedAt) {
+      reject(422, "claim_progress_source_required",
+        "Post the progress update in the room first, then name its message id");
+    }
+    if (message.toMemberId) {
+      reject(422, "claim_progress_source_required",
+        "The progress message must be a public room message, not a DM — post it in the room first");
+    }
+    if (message.authorId !== caller) {
+      reject(403, "claim_progress_source_foreign",
+        "The progress message must be your own message — only the claim holder's progress carries the handoff");
+    }
+  };
 
   const load = id => {
     const item = registry.get(roomId, id);
@@ -1111,12 +1134,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength", "noteMessageId", "progressMessageId"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?, noteMessageId?, progressMessageId?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
       invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
     }
-    if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
+    if (data.state === undefined && data.note === undefined && data.readingAck === undefined && data.noteMessageId === undefined && data.progressMessageId === undefined) invalidInput(reject, "a state transition, a note, a reading ack, or a progress pointer");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
     // malformed ack is a 422, never a silent drop.
@@ -1171,7 +1194,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
-          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }),
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery,
+          progressMessageId: data.progressMessageId !== undefined ? data.progressMessageId : data.noteMessageId }),
         item.claimRound);
       if (verdict === "replay") return json(res, 200, item);
       if (verdict === "conflict") reject(409, "work_claim_conflict",
@@ -1190,6 +1214,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // it here would leave a delivered, approved claim unverifiable in any
     // room inside its budget reserve. Every other update keeps the floor.
     if (!(verifyCall && item.owner !== caller)) requireEventBudget();
+    assertProgressPointer(data);
     // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
     // updates. The appendPullRequest variant binds its write to claimedAt +
     // history length; a plain update had no such binding, so a stale client
@@ -1279,6 +1304,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
         delivery: data.delivery, policy,
+        noteMessageId: data.noteMessageId, progressMessageId: data.progressMessageId,
         jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
         requestId: data.requestId, now: nowMs,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
@@ -1376,9 +1402,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // E5/D4 (QA-200 2026-10-08): ownership is checked before the body
     // shape, so a non-holder is always refused with 403 work_not_owner
     // (abuse-guards C2) regardless of what the body carries.
-    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason"] }))
-      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?}");
+    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason", "noteMessageId", "progressMessageId"] }))
+      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?, noteMessageId?, progressMessageId?}");
     requireEventBudget();
+    assertProgressPointer(data);
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
     // E5/D4 (QA-200 2026-10-08): a release binds the claim round the client
     // read (claimedAt + history length). A stale replay or a delayed
@@ -1392,6 +1419,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       released = releaseWork(item, caller, {
         expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
         note: reason, now: nowMs, authority,
+        noteMessageId: data.noteMessageId, progressMessageId: data.progressMessageId,
       });
     } catch (error) {
       // runPure's mapping, plus 409 for a stale round (same as the update
