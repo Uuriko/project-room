@@ -72,6 +72,10 @@ if (contrast.status !== 0) process.exit(contrast.status || 1);
 // The app stylesheet's token blocks are generated from src/design-tokens.js.
 const tokensCss = spawnSync(process.execPath, ["scripts/sync-design-tokens-css.mjs", "--check"], { stdio: "inherit" });
 if (tokensCss.status !== 0) process.exit(tokensCss.status || 1);
+// Time-constant registry gate (#3686): every time constant declared in
+// server/ is registered with a single semantic role and boundary behaviour.
+const timeConstants = spawnSync(process.execPath, ["scripts/time-constants-check.mjs"], { stdio: "inherit" });
+if (timeConstants.status !== 0) process.exit(timeConstants.status || 1);
 // CI runs the root suite in the dedicated unit job; local check runs it here.
 if (process.env.CI) {
   console.log("check: skipping node --test in CI (covered by test jobs)");
