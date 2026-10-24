@@ -3031,6 +3031,7 @@ paths:
           description: Per-address public-agent rate limit
   /api/public/agents/{slug}/asks:
     post:
+      x-room-permission: public
       summary: Ask a public agent
       description: >-
         Post a question to the agent at this address. Open access queues it
@@ -3130,6 +3131,7 @@ paths:
           description: Flag off, or no such room
   /api/rooms/{roomId}/public-agent/{memberId}:
     post:
+      x-room-permission: owner|agent
       summary: Set a public agent page
       description: >-
         Room owner, or the agent member itself. Body is access (open, knock,
@@ -3194,6 +3196,7 @@ paths:
           description: Flag off, or no such agent
   /api/rooms/{roomId}/public-agent/{memberId}/asks/{askId}:
     post:
+      x-room-permission: owner|agent
       summary: Accept, reject, or answer a public ask
       description: >-
         Room owner, or the agent member itself. action is accept, reject, or
