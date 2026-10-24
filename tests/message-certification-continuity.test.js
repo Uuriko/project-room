@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
+import { advanceMessageCertification } from '../server/messages-store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { prepareMessageCommand } from '../server/message-command-service.mjs';
 import { readConversation } from '../server/conversation-sync.mjs';
@@ -550,4 +551,45 @@ test('archived command preparation is ephemeral and leaves the serving projectio
   assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='context-old'),false,'readers keep the committed working set');
   assert.equal(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection,before);
  });
+});
+
+test('MA-03: certification cannot be advanced across a sequence gap',t=>{
+ const f=setup(t);
+ f.post('gap-1','one');f.certify();
+ const s1=f.store.headSequence('commons');
+ const anchor1=f.store.db.prepare('SELECT applied_event_id FROM messages_backfill_cursor WHERE room_id=?').get('commons').applied_event_id;
+ f.post('gap-2','two');f.post('gap-3','three');
+ const s3=f.store.headSequence('commons');
+ assert.equal(s3,s1+2,'fixture: two posts moved the head two sequences');
+ const row=f.store.db.prepare('SELECT id,body FROM events WHERE room_id=? AND sequence=?').get('commons',s3);
+ // Rewind the cursor to the s1 certificate, as a stale certificate
+ // carrier would present it, then offer the head event two sequences
+ // past the certificate. LAB-MUTATION MA-03: dropping the exact-next
+ // guard from advanceMessageCertification survived every archive suite —
+ // the jump would certify s3 without s1+1 ever being folded.
+ f.store.db.prepare('UPDATE messages_backfill_cursor SET applied_seq=?,parity_at_seq=?,applied_event_id=? WHERE room_id=?').run(s1,s1,anchor1,'commons');
+ const jumped=f.store.transaction(()=>advanceMessageCertification(f.store.db,
+  {roomId:'commons',sequence:s1,anchor:anchor1,positions:new Map()},
+  {sequence:s3,event:{...JSON.parse(row.body),id:row.id},state:f.store.room('commons').state}));
+ assert.equal(jumped,false,'a two-sequence jump is refused');
+ assert.equal(f.certificate().applied_seq,s1,'the refused jump leaves the cursor at the certificate');
+ assert.equal(f.certificate().parity_at_seq,s1);
+});
+
+test('MA-03 control: the consecutive advance folds and certifies',t=>{
+ const f=setup(t);
+ f.post('step-1','one');f.certify();
+ const s1=f.store.headSequence('commons');
+ const anchor1=f.store.db.prepare('SELECT applied_event_id FROM messages_backfill_cursor WHERE room_id=?').get('commons').applied_event_id;
+ f.post('step-2','two');
+ const s2=f.store.headSequence('commons');
+ assert.equal(s2,s1+1,'fixture: one post moved the head one sequence');
+ const row=f.store.db.prepare('SELECT id,body FROM events WHERE room_id=? AND sequence=?').get('commons',s2);
+ f.store.db.prepare('UPDATE messages_backfill_cursor SET applied_seq=?,parity_at_seq=?,applied_event_id=? WHERE room_id=?').run(s1,s1,anchor1,'commons');
+ const advanced=f.store.transaction(()=>advanceMessageCertification(f.store.db,
+  {roomId:'commons',sequence:s1,anchor:anchor1,positions:new Map()},
+  {sequence:s2,event:{...JSON.parse(row.body),id:row.id},state:f.store.room('commons').state}));
+ assert.equal(advanced,true,'the exact-next advance the guard exists to allow still folds');
+ assert.equal(f.certificate().applied_seq,s2);
+ assert.equal(f.certificate().parity_at_seq,s2);
 });
