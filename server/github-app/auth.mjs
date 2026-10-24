@@ -10,6 +10,8 @@
 // is 9 minutes ahead, which stays inside GitHub's 10 minute maximum. An
 // installation token is cached until 5 minutes before it expires.
 
+import { loadConfig } from "../config.mjs";
+
 export const GITHUB_API = "https://api.github.com";
 const TOKEN_SKEW_MS = 5 * 60 * 1000;
 const processCache = new Map();
@@ -32,9 +34,15 @@ function normalizePem(value) {
 }
 
 export function githubAppCredentials(env = process.env) {
-  const appId = readEnv(env, "GITHUB_APP_ID");
-  const privateKey = readEnv(env, "GITHUB_APP_PRIVATE_KEY");
-  const webhookSecret = readEnv(env, "GITHUB_APP_WEBHOOK_SECRET");
+  const cfg = env == null || typeof env !== "object" ? loadConfig({}) : loadConfig(env);
+  const bag = {
+    GITHUB_APP_ID: cfg.githubAppId,
+    GITHUB_APP_PRIVATE_KEY: cfg.githubAppPrivateKey,
+    GITHUB_APP_WEBHOOK_SECRET: cfg.githubAppWebhookSecret,
+  };
+  const appId = readEnv(bag, "GITHUB_APP_ID");
+  const privateKey = readEnv(bag, "GITHUB_APP_PRIVATE_KEY");
+  const webhookSecret = readEnv(bag, "GITHUB_APP_WEBHOOK_SECRET");
   if (!appId || !privateKey || !webhookSecret) return null;
   if (!/^\d{1,20}$/.test(appId)) return null;
   return { appId, privateKeyPem: normalizePem(privateKey), webhookSecret };

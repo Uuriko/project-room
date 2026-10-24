@@ -22,6 +22,7 @@
 // approval. `check`/`view` for the gmail channel are documented no-ops, and
 // the route layer must not call check() for gmail sends.
 import { createLimiter } from "./token-bucket.mjs";
+import { envConfig } from "./config.mjs";
 import { ServiceError } from "./store.mjs";
 
 export const DEFAULT_SEND_BUDGET_PER_MIN = 30;
@@ -37,9 +38,10 @@ const number = (value, fallback) => {
 // and operators can inspect it without a registry.
 export function resolveSendBudget({ channel, env = {} }) {
   if (channel === "gmail") return null; // [JOHN]-gated; see module header.
+  const cfg = envConfig(env);
   const upper = String(channel).toUpperCase();
-  const perMin = number(env[`${upper}_SEND_BUDGET_PER_MIN`], number(env.CHANNEL_SEND_BUDGET_PER_MIN, DEFAULT_SEND_BUDGET_PER_MIN));
-  const burst = Math.round(number(env[`${upper}_SEND_BUDGET_BURST`], number(env.CHANNEL_SEND_BUDGET_BURST, DEFAULT_SEND_BUDGET_BURST)));
+  const perMin = number(cfg.read(`${upper}_SEND_BUDGET_PER_MIN`), number(cfg.channelSendBudgetPerMin, DEFAULT_SEND_BUDGET_PER_MIN));
+  const burst = Math.round(number(cfg.read(`${upper}_SEND_BUDGET_BURST`), number(cfg.channelSendBudgetBurst, DEFAULT_SEND_BUDGET_BURST)));
   return { rate: perMin / 60, burst: Math.max(1, burst) };
 }
 // Per-connection overrides from the CHANNEL_SEND_BUDGETS JSON map. Malformed
@@ -78,7 +80,7 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
   // Evicted scopes' bucket state, bounded like the live cache: a scope that
   // cycles back in resumes its consumed burst instead of a silent refill.
   const retiredBuckets = new Map(); // budgetKey -> { buckets, signature }
-  const connectionOverrides = parseConnectionBudgets(env.CHANNEL_SEND_BUDGETS);
+  const connectionOverrides = parseConnectionBudgets(envConfig(env).channelSendBudgets);
   const storedBudget = (channel, accountId, connectionId) => {
     try {
       const bag = connectionBudget?.(channel, accountId, connectionId);

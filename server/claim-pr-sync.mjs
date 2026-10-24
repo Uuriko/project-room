@@ -25,6 +25,7 @@
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { loadConfig } from "./config.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
@@ -60,8 +61,9 @@ const BUDGET_ROOM = "_claim-pr-budget";
 
 function githubToken(env) {
   if (!env || typeof env !== "object") return null;
+  const cfg = loadConfig(env);
   for (const key of ["GITHUB_TOKEN", "GH_TOKEN"]) {
-    const value = env[key];
+    const value = cfg.read(key);
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
@@ -1272,7 +1274,7 @@ export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = n
   // live-vs-main mismatch out of it.
   const fallback = { ...readCachedDeployStatus(store), stale: true };
   if (readClaimPullBudget(store) > nowMs) return fallback;
-  const repository = repo || process.env.GITHUB_REPOSITORY || "Uuriko/project-room";
+  const repository = repo || loadConfig().githubRepository;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return fallback;
   const [owner, name] = repository.split("/");
   let response;

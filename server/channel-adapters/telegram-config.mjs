@@ -4,6 +4,7 @@
 // reader exposes a "not configured" state instead of failing, and keeps the
 // values behind accessors so a serialized config never carries them.
 import { createHash } from "node:crypto";
+import { loadConfig } from "../config.mjs";
 import { webhookRotationView } from "./telegram-rotation.mjs";
 
 export const telegramBindings = Object.freeze({ token: "TELEGRAM_BOT_TOKEN", webhookSecret: "TELEGRAM_WEBHOOK_SECRET", apiBase: "TELEGRAM_API_BASE" });
@@ -16,8 +17,14 @@ export const hashWebhookSecret = secret => createHash("sha256").update(secret).d
 const bindingValue = (env, name) => typeof env?.[name] === "string" && env[name].trim() ? env[name].trim() : null;
 
 export function telegramConfig(env = process.env) {
-  const token = bindingValue(env, telegramBindings.token), secret = bindingValue(env, telegramBindings.webhookSecret);
-  const apiBase = bindingValue(env, telegramBindings.apiBase) ?? telegramApiDefault;
+  const cfg = env == null || typeof env !== "object" ? loadConfig({}) : loadConfig(env);
+  const bag = {
+    [telegramBindings.token]: cfg.telegramBotToken,
+    [telegramBindings.webhookSecret]: cfg.telegramWebhookSecret,
+    [telegramBindings.apiBase]: cfg.telegramApiBase,
+  };
+  const token = bindingValue(bag, telegramBindings.token), secret = bindingValue(bag, telegramBindings.webhookSecret);
+  const apiBase = bindingValue(bag, telegramBindings.apiBase) ?? telegramApiDefault;
   const missing = [token ? null : telegramBindings.token, secret ? null : telegramBindings.webhookSecret].filter(Boolean);
   const invalid = [token && !tokenPattern.test(token) ? telegramBindings.token : null, secret && !secretPattern.test(secret) ? telegramBindings.webhookSecret : null].filter(Boolean);
   let base;

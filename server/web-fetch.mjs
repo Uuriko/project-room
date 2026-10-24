@@ -34,6 +34,7 @@
 // journaled fetches (hit/miss); typed failures are journaled but never
 // billed. Cache hits still cost quota, exactly like a credit model.
 import { createHash, randomUUID } from "node:crypto";
+import { loadConfig } from "./config.mjs";
 import { promises as dns } from "node:dns";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
@@ -77,10 +78,11 @@ export const WEB_FETCH_TAG_CHARS = 64;
 let loopbackWarned = false;
 export function webFetchTestContext() {
   if (typeof process === "undefined" || !process?.env) return false;
-  return Boolean(process.env.NODE_TEST_CONTEXT) || process.env.NODE_ENV === "test";
+  const cfg = loadConfig(process.env);
+  return Boolean(cfg.nodeTestContext) || cfg.nodeEnv === "test";
 }
 const allowLoopback = () => {
-  if (typeof process === "undefined" || process?.env?.WEB_FETCH_ALLOW_LOOPBACK !== "1") return false;
+  if (typeof process === "undefined" || loadConfig(process.env).webFetchAllowLoopback !== "1") return false;
   if (webFetchTestContext()) return true;
   if (!loopbackWarned) {
     loopbackWarned = true;

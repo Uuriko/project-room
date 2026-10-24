@@ -7,6 +7,7 @@ import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
 import { defaultServerArgs } from "./server/boot-options.mjs";
 import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
+import { loadConfig } from "./server/config.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./server/version.mjs";
@@ -15,8 +16,9 @@ import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
 
-const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
-const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
+const config = loadConfig();
+const { host, port, origin, filename, production, streamInterval } = deploymentConfig(config);
+const paused = maintenanceEnabled(config.roomMaintenance);
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
@@ -36,11 +38,11 @@ if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 // process would race it (last-writer-wins / torn write on concurrent
 // shutdown). Refusing to boot is the safe failure mode; override the path
 // for tests via ROOM_INSTANCE_LOCK_PATH.
-const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), ".project-room.lock");
+const lockPath = config.instanceLockPath || join(dirname(filename), ".project-room.lock");
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
 try {
-  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
+  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(config) });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,
@@ -68,7 +70,7 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(config), growth: growthHttp, production, env: config });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);

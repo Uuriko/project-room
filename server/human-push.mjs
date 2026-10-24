@@ -1,3 +1,5 @@
+import { loadConfig } from "./config.mjs";
+
 // Human browser push. Default: mentions and direct messages, both on until
 // the member opts out per kind. The browser permission prompt is the subscribe
 // switch; the per-kind preference switches (human_push_preferences) are the
@@ -45,7 +47,8 @@ export function declarativePushPayload(payload, { enabled = false } = {}) {
 }
 
 export function declarativePushEnabled(env = process.env) {
-  return env?.PUSH_DECLARATIVE === "on";
+  if (env == null || typeof env !== "object") return false;
+  return loadConfig(env).pushDeclarative === "on";
 }
 
 class ServiceError extends Error {

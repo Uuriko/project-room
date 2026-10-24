@@ -21,6 +21,7 @@
 //     prefixed via edgeDoorApiPath: /api/* there is Webflow, not the Worker.
 
 import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
+import { envConfig } from "../server/config.mjs";
 
 export const FAILURES_BEFORE_ALERT = 2;
 export const DEFAULT_ORIGIN = "https://room.trydemigod.com";
@@ -74,29 +75,30 @@ function validRoomId(value) {
 }
 
 function timeoutMs(env) {
-  const raw = text(env.PROBE_CHECK_TIMEOUT_MS);
+  const raw = text(envConfig(env).probeCheckTimeoutMs);
   if (!raw) return DEFAULT_TIMEOUT_MS;
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed >= 100 && parsed <= 30_000 ? parsed : DEFAULT_TIMEOUT_MS;
 }
 
 function probeOrigin(env) {
-  const configured = text(env.PROBE_ORIGIN);
+  const configured = text(envConfig(env).probeOrigin);
   if (!configured) return DEFAULT_ORIGIN;
   return validProbeOrigin(configured) ? new URL(configured).origin : null;
 }
 
 function webhookDestination(env) {
-  const configured = text(env.PROBE_ALERT_WEBHOOK_URL);
+  const configured = text(envConfig(env).probeAlertWebhookUrl);
   if (!configured) return { url: null, inert: "unset" };
   if (!validWebhook(configured)) return { url: null, inert: "invalid" };
   return { url: configured, inert: null };
 }
 
 function roomDestination(env) {
-  const origin = text(env.PROBE_ROOM_ORIGIN) || text(env.ROOM_AGENT_ORIGIN);
-  const roomId = text(env.PROBE_ROOM_ID) || text(env.ROOM_AGENT_ROOM);
-  const credential = text(env.PROBE_ROOM_TOKEN) || text(env.ROOM_AGENT_TOKEN);
+  const cfg = envConfig(env);
+  const origin = text(cfg.probeRoomOrigin) || text(cfg.roomAgentOrigin);
+  const roomId = text(cfg.probeRoomId) || text(cfg.roomAgentRoom);
+  const credential = text(cfg.probeRoomToken) || text(cfg.roomAgentToken);
   if (!origin && !roomId && !credential) return { room: null, inert: "unset" };
   if (!validProbeOrigin(origin) || !validRoomId(roomId) || credential.length < 8 || credential.length > 512) {
     return { room: null, inert: "invalid" };
