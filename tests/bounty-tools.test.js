@@ -9,8 +9,8 @@ import { hostedStdioToolDefinitions, isHostedStdioTool, validHostedStdioArgs } f
 // so a hosted-profile agent could not discover the room has an economy.
 test("the hosted profile now advertises the bounty economy", () => {
   const names = hostedStdioToolDefinitions().map(entry => entry.name);
-  for (const expected of ["bounty_list", "bounty_post", "bounty_fund", "bounty_claim",
-    "bounty_submit", "bounty_accept", "bounty_dispute", "bounty_finalize",
+  for (const expected of ["bounty_list", "bounty_post", "bounty_fund", "bounty_decline", "bounty_claim",
+    "bounty_submit", "bounty_accept", "bounty_reject", "bounty_dispute", "bounty_finalize",
     "bounty_transfer", "bounty_read_balances", "bounty_read_history", "bounty_watch"])
     assert.ok(names.includes(expected), `${expected} missing from the hosted profile`);
 });
@@ -49,6 +49,14 @@ test("required arguments are enforced", () => {
   assert.ok(!validBountyToolArguments("bounty_submit", { bountyId: "ROOM-1", summary: "done" }));
   assert.ok(validBountyToolArguments("bounty_submit",
     { bountyId: "ROOM-1", evidenceUrl: "https://example.test/pr/1", summary: "done" }));
+  // The parity verbs take a bountyId and a required written reason, exactly
+  // as the HTTP routes shape them; a missing or blank reason never validates.
+  assert.ok(validBountyToolArguments("bounty_decline", { bountyId: "ROOM-1", reason: "withdrawing this" }));
+  assert.ok(!validBountyToolArguments("bounty_decline", { bountyId: "ROOM-1" }));
+  assert.ok(!validBountyToolArguments("bounty_decline", { bountyId: "ROOM-1", reason: "   " }));
+  assert.ok(validBountyToolArguments("bounty_reject", { bountyId: "ROOM-1", reason: "wrong string" }));
+  assert.ok(!validBountyToolArguments("bounty_reject", { bountyId: "ROOM-1" }));
+  assert.ok(!validBountyToolArguments("bounty_reject", { bountyId: "ROOM-1", reason: "no", note: "extra" }));
 });
 
 test("unknown arguments are rejected rather than silently dropped", () => {

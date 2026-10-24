@@ -3170,7 +3170,7 @@ export class BountyEscrow {
         groups.get(r.lot_id).push(r);
       }
       for (const r of singles) groups.set(`entry:${r.entry_id}`, [r]);
-      const receipts = [];
+      const keyed = [];
       for (const entries of groups.values()) {
         const debit = entries.find(e => e.amount < 0) ?? null;
         const credit = entries.find(e => e.amount > 0) ?? null;
@@ -3180,7 +3180,7 @@ export class BountyEscrow {
         const after = credit ? { account: credit.account_id, lotState: credit.lot_state }
           : { account: first.account_id, lotState: first.lot_state };
         if (state !== null && after.lotState !== state) continue;
-        receipts.push(Object.freeze({
+        keyed.push({ seq: first.seq, receipt: Object.freeze({
           receiptId: first.lot_id ?? first.entry_id, at: first.at, kind: first.kind,
           memo: first.memo, bountyId: first.bounty_id, actor, before, after,
           amount: toCredits(Math.abs((credit ?? first).amount)),
@@ -3188,9 +3188,16 @@ export class BountyEscrow {
           entries: entries.map(e => e.entry_id),
           signedReceiptIds: Object.freeze([...new Set(entries.map(e => e.receipt_id).filter(Boolean))]),
           hash: first.hash, prevHash: first.prev_hash,
-        }));
+        }) });
       }
-      return receipts;
+      // Presentation order is the documented contract: newest first by
+      // recorded time. The groups above are built in chain (insertion)
+      // order with lot-less entries trailing, which is neither — so sort
+      // here, at the read. Ties (movements recorded in the same instant)
+      // break by chain position, later chain entry first. No receipt field
+      // changes; the hash chain is untouched.
+      keyed.sort((a, b) => (a.receipt.at < b.receipt.at ? 1 : a.receipt.at > b.receipt.at ? -1 : b.seq - a.seq));
+      return keyed.map(entry => entry.receipt);
     });
   }
 

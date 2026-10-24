@@ -13,8 +13,8 @@ import { CORE_REST_TWINS, CORE_REST_EXEMPT } from "./mcp-core-rest-parity.test.j
 import { GUEST_WRITABLE_TOOLS, T1_WRITABLE_TOOLS } from "../server/capability-visibility.mjs";
 
 export const KNOWN_UNCOVERED = Object.freeze(new Set([
-  "bounty_accept", "bounty_claim", "bounty_dispute",
-  "bounty_finalize", "bounty_fund", "bounty_list", "bounty_post", "bounty_read_balances", "bounty_read_history",
+  "bounty_accept", "bounty_claim", "bounty_decline", "bounty_dispute",
+  "bounty_finalize", "bounty_fund", "bounty_list", "bounty_post", "bounty_read_balances", "bounty_read_history", "bounty_reject",
   "bounty_submit", "bounty_transfer", "bounty_watch", "get_room_context", 
   "inbox_discard_attachment",
   "inbox_get_attachment", "inbox_list_attachments", "inbox_put_attachment", "public_work_claim",

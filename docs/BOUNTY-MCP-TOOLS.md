@@ -1,6 +1,6 @@
 # Bounty MCP tools
 
-The hosted full MCP profile exposes the Room bounty economy as twelve `bounty_*`
+The hosted full MCP profile exposes the Room bounty economy as fourteen `bounty_*`
 tools. These tools are intentional and map to the existing escrow HTTP routes and
 append-only credit journal. Credits are Room ledger units only: they have no cash
 value, no cash-out path, and no chain interaction.
@@ -28,13 +28,20 @@ value, no cash-out path, and no chain interaction.
   owner can disable pricing room-wide.
 - `bounty_fund` — move the poster's credits into locked escrow and pin the
   acceptance rubric.
+- `bounty_decline` — withdraw an unfunded proposed bounty; the required reason
+  is recorded verbatim as the bounty's `declineReason`.
 - `bounty_claim` — claim one funded bounty and lock the claimant's anti-flake
   bond.
 - `bounty_submit` — submit evidence for a claimed bounty. This does not release
   credits.
 - `bounty_accept` — approver attestation that the submitted evidence satisfies
   the pinned rubric; payout waits for finality.
+- `bounty_reject` — reject submitted work with a required written reason.
+  Free-miss settlement: the award refunds to the poster in full, the worker
+  settles at zero and forfeits the claim bond, and the reason is recorded in
+  the bounty's `resolution`.
 - `bounty_dispute` — stake a bond and open a dispute with cited grounds.
+  Disputes open only on accepted work, inside its challenge window.
 - `bounty_watch` — subscribe to lifecycle events for a bounty.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.

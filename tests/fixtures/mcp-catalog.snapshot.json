@@ -337,6 +337,15 @@
         "openWorldHint": false
       }
     },
+    "bounty_decline": {
+      "inputSchema": "8f9ebde09ad4a0e1",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
     "bounty_dispute": {
       "inputSchema": "706d1614d3833313",
       "annotations": {
@@ -397,6 +406,15 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "bounty_reject": {
+      "inputSchema": "8039ebc133cd838e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },

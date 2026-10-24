@@ -469,6 +469,12 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         return { roomId, bounty, receipt };
       });
     }
+    case "bounty_decline": {
+      return idem("bounty.decline", 200, () => {
+        const { bounty, receipt } = escrow.declineBounty(roomId, bountyId, { decliner: caller, reason: rest.reason, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
     case "bounty_claim": {
       return idem("bounty.claim", 200, () => {
         const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
@@ -489,6 +495,13 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
           { acceptor: caller, verifierAttestation: rest.verifierAttestation, actor });
         return { roomId, bounty, approval, attribution, receipt };
+      });
+    }
+    case "bounty_reject": {
+      return idem("bounty.reject", 200, () => {
+        const { bounty, settlement, alreadySettled, receipt } = escrow.rejectWork(roomId, bountyId,
+          { rejector: caller, reason: rest.reason, actor });
+        return { roomId, bounty, settlement, alreadySettled, receipt };
       });
     }
     case "bounty_dispute": {
