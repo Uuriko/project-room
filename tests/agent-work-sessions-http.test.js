@@ -41,8 +41,14 @@ async function ownerRoom(origin, fixture) {
 }
 
 test("work-sessions next[] teaches register-work-item when none are open", async t => {
-  // RC-2026-09-24-001 (dogfood F-07): the empty state must name the creation
-  // path — POST a work claim — not an undefined "session.start command".
+  // Deliberate reversal of RC-2026-09-24-001 (dogfood F-07), per #3666: that
+  // pin sent agents to POST /work-claims to "register a work item", but a
+  // work-claims POST creates a board claim, never a session work item — the
+  // follow-on session POST then 404'd work_not_found (executed repro in
+  // #3666). The two nouns are distinct by design: board claims live at
+  // /work-claims; session work items are created by the work.proposed
+  // command. The empty state must name that real creation path, and
+  // following it must actually produce a claimable session.
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const { ownerSecret, roomId } = await ownerRoom(origin, fixture);
@@ -53,8 +59,39 @@ test("work-sessions next[] teaches register-work-item when none are open", async
   assert.deepEqual(json.next.map(n => n.action), ["register-work-item"]);
   const step = json.next[0];
   assert.equal(step.method, "POST");
-  assert.equal(step.path, `/api/rooms/${roomId}/work-claims`);
-  assert.ok(step.description.includes("id"), "names the claim id field");
+  assert.equal(step.path, `/api/rooms/${roomId}/commands`);
+  assert.ok(step.description.includes("work.proposed"), "names the work.proposed command type");
+  assert.ok(step.description.includes("workItemId"), "names the workItemId field");
+  assert.ok(step.description.includes("accountableMemberId"), "names the accountableMemberId field");
+  assert.ok(step.description.includes("/work-claims"), "names board claims as the other noun");
+  // Execute the hint: proposing via the named path must create the item so
+  // the next read offers claim-session for it (the #3666 failure mode was
+  // that this flow dead-ended in work_not_found).
+  const friend = fixture.store.identities.create("ws hint friend");
+  const reqRes = await post(origin, "/api/access-requests", {
+    roomId, identityId: friend.identityId, displayName: "Hint Friend",
+    requestedPermissions: ["accept_work"], note: null, requestId: "ws-hint-req-1",
+  }, friend.secret);
+  assert.equal(reqRes.status, 201);
+  const decideRes = await post(origin, `/api/rooms/${roomId}/access-requests/ws-hint-req-1/decide`, {
+    decision: "approve", permissions: ["accept_work"], note: null,
+  }, ownerSecret);
+  assert.equal(decideRes.status, 200);
+  const memberId = (await decideRes.json()).memberId;
+  const propRes = await post(origin, step.path, {
+    id: "00000000-0000-4000-8000-000000000366",
+    type: "work.proposed",
+    data: {
+      workItemId: "ws-hint-item-1", title: "Follow the hint",
+      definitionOfDone: "Session listed", accountableMemberId: memberId, mode: "read",
+    },
+  }, ownerSecret);
+  assert.equal(propRes.status, 201);
+  const after = await get(origin, `/api/rooms/${roomId}/work-sessions`, ownerSecret);
+  assert.equal(after.status, 200);
+  const afterJson = await after.json();
+  assert.ok(afterJson.sessions.some(s => s.workItemId === "ws-hint-item-1"), "hint-created item is listed as a session");
+  assert.deepEqual(afterJson.next.map(n => n.action), ["claim-session"]);
 });
 
 test("work-sessions next[] teaches claim-session for an open session", async t => {
