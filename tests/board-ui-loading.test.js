@@ -270,6 +270,9 @@ function focusDom(t) {
       sanitizeHtml(html, {
         onOpenTag(tag, attrs) {
           const node = { tag, attrs, parent: stack.at(-1),
+            get name() { return attrs.name ?? ""; },
+            get value() { return this._typed ?? attrs.value ?? ""; },
+            set value(next) { this._typed = String(next); },
             get dataset() {
               return Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("data-"))
                 .map(([key, value]) => [key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
@@ -298,7 +301,7 @@ function focusDom(t) {
       if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
     }
   });
-  return { root, query, active: () => active, drain: gate => gates.push(gate), click: target => listeners.get("click")({ target }) };
+  return { root, query, active: () => active, drain: gate => gates.push(gate), click: target => listeners.get("click")({ target }), input: target => listeners.get("input")({ target }) };
 }
 
 const STATIC_FOCUS_CONTROLS = [
@@ -425,4 +428,35 @@ test("deploy chip: a missing sha, no status, or a held (stale) read stays unknow
     { live: "unstamped", main: SHA_B, behind: null }, { live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }]) {
     assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
   }
+});
+
+// --- #4532: a post-open re-render must not discard New item input ---
+
+test("boardHtml renders a supplied new-item draft back into the form, escaped", () => {
+  const html = boardHtml([], null, viewer, {}, NOW, { canWrite: true, newItem: { title: 'Draft "quoted" <title>', note: "context & more", files: "a.md" } });
+  assert.ok(html.includes('value="Draft &quot;quoted&quot; &lt;title&gt;"'), "title draft rendered, escaped");
+  assert.ok(html.includes('value="context &amp; more"'), "note draft rendered, escaped");
+  assert.ok(html.includes('value="a.md"'), "files draft rendered");
+});
+
+test("Board post-open re-render preserves typed New item input", async t => {
+  const dom = focusDom(t), gate = held(), arrived = held();
+  dom.drain(gate);
+  const board = focusBoard(gate, arrived);
+  board.sync(); await arrived.promise;
+  const title = dom.query('#board-new-item [name="title"]');
+  assert.ok(title, "new-item title exists while the initial read is held");
+  title.focus();
+  title.value = "Typed before the board loaded";
+  dom.input(title);
+  const note = dom.query('#board-new-item [name="note"]');
+  note.value = "with context";
+  dom.input(note);
+  gate.resolve({ claims: [] }); await board.whenReady();
+  const afterTitle = dom.query('#board-new-item [name="title"]');
+  assert.ok(afterTitle, "new-item form still exists after the re-render");
+  assert.notEqual(afterTitle, title, "the renderer replaced the node");
+  assert.equal(afterTitle.value, "Typed before the board loaded", "typed title survives the post-open re-render");
+  assert.equal(dom.query('#board-new-item [name="note"]').value, "with context", "typed note survives too");
+  assert.equal(dom.active(), afterTitle, "focus still follows the title field");
 });

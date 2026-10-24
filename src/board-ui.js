@@ -823,8 +823,11 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
-function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
+function newItemForm(draft = {}) {
+  // #4532: the draft is rendered back into the form, so a repaint (the post-open
+  // read landing, a refresh, an action) does not discard typed input.
+  const value = name => escapeHtml(String(draft?.[name] ?? ""));
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off" value="${value("title")}"></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up" value="${value("note")}"></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated" value="${value("files")}"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -883,7 +886,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null, newItem = {} } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -899,7 +902,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
-  const form = canWrite ? newItemForm() : "";
+  const form = canWrite ? newItemForm(newItem) : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const bar = filterBarHtml(filter);
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
@@ -989,6 +992,10 @@ export function installWorkBoard({ client, getState, getSession }) {
   // claims; cleared on room/member context change.
   let filter = { q: "", mine: false };
   let pendingCaret = null;
+  // #4532: in-progress New item input, kept across repaints exactly like the
+  // filter state above: typed values live here, paint renders them back, and
+  // only a successful create (or a context change / reset) clears them.
+  let newItemDraft = { title: "", note: "", files: "" };
 
   function paint() {
     const state = getState();
@@ -1004,7 +1011,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy, newItem: newItemDraft
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
@@ -1065,7 +1072,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; newItemDraft = { title: "", note: "", files: "" }; paint();
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -1164,6 +1171,13 @@ export function installWorkBoard({ client, getState, getSession }) {
   }
 
   root.addEventListener("input", event => {
+    // #4532: typing in the New item form only updates the draft — paint
+    // renders it back after any repaint, so no repaint is triggered here.
+    const draftName = { "board-new-title": "title", "board-new-note": "note", "board-new-files": "files" }[event.target?.dataset?.focusKey];
+    if (draftName) {
+      if (root.contains(event.target)) newItemDraft = { ...newItemDraft, [draftName]: String(event.target.value ?? "") };
+      return;
+    }
     const form = event.target.closest("[data-board-filter]");
     if (!form || !root.contains(form)) return;
     const data = new FormData(form);
@@ -1389,7 +1403,13 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = newItemCreateBody(data);
       if (!body) return;
       const title = body.title;
-      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
+      flySubmit(created, async () => {
+        const createdItem = await client.request(client.path("/work-claims"), { method: "POST", data: body });
+        // #4532: the draft clears only once the create has landed; a failed
+        // create keeps the typed input for the retry.
+        newItemDraft = { title: "", note: "", files: "" };
+        return createdItem;
+      }, { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
@@ -1459,6 +1479,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; newItemDraft = { title: "", note: "", files: "" }; if (root.isConnected) root.replaceChildren(); }
   };
 }
