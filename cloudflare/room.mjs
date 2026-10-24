@@ -34,6 +34,8 @@ import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { DURABLE_ALARM_SLICE_GAP_MS } from '../server/durable-alarm-queue.mjs';
+import { durableAlarmQueueEnabled, runDurableAlarmTurn } from '../server/durable-alarm-turn.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -531,11 +533,68 @@ export class ProjectRoom extends DurableObject {
     await this.ctx.storage.setAlarm(when);
     return { armed: true, alarmAt: when };
   }
+  // Queue arm. Same "keep the earlier alarm" rule as #armJobAlarm. A due
+  // queue row wakes after a short gap so one slice cannot tight-loop.
+  async #armDurableQueue(turn, retryDelayMs = 0) {
+    const now = Date.now();
+    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    let when = earliestFutureAlarm(JOBS, {
+      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
+    });
+    if (turn?.nextAt != null) when = when == null ? turn.nextAt : Math.min(when, turn.nextAt);
+    if (retryDelayMs > 0) {
+      const retryAt = now + retryDelayMs;
+      when = when == null ? retryAt : Math.min(when, retryAt);
+    }
+    if (when != null && when <= now) when = now + DURABLE_ALARM_SLICE_GAP_MS;
+    const current = await this.ctx.storage.getAlarm();
+    if (when == null) {
+      if (current != null) await this.ctx.storage.deleteAlarm();
+      return { armed: false, alarmAt: null };
+    }
+    if (current != null && current <= when) return { armed: false, alarmAt: current };
+    await this.ctx.storage.setAlarm(when);
+    return { armed: true, alarmAt: when };
+  }
+  async #durableAlarm() {
+    let retryDelayMs = 0;
+    let turn = null;
+    try {
+      const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      turn = await runDurableAlarmTurn({
+        db: this.store.db, env: this.env, store: this.store, now: Date.now(),
+        lastRan: lastRanFrom(stored), includeSlow: false, drain: true,
+        runJob: (name, slow) => this.#runDueJobs({ includeSlow: slow, onlyJob: name })
+      });
+      const failed = (turn?.result?.outcomes ?? []).filter(outcome => !outcome.ok);
+      if (turn?.failed || failed.length) {
+        retryDelayMs = ALARM_RETRY_MS;
+        const names = failed.map(outcome => outcome.job).filter(Boolean);
+        throw new Error(`cron jobs failed: ${names.length ? names.join(", ") : "durable alarm"}`);
+      }
+    } catch (error) {
+      if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
+      throw error;
+    } finally {
+      try { await this.#armDurableQueue(turn, retryDelayMs); }
+      catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
+    }
+  }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
-  async ensureJobAlarm() {
+  // ROOM_DURABLE_ALARM_QUEUE enqueues instead of running. The alarm drains.
+  async ensureJobAlarm(options = {}) {
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
+    if (durableAlarmQueueEnabled(this.env)) {
+      const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const turn = await runDurableAlarmTurn({
+        db: this.store.db, env: this.env, store: this.store, now: Date.now(),
+        lastRan: lastRanFrom(stored), includeSlow: options?.includeSlow === true, drain: false
+      });
+      const armed = await this.#armDurableQueue(turn, 0);
+      return { ...armed, ran: [] };
+    }
     const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
     const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
@@ -555,6 +614,10 @@ export class ProjectRoom extends DurableObject {
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
     if (this.paused || !this.store) return;
+    if (durableAlarmQueueEnabled(this.env)) {
+      await this.#durableAlarm();
+      return;
+    }
     let retryDelayMs = 0;
     try {
       const outcomes = await this.#runDueJobs({ includeSlow: false });
@@ -755,6 +818,10 @@ export default {
   // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
+    if (durableAlarmQueueEnabled(env)) {
+      await env.ROOM.getByName('invite-only-pilot').ensureJobAlarm({ includeSlow: true });
+      return;
+    }
     let room = env.ROOM.getByName('invite-only-pilot');
     const failures = [];
     try { await room.ensureJobAlarm(); }
