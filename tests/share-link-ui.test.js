@@ -716,3 +716,103 @@ test("a dead invite link asks for a fresh one and offers sign-in", async () => {
     assert.equal(dom.node("#join-link-scope").textContent.includes("incomplete"), false);
   } finally { dom.uninstall(); }
 });
+
+test("growth kit copy controls carry the same link before and after a create, and invalidate together (#4071)", async () => {
+  const nodes = new Map();
+  let kitBuilt = false;
+  const node = selector => {
+    if (selector === "#growth-kit" && !kitBuilt) return null;
+    if (!nodes.has(selector)) nodes.set(selector, {
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {}, children: [],
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
+      classList: { toggle() {} },
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      contains() { return false; }, replaceChildren(...kids) { this.children = kids; }, showModal() { this.open = true; }, close() { this.open = false; },
+      after() {}, append(...kids) { this.children.push(...kids); }, before() {},
+      focus() {},
+    });
+    return nodes.get(selector);
+  };
+  const writes = [];
+  const globals = {
+    document: { querySelector: node, createElement(tag) { const el = node(`created:${tag}`); if (tag === "section") kitBuilt = true; return el; }, activeElement: null },
+    window: { addEventListener() {} },
+    location: { hostname: "localhost", origin: "http://localhost:52331" },
+    navigator: { clipboard: { async writeText(value) { writes.push(value); } } },
+  };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { member, roomId: "commons" };
+  const kitToken = "R".repeat(43), kitUrl = `http://localhost:52331/#join/${kitToken}`;
+  const kitMessage = `Join me in Commons. People and agents work in the same room.\n${kitUrl}`;
+  const requests = [];
+  const listState = { links: [] };
+  const client = {
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
+    async request(path, options) {
+      if (path === "/referrals") return { invite: { token: kitToken, message: "Join me in Commons. People and agents work in the same room.\n{url}", status: "active" }, reward: null };
+      if (path === "/share-links-cancel") {
+        listState.links = listState.links.map(link => ({ ...link, status: "cancelled" }));
+        return {};
+      }
+      assert.equal(path, "/share-links");
+      if (options?.method === "POST") {
+        requests.push(structuredClone(options.data));
+        listState.links = [{ id: "created-link", status: "active", access: "guest", joins: 0, maxJoins: 2, createdAt: Date.now(), expiresAt: Date.now() + 3600000 }];
+        return { link: { id: "created-link", status: "active", access: "guest", expiresAt: Date.now() + 3600000 } };
+      }
+      return { links: listState.links };
+    },
+  };
+  try {
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    installShareLinks({ client, accountClient: {}, getState: () => ({ room: { id: "commons", title: "Commons", ownerId: "owner" }, members: { owner: member } }), getSession: () => session, openRoom() {} });
+    node("#share-link-expiry").value = "24";
+    node("#share-link-limit").value = "2";
+    await node("#invite-people-button").handlers.click();
+    // The kit pair renders from the referral invite; both controls agree.
+    assert.equal(node("#growth-invite-url").value, kitUrl);
+    assert.equal(node("#growth-invite-message").value, kitMessage);
+    assert.equal(node("#growth-copy-link").disabled, false);
+    assert.equal(node("#growth-copy-message").disabled, false);
+    await node("#growth-copy-link").handlers.click();
+    await node("#growth-copy-message").handlers.click();
+    assert.deepEqual(writes, [kitUrl, kitMessage]);
+    // Create a link: BOTH growth fields move to the created link, so the
+    // paired controls copy the same freshly created link (#4071 — before
+    // the fix the message field kept the kit link here).
+    writes.length = 0;
+    await node("#share-link-form").handlers.submit({ preventDefault() {} });
+    const createdUrl = `http://localhost:52331/#join/${requests[0].linkToken}`;
+    assert.equal(node("#share-link-url").value, createdUrl);
+    assert.equal(node("#growth-invite-url").value, createdUrl);
+    assert.equal(node("#growth-invite-message").value, `Join me in Commons. People and agents work in the same room.\n${createdUrl}`);
+    assert.doesNotMatch(node("#growth-invite-message").value, new RegExp(kitToken));
+    await node("#growth-copy-link").handlers.click();
+    await node("#growth-copy-message").handlers.click();
+    assert.deepEqual(writes.slice(-2), [createdUrl, node("#growth-invite-message").value]);
+    // Revocation invalidates the pair together: cancelling the created
+    // link routes through clearResult (as expiry and reset also do), and
+    // the kit pair is restored in both fields — never one stale field
+    // beside a fresh one. Wait for the rendered row's cancel control:
+    // the trailing list refresh is fire-and-forget, so poll for state,
+    // not for a lapse of time.
+    const deadline = Date.now() + 10000;
+    let cancelButton = null;
+    while (!cancelButton && Date.now() < deadline) {
+      const row = node("#share-link-list").children[0];
+      cancelButton = row?.children.find(child => child.textContent === "Cancel link") ?? null;
+      if (!cancelButton) await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.ok(cancelButton, "the created link renders with a cancel control");
+    await cancelButton.handlers.click();
+    assert.equal(node("#share-link-url").value, "");
+    assert.equal(node("#growth-invite-url").value, kitUrl);
+    assert.equal(node("#growth-invite-message").value, kitMessage);
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});

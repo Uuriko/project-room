@@ -4,7 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
-import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { projectPublicWorkReceipt, publicReceiptById } from './public-read-model.mjs';
 
 // Private review is a separate fact. Submission bytes, leases and work
 // gates are never changed here. Two deliberate exceptions, both inside
@@ -128,7 +128,13 @@ export class PublicWorkReviews {
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), ...(history ? { history: this.historyEntries(scope) } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), ...(history ? { history: this.historyEntries(scope) } : {}),
+      // #4071: whether this receipt's public page currently resolves,
+      // computed with the detail route's own resolver — the one visibility
+      // definition (owner toggle + operator unpublish). The owner console
+      // links /receipts/<id> only when this is true; the authenticated
+      // artifact/JSON reads stay the owner's usable receipt when it is not.
+      publicPage: Boolean(publicReceiptById(this.store, scope.receipt.receiptId)), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
