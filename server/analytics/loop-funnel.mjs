@@ -24,9 +24,11 @@
 // progression, whoever performs them — the same counterparty-inclusive
 // shape AN-FUNNEL-1 uses for first replies.
 //
-// Stage 2 of the charter funnel, "saw board", is deliberately absent: no
-// surface records a board view today (see LOOP_FUNNEL_DEFINITIONS.sawBoard
-// and the gap issue). Every other stage is measured from recorded data.
+// Stage 2 of the charter funnel, "saw board", is measured from the
+// board_viewed analytics rows the board doors record (#3588; see
+// server/analytics/board-views.mjs): the actor's first recorded board view
+// at or after entry, with the claimable count that view carried. Every
+// stage is measured from recorded data.
 
 function minutesBetween(start, end) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
@@ -144,7 +146,7 @@ function publicLoopStages(task) {
   };
 }
 
-export function loopFunnel({ members = [], signups = [], memberships = [], claimEvents = [], publicTasks = [], identityLinks = [] } = {}) {
+export function loopFunnel({ members = [], signups = [], memberships = [], claimEvents = [], publicTasks = [], identityLinks = [], boardViews = [] } = {}) {
   const signupAt = new Map();
   for (const row of signups) {
     if (typeof row?.accountId !== "string" || !Number.isFinite(row?.at)) continue;
@@ -283,6 +285,38 @@ export function loopFunnel({ members = [], signups = [], memberships = [], claim
     });
   }
 
+  // Board views (#3588): per identified actor, their views in time order.
+  // Anonymous views (actorId null) attribute to nobody — they exist for
+  // coverage counts on the reader side, not for an actor's funnel.
+  const viewsByActor = new Map();
+  for (const view of boardViews) {
+    if (typeof view?.actorId !== "string" || !view.actorId || !Number.isFinite(view?.at)) continue;
+    let list = viewsByActor.get(view.actorId);
+    if (!list) {
+      list = [];
+      viewsByActor.set(view.actorId, list);
+    }
+    list.push(view);
+  }
+  for (const list of viewsByActor.values()) list.sort((a, b) => a.at - b.at);
+  // A view by an actor with no other recorded entry IS their entry: the
+  // public board has no membership (the same rule as a first board action
+  // above). The view does not move an existing entry earlier.
+  for (const [actorId, views] of viewsByActor) {
+    const actor = actorFor(actorId);
+    if (actor.enteredAt == null) {
+      actor.enteredAt = views[0].at;
+      actor.enteredBasis = "board_view";
+    }
+  }
+  // The saw-board moment is the first view at or after entry; an earlier
+  // view is clock-skew noise, the same rule loops follow.
+  const firstViewFrom = (actor) => {
+    const views = viewsByActor.get(actor.actorId);
+    if (!views || actor.enteredAt == null) return null;
+    return views.find(view => view.at >= actor.enteredAt) ?? null;
+  };
+
   const boardSummary = {
     claims: boardLoops.length,
     claimed: boardLoops.filter(l => l.timeline.claimedAt != null).length,
@@ -297,13 +331,15 @@ export function loopFunnel({ members = [], signups = [], memberships = [], claim
     .sort((a, b) => a.enteredAt - b.enteredAt)
     .map(actor => {
       const loop = actor.loop;
+      const firstView = firstViewFrom(actor);
       return {
         actorId: actor.actorId,
         kind: actor.kind ?? (isAgentId(actor.actorId) ? "agent" : "unknown"),
         accountId: actor.accountId,
         enteredAt: actor.enteredAt,
         enteredBasis: actor.enteredBasis,
-        sawBoardAt: null,
+        sawBoardAt: firstView?.at ?? null,
+        sawBoardClaimableCount: firstView ? (firstView.claimableCount ?? null) : null,
         loopSystem: loop?.system ?? null,
         loopRef: loop?.ref ?? null,
         loopRole: loop?.role ?? null,
@@ -325,6 +361,7 @@ export function loopFunnel({ members = [], signups = [], memberships = [], claim
     const claimToReceipt = subset.map(r => r.minutesClaimToReceipt).filter(v => v != null);
     return {
       actors: subset.length,
+      sawBoard: stageCount(subset, "sawBoardAt"),
       withLoop: stageCount(subset, "directedOrClaimedAt"),
       reviewed: stageCount(subset, "reviewedAt"),
       accepted: stageCount(subset, "acceptedAt"),
@@ -352,7 +389,7 @@ export function loopFunnel({ members = [], signups = [], memberships = [], claim
 export const LOOP_FUNNEL_DEFINITIONS = Object.freeze({
   activation: "Activation is first-receipt-held: an actor is activated when their first loop ends with a receipt held (receiptAt set). Signups, entries and claims are funnel stages, not activation.",
   entered: "Earliest recorded entry: account signup (humans, when the account predates member entry), first member.added / member.joined_via_invitation event, or — for public-board-only identities, who have no membership — their first recorded board action.",
-  sawBoard: "UNMEASURED in this version: no surface records a board view (public board list, in-room available-work list and the MCP available-work tools all serve reads without recording them), so the claimable-count snapshot at view time does not exist. Reported as null for every actor until the gap is closed; see the filed gap issue.",
+  sawBoard: "Measured from board_viewed analytics rows (#3588): the actor's first recorded board view at or after their entry — the public board list or match (ui/rest), the MCP public_work_recommend door, or the in-room work-claims list — and sawBoardClaimableCount is the claimable count that view's response carried. A first view can itself be the entry (enteredBasis board_view) for public-board identities with no membership. Views recorded before entry do not count (the same clock-skew rule as loops), and anonymous views are recorded but attribute to no actor, so an actor with no identified view at or after entry still reports null.",
   directedOrClaimed: "The actor's first loop starts: earliest board claim they created (role director) or claimed (role claimer), or earliest public task they claimed (role claimer), at or after entry. Only this first claim's progression is followed.",
   reviewed: "Board: earliest reviewed-action event on the loop claim by someone other than the claim's owner (a verdict review or an attestation stamp; the owner's own stamps do not count). Public: earliest verification or decision recorded on the loop task's submission.",
   accepted: "Board: earliest approve verdict on the loop claim; when no verdict review exists, the claim's done transition (merged-delivery completion is the acceptance the system records). Public: the review decision 'accepted' — public submission receipts alone never count as acceptance.",

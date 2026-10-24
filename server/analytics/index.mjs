@@ -28,6 +28,10 @@ export {
   readAnalyticsContext, runWithRequestContext, writeAnalyticsContext
 } from "./context.mjs";
 export {
+  BOARD_VIEWED_EVENT, BOARD_VIEW_DOORS, BOARD_VIEW_SCOPES, boardDoorForRequest, readBoardViews,
+  recordBoardView
+} from "./board-views.mjs";
+export {
   analyticsHealth, baselineReport, isoWeekStart, loadMessages, referralK, roomFunnel,
   signupsByWeek, weekLabel, weeklyProductiveRooms
 } from "./metrics.mjs";
