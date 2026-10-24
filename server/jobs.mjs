@@ -270,9 +270,9 @@ function defineJob(job) {
 // operator must act, not the hard caps: the largest room projection is
 // escalated at 3.5 MB against the 4 MiB application cap, and the
 // database at 8 GB against the 10 GB Durable Object SQLite limit.
-// A projection hot window keeps a busy room near 100 KB. 3.5 MB stays
-// the escalation line in front of that cap, so a room that is merely
-// large still pages here while a healthy room does not approach it.
+// 3.5 MB stays the escalation in front of the 4 MiB cap. The projection
+// hot window keeps a busy room near 100 KB once it lands; raising this
+// line would page later, closer to the hard cap, both before and after.
 export const STORE_GROWTH_LIMITS = Object.freeze({
   maxProjectionBytes: 3_500_000,
   dbBytes: 8_000_000_000
