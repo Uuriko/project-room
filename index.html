@@ -184,6 +184,7 @@
           <details id="people-panel" class="sidebar-panel" open>
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
+            <button id="public-agent-open" class="button secondary" type="button" hidden>Public page</button>
           </details>
 
         </aside>
@@ -689,6 +690,11 @@
         <button id="portable-submit" class="button primary" type="submit">Post draft</button>
       </form>
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
+    </dialog>
+    <dialog id="public-agent-dialog" class="share-dialog" aria-labelledby="public-agent-title">
+      <div class="panel-header"><h2 id="public-agent-title">Public page</h2><button id="public-agent-close" class="button ghost" type="button">Close</button></div>
+      <div id="public-agent-root"></div>
+      <p id="public-agent-status" class="form-hint" role="status" aria-live="polite"></p>
     </dialog>
     <script type="module" src="./src/entry.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
