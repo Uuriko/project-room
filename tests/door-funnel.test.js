@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { readDoorFunnel, computeDoorFunnel, clampDoorFunnelWeeks, DOOR_FUNNEL_MAX_WEEKS } from "../server/door-funnel.mjs";
+import { DOOR_FUNNEL_ROUTES, handleDoorFunnel } from "../server/routes/door-funnel.mjs";
 
 // Wednesday 2026-10-21 11:00 America/Los_Angeles. Los Angeles Mondays in
 // scope: Oct 5 / Oct 12 / Oct 19, each starting 07:00Z (PDT).
@@ -124,4 +125,58 @@ test("a missing source refuses the whole read instead of silently zeroing a leg"
     () => readDoorFunnel({ db: makeDb() }, { now: NOW }),
     error => error.code === "door_funnel_unavailable",
   );
+});
+
+// ---- route handler (server/routes/door-funnel.mjs) -------------------------
+// The handler is exercised directly with the fake-ctx shape the route tests
+// use (account-sessions-route): rate records its call, json returns the
+// { status, body } pair it was handed. The store is the same in-memory
+// fixture store the read tests above drive.
+function routeCtx(store, search = "") {
+  const calls = [];
+  return {
+    calls,
+    res: {},
+    store,
+    remoteAddress: "203.0.113.9",
+    url: new URL(`https://example.test/api/public/door-funnel${search}`),
+    rate: (key, max) => calls.push(["rate", key, max]),
+    json: (_res, status, body) => ({ status, body }),
+  };
+}
+
+test("the route row is the anonymous counts-only GET the table carries", () => {
+  assert.equal(DOOR_FUNNEL_ROUTES.length, 1);
+  const [row] = DOOR_FUNNEL_ROUTES;
+  assert.equal(row.id, "public.door-funnel");
+  assert.equal(row.method, "GET");
+  assert.equal(row.path, "/api/public/door-funnel");
+  assert.equal(row.auth, "none");
+  assert.equal(row.handler, handleDoorFunnel);
+});
+
+test("the handler rate-limits by remote address, then serves the funnel read", () => {
+  const ctx = routeCtx(storeOf(seededDb(), LISTED));
+  const out = handleDoorFunnel(ctx);
+  assert.deepEqual(ctx.calls, [["rate", "door-funnel:203.0.113.9", 120]]);
+  assert.equal(out.status, 200);
+  assert.equal(out.body.schema, "project-room-door-funnel/1");
+  assert.equal(out.body.weeks.length, DOOR_FUNNEL_MAX_WEEKS);
+  assert.deepEqual(out.body.directory, { listedRooms: 2, totalMembers: 117, rooms: LISTED });
+});
+
+test("the handler passes the weeks query parameter through the clamp", () => {
+  const store = storeOf(makeDb(), LISTED);
+  assert.equal(handleDoorFunnel(routeCtx(store, "?weeks=2")).body.weeks.length, 2);
+  assert.equal(handleDoorFunnel(routeCtx(store, "?weeks=99")).body.weeks.length, DOOR_FUNNEL_MAX_WEEKS);
+  assert.equal(handleDoorFunnel(routeCtx(store, "?weeks=abc")).body.weeks.length, DOOR_FUNNEL_MAX_WEEKS);
+});
+
+test("the handler propagates a source refusal instead of serving a partial read", () => {
+  const ctx = routeCtx({ db: makeDb() }); // no roomDirectory attached
+  assert.throws(
+    () => handleDoorFunnel(ctx),
+    error => error.code === "door_funnel_unavailable" && error.status === 500,
+  );
+  assert.deepEqual(ctx.calls, [["rate", "door-funnel:203.0.113.9", 120]]);
 });
