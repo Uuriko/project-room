@@ -1579,18 +1579,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (version > 0 && version < 12) {
       // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
       // previously stored policy marker, even when it is null or behind a checkpoint.
+      // #4126: the projection terms of every legacy scan in this constructor
+      // carry json_valid guards — an unreadable projection is quarantined by
+      // repairProjectionProvenance below, never a boot brick. The events
+      // terms stay unguarded on purpose: a torn journal body fails closed.
       const collision = this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='message.posted' AND json_type(body,'$.data.requestPolicyVersion') IS NOT NULL LIMIT 1").get()
-        || this.db.prepare("SELECT 1 FROM rooms WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
-      const checkpointCollision = version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+        || this.db.prepare("SELECT 1 FROM rooms WHERE json_valid(projection) AND json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+      const checkpointCollision = version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints WHERE json_valid(projection) AND json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
       if (collision || checkpointCollision) throw new Error("Legacy reply request marker requires operator reconciliation");
     }
     if (version > 0 && version < 13) {
-      const collision = table => this.db.prepare(`SELECT 1 FROM ${table}, json_each(projection,'$.workItems') AS item WHERE json_type(item.value,'$.helpWanted') IS NOT NULL LIMIT 1`).get();
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table}, json_each(projection,'$.workItems') AS item WHERE json_valid(projection) AND json_type(item.value,'$.helpWanted') IS NOT NULL LIMIT 1`).get();
       if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
         || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.help_updated' LIMIT 1").get()) throw new Error("Legacy help invitation field requires operator reconciliation");
     }
     if (version > 0 && version < 14) {
-      const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.helpOffers') IS NOT NULL LIMIT 1`).get();
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_valid(projection) AND json_type(projection,'$.helpOffers') IS NOT NULL LIMIT 1`).get();
       if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
         || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type') IN ('work.help_offer_opened','work.help_offer_updated') LIMIT 1").get()) throw new Error("Legacy help offer field requires operator reconciliation");
     }
@@ -1617,8 +1621,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.exec(WORK_REPOSITORY_SCHEMA);
     if (version > 0 && version < 26 && (
       this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
-      || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
-      || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()))
+      || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_valid(rooms.projection) AND json_tree.key='externalProducer' LIMIT 1").get()
+      || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_valid(projection_checkpoints.projection) AND json_tree.key='externalProducer' LIMIT 1").get()))
       throw new Error("Pre-v26 outside credit history requires operator reconciliation");
     if (!deferIntegrity) this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
@@ -2133,7 +2137,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // skipping already normalized carriers. Reverse reconstructs inline state.
   migrateWorkProjections({ reverse = false } = {}) {
     let converted = 0;
-    for (const { id } of this.db.prepare("SELECT id FROM rooms ORDER BY id").all()) {
+    // #4126: a room whose projection does not parse is quarantined at boot;
+    // the migration leaves its bytes untouched for the operator repair path.
+    for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE json_valid(projection) ORDER BY id").all()) {
       this.transaction(() => {
         const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(id);
         const raw = JSON.parse(row.projection);
