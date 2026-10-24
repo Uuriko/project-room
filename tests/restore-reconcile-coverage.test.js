@@ -111,10 +111,10 @@ const PLANTS = {
   },
   link_code: {
     plant(ctx, X) {
-      const { linkCode } = ctx.store.identities.mintLinkCode(X.identityId, X.secret);
+      const { linkCode } = ctx.store.identities.mintLinkCode(X.identityId, X.secret, { roomId: "commons" });
       return { linkCode };
     },
-    withdraw(ctx, X, memberId, planted) { ctx.store.identities.consumeLinkCode(X.identityId, planted.linkCode); },
+    withdraw(ctx, X, memberId, planted) { ctx.store.identities.consumeLinkCode(X.identityId, planted.linkCode, { roomId: "commons" }); },
   },
   approved_access_row: {
     plant(ctx, X) {
@@ -385,7 +385,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   });
   ctx.store.agentPlugin.verifyIdentity({ identityId: X.identityId, verifiedBy: "owner" });
   const W = ctx.store.identities.create("Code Holder");
-  const { linkCode } = ctx.store.identities.mintLinkCode(W.identityId, W.secret);
+  const { linkCode } = ctx.store.identities.mintLinkCode(W.identityId, W.secret, { roomId: "commons" });
 
   const restored = await backupAndRestore(ctx);
   t.after(() => restored.close());
@@ -394,7 +394,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   ctx.store.ownerDelegates.revoke(ctx.owner, "commons", { identityId: X.identityId });
   ctx.store.agentPlugin.revokeApiKey({ identityId: X.identityId, keyId: issued.keyId });
   ctx.store.agentPlugin.unverifyIdentity({ identityId: X.identityId });
-  ctx.store.identities.consumeLinkCode(W.identityId, linkCode);
+  ctx.store.identities.consumeLinkCode(W.identityId, linkCode, { roomId: "commons" });
   // Timestamp hygiene for the divergence rule below: the scenario's
   // timeline has the live spend and the restored re-spend well apart,
   // but two adjacent calls can land in the same millisecond — and
@@ -406,7 +406,7 @@ test("C-D anchor: all five planted classes are named (was: one of five)", async 
   // The original repro proves the re-spend in the restored store BEFORE
   // reconciling; the reconcile must still name the code (its restored
   // consumption timestamp cannot be the live store's consumption).
-  restored.identities.consumeLinkCode(W.identityId, linkCode);
+  restored.identities.consumeLinkCode(W.identityId, linkCode, { roomId: "commons" });
 
   const report = reconcileRestoredAuthority(restored, ctx.store);
   const kinds = new Set(report.stale.map(row => row.kind));
