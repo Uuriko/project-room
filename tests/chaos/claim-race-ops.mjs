@@ -384,8 +384,8 @@ const WEAKENINGS = {
   // raced the release leaves its extended lease silently surviving on the
   // unclaimed item — the double effect P3 forbids.
   p3: [
-    [`leaseStartAt: released ? null : item.leaseStartAt,`, `leaseStartAt: item.leaseStartAt,`],
-    [`leaseExpiresAt: released ? null : item.leaseExpiresAt,`, `leaseExpiresAt: item.leaseExpiresAt,`],
+    [`leaseStartAt: released ? null : sendBack ? leaseWindow.leaseStartAt : item.leaseStartAt,`, `leaseStartAt: sendBack ? leaseWindow.leaseStartAt : item.leaseStartAt,`],
+    [`leaseExpiresAt: released ? null : sendBack ? leaseWindow.leaseExpiresAt : item.leaseExpiresAt,`, `leaseExpiresAt: sendBack ? leaseWindow.leaseExpiresAt : item.leaseExpiresAt,`],
   ],
 };
 
