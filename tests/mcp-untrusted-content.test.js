@@ -154,7 +154,7 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   rooms.create(owner.secret, {
     roomId: "budget-den", title: "Budget den", purpose: "Catalog budget", kind: "personal", displayName: "Budget owner"
   });
-  const coreBody = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
+  const coreBody = await (await rpc(origin, "tools/list", { profile: "core" }, owner.secret)).json();
   const fullBody = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   const coreTools = coreBody.result.tools;
   const fullTools = fullBody.result.tools;
