@@ -56,7 +56,7 @@ for (const script of ["project-room", "project-room-staging"]) {
       assert.equal(vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
     } else {
       assert.deepEqual(room, { type: "durable_object_namespace", name: "ROOM", class_name: "ProjectRoom", script_name: "project-room" });
-      assert.equal(metadata.limits.cpu_ms, 1000);
+      assert.equal(metadata.limits.cpu_ms, 30000);
       // The entry door serves production traffic, so it reports production (QA5R G-1).
       assert.deepEqual(vars, { ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "production", ROOM_SERVICE_MODE: "cloudflare-production", ROOM_SECURITY_CONTACT: "potter@trydemigod.com" });
     }

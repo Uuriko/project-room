@@ -947,6 +947,14 @@ export class LandQueue {
         console.warn(`land queue refresh skipped: ${error?.code ?? "github_unavailable"}`);
       }
     }
+    // #3911 F-8: an unconfigured token is a failed tick, not a quiet
+    // success. Name it on the failure channel the heartbeat grades
+    // (scanError, the integrity job's shape), so the stall is recorded
+    // instead of lastSuccessAt advancing while the queue silently stops
+    // moving and the counts sit in a summary nobody is paged on.
+    if (summary.unconfigured > 0) {
+      summary.scanError = `land queue GitHub unconfigured (${summary.unconfigured} item(s) skipped)`;
+    }
     return summary;
   }
 
