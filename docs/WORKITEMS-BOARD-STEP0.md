@@ -363,3 +363,7 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Agent session list (2026-10-24)
+
+The reference census is 59 files. `server/agent-sessions.mjs` reads `workItems` to attach the live claim and the running task to a session row. It does not write work items or board claims.

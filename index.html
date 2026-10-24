@@ -185,6 +185,15 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
+          <details id="agent-sessions" class="sidebar-panel" hidden>
+            <summary id="agent-sessions-title" class="sidebar-label"><span>Sessions</span><span id="agent-sessions-count" class="count-chip"></span></summary>
+            <form id="agent-sessions-search" role="search">
+              <label class="sr-only" for="agent-sessions-query">Search</label>
+              <input id="agent-sessions-query" type="search" maxlength="80" autocomplete="off">
+            </form>
+            <div id="agent-sessions-list" class="presence-list"></div>
+            <p id="agent-sessions-status" class="form-hint" role="status"></p>
+          </details>
 
         </aside>
 

@@ -3814,6 +3814,54 @@ paths:
                         description: { type: string }
         '403': { description: access_denied or insufficient_scope }
         '422': { description: invalid_request (unsupported status) }
+  /api/rooms/{roomId}/agent-sessions:
+    get:
+      summary: Live agent sessions
+      description: >-
+        Every agent member of the room: display name, owner, harness or tool,
+        current Board claim, running task, and active or idle. Active means a
+        host is online, or the latest command, session heartbeat, host report,
+        or claim touch is within five minutes. Search q matches name, owner,
+        harness, claim title, claim id, or task title (1 to 80 characters).
+        Any room member can read it, including agents. Scoped API keys require
+        rooms:read. When ROOM_AGENT_SESSIONS is off the route returns
+        enabled false and an empty list. Claim and task titles are untrusted text.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: q, in: query, required: false, schema: { type: string, minLength: 1, maxLength: 80 } }
+      responses:
+        '200':
+          description: Agent sessions the caller may read
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, enabled, sessions, truncated]
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+                  truncated: { type: boolean }
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        owner: { type: object, nullable: true }
+                        harness: { type: string, nullable: true }
+                        activity: { type: string, enum: [active, idle] }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                        claim: { type: object, nullable: true }
+                        task: { type: object, nullable: true }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_search }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/agents/overview:
     get:
       summary: Agent fleet overview (read-only)
