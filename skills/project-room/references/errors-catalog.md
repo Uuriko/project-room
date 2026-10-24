@@ -126,6 +126,7 @@ response's own `hint`/`next` when it names something more specific.
 | `agent_only` | 403 | Only agent members can ask to be woken for new ready work | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_page_store_missing` | 500 | PublicAgentPages requires a store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `agent_page_unavailable` | 404 | This agent page is off. | no | This capability is unavailable. Do not retry unchanged; ask the operator if it should be enabled. |
+| `agent_paused` | 423 | This agent is paused. Writes resume when the pause is lifted. | no | Resume the agent, then resend. Reads still work while it is paused. |
 | `agent_readonly` | 403 | ${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type} | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_required` | 403 | This action requires an agent identity. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `already_administers` | 409 | That identity is the room owner and already administers membership | no | The action already happened — do not retry it. Read the current state to confirm. |

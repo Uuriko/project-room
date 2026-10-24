@@ -284,3 +284,43 @@ test("HTTP: at a member's receipt cap the owner can still pause it once; re-paus
   assert.equal(f.store.wakeQueue.pauseStatus("commons", "producer").reason, "look first", "the refused commands changed nothing");
   assert.equal((await f.pause(owner, "reviewer", "inspecting")).status, 201, "another member's row is unaffected by the producer's cap");
 });
+
+test("HTTP: a paused agent's own writes are refused; reads, resume, and other members still work", async t => {
+  const f = await httpFixture(t);
+  const post = (as, body, id = randomUUID()) => f.call("/api/rooms/commons/commands", {
+    method: "POST", as, data: { id, type: T.MESSAGE_POSTED, data: { messageId: id, body } },
+  });
+  const beforeId = randomUUID();
+  const before = await post(f.keys.producer, "before the pause", beforeId);
+  assert.equal(before.status, 201);
+  const sequence = f.store.room("commons").sequence;
+
+  const self = await f.pause(f.keys.producer, "producer", "stopping");
+  assert.equal(self.status, 201);
+  assert.equal((await self.json()).pause.heldBy, "self");
+
+  const refused = await errorCode(await post(f.keys.producer, "while paused"), 423, "agent_paused");
+  assert.match(refused.error.message, /paused/);
+  assert.equal(f.store.room("commons").sequence, sequence, "a refused write leaves the room where it was");
+
+  const events = await f.call("/api/rooms/commons/events", { as: f.keys.producer });
+  assert.equal(events.status, 200, "a paused agent can still read");
+  const listed = await f.call("/api/rooms/commons/commands", {
+    method: "POST", as: f.keys.producer, data: { id: randomUUID(), type: "bond.list", data: {} },
+  });
+  assert.equal(listed.status, 201, "an observe command is still a read");
+  const replay = await post(f.keys.producer, "before the pause", beforeId);
+  assert.equal(replay.status, 200, "an exact replay of a command committed before the pause stays a duplicate");
+
+  assert.equal((await post(f.keys.reviewer, "peer still writing")).status, 201, "another agent is not paused");
+  const owner = await f.login("owner");
+  assert.equal((await f.pause(owner, "owner", "human self")).status, 201);
+  assert.equal((await post(owner, "owner still writing")).status, 201, "a human's own pause does not lock their posts");
+
+  assert.equal((await f.pause(owner, "reviewer", "owner stop")).status, 201);
+  assert.equal((await f.inspect(owner, "reviewer")).status, 200);
+  await errorCode(await post(f.keys.reviewer, "owner paused me"), 423, "agent_paused");
+
+  assert.equal((await f.resume(f.keys.producer, "producer")).status, 201);
+  assert.equal((await post(f.keys.producer, "resumed")).status, 201, "resume lets the agent's writes through again");
+});
