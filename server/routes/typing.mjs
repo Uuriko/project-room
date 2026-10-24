@@ -22,7 +22,7 @@ export async function postTypingBeat(ctx) {
   // member-permissions.mjs: no bearer account sessions,
   // CSRF/Origin on cookie writes, the shared write bucket, and rooms:write
   // for API keys. A read-only key or a cross-site cookie POST is refused.
-  if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted");
+  if (selected.bearer && auth.credentialScope !== "room" && auth.credentialScope !== "oauth") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted"); // AGENT-DOOR-AUTH: oauth admitted, scope-gated in roomCredentials
   ctx.protectWrite(ctx.req, auth, selected.bearer);
   if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) {
     ctx.reject(403, "insufficient_scope", "API key lacks rooms:write");
