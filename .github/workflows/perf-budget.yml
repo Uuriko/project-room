@@ -1,0 +1,78 @@
+name: perf-budget
+
+# Report-only page-weight measurement (docs/PERF-BUDGET.md, PERF program
+# Slice 1). Runs scripts/perf-budget.mjs against a throwaway local server
+# on an empty database and publishes the numbers as a job summary and an
+# artifact. It never gates: the measurement step is continue-on-error and
+# no step fails on the numbers, so a heavy page cannot turn this red.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pull requests each have their own group and cancel their own older runs.
+# Pushes to main share `perf-budget-main` and do not cancel the run already
+# in progress. workflow_dispatch is keyed by run id: a manual run neither
+# cancels the tip nor is cancelled by it. (Same pattern as test.yml.)
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'perf-budget-main') || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Measure page weight (report-only, never gates)
+        continue-on-error: true
+        run: node scripts/perf-budget.mjs --out perf-budget.json
+      - name: Summarize page weight
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+          const lines = [];
+          lines.push("## perf-budget (report-only)");
+          lines.push("");
+          lines.push("Approved budget (docs/PERF-BUDGET.md, D5-5): signed-out `/` at 390px — ≤15 requests, ≤150 KB.");
+          lines.push("Local bytes are uncompressed (the local server does not compress), so treat these numbers as a trend signal, not a deployed-bytes verdict. This workflow does not gate on the numbers.");
+          lines.push("");
+          let report = null;
+          try {
+            report = JSON.parse(fs.readFileSync("perf-budget.json", "utf8"));
+          } catch {
+            report = null;
+          }
+          if (!report || !Array.isArray(report.results)) {
+            lines.push("perf-budget.json was not produced — the measurement step failed; see its log above. No numbers to report.");
+          } else {
+            if (report.sourceRevision) lines.push(`Source revision: \`${report.sourceRevision}\``);
+            if (report.at) lines.push(`Measured at: ${report.at}`);
+            lines.push("");
+            lines.push("| Page | Viewport | Requests | Bytes | DOM nodes | Lab LCP |");
+            lines.push("| --- | ---: | ---: | ---: | ---: | ---: |");
+            for (const r of report.results) {
+              const lcp = typeof r.lcpMs === "number" ? `${r.lcpMs} ms` : "n/a";
+              lines.push(`| ${r.page} | ${r.viewport} | ${r.requests} | ${r.bytes} | ${r.domNodes} | ${lcp} |`);
+            }
+          }
+          fs.appendFileSync(summaryFile, lines.join("\n") + "\n");
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: perf-budget
+          path: perf-budget.json
+          if-no-files-found: ignore
