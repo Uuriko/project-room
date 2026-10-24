@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { deflateSync, inflateSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { EMBEDDED_OG_ASSETS } from "./og-assets-embedded.mjs";
 
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
@@ -219,17 +220,66 @@ export function wrapOgText(text, { size, maxWidth, maxLines, atlas }) {
 
 let assetsCache = null;
 
-function loadAssets() {
-  if (assetsCache) return assetsCache;
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "og");
-  const atlas = JSON.parse(readFileSync(join(dir, "atlas.json"), "utf8"));
+function assembleAssets(atlasText, pngByName) {
+  const atlas = JSON.parse(atlasText);
   const bitmaps = {};
   for (const [size, entry] of Object.entries(atlas.sizes)) {
-    bitmaps[size] = decodePng(readFileSync(join(dir, entry.file)));
+    bitmaps[size] = decodePng(pngByName(entry.file));
   }
-  const base = decodePng(readFileSync(join(dir, "base-receipt.png")));
+  const base = decodePng(pngByName("base-receipt.png"));
   if (base.width !== OG_WIDTH || base.height !== OG_HEIGHT) throw new Error("base receipt image must be 1200 by 630");
-  assetsCache = { atlas, bitmaps, base: base.rgba };
+  return { atlas, bitmaps, base: base.rgba };
+}
+
+function loadDiskAssets() {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "og");
+  return assembleAssets(
+    readFileSync(join(dir, "atlas.json"), "utf8"),
+    name => readFileSync(join(dir, name)),
+  );
+}
+
+const BASE64_VALUES = new Map([...("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")].map((ch, index) => [ch, index]));
+
+export function decodeBase64(text) {
+  const clean = String(text).replace(/=+$/u, "");
+  const out = new Uint8Array(Math.floor((clean.length * 6) / 8));
+  let bits = 0;
+  let bitCount = 0;
+  let offset = 0;
+  for (const ch of clean) {
+    const value = BASE64_VALUES.get(ch);
+    if (value === undefined) throw new TypeError("invalid base64 in embedded og assets");
+    bits = (bits << 6) | value;
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      out[offset] = (bits >> bitCount) & 0xff;
+      offset += 1;
+    }
+  }
+  return out.subarray(0, offset);
+}
+
+// The worker bundle cannot read the assets from disk: import.meta.url is
+// undefined there, so even computing the path throws (ERR_INVALID_ARG_TYPE)
+// before any read happens. Fall back to the embedded copy, the same
+// pattern as the legal pages (server/legal-documents.mjs). The embedded
+// bytes are pinned to the og/ files by tests/og-assets-embedded.test.js.
+export function loadEmbeddedOgAssets() {
+  return assembleAssets(
+    new TextDecoder().decode(decodeBase64(EMBEDDED_OG_ASSETS["atlas.json"])),
+    name => decodeBase64(EMBEDDED_OG_ASSETS[name]),
+  );
+}
+
+function loadAssets() {
+  if (assetsCache) return assetsCache;
+  try {
+    assetsCache = loadDiskAssets();
+  } catch {
+    assetsCache = loadEmbeddedOgAssets();
+  }
   return assetsCache;
 }
 

@@ -233,4 +233,10 @@ test("proof share layer: JSON-LD mirrors the entries and the OG card rides the s
   const bytes = new Uint8Array(await og.arrayBuffer());
   assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
   assert.equal((await fetch(`${origin}/r/nope/proof/og.png`)).status, 404);
+  // A work-item receipt's own share card rides the same renderer and gate.
+  const wirOg = await fetch(`${origin}/receipts/${WIR}/og.png`);
+  assert.equal(wirOg.status, 200);
+  assert.match(wirOg.headers.get("content-type"), /image\/png/);
+  const wirBytes = new Uint8Array(await wirOg.arrayBuffer());
+  assert.deepEqual([...wirBytes.slice(0, 4)], [137, 80, 78, 71]);
 });

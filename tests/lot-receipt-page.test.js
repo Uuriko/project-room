@@ -593,6 +593,8 @@ test("the room's recorded public-receipts setting gates the lot page (#3594)", a
   record("pub-on", true);
   assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200,
     "recorded on: still served");
+  assert.equal((await fetch(`${origin}/receipts/${lotId}/og.png`)).status, 200,
+    "recorded on: the lot share card is served too");
   record("pub-off", false);
   assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 404,
     "recorded off: the lot page hides like every other shape");
