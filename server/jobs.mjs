@@ -492,15 +492,18 @@ export const JOBS = Object.freeze([
     name: "public-work-reseed",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    // #3530: the keeper is due only when the public board's claimable
-    // supply is exactly zero and at least one anchored starter seed has
-    // a fully submitted latest round to advance.
+    // #3530: the keeper is due only while the public board's claimable
+    // supply is below the starter-pool floor (4 — keep in sync with
+    // PUBLIC_WORK_STARTER_POOL_FLOOR in server/public-work-claims.mjs)
+    // and at least one anchored starter seed has a fully submitted
+    // latest round to advance. The old exactly-zero gate wedged the
+    // shelf: one stale claimable task blocked every due seed forever.
     enabled(_env, store) {
       if (!store?.publicWorkClaims) return false;
       const status = store.publicWorkClaims.starterPoolStatus();
-      return status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
+      return status.available && status.anchored > 0 && status.claimable < 4 && status.due.length > 0;
     },
-    disabledReason: () => "Public-work starter pool has claimable tasks or no seed round is due",
+    disabledReason: () => "Public-work starter pool has enough claimable tasks or no seed round is due",
     async run(store, ctx) {
       if (ctx.room?.reseedPublicWorkStarters) return ctx.room.reseedPublicWorkStarters();
       return store.publicWorkClaims.reseedStarterPool();

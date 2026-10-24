@@ -1,9 +1,11 @@
 // #3530: the public-work starter pool is one-shot — a submitted task
-// never becomes claimable again — so the board dead-ends at
-// claimableCount 0 unless the keeper mints the next round. These tests
-// pin the replenishment contract: fires only at exactly zero claimable,
-// at most one round per anchored seed, a live claimed round blocks only
-// its own seed, and repeated ticks converge instead of duplicating.
+// never becomes claimable again — so the board dead-ends unless the
+// keeper mints the next round. These tests pin the replenishment
+// contract: fires while claimable is below the starter-pool floor
+// (4) and at least one seed is due, stands down at or above the
+// floor or when nothing is due, at most one round per anchored
+// seed, a live claimed round blocks only its own seed, and repeated
+// ticks converge instead of duplicating.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -87,13 +89,44 @@ test('reseeds the full starter set once every seed is submitted; the public read
   assert.equal(Object.hasOwn(matched, 'reasonCode'), false);
 });
 
-test('no-op while anything on the board is claimable — the zero bound', t => {
+test('the wedged shelf: claimable 1 with 3 due seeds reseeds exactly those 3', t => {
+  // The production wedge of 2026-10-24: three garden seeds submitted
+  // (due) and one stale linkcheck-style task still unclaimed, so the
+  // old exactly-zero gate never fired. Below the floor of 4 the
+  // keeper must advance the due seeds and leave the stale seed's
+  // family alone — its latest round is unclaimed, not submitted.
   const f = fixture(t);
+  const stale = PUBLIC_WORK_STARTER_SEED_IDS[3];
   for (const id of PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3)) f.submit(id);
   assert.equal(f.service().list({ limit: 100 }).claimableCount, 1);
+  assert.deepEqual(f.service().starterPoolStatus().due, [...PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3)]);
+  const job = jobByName('public-work-reseed');
+  assert.equal(jobEnabled(job, {}, f.store), true, 'wedged pool: keeper is due');
+  const outcome = f.service().reseedStarterPool();
+  assert.equal(outcome.seeded, 3);
+  assert.deepEqual(outcome.errors, []);
+  assert.deepEqual(outcome.rounds, PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3).map(id => starterRoundId(id, 2)));
+  assert.deepEqual(outcome.skipped, [{ seed: stale, reason: 'latest_round_unclaimed' }]);
+  // The shelf recovers to the floor: the stale task plus three fresh
+  // rounds; the keeper then stands down at exactly the floor.
+  assert.equal(f.service().list({ limit: 100 }).claimableCount, 4);
+  assert.equal(jobEnabled(job, {}, f.store), false, 'pool at floor: keeper stands down');
+  assert.equal(f.service().reseedStarterPool().seeded, 0);
+});
+
+test('no reseed when nothing is due, even below the floor', t => {
+  // Claim (do not submit) three seeds: claimable drops below the
+  // floor but no seed's latest round is submitted, so due is empty
+  // and the keeper must not mint anything.
+  const f = fixture(t);
+  for (const id of PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3))
+    f.service().act(id, f.worker.secret, 'claim', { requestId: `hold-${id}`, expectedTermsVersion: 1 });
+  assert.equal(f.service().list({ limit: 100 }).claimableCount, 1);
+  assert.deepEqual(f.service().starterPoolStatus().due, []);
+  const job = jobByName('public-work-reseed');
+  assert.equal(jobEnabled(job, {}, f.store), false, 'nothing due: keeper stands down');
   const outcome = f.service().reseedStarterPool();
   assert.equal(outcome.seeded, 0);
-  assert.equal(outcome.claimable, 1);
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM project_offers WHERE offer_id LIKE '%-r2'").get().n, 0);
 });
 
@@ -123,13 +156,17 @@ test('a live claimed round blocks only its own seed', t => {
   assert.equal(outcome.seeded, 3);
   assert.deepEqual(outcome.skipped, [{ seed: held, reason: 'latest_round_claimed' }]);
   f.service().act(held, f.worker.secret, 'finish', { requestId: 'held-finish', expectedTermsVersion: 1, generation: 1, artifactText: 'Done held', checksReported: [] });
-  // The three fresh rounds are claimable now, so the keeper stands down;
-  // the held seed advances only once the board drains again.
-  assert.equal(f.service().reseedStarterPool().seeded, 0);
+  // The held seed is due now and claimable (3) is below the floor, so
+  // the keeper advances it at the next tick — under the old
+  // exactly-zero gate it had to wait for a full drain.
+  const heldAdvance = f.service().reseedStarterPool();
+  assert.equal(heldAdvance.seeded, 1);
+  assert.deepEqual(heldAdvance.rounds, [starterRoundId(held, 2)]);
+  assert.equal(f.service().list({ limit: 100 }).claimableCount, 4);
   for (const id of PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3)) f.submit(starterRoundId(id, 2));
   const next = f.service().reseedStarterPool();
-  assert.equal(next.seeded, 4);
-  assert.ok(next.rounds.includes(starterRoundId(held, 2)));
+  assert.equal(next.seeded, 3);
+  assert.deepEqual(next.rounds, PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3).map(id => starterRoundId(id, 3)));
 });
 
 test('an unanchored store grows nothing', t => {
