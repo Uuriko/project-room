@@ -5,11 +5,17 @@
 // own answer once the object is awake, because Origin checks and HEAD/GET are
 // per request.
 
-// Warm production storage answers in tens of milliseconds. A cold
-// invite-only-pilot used to block the same check for 6–20 s. After one second
-// the probe answers 503 with status "degraded" and do.status "timeout". The
-// same bound covers a local workerd isolate's first boot.
-export const HEALTH_PROBE_TIMEOUT_MS = 1000;
+// The bound is calibrated to measured production latency, not to the
+// storage statement itself (SELECT 1 is trivial). Reaching the object —
+// waking it and queueing behind its input gate — took 766–925 ms on every
+// successful production probe sampled 2026-10-24, so the old 1000 ms bound
+// sat inside the healthy distribution and flapped /api/ready to 503
+// "degraded" on ordinary variance (3 of 7 samples). 3000 ms is ~3x the
+// slowest observed healthy answer: a live object answers ready, while an
+// object that cannot answer at all still answers 503 with status
+// "degraded" and do.status "timeout" once the bound passes. The same
+// bound covers a local workerd isolate's first boot.
+export const HEALTH_PROBE_TIMEOUT_MS = 3000;
 
 export function createHealthProbe() {
   let inflight = null;
