@@ -144,6 +144,25 @@ test("template start is idempotent, carries ref, and the gallery is indexable", 
   assert.match(detail.text, /Start this room/);
   assert.match(detail.text, /ref=Ada/);
   assert.match(detail.text, /og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/);
+  // An unknown slug that still matches the template route is a missing page.
+  // Browsers get the styled HTML 404; the .json twin and non-HTML clients keep JSON.
+  const missing = await raw(origin, "/templates/no-such-template", { headers: { Accept: "text/html,application/xhtml+xml" } });
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("content-type"), /^text\/html/);
+  assert.equal(missing.headers.get("x-robots-tag"), "noindex");
+  assert.match(missing.text, /<h1>Page not found<\/h1>/);
+  assert.doesNotMatch(missing.text, /"error"/);
+  const missingHead = await raw(origin, "/templates/no-such-template", { method: "HEAD", headers: { Accept: "text/html" } });
+  assert.equal(missingHead.status, 404);
+  assert.match(missingHead.headers.get("content-type"), /^text\/html/);
+  assert.equal(missingHead.text, "");
+  const missingJson = await raw(origin, "/templates/no-such-template.json", { headers: { Accept: "text/html" } });
+  assert.equal(missingJson.status, 404);
+  assert.match(missingJson.headers.get("content-type"), /^application\/json/);
+  assert.equal(JSON.parse(missingJson.text).error.code, "not_found");
+  const missingClient = await raw(origin, "/templates/no-such-template");
+  assert.equal(missingClient.status, 404);
+  assert.match(missingClient.headers.get("content-type"), /^application\/json/);
   const anonymous = await raw(origin, "/api/account-rooms/from-template", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   assert.equal(anonymous.status, 422);
   assert.equal(JSON.parse(anonymous.text).error.code, "session_binding_required");

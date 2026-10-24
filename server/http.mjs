@@ -2256,6 +2256,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (templateDetail) {
           const page = templatePage(templateDetail[1], { ref });
+          // Same posture as an unknown room page: a slug that matches the
+          // template route but is not a template gets the styled public 404
+          // for browsers. /templates/<slug>.json and non-HTML clients keep JSON.
+          if (!page && !templateDetail[2] && acceptPrefersHtml(req.headers.accept)) {
+            const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+            res.setHeader("X-Robots-Tag", "noindex");
+            res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
           if (!page) reject(404, "not_found", "Not found");
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
