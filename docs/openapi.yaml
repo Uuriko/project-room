@@ -7958,8 +7958,22 @@ paths:
         rejected challenge releases the award (the bond compensates the
         worker for delay, no fee); an upheld challenge cancels and refunds
         the poster in full with no fee while the claimant's bond is slashed
-        to the pool. The settlement is attributed to the decider. API keys
-        need `rooms:write`.
+        to the pool. A split ruling vests half the award with the worker
+        and refunds half to the poster (the challenger's bond is returned);
+        a frivolous ruling is a rejected challenge whose bond is forfeited
+        to the room pool instead of compensating the worker. Frivolous is
+        a threshold, not a stronger rejected: rule it only when a factual
+        claim the dispute depends on is demonstrably false against the
+        room record, or on a repeat baseless filing (docs/CALIBRATION-
+        RULINGS.md CR-6). On partial work the calibration default is
+        worker credits = the verified-completion fraction x the award;
+        the split outcome currently settles exactly one half regardless,
+        so a decider ruling split records the verified fraction (and the
+        reason, when it is not one half) in the ruling's evidence. Before
+        ruling, run the case-file completeness checklist in
+        docs/CALIBRATION-RULINGS.md (ids untruncated, criteria verbatim,
+        delivery complete). The settlement is attributed to the decider.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
