@@ -744,7 +744,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
-  function rate(id, maximum) {
+  // #3924: rate()'s bump and throw halves, named so the public-work
+  // doors can peek (rateWouldRefuse), refuse without charging
+  // (rateRefuse), and charge only on admission (rateCharge). bumpRate
+  // is main's original rate() body up to the throw; rateError builds
+  // the exact ServiceError it threw. Composed, rate() is unchanged.
+  function bumpRate(id, maximum) {
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
@@ -764,8 +769,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const stride = Math.max(1, Math.floor(maximum / 4));
       if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+    return entry;
+  }
+  function rateError(id, maximum, entry) {
+    return new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil((entry?.until ?? Date.now() + 60000) / 1000), "X-RateLimit-Bucket": rateFamily(id) });
+  }
+  function rate(id, maximum) {
+    const entry = bumpRate(id, maximum);
+    if (entry.n > maximum) throw rateError(id, maximum, entry);
+  }
+  // #3924 peek/charge accounting for the public-work families: a refusal
+  // never charges the bucket it was refused from (rate() increments
+  // before it throws, so a refused attempt used to re-charge its own
+  // bucket), and the write/match per-IP buckets count admissions
+  // against a per-identity primary budget instead of counting attempts.
+  // Shared rate() semantics for the other families are unchanged: rate()
+  // above is the same bump-then-refuse it always was.
+  function rateWouldRefuse(id, maximum) {
+    const entry = rates.get(id);
+    return Boolean(entry && entry.until > Date.now() && entry.n >= maximum);
+  }
+  function rateRefuse(id, maximum) { throw rateError(id, maximum, rates.get(id)); }
+  function rateCharge(id, maximum) { bumpRate(id, maximum); }
+  function rateNoSelfCharge(id, maximum) {
+    if (rateWouldRefuse(id, maximum)) rateRefuse(id, maximum);
+    rate(id, maximum);
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -1947,16 +1976,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/public-work/match") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         if ([...url.searchParams].length) reject(422, "invalid_public_work", "No matching query parameters accepted");
-        rate(`public-work-match:${remoteAddress}`, 60);
         const secret = bearer(req);
         const input = await body(req);
-        return json(res, 200, store.publicWorkClaims.match(secret, input));
+        const identity = secret ? store.identities.resolveGlobalIdentitySecret(secret) : null;
+        const ipBucket = `public-work-match:${remoteAddress}`;
+        if (!identity) {
+          // Anonymous attempts keep the historical attempt accounting:
+          // the per-IP bucket is the only throttle before an identity
+          // exists. Known identities get admissions accounting (#3924);
+          // match's own claim site still enforces (and charges) the
+          // per-identity ceiling when autoClaim actually claims.
+          rate(ipBucket, 60);
+          return json(res, 200, store.publicWorkClaims.match(secret, input));
+        }
+        if (rateWouldRefuse(ipBucket, 60)) rateRefuse(ipBucket, 60);
+        const matched = store.publicWorkClaims.match(secret, input);
+        rateCharge(ipBucket, 60);
+        return json(res, 200, matched);
       }
       const publicWorkReviewMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/review$/.exec(url.pathname);
       if (publicWorkReviewMatch) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
         if ([...url.searchParams].length) reject(422, "invalid_public_work_review", "No review query parameters accepted");
-        rate(`public-work-review:${remoteAddress}`, 120);
+        rateNoSelfCharge(`public-work-review:${remoteAddress}`, 120);
         return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
       }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
@@ -1967,25 +2009,40 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-          rate(`public-work-write:${remoteAddress}`, 60);
           const secret = bearer(req);
-          const identity = store.identities.resolveGlobalIdentitySecret(secret);
-          if (!identity) reject(401, "unauthenticated", "Use your saved agent identity credential");
-          // The per-identity ceiling is enforced at every claim door
-          // (#3271): here for direct REST, in the MCP public-work handler
-          // for MCP, and at match's claim site for autoClaim — all against
-          // the one bucket on PublicWorkClaims, so the doors share a
-          // counter and cannot drift or be bypassed by rotating source IP.
-          store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId);
+          const identity = secret ? store.identities.resolveGlobalIdentitySecret(secret) : null;
+          if (!identity) {
+            // Pre-auth attempts keep the historical per-IP attempt
+            // accounting: the bucket is the only throttle before an
+            // identity exists.
+            rate(`public-work-write:${remoteAddress}`, 60);
+            reject(401, "unauthenticated", "Use your saved agent identity credential");
+          }
+          // #3924: the per-identity ceiling (#3271) is the primary
+          // budget and the per-IP bucket is an admissions backstop.
+          // Both refusals are peeks — a 429 charges neither bucket, so
+          // one identity's refused attempts (its own 429s included) can
+          // no longer starve every other identity behind the egress IP.
+          // The identity budget itself still counts attempts (a 404
+          // claim charges the identity, never the IP); the IP bucket
+          // charges only when the domain admits the write. The other
+          // claim doors (MCP, match's claim site) keep converging on
+          // the shared per-identity counter inside PublicWorkClaims.
+          store.publicWorkClaims.assertIdentityRateBudget(identity.identityId);
+          const ipBucket = `public-work-write:${remoteAddress}`;
+          if (rateWouldRefuse(ipBucket, 60)) rateRefuse(ipBucket, 60);
+          store.publicWorkClaims.chargeIdentityRate(identity.identityId);
           // Escaped JSON can be larger than the domain's 64KiB UTF8 artifact.
           // The larger envelope limit applies to this one route only.
           const data = await body(req, action === "finish" ? { limit: 524288 } : {});
           // The service reauthenticates the unchanged credential inside its
           // write transaction after the awaited upload, including on replay.
-          return json(res, 200, store.publicWorkClaims.act(pathId(publicWorkTaskMatch[1]), secret, action, data));
+          const result = store.publicWorkClaims.act(pathId(publicWorkTaskMatch[1]), secret, action, data);
+          rateCharge(ipBucket, 60);
+          return json(res, 200, result);
         }
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
-        rate(`public-work-read:${remoteAddress}`, 120);
+        rateNoSelfCharge(`public-work-read:${remoteAddress}`, 120);
         if (publicWorkReceiptMatch) {
           const receiptId = pathId(publicWorkReceiptMatch[1]);
           // Owner-only public-receipts toggle: a room that turned receipts
