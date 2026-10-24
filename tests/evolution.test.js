@@ -145,6 +145,22 @@ test('real Room request executes once and lost reply acknowledgement reconciles'
   const recovered = await runRoomCapability(f.store, { connection, requestMessageId: 'evolution-crash', observeResources: f.observation });
   assert.equal(recovered.hostExecuted, false); assert.equal(recovered.status, 'delivered');
   assert.equal(f.store.db.prepare('SELECT SUM(attempt) AS count FROM jobs').get().count, 2);
+  const { watchRoomCapabilities } = await import('../client/evolution/room-service.mjs');
+  const controller = new AbortController(), emitted = [];
+  const timer = setTimeout(() => controller.abort(), 5000);
+  const watching = watchRoomCapabilities(f.store, { connection, signal: controller.signal, intervalMs: 1000,
+    observeResources: f.observation, emit: value => { emitted.push(value); if(value.status === 'delivered') controller.abort(); } });
+  await delay(40);
+  room.store.command(room.keys.owner, 'commons', { id: 'ordinary', type: 'message.posted', data: { messageId: 'ordinary', toMemberId: 'producer', requestKind: 'reply', body: 'Please do arbitrary work' } });
+  room.store.command(room.keys.owner, 'commons', { id: 'event-job', type: 'message.posted', data: { messageId: 'event-job', toMemberId: 'producer', requestKind: 'reply', body: prefix + JSON.stringify({ version: 1, capability: 'verify', input: { value: 9 } }) } });
+  await watching; clearTimeout(timer);
+  assert.ok(emitted.some(r => r.requestMessageId === 'event-job' && r.status === 'delivered'));
+  assert.equal((await new RoomAgentClient(connection).replyContext('ordinary')).request.status, 'open');
+  assert.equal(f.store.db.prepare('SELECT SUM(attempt) AS count FROM jobs').get().count, 3);
+  assert.ok(f.store.db.prepare("SELECT value FROM settings WHERE id LIKE 'watch-%'").get());
+  await watchRoomCapabilities(f.store, { connection, signal: AbortSignal.timeout(250), intervalMs: 1000, observeResources: f.observation });
+  assert.equal(f.store.db.prepare('SELECT SUM(attempt) AS count FROM jobs').get().count, 3);
+
 
 });
 

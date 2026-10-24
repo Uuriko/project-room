@@ -95,7 +95,16 @@ A separately persisted Room binding also reconstructs an answer after local
 completion but before response persistence, only while the exact original
 request basis still matches. Changed or closed requests require reconciliation.
 
-The adapter can be invoked by the existing host after its normal wake and access
+`room-watch` takes `{connectionDirectory,intervalMs}` and runs the same adapter
+on incoming authorized capability requests. It uses Room event subscription with
+bounded polling fallback, persists the event cursor, and re-reads standing
+requests after restart. A maximum of 50 request contexts is inspected per cycle;
+a rotating checkpoint prevents unrelated chat requests from starving later work.
+Ordinary messages never execute. Repeated identical waiting errors are quiet.
+The watcher creates no follow-up tasks or model calls. SIGTERM/SIGINT stops it;
+run it under the existing host supervisor for restart-on-exit behavior.
+
+The adapter can also be invoked by the existing host after its normal wake and access
 checks. This pilot does not alter that peer-owned runtime or auto-register a
 second listener. Local artifact paths are not exposed as remotely usable URLs;
 the compact reply explicitly identifies evidence as local to the laptop.
@@ -173,7 +182,7 @@ evidence. This is a local fixture, not physical two-laptop qualification.
 
 Remaining before an unattended fleet release:
 
-1. Wire the shared broker into the desktop/host runtime under its existing lane;
+1. Supervise room-watch from the desktop/host runtime under its existing lane;
    publish capabilities and artifact references through the production transport.
 2. Integrate resource telemetry and one shared broker for all laptop services.
 3. Add human activity/control views over the same commands and event cursor.
