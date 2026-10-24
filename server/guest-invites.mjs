@@ -649,6 +649,13 @@ export class GuestInvites {
         // Self-serve redemption: no owner token is present, so the event is
         // built directly (the joinAgent pattern) with the minting owner as
         // the actor — the journal always shows who sponsored the guest.
+        // Display-name reservation (IDENTITY-NAME-1 census note, REV-4348
+        // N1): this direct MEMBER_ADDED admission into an existing room was
+        // the one live path that census missed. It needs no guard call: the
+        // guest display name always carries GUEST_BADGE_SUFFIX, which
+        // changes the name's skeleton, so it can never collide with a
+        // removed member's reserved name. If the badge ever becomes
+        // optional, thread the display-name guard through here first.
         this.admissionBudget(room);
         const now = this.store.now();
         const eventId = `guest-invite-${row.id}`;

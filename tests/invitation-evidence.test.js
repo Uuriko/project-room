@@ -47,6 +47,32 @@ test("later access changes do not rewrite the original acceptance evidence", () 
   assert.doesNotThrow(() => assertInvitationMembershipEvidence(f.record, f.linked, f.binding, f.room));
 });
 
+test("rejoin evidence verifies only against the superseded member record (N2)", () => {
+  // Legitimate rejoin: the joined event names the account's self-left record;
+  // that record sits inactive in the room roster. The audit admits it.
+  const legit = fixture();
+  legit.linked.body = JSON.stringify(invitationJoinedEvent({ ...legit.record, rejoinOfMemberId: "member-old" }));
+  legit.room.state.members["member-old"] = { id: "member-old", kind: "human", displayName: "Member", role: "guest",
+    accountableHumanId: "member-old", membershipOrigin: legit.member.membershipOrigin, permissions: [], active: false, revision: 2 };
+  assert.doesNotThrow(() => assertInvitationMembershipEvidence(legit.record, legit.linked, legit.binding, legit.room));
+  // Forgery family: a stored joined event naming a record that is not an
+  // inactive superseded member of this room must not be blessed by the
+  // normalisation — nonexistent, still-active, and self-naming values refuse.
+  for (const [label, mutate] of [
+    ["nonexistent member", () => {}],
+    ["still-active member", f => { f.room.state.members["member-old"].active = true; }],
+    ["the joining member itself", f => { f.linked.body = JSON.stringify(invitationJoinedEvent({ ...f.record, rejoinOfMemberId: "member" })); }],
+  ]) {
+    const f = fixture();
+    f.linked.body = JSON.stringify(invitationJoinedEvent({ ...f.record, rejoinOfMemberId: "member-old" }));
+    f.room.state.members["member-old"] = { id: "member-old", kind: "human", displayName: "Member", role: "guest",
+      accountableHumanId: "member-old", membershipOrigin: f.member.membershipOrigin, permissions: [], active: false, revision: 2 };
+    mutate(f);
+    if (label === "nonexistent member") delete f.room.state.members["member-old"];
+    assert.throws(() => assertInvitationMembershipEvidence(f.record, f.linked, f.binding, f.room), /evidence/, label);
+  }
+});
+
 test("pre-displayNamePolicyVersion joined events still verify (old databases upgrade)", () => {
   // W4-NEW-1 added displayNamePolicyVersion to invitationJoinedEvent. Joined
   // events written before that field existed must still pass the membership
