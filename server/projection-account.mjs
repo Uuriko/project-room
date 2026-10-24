@@ -4,7 +4,7 @@
 // inside those components (a receipt card is part of messages) or name
 // bytes that are not on rooms.projection at all.
 
-export const PROJECTION_CAP_BYTES = 4 * 1024 * 1024;
+import { PILOT_LIMITS } from "./store.mjs";
 
 const COMPONENT_OF = new Map([
   ["messages", "messages"],
@@ -106,7 +106,7 @@ function boardDetails(workItems) {
 // Break a stored rooms.projection value into components. `framing` is the
 // object braces plus any byte the per-value encoding does not claim, so the
 // components add up to projectionBytes.
-export function accountProjection(projectionText, { capBytes = PROJECTION_CAP_BYTES } = {}) {
+export function accountProjection(projectionText, { capBytes = PILOT_LIMITS.projectionBytes } = {}) {
   if (typeof projectionText !== "string") throw new TypeError("projection text is required");
   const projectionBytes = Buffer.byteLength(projectionText);
   let state;
