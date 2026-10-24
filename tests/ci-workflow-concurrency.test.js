@@ -211,6 +211,22 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
 // Execute the actual workflow shell command with a stand-in npm binary.
 // This catches manual suite lists drifting behind package.json and ensures
 // a failed runtime suite cannot be hidden by later browser success.
+test("required merge-gate jobs stay present and the unit suite is one job", () => {
+  const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
+  for (const id of ["test", "contract", "lint", "browser", "cloudflare"]) {
+    assert.ok(workflow.jobs[id], `required check job ${id} is missing`);
+  }
+  assert.equal(workflow.jobs["unit-shards"], undefined);
+  assert.equal(workflow.jobs.unit.strategy, undefined);
+  const runs = workflow.jobs.unit.steps.map(step => step.run).filter(Boolean).join("\n");
+  assert.match(runs, /unit-ci\.mjs --all/);
+  const coverageIf = String(workflow.jobs.coverage.if);
+  assert.match(coverageIf, /schedule/);
+  assert.match(coverageIf, /workflow_dispatch/);
+  assert.match(coverageIf, /merge_group/);
+  assert.doesNotMatch(coverageIf, /pull_request/);
+});
+
 test("Cloudflare CI runs canonical runtime then browser scripts and preserves failure", t => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
   const step = workflow.jobs.cloudflare.steps.find(item => item.name === "Verify the shared Workers runtime and restart journey");

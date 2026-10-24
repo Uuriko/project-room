@@ -20,6 +20,14 @@ name: schema-gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Docs-only diffs cannot move the schema migration. This check is not in
+    # the merge gate's required set. deploy-prod reads the push run, which
+    # stays unfiltered. A required check would need a companion job instead
+    # of this skip.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   push:
     branches: [main]
 
