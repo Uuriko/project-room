@@ -32,6 +32,7 @@ import {
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { dmEventVisibility } from "./dm-event-visibility.mjs"; // SEC-19: the read paths' DM predicate, shared with the fan-out (F-1).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1276,6 +1277,26 @@ export class AgentPluginStore {
       }
       return members?.[event?.actorId] ?? null;
     };
+    // DM privacy (SEC-19): the fan-out applies the read paths' own
+    // predicate — dmEventVisibility is the single implementation for
+    // both consumers, not a local re-check. Built lazily, one per
+    // subscriber member, and only evaluated for subscriptions whose
+    // filter already matched (non-follow-up events never resolve the
+    // projection). A resolution failure withholds the delivery: a
+    // privacy fence fails closed, never open.
+    const dmPredicates = new Map();
+    const dmVisibleTo = memberId => {
+      let predicate = dmPredicates.get(memberId);
+      if (!predicate) {
+        predicate = dmEventVisibility(memberId,
+          () => this.store.room(roomId)?.state?.messages ?? [],
+          [event],
+          typeof this.store.archivedDmPartiesReader === "function"
+            ? this.store.archivedDmPartiesReader(roomId) : null);
+        dmPredicates.set(memberId, predicate);
+      }
+      try { return predicate(event); } catch { return false; }
+    };
     for (const row of rows) {
       // R282-1: a revoked identity's subscription must not keep pushing the
       // room's message bodies to the URL it chose, even if the row stayed
@@ -1290,20 +1311,19 @@ export class AgentPluginStore {
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
-      // Targeted-DM privacy: mirrors the store read-path predicate
-      // (RC-2026-09-18-012, server/store.mjs). A message.posted event
-      // carrying data.toMemberId is a direct message, visible only to its
-      // sender and its addressed member — never to third-party push
-      // subscribers. The resolver above already resolved the
-      // subscription's agent_id to this room's member id (the guest
-      // seat's member id for trial seats, so the fence binds guests
-      // too); apply the same rule the /events and /stream read paths
-      // use. (Every candidate row is a seated member by construction, so
-      // an unseated subscriber can never reach this branch as sender or
-      // addressee.)
-      if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
-      }
+      // Targeted-DM privacy (SEC-19, RC-2026-09-18-012): the shared
+      // predicate fences the targeted message.posted itself AND its
+      // follow-ups — edits (which carry the new body), deletes,
+      // redactions, poll votes, pins and unpins — whose events carry no
+      // toMemberId, so parties resolve from the room projection with
+      // the archived-DM reader behind it, exactly as the /events and
+      // /stream read paths resolve them. The resolver above already
+      // resolved the subscription's agent_id to this room's member id
+      // (the guest seat's member id for trial seats, so the fence binds
+      // guests too). Before this, the fan-out hand-checked only
+      // message.posted and every DM follow-up fanned out to non-party
+      // subscribers (DATA-FLOW-TRACE F-1).
+      if (!dmVisibleTo(memberId)) continue;
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
           data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
