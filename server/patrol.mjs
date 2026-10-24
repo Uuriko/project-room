@@ -500,13 +500,12 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
   }
 
   // Idempotency look-back: a key first used before this batch must not be
-  // re-used inside it. One bounded query over the batch's keys.
+  // re-used inside it. A JSON binding keeps even large batches within SQL's parameter limit.
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
     const keys = [...new Set(keyUses.map(use => use.key))];
-    const placeholders = keys.map(() => "?").join(",");
     const prior = db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
-      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (${placeholders})`)
-      .all(roomId, batchStart, ...keys);
+      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (SELECT value FROM json_each(?))`)
+      .all(roomId, batchStart, JSON.stringify(keys));
     if (prior.length) {
       const firstByKey = new Map(prior.map(row => [row.k, row.sequence]));
       for (const use of keyUses) {

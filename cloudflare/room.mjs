@@ -121,6 +121,7 @@ export class ProjectRoom extends DurableObject {
         });
       });
     });
+    this.store.featureEnv = env;
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials
@@ -255,32 +256,39 @@ export class ProjectRoom extends DurableObject {
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
-    const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    const next = applyOutcomes(previous, outcomes);
-    // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
-    // outcome; it is consumed here, once the heartbeat record reporting
-    // it is durable. If the put fails, the report marker is released and
-    // the stash stays, so the next drain tick reports the same outcome
-    // again instead of it being lost with the failed write.
-    const reported = this.channelDrainOutcomeReported ?? null;
-    const drainRecorded = reported !== null && Array.isArray(outcomes)
-      && outcomes.some(outcome => outcome?.job === 'channel-drain');
-    try {
-      await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
-    } catch (error) {
-      this.channelDrainOutcomeReported = null;
-      throw error;
-    }
-    if (drainRecorded) {
-      this.channelDrainOutcomeReported = null;
-      if (this.channelDrainOutcome === reported) {
-        // Consume exactly once; a completion that queued behind the
-        // reported outcome while it awaited this record is promoted.
-        this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
-        this.channelDrainOutcomeHeld = null;
+    // Serialize the entire read/merge/write across alarms and cron RPCs.
+    const persist = async () => {
+      const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const next = applyOutcomes(previous, outcomes);
+      // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
+      // outcome; it is consumed here, once the heartbeat record reporting
+      // it is durable. If the put fails, the report marker is released and
+      // the stash stays, so the next drain tick reports the same outcome
+      // again instead of it being lost with the failed write.
+      const reported = this.channelDrainOutcomeReported ?? null;
+      const drainRecorded = reported !== null && Array.isArray(outcomes)
+        && outcomes.some(outcome => outcome?.job === 'channel-drain');
+      try {
+        await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      } catch (error) {
+        this.channelDrainOutcomeReported = null;
+        throw error;
       }
-    }
-    return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+      if (drainRecorded) {
+        this.channelDrainOutcomeReported = null;
+        if (this.channelDrainOutcome === reported) {
+          // Consume exactly once; a completion that queued behind the
+          // reported outcome while it awaited this record is promoted.
+          this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
+          this.channelDrainOutcomeHeld = null;
+        }
+      }
+      return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+    };
+    const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
+    this.cronTickTail = pending;
+    try { return await pending; }
+    finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
@@ -485,25 +493,25 @@ export class ProjectRoom extends DurableObject {
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.
-  async #runDueJobs({ includeSlow }) {
+  async #runDueJobs({ includeSlow, onlyJob = null }) {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
+      if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
       return jobIsDue(job, this.store, now, lastRan[job.name]);
     });
-    const runners = {};
+    const outcomes = [];
     for (const job of selected) {
-      runners[job.name] = () => job.run(this.store, {
+      const result = await runCronJobs({ [job.name]: () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
-      });
-    }
-    const outcomes = await runCronJobs(runners);
-    if (outcomes.length) {
-      try { await this.recordCronTick(outcomes); }
-      catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+      }) });
+      // A later job may reset the object. Commit completed work before
+      // starting it; a failed heartbeat write must not claim a healthy tick.
+      await this.recordCronTick(result);
+      outcomes.push(...result);
     }
     return outcomes;
   }
@@ -529,16 +537,26 @@ export class ProjectRoom extends DurableObject {
     await this.ctx.storage.setAlarm(when);
     return { armed: true, alarmAt: when };
   }
-  // Safety-net RPC. Runs anything already due, then re-arms a missing alarm.
+  // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
   async ensureJobAlarm() {
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
-    const outcomes = await this.#runDueJobs({ includeSlow: true });
+    const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
     const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
     return { ...armed, ran: outcomes.map(outcome => outcome.job) };
+  }
+  // Separate RPC invocations give each slow job its own CPU budget. A reset
+  // cannot erase outcomes already committed by another invocation.
+  async runSlowJob(name) {
+    if (!JOBS.some(job => job.name === name && job.slow && job.runtimes.includes("worker"))) {
+      throw new Error("Unsupported slow job");
+    }
+    if (this.paused || !this.store) return { skipped: "paused" };
+    await yieldToQueuedRequests();
+    return this.#runDueJobs({ includeSlow: true, onlyJob: name });
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
@@ -734,14 +752,29 @@ export default {
 
   // Safety-net cron (wrangler production trigger is every 30 minutes).
   // Reading Durable Object storage always wakes it, so this handler cannot
-  // ask "is anything due?" from the Worker. It makes one RPC that runs jobs
-  // already due and re-arms the alarm when one is missing. Webhook retries,
+  // ask "is anything due?" from the Worker. Fast work re-arms its alarm;
+  // each slow job then runs in a separate RPC, with due checks in the object.
+  // Continue after an RPC failure so one reset cannot starve later jobs.
+  // Webhook retries,
   // land-queue polls, and claim polls run from ProjectRoom.alarm() at the
   // next due time. A failed fast job fails this invocation so Cron Events
   // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    const room = env.ROOM.getByName('invite-only-pilot');
-    await room.ensureJobAlarm();
+    let room = env.ROOM.getByName('invite-only-pilot');
+    const failures = [];
+    try { await room.ensureJobAlarm(); }
+    catch { failures.push("fast jobs"); room = env.ROOM.getByName('invite-only-pilot'); }
+    for (const job of JOBS.filter(job => job.slow && job.runtimes.includes("worker"))) {
+      try { await room.runSlowJob(job.name); }
+      catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
+    }
+    if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
+
+// Per-room objects stay classified and unwired. Fetch still names
+// invite-only-pilot. This re-export keeps the classification on the worker
+// import graph; it does not open a second Durable Object.
+export { tableHome } from '../server/room-shard.mjs';
+export { RoomShard } from './room-shard.mjs';

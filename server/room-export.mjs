@@ -517,8 +517,9 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 // current reducer, and production rooms written by older code can differ
 // from that replay while the live room serves them fine. A disaster
 // restore needs the data back and the drift named, not a refusal.
-export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
+export function replayNdjson(ndjson, filename, { audit = "strict", retainTables = null } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
+  if (retainTables != null && typeof retainTables !== "function") throw new Error("retainTables must be a function");
   if (!filename) throw new Error("Missing replay paths");
   const { watermark, byTable, trailer } = parseExport(ndjson);
   // Fail fast on a torn export, before any store is created: a mid-stream
@@ -537,7 +538,12 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     // #3599: sanitized cells resolve to safe substitutes, never the
     // placeholder; legacy streams get the legacy resolutions.
     const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
-    const existing = new Set(tableNames(store.db));
+    // A room restore passes the tables it is willing to load. Names outside
+    // that set fail the check below, including directory tables and unknown
+    // tables. The default restore sees every table the fresh store created.
+    const retained = retainTables ? retainTables(store.db) : null;
+    if (retained != null && !(retained instanceof Set)) throw new Error("retainTables must return the tables this store keeps");
+    const existing = retained ?? new Set(tableNames(store.db));
     const skipped = {};
     for (const table of REPLAY_SKIPPED_TABLES) {
       if (existing.has(table) || !byTable.has(table)) continue;
