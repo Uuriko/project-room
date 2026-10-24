@@ -35,6 +35,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { bindAgentSessions } from "./agent-sessions.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -4671,7 +4672,8 @@ async function refreshAgentPauses() {
     render();
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
-$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
+const agentSessions = bindAgentSessions({ client, $ });
+$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); void agentSessions.refresh(); } });
 // plan-dir-card: lazy-load a member's directory card the first time its
 // chip section expands. The endpoint 404s when the member has no visible
 // card; the section only renders when the roster advertised a cardAgentId,
@@ -6993,6 +6995,7 @@ document.addEventListener("visibilitychange", () => {
 // clearly qualifying cached availability as unrefreshed.
 async function refreshPresenceStates() {
   if (!state || !session || $("#main").hidden) return;
+  if (agentSessions.shouldPoll()) void agentSessions.refresh();
   // Qualify synchronously, including while the owned request is still pending.
   if (presenceObservationAged()) render();
   if (presenceRequest && ownsPresenceRequest(presenceRequest)) return;

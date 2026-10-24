@@ -532,5 +532,9 @@ export default {
   "composer.saved": "Message saved. ",
   "composer.savedHistoryPending": "Message saved; history is reconnecting. ",
   "composer.viewSaved": "View message",
-  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery."
+  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery.",
+  "agentSessions.empty": "No agents in this room.",
+  "agentSessions.none": "No agent matches that search.",
+  "agentSessions.error": "Sessions could not load.",
+  "agentSessions.truncated": "Showing the first 200 agents."
 };
