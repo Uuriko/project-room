@@ -83,7 +83,7 @@ import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
-import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
+import { enforceAutonomyTierForAction, getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
@@ -3652,6 +3652,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
         rate(`write:${auth.credentialHash}`, 60);
+        // #941 P2: the MCP land tools gate every write on the caller's
+        // autonomy tier (callLandTool in mcp-room-profile.mjs, #993), but
+        // these HTTP routes called the land queue directly and skipped it —
+        // a t1_readonly agent could add, remove, and report tips here while
+        // its MCP twins refused with 403 agent_readonly. Mirror the MCP
+        // gate so both doors refuse identically; list_land_queue returned
+        // above and stays readable at the read-only tier.
+        enforceAutonomyTierForAction({
+          db: store.db, roomId, state: store.room(roomId).state, actor: auth.member, action, fail: reject
+        });
         const data = await body(req);
         try {
           if (action === "add_land_item") {
