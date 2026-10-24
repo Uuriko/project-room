@@ -22,6 +22,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_read_messages: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/events" },
   room_post_message: { access: `write, ${GUEST_OK}`, cost: POST, rest: `${COMMANDS} (message.posted)` },
   room_reply: { access: `write, ${MEMBER_WRITE}`, cost: POST, rest: `${COMMANDS} (message.posted)` },
+  room_ask_user: { access: `write, ${MEMBER_WRITE}`, cost: "one write; the asked person sees an ask card, starts no AI", rest: `${COMMANDS} (message.posted with requestKind reply)` },
   room_list_requests: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/reply-requests" },
   room_read_request: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/reply-context" },
   room_respond_to_request: { access: `write, ${MEMBER_WRITE}`, cost: POST, rest: `${COMMANDS} (message.posted)` },

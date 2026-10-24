@@ -123,6 +123,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_read_request",
   "room_request_history",
   "room_request_reply",
+  "room_ask_user",
   "room_reply",
   "room_respond_to_request",
   "room_cancel_request",
