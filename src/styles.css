@@ -807,6 +807,13 @@ button:disabled { cursor: wait; opacity: .6; }
 .share-link-list li { padding-block: .5rem; }
 .share-dialog details { margin-block: .75rem; }
 .share-dialog summary { cursor: pointer; min-height: 44px; padding-block: .65rem; font-size: .875rem; color: var(--muted); }
+.share-dialog label.check { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
+.share-dialog label.check input { flex: 0 0 1.25rem; width: 1.25rem; height: 1.25rem; min-height: 1.25rem; }
+#public-agent-root section + section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+#public-agent-root h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; overflow-wrap: anywhere; }
+#public-agent-root article { margin-top: .75rem; overflow-wrap: anywhere; }
+#public-agent-root article p { margin: .35rem 0; }
+#public-agent-root a { overflow-wrap: anywhere; }
 .growth-kit { margin-block: .25rem 1rem; }
 .growth-reward, .growth-inviter { margin: 0 0 .75rem; font-weight: 650; }
 .growth-kit textarea, .growth-kit input { width: 100%; }

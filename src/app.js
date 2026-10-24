@@ -35,6 +35,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { installPublicAgentPages } from "./public-agent-ui.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -321,6 +322,7 @@ let portableWorkUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
+let publicAgentPagesUI = null;
 let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
@@ -698,6 +700,7 @@ function lazyDisclosure({ panel, load, install, onError }) {
 
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+publicAgentPagesUI = installPublicAgentPages({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
@@ -1967,6 +1970,7 @@ function renderContent(selector, html) {
   restoreDisclosures(container, saved);
 }
 function render() {
+  publicAgentPagesUI?.sync();
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
