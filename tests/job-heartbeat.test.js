@@ -71,9 +71,9 @@ test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
     "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol",
-    "store-growth"
+    "store-growth", "messages-archive"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60, 3600]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60, 3600, 3600]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -417,14 +417,14 @@ test("scheduled() preserves slow-job attempts when the fast safety-net RPC fails
   });
   await assert.rejects(worker.scheduled({ cron: "*/30 * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
     /Scheduled job RPC failed: fast jobs/);
-  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(5).fill("runSlowJob")]);
 });
 
 test("scheduled() checks each slow job separately after the fast safety-net call", async () => {
   const { stub, calls } = roomStub();
   const env = { ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0", ROOM: { getByName: () => stub } };
   await worker.scheduled({ cron: "*/30 * * * *" }, env, { waitUntil() {} });
-  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(5).fill("runSlowJob")]);
 });
 
 test("a failed slow RPC does not prevent later jobs and uses a fresh stub", async () => {
@@ -436,7 +436,7 @@ test("a failed slow RPC does not prevent later jobs and uses a fresh stub", asyn
     return [];
   } });
   await assert.rejects(worker.scheduled({}, { ROOM: { getByName() { bindings++; return stub; } } }, {}), /RPC failed: integrity/);
-  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth"]);
+  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth", "messages-archive"]);
   assert.equal(bindings, 2);
 });
 
