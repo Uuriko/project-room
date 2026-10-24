@@ -25,9 +25,12 @@
 // (server/messages-store.mjs) puts every moved message back.
 
 import { ARCHIVE_DEFAULT_KEEP, operatorArchive } from "./operator-archive.mjs";
+import { messagesBackfillCaughtUp } from "./messages-store.mjs";
 
 export const RELIEF_REASON = "store-growth automatic projection relief";
 export const RELIEF_ROOMS_PER_TICK = 3;
+export const RELIEF_CATCH_UP_EVENTS = 500;
+export const RELIEF_CATCH_UP_CHUNK = 50;
 
 function roomsPastLine(db, limitBytes, max) {
   return db.prepare(`SELECT id FROM rooms WHERE length(CAST(projection AS BLOB)) > ?
@@ -41,6 +44,46 @@ function parked(db, roomId) {
 
 function errorCode(error) {
   return typeof error?.code === "string" ? error.code : "relief_failed";
+}
+
+// Production's 4,000-event synchronous catch-up exceeded the DO CPU limit
+// even in a separate RPC. Bound total replay and yield between small commits
+// so serving requests can run. The final plan/apply remains synchronous and
+// rechecks the current head; no plan survives an await.
+export async function relieveProjectionsIncrementally(store, options = {}) {
+  const { limitBytes, recovery = null, maxRooms = RELIEF_ROOMS_PER_TICK,
+    eventCap = RELIEF_CATCH_UP_EVENTS, chunkSize = RELIEF_CATCH_UP_CHUNK,
+    yieldWork = () => new Promise(resolve => setTimeout(resolve, 0)) } = options;
+  if (!Number.isInteger(eventCap) || eventCap < 1 || !Number.isInteger(chunkSize) || chunkSize < 1) {
+    throw new TypeError("Relief catch-up limits must be positive integers");
+  }
+  let catchUpEvents = 0, catchUpChunks = 0;
+  if (!store?.readOnly && Number.isFinite(limitBytes) && recovery && typeof recovery === "object") {
+    for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
+      if (parked(store.db, roomId)) continue;
+      while (catchUpEvents < eventCap && !messagesBackfillCaughtUp(store.db, roomId)) {
+        await yieldWork();
+        let result;
+        try { result = store.backfillMessages({ limit: Math.min(chunkSize, eventCap - catchUpEvents) }); }
+        catch {
+          // The guarded archive below still records a refusal. A corrupt or
+          // blocked room must not prevent the other oversized rooms' checks.
+          break;
+        }
+        catchUpChunks += 1;
+        const events = Number.isInteger(result.events) && result.events > 0 ? result.events : 0;
+        catchUpEvents += events;
+        if (!events || result.done || result.budgetExceeded || parked(store.db, roomId)) break;
+      }
+    }
+  }
+  const result = relieveProjections(store, { ...options, archive: (target, request) =>
+    operatorArchive(target, { ...request,
+      // The existing prefix archive checks its exact cursor and retains every
+      // message named by a later event, including edits, replies and pins.
+      belowCursor: request.belowCursor || !messagesBackfillCaughtUp(target.db, request.roomId)
+    }, null, { eventCap: 0 }) });
+  return { ...result, catchUpEvents, catchUpChunks };
 }
 
 // Returns { attempted, relieved, freedBytes, refused } with counts only:

@@ -45,3 +45,14 @@ test("concurrent real Durable Object heartbeat commits retain both jobs", async 
     assert.equal(recorded.integrity.lastSuccessAt, 1234);
   } finally { await mf.dispose(); }
 });
+
+test("bounded relief in Workerd archives a verified prefix without replaying the entire backlog", async () => {
+  const mf = await start();
+  try {
+    const { result, newestKept, diagnostic } = await (await mf.dispatchFetch("https://room.example.test/bounded-relief")).json();
+    assert.equal(result.catchUpEvents, 1);
+    assert.equal(result.relieved, 1, diagnostic ?? JSON.stringify(result));
+    assert.ok(result.freedBytes > 0);
+    assert.equal(newestKept, true);
+  } finally { await mf.dispose(); }
+});
