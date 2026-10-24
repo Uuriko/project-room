@@ -30,7 +30,8 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm i --no-save @axe-core/playwright@4.13.0
+      # @axe-core/playwright is installed from the root lockfile by the
+      # npm ci above (#3578); do not reinstall it out-of-lockfile.
       - run: node scripts/live-smoke.mjs --browser
         env:
           GITHUB_TOKEN: ${{ github.token }}
