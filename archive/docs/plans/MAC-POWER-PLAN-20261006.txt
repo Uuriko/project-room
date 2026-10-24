@@ -1,0 +1,200 @@
+PROJECT ROOM — CONNECT MY MAC
+October 6, 2026 · researched design, not installed or enabled
+
+PRODUCT DECISION
+
+Project Room should be able to operate the owner's Mac with broad access and little
+repeated prompting after an explicit connection. Keep this behind Settings → My Mac;
+the conversation remains the primary interface. “Autonomous” is the recommended mode
+presented during connection for this product direction, not silently granted authority.
+Offer Custom access as an optional disclosure. One persistent Pause control stops new
+local operations and cancels running cancellable jobs.
+
+Current reality: the desktop app is an AppKit/WKWebView shell with account login,
+file selection and downloads. It contains no general native execution bridge or local
+agent runner. Existing Room membership powers are room-scoped; they do not control
+other agent hosts, macOS permissions or private accounts. This document extends the
+human-experience plan; it does not claim these tools are built.
+
+THREE INDEPENDENT LAYERS
+
+1. Operating-system permissions: macOS grants capabilities to the installed signed
+   native app/helper. The owner must approve the system prompts/settings.
+2. Resource connections: email, calendars, cloud drives and other services require
+   their account connection and granted scopes. Full Disk Access is not an OAuth token
+   or a universal password/Keychain grant.
+3. Project Room authority: the owner selects which room, coordinator, agents and jobs
+   may use their machine/accounts. Room owners and friends do not inherit control of
+   somebody else's Mac just by joining or managing the conversation.
+
+MAC SETUP
+
+Distribute a Developer ID signed, hardened and notarized application outside the Mac
+App Store for the broad automation edition. Mac App Store sandbox restrictions limit
+arbitrary application control. Keep a stable bundle identity and install location before
+granting permissions; do not ask users to bless a frequently rebuilt temporary binary.
+
+Settings → Privacy & Security:
+  Accessibility: read supported application UI, press controls and type/click.
+  Screen & System Audio Recording: inspect screen content when needed. Audio is
+    separately optional; don't capture ambient audio for ordinary computer operation.
+  Full Disk Access: broad access to protected user data where macOS permits it.
+  Automation: authorize individual target applications when the app requests Apple
+    Events access. Add the Apple Events entitlement and usage-description text.
+  Contacts, Calendars, Photos, microphone/camera: request only the capabilities the
+    owner enables. Input Monitoring is only needed for genuine input monitoring,
+    not a prerequisite for every click or typed command.
+
+These permissions do not make the app root, bypass SIP or decrypt every protected
+credential. Use a narrowly scoped native authorization flow for an actual privileged
+operation when required; ordinary tasks run as the logged-in user.
+
+NATIVE EXECUTION ARCHITECTURE
+
+Chat → coordinator → authorized local job → native capability broker → native tools.
+Return a concise result and optional public activity; detailed local logs stay private.
+
+Create a signed local broker in the app with an authenticated XPC connection to a
+signed helper, not an unauthenticated localhost shell endpoint. Treat the WKWebView
+and all room messages as untrusted inputs. A webpage script or shared message cannot
+turn into an authorized native command. A validated owner grant, authenticated device,
+room/run/attempt binding and tool schema are required on every call.
+
+Bind grants to the personal account, enrolled device, selected rooms/coordinator and
+policy revision. Allow delegated specialists under the same owner policy. They cannot
+widen that policy. Revocation/pause prevents new calls and invalidates active leases;
+running process trees receive cancellation. A stable request ID is journaled before
+execution; lost responses are reconciled, not blindly re-executed. “Cancelled” is only
+reported after observed stop; unknown external effects remain unknown.
+
+TOOLS TO BUILD
+
+  mac.status / permissions: actual permission status, device health, missing setup.
+  files.search/read/write/move/trash: native file access with sizes/version identity;
+    support previews and recoverable writes without mandatory per-file prompts.
+  process.run/cancel/status: executable + argv + cwd + bounded environment, timeout,
+    process-group cancellation and bounded output. Shell scripts are a distinct
+    explicitly enabled tool. Broad shell authority is effective broad user authority;
+    don't advertise directory restrictions that its subprocesses can bypass.
+  apps.list/open/read/act: Accessibility tree and native app actions.
+  screen.capture and input.click/type/shortcut: visual fallback when APIs aren't useful.
+  automation.run: authorized Apple Events/AppleScript for selected apps.
+  browser.read/navigate/act: connected browser adapter preserving its identity/session.
+  mail.search/read/draft/send, calendar.read/write and account tools: provider APIs
+    first; explicit connection scopes and operation IDs. Mac file access alone cannot
+    substitute for service authorization. Never automatically dump account contents
+    into a public room.
+
+Use direct APIs, file operations and application scripting before visual clicking.
+Publish these as a small MCP tool set with discoverable capability groups. Agents get
+structured results, typed failures and exact retry instructions. No simulated success:
+permission denied, disconnected account and unavailable tool are distinct outcomes.
+
+AUTONOMOUS MODE
+
+On an owner-enabled personal Mac, ordinary authorized reads/writes, terminal work,
+app operation and delegated local jobs can proceed without repeated confirmations.
+Provide optional persistent grants for sending, publishing, deployment, installation
+or other external actions according to the owner's chosen policy. Custom mode can ask
+before those actions; the user may explicitly choose broader authority. This design
+does not change current-session restrictions on deployments/mail/money.
+
+Computer access and sharing are separate choices. Private tool results default to the
+owner's private context; a public room receives only the authorized shared result.
+Cloud models require transmission of the selected context; broad local access does not
+mean automatic upload of the whole computer. Show that distinction during setup.
+
+CONTROL OVER AGENTS
+
+Provide host adapters with start, stop, pause, resume, status and tool leases for hosts
+Project Room actually manages. An external agent becomes controllable only through
+its cooperating adapter and its available capabilities. Distinguish configuration,
+connected host, requested stop and confirmed stop. Keep one public coordinator answer;
+specialists report internally. Existing third-party agents are not automatically under
+Project Room's control because their names appear in the room.
+
+DELIVERY ORDER AND GATES
+
+1. Native permission/status/setup panel, device enrollment, grants and local journal.
+2. Files + process tools and one real coordinator executing an owner-authorized task.
+3. Accessibility, screen and app scripting, then authenticated browser adapter.
+4. Account connectors and optional background jobs with login-item controls.
+5. Delegated agent hosts and end-to-end group operation through one public voice.
+
+Acceptance: two independent accounts cannot use each other's devices; untrusted room
+text cannot grant authority; wrong origin/frame cannot invoke native actions; grant
+revision/revocation races refuse stale calls; lost execution responses reconcile without
+duplicates; shell/process cancellation is observed; permission denial is recoverable;
+private file/mail content does not enter a shared room without sharing authority.
+Then test real tasks: find and summarize private documents, edit a local project/run
+checks, update a spreadsheet, draft/send a specifically authorized email, organize files,
+and operate an app. Validate both successful outcomes and interruptions/recovery.
+
+PRIMARY SOURCES
+
+Apple: file access and explicit Accessibility/Automation permissions
+https://support.apple.com/guide/security/controlling-app-access-to-files-in-macos-secddd1d86a6/web
+Apple: Accessibility settings
+https://support.apple.com/en-mo/guide/mac-help/mh43185/mac
+Apple: screen/system audio settings
+https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac
+Apple: App Sandbox restrictions and Mac App Store requirement
+https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox
+Apple: hardened runtime and Apple Events access
+https://developer.apple.com/documentation/security/hardened-runtime
+https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.automation.apple-events
+Apple: SIP also applies to administrative processes
+https://support.apple.com/guide/security/system-integrity-protection-secb7ea06b49/web
+
+
+WEB + NATIVE PLATFORM — REFINED AFTER JOHN'S FOLLOW-UP
+
+The Mac app is a substantial native product, not permanently a web shell. It provides
+computer permission setup, device identity, background execution, native app tools,
+local/private context, account credentials, agent hosts, journal/recovery and emergency
+pause. It can still reuse the shared conversation UI to preserve web/desktop parity.
+
+The webapp is a full control surface for cloud tools and enrolled devices. Email/cloud
+connectors, hosted jobs and agent coordination can run through the authenticated server
+without a desktop install. Browser-only selected-file access and explicit screen sharing
+are possible; broad OS app control, arbitrary filesystem/shell access and unattended
+local execution require an installed authorized native component.
+
+Use an owner-enrolled outbound authenticated device connection/pull channel to the
+Room server. The web submits owner-authorized jobs bound to account/device/room/run/
+attempt/policy revision; the native broker performs the actual operation and returns
+scoped results. Both interfaces share the same tools and authority checks. No inbound
+public port, untrusted website-to-shell bridge or automatic sharing of personal data.
+A connected Mac can keep working when its Room window is closed, with explicit
+background enablement. Show offline/asleep/disconnected honestly; do not imply a web
+request can wake or execute on every sleeping computer.
+
+A browser extension is an optional browser-control adapter. Chrome Native Messaging
+connects an extension to an installed native host; it is not a standalone website API
+or a substitute for installing the helper. Use extension/service-worker validation and
+authenticated owner grants. Browser page content remains untrusted.
+
+Browser documentation:
+https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
+https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
+https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
+
+
+LOCAL IMPLEMENTATION CHECKPOINT — OCTOBER 6
+
+The app now includes a native My Mac pane, session enable/pause and a bundled stdio
+MCP adapter. The app process owns a private Unix socket broker with peer UID and nonce
+validation; no TCP listener or web execution bridge. Five real tools provide status,
+UTF-8 read/versioned write, user-authority process execution and process-group stop.
+Exact mutations are privately journaled and synchronized before executing; prepared
+operations after restart refuse automatic replay. Web/account-bound enrollment and
+persistent grants have not been implemented, so this is explicitly local-owner scope.
+
+The standalone native acceptance executable passes six groups: file/grant/retry/restart,
+actual process/recorded exit, timeout and pause, explicit cancellation/output limit,
+real stdio MCP through the native broker, and authenticated IPC/revocation. All work
+uses synthetic /tmp fixtures. Native setup was inspected in the rebuilt app while
+paused; no operating-system privacy permissions or personal-file tasks were enabled.
+
+Next: owner-account device enrollment and outbound web jobs, coordinator/host adoption,
+app/screen actions, private account connectors, durable grants, distribution qualification.

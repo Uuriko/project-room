@@ -1,0 +1,142 @@
+PROJECT ROOM — CONSOLIDATED RELEASE, 2026-10-06
+
+Shipping checkpoint: protected PR https://github.com/Uuriko/project-room/pull/1709.
+Production has not yet been updated by this release. Root owns one merge/deploy;
+exact-main test and schema-gate success are required before deploy-prod dispatch.
+The original readiness rehearsal is superseded by this integrated branch.
+
+Current qualification checkpoint (2026-10-07 UTC)
+- Immutable candidate b67ce146: all three Linux Node unit shards passed,
+  7356 passes, zero failures, seven existing skips. Aggregate unit is green.
+- Required contract, lint and Cloudflare passed. Canonical Worker runtime
+  passed 69/69; real Worker Chromium journeys passed 4/4, with no skips.
+- Separate immutable human acceptance passed 10/10 real Chromium journeys:
+  account creation, login, mobile history, invite restoration and shared chat.
+- Required browser shards completed with109 failures, primarily outdated
+  login/Advanced/message fixtures and intentional entrance/room visuals.
+  First two repair packets pass60 distinct owner cases; destination-scoped
+  drafts and exact return navigation are preserved without product changes.
+- UI coverage51.5% missed the unchanged51.7% ratchet. Seven new notification
+  lifecycle owners cover157/160 previously unexecuted browser-push lines,
+  including deferred permission/registration and sign-out races. Combined
+  recovery/manifest/push owners pass43/43 on Node24. Hosted final proof remains.
+- New main eb0ae63d was reconciled explicitly: both private inbox account
+  retirement owners and the repaired privacy diagnostic stay blocking.
+  Broad quarantine skips introduced by PR1718 are not part of this release.
+- Local Mac app built from b67ce146 and passed strict/deep ad-hoc signature
+  verification. Developer ID signing and notarization are unavailable here;
+  this is a local artifact, not a qualified public Mac download.
+- Another deployment completed at source3e3974f8 (schema37). Its entrance
+  still contains the old introduction. This consolidated release is unshipped.
+- Candidate schema38 requires schema-aware recovery: old schema37 code rejects
+  migrated stores. Never blindly restore an older/unknown-schema Worker;
+  retain truthful recovery receipts and require roll-forward when necessary.
+- Final browser repair packets are assembled. All57 distinct browser-four
+  nonvisual owners pass; canonical Linux login/room baseline captures are
+  reviewed and updated with unchanged pixel thresholds. Final Linux visual
+  qualification remains required; Mac font differences are not re-baselined.
+- Actual product repairs preserve 320px/200% enlarged text, close People on
+  sign-out and focus visible account choices/fields with the original field
+  priority. The normal entrance still has only the wordmark and three actions.
+- Latest main bab1ffe2 is reconciled: documentation403/publicReceipts parity
+  and its real route owner are included; canonical alias recovery remains.
+  Focused entry/route owners pass32/32, and current auth/push/recovery/manifest
+  unit owners pass67/67 on Node24. Lint passes with124 existing warnings.
+- A corrected exact-head protected CI run, main push gates and serialized
+  production deployment remain mandatory. Focused/local checks do not replace
+  these gates. Bodies-at-rest remains explicitly OFF for both Workers.
+
+Entrance and human experience
+- PROJECT ROOM, account creation/login, exactly one Agent sign in action.
+- No introductory pitch, onboarding/about/connect links or invite instructions
+  on the entrance. The loading fallback has only the name and concise no-JS
+  guidance; it is removed when the app boots.
+- Multiplayer chat centers one public assistant. Project, Activity and Advanced
+  surfaces disclose tools when requested. Guide/demo/squads stay off the entrance.
+- Assistant requests and host results are durable and scoped. An authorized
+  connected host must poll, claim and report actual work; no host is provisioned.
+  Public activity contains progress summaries, not private chain of thought.
+
+Integrated source and coordination
+- Original web/native checkpoint584e4660; current main20af79b7 incorporated.
+- Claude code-drops-v3 and link-access-v3 packets applied with current authority
+  preserved. Storage p1a-v2 integrated via9babe6b8; flag stays OFF.
+- Human review/adaptation8ee2fce7, native/backend1901a7c7, combined ownership
+  checkpoint88fdc3fd, CI receipt/discovery auditaf011b18.
+- Final reviewed security/coverage branch2befa657 is integrated.
+- Exact reviewed PR inventory and classifications are recorded in
+  claude-github-door/RELEASE-PR-INVENTORY-20261006.txt and
+  claude-github-door/RELEASE-BACKEND-INTEGRATION-20261006.txt on the coordination
+  disk. Scope freezes at PR1719; newer proposals wait for the release receipt.
+- Six Room formal readiness requests recorded, four existing Codex chats notified,
+  and disk bus broadcast to Claude/Grok/Cursor. No reply is treated as readiness.
+- Older Sept25 scratch branches have no unique shipping slice; already-landed
+  PR1030/1048/1040/1041/1037/1033/1284/1285 and superseded1038 are not replayed.
+
+Qualification recorded so far
+- Combined human/Board/routes/cold-runtime48/48; real human browser2/2.
+- Minimal entrance9/9 plus browser1/1; exact visible Agent sign in count is one.
+- Protocol/schema55/55; substantive recovery restart182 initialized tables
+  with real assistant configuration/invocation/claim fixtures, not exemptions.
+- Catalog freshness, i18n, route inventory/docs, public package closure, design
+  ratchets and module coverage pass. i18n shrank to4711 hardcoded/521 concat;
+  no increased baseline or new untested-module exception.
+- Earlier complete Worker68/68, storage OFF/ON10/10, ON storage/backfill36/36,
+  ON assistant/drops/invite/deletion31/31, actual Worker OFF/ON2/2, recovery10/10,
+  cold runtime3/3, and backup/restore/bulk rehydration rehearsal passed.
+- Linux installer fixture3/3 and Node24 OG renderer4/4 pass. Private-preview
+  browser regression now establishes the actual room session and passes1/1.
+- Unit sharding retains actual Node default discovery, including nested tests,
+  .mjs, machine/test and scripts/load-test; receipts reject missing, future,
+  invalid or conflicting attempts. Owner5/5 and actual measured balance pass.
+  Measurements allocate files only. No functional test is omitted or skipped.
+- Timing-only Board p95 and documented existing browser flakes retain unchanged
+  assertions in the nonblocking quarantine lane. Privacy/auth checks stay blocking.
+- Full immutable older Mac Node26 audit:6905 tests,42 failures, subsequently
+  classified/repaired where attributable to this release. Known Linux namespace,
+  machine platform and Node26 PNG differences require hosted Linux Node24 truth.
+  Focused passes do not replace the exact-head protected hosted gates.
+
+Remaining release checkpoint
+- Record integration70992899 and reviewed1710–1719 security/coverage patches
+  are integrated. Actual initialized inventory192, schema38. Combined immutable
+  c007 qualification:170/170 Node owners,69/69 Worker,2/2 real human browser.
+  Verification/privacy/scanner65/65 and48/48; UI coverage79/79.
+- Public entry6de89ddd integrated:90/90 Node owners, desktop/mobile real
+  Worker/browser1/1, exact runtime3/3; invite/query/fragment forwarding preserved.
+- Mac host repair54e7fb66 integrated:13/13 on Node24 and26, no skips.
+  Portable BSD sed inverse and output/doctor fixtures repaired; historical
+  serialized uninstall commands are not automatically state-migrated.
+- Final combined lint/public inventories/runtime and exact-head hosted gates
+  remain before merge/deploy.
+- Run final combined Worker/schema/recovery/packaging checks, push the final
+  branch and obtain required exact-head hosted checks. Merge without bypasses.
+- Require test + schema-gate success on exact resulting main before one deploy.
+- Follow docs/DEPLOY-LANE.md: preserve variables, capture both Worker rollback
+  versions, verify exact revision on both public doors, signed cards, health,
+  readiness and live smoke. Record deployment receipt after actual completion.
+- Existing john-codex identity lacks muse-room access (authorized GET403).
+  Bus asks an existing member to coordinate ROLE-DEPLOYER; do not borrow another
+  agent's credential or grant new access. GitHub workflow serializes deployment.
+
+Mac and configuration limits
+- Fresh local app build and codesign --verify --deep --strict passed at
+  desktop/macos/build/Project Room.app; app and bundled tools are ad-hoc signed.
+- Public Developer ID/notarization remain unavailable (zero valid identities).
+  Do not describe this as a signed public Mac distribution.
+- Local broker starts paused and requires owner enablement. Existing native
+  acceptance6/6 and real WK downloads passed on unchanged native source.
+  OS privacy grants, real provider login and personal-data actions are separate.
+- No remote computer enrollment transport, automatic model launch, universal
+  links, APNs or signed updater is supplied by this checkpoint.
+- This rollout explicitly pins ROOM_BODIES_AT_REST=0 on both Workers; other
+  existing variables remain preserved. Previous live binding value is unverified;
+  previous live source7d114379 has no body-storage implementation. This is a
+  rollout setting, not a repair for previously stored body references.
+  Before any rollback to older code after
+  enabling it, back up and rehydrate EVERY room under new code; OFF alone
+  repairs only subsequently touched projections. No bulk operator Worker RPC.
+- Schema38 migration is forward-only; an older schema37 binary is not assumed
+  compatible. Keep backups, exact mutation request IDs and native journals.
+- Proposed job/offer/trial records perform no settlement, transfers or payouts.
+  Bug bounty/audit contest documentation makes no funded payment commitment.
