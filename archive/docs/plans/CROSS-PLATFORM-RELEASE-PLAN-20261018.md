@@ -63,7 +63,7 @@ asleep, disconnected, or this execution environment is unavailable.
 
 The detailed release procedure remains
 [RELEASE-ACCEPTANCE-EXECUTION-20261018.md](RELEASE-ACCEPTANCE-EXECUTION-20261018.md).
-The six-outcome scope remains [FOCUSED-DELIVERY-PLAN.md](FOCUSED-DELIVERY-PLAN.md).
+The six-outcome scope remains [FOCUSED-DELIVERY-PLAN.md](../../../docs/FOCUSED-DELIVERY-PLAN.md).
 The comprehensive historical inventory and delivery ledger retain obligations;
 this campaign does not silently reactivate deferred experiments or erase tasks.
 

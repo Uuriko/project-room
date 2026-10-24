@@ -4,7 +4,7 @@ Execution order and complete scope mapping: [build-to-completion plan](BUILD-TO-
 
 Updated 2026-10-18. Owner role for these local items: Codex implementation.
 This ledger preserves the seven stages in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md),
-plus the [infra research](FRONTIER-INFRA-RESEARCH-2026-10-18.md) and
+plus the [infra research](../archive/docs/plans/FRONTIER-INFRA-RESEARCH-2026-10-18.md) and
 [startup/product strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md).
 Detailed requirements in those documents remain binding; these rows do not replace them.
 

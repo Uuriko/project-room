@@ -3,7 +3,7 @@
 2026-10-18. This is the navigation and sequencing layer for the existing overhaul,
 not a replacement scope. Track status in the [delivery ledger](DELIVERY-LEDGER.md).
 Architecture requirements remain in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md).
-Supporting evidence: [infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md),
+Supporting evidence: [infrastructure research](../archive/docs/plans/FRONTIER-INFRA-RESEARCH-2026-10-18.md),
 [startup research](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md),
 [automation design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md), and
 [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md).
