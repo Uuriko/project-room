@@ -189,6 +189,8 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const config = { origin, roomId: 'commons', memberId: worker.identityId, token: worker.secret };
   let baselineBytes = 0, baselineRequests = 0;
   const baselineClient = new RoomAgentClient({ ...config, fetchImpl: async (url, options) => {
+    // Keep the historical full-snapshot baseline explicit as the client improves.
+    if (String(url).endsWith('/agent-connection')) return Response.json({ error: { code: 'not_found', message: 'Legacy fixture' } }, { status: 404 });
     const response = await fetch(url, options); baselineRequests++; baselineBytes += Buffer.byteLength(await response.clone().text()); return response;
   } });
   await baselineClient.roomContext();

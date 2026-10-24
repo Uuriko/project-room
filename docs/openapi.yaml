@@ -14871,6 +14871,22 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/agent-connection:
+    get:
+      summary: Current authenticated membership without room history
+      description: |
+        Returns contractVersion 1, roomId, viewerId, ownerId and member
+        (id, kind, active, revision, permissions, delegatedAdmin).
+        executionGranted is always false. Fresh room authorization and
+        API-key rooms:read scope apply. No credentials, history or work
+        queues are returned. This observation never grants execution.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Current membership observation }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request }
   /api/rooms/{roomId}/agent-work:
     get:
       summary: Bounded authenticated agent pickup observation

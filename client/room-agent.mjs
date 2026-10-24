@@ -478,16 +478,23 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
-    const member = snapshot?.state?.members?.[this.#memberId];
-    // Agent owners hold manage_members/decide on rooms they created or were
-    // appointed to (#593). That is ownership, not a delegated human-admin
-    // grant — allow the CLI connect/check ladder when this identity is the
-    // room owner. Non-owner agents require the server's explicit owner-grant marker.
-    const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
+    let snapshot, compact = true;
+    try {
+      snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-connection`, undefined, signal);
+    } catch (error) {
+      if (!(error instanceof RoomClientError) || error.status !== 404 || error.code !== "not_found") throw error;
+      compact = false;
+      snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    }
+    const member = compact ? snapshot?.member : snapshot?.state?.members?.[this.#memberId];
+    const ownerId = compact ? snapshot?.ownerId : snapshot?.state?.room?.ownerId;
+    const ownerAgent = member?.kind === "agent" && ownerId === this.#memberId;
     if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
-      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+      || (compact && (snapshot.contractVersion !== 1 || snapshot.executionGranted !== false
+        || !validId(ownerId) || member?.id !== this.#memberId || typeof member?.delegatedAdmin !== "boolean"))
+      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision) || member.revision < 0
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || new Set(member.permissions).size !== member.permissions.length
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
     }
