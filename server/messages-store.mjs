@@ -1154,7 +1154,7 @@ const ARCHIVE_CERTIFY_CALLS = 20;
 // behind is caught up by repeating the call, which keeps every committed
 // chunk (each call resumes from the cursor).
 export function certifyRoomMessagesAtHead(store, roomId, { deadline = Date.now() + ARCHIVE_CERTIFY_BUDGET_MS, eventCap = ARCHIVE_CERTIFY_EVENT_CAP } = {}) {
-  if (!Number.isInteger(eventCap) || eventCap < 1) throw new TypeError("eventCap must be a positive integer");
+  if (!Number.isInteger(eventCap) || eventCap < 0) throw new TypeError("eventCap must be a non-negative integer");
   let events = 0;
   for (let call = 0; call < ARCHIVE_CERTIFY_CALLS && events < eventCap && !messagesBackfillCaughtUp(store.db, roomId); call += 1) {
     const result = store.backfillMessages({ limit: Math.min(1000, eventCap - events), deadline });

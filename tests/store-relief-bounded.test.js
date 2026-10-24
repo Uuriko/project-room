@@ -82,6 +82,16 @@ test("zero catch-up budget refuses an uncertified full archive without advancing
   assert.equal(f.cursor(), before);
 });
 
+test("zero catch-up budget certifies a caught-up room without replay", t => {
+  const f = fixture(t); f.post(0, 110);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify the prefix */ }
+  const before = f.cursor();
+  const result = operatorArchive(f.store, { roomId: "commons", keepNewest: 100, reason: "bounded fixture" }, null, { eventCap: 0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.archived, 10);
+  assert.equal(f.cursor(), before);
+});
+
 test("DurableDatabase iterator streams rows and accounts for early termination", () => {
   let rowsRead = 0, argumentsSeen;
   const db = new DurableDatabase({ sql: { exec: (...args) => {
