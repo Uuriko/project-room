@@ -11,6 +11,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -217,4 +218,31 @@ test("room key refuses multi-room identity and an unlinked member", async t => {
   assert.equal((await post(origin,"/api/agent-heartbeats",{hostId:"local",mode:"pull-only"},roomKey)).status,403);
   f.store.db.prepare("DELETE FROM identity_links WHERE identity_id=?").run(identity.identityId);
   assert.equal((await post(origin,"/api/agent-heartbeats",{hostId:"local",mode:"pull-only"},roomKey)).status,403);
+});
+
+test("a guest seat's room access key registers pull-only presence (#3908 F-9)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  // Seat a trial-seat guest through the real mint -> redeem flow: the
+  // member lands in guest_members only, never identity_links, so the
+  // identity_links-only resolution this door used before refused it.
+  const mint = await (await post(origin, "/api/rooms/commons/guest-invites",
+    { requestId: randomUUID(), guestLabel: "guest presence", expectedOwnerRevision: 0, credentialTtlMs: 3600_000 },
+    f.keys.owner)).json();
+  assert.ok(mint.code, "mint returns a code");
+  const identity = f.store.identities.create("Guest Presence");
+  const kp = generateKeyPair();
+  const cardBody = { name: "Guest Presence", description: "room-key guest test", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: kp.publicKey,
+    signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: kp.privateKey }) };
+  const redeemed = await (await post(origin, "/api/guest-invites/redeem",
+    { inviteCode: mint.code, card }, identity.secret)).json();
+  assert.ok(redeemed.member?.id, "redeem seats the guest member");
+  const roomKey = f.store.issueAccessKey("commons", redeemed.member.id);
+  const registered = await post(origin, "/api/agent-heartbeats",
+    { hostId: "guest-home-1", mode: "pull-only", cadenceSeconds: 60 }, roomKey);
+  assert.equal(registered.status, 200, "the guest seat's room key registers presence");
+  const doc = await registered.json();
+  assert.equal(doc.agentId, identity.identityId, "presence is attributed to the guest identity");
+  assert.equal(doc.host.mode, "pull-only");
 });

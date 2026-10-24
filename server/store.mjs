@@ -4666,9 +4666,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // secret hash at creation time. If the secret was rotated or revoked
     // since, the session is rejected.
     if (row.identity_secret_hash !== null && row.identity_secret_hash !== undefined) {
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
-      if (!linkRow) fail(401, "unauthenticated", "Agent session identity link not found");
-      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkRow.identityId);
+      // Guest-aware (#3908 F-9): createJoinSession binds a trial seat's
+      // session to its guest identity's secret, so the binding check
+      // resolves through the shared wake resolver (identity_links first,
+      // guest_members fallback) - an identity_links-only lookup would
+      // refuse every bound guest session as link-less.
+      const linkIdentityId = identityIdForWakeMember(this.db, row.room_id, row.member_id);
+      if (!linkIdentityId) fail(401, "unauthenticated", "Agent session identity link not found");
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkIdentityId);
       if (!secretRow || secretRow.revokedAt !== null || secretRow.secretHash !== row.identity_secret_hash) {
         fail(401, "unauthenticated", "Agent identity secret was rotated or revoked; sign in again");
       }
@@ -4709,9 +4714,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // invalidates the session — the same binding createAgentSession uses
       // (RC-2026-09-23-106). Members with no identity link keep the legacy
       // null binding.
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-      const secretRow = linkRow
-        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
+      // Guest-aware (#3908 F-9): a trial seat's join session binds to its
+      // guest identity's current secret hash the same way - the member
+      // resolves through the shared wake resolver, not identity_links
+      // alone (authenticate resolves it back through the same resolver).
+      const linkIdentityId = identityIdForWakeMember(this.db, roomId, memberId);
+      const secretRow = linkIdentityId
+        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkIdentityId)
         : null;
       const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
       return { token, expiresAt };
