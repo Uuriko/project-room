@@ -43,7 +43,10 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
 });
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
-  const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
+  // One stable default: the core list is the same before and after an agent
+  // joins a room, so hosts never need notifications/tools/list_changed.
+  // Volunteer work stays one focus away (focus "public_work").
+  const outside = focus === "public_work";
   if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and

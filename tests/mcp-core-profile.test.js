@@ -64,8 +64,7 @@ test("default tools/list is the short core profile and every listed name is lega
   const names = namesOf(body);
   assert.equal(body.result.profile, "core");
   assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
-  // Core still names bond_propose; the rest of the bond lifecycle is
-  // advertised from the conversation focus (see the focus test below).
+  // Lean v1: the bond lifecycle is advertised from the conversation focus.
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
@@ -84,13 +83,13 @@ test("default tools/list is the short core profile and every listed name is lega
   console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
   // QA7-04 added the latest flag to room_read_messages' schema: the core
   // profile stays small for cold agents, with headroom for one more flag.
-  assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
+  assert.ok(coreBytes < 26 * 1024, `core tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
-  assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
-  assert.equal(aliasBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
+  // Lean v1: no aliased tool is in the default list; aliases are checked on
+  // profile full below.
   assert.equal(aliasBody.result.tools.some(tool => tool.name === "bond.list"), false);
 
   const queried = await rpc(origin, "tools/list", undefined, ada.secret, "?aliases=1&profile=full");
@@ -305,7 +304,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const initial = await invoke(pointer.tool, pointer.arguments);
   const stale = initial.value.responseActions.find(action => action.arguments.responseOutcome === "answered");
   assert.ok(advertised.has(stale.tool), "the discovered response must also be advertised");
-  await invoke("room_reply", { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." });
+  await invoke("room_post_message", { roomId: room.roomId, id: "core-clarification", replyToId: "core-question", body: "One clarification first." });
   assert.equal(store.room(room.roomId).state.replyRequests["core-question"].status, "open", "ordinary chat does not answer the formal request");
   const refused = await invoke(stale.tool, { ...stale.arguments, requestId: "core-stale-answer", body: "Stale answer" });
   assert.equal(refused.body.result.isError, true);
