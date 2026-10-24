@@ -320,6 +320,7 @@ optional.push("server/restore-ndjson.mjs"); // whole-store NDJSON restore (impor
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/durable-alarm-queue.mjs", "server/durable-alarm-turn.mjs"); // ROOM_DURABLE_ALARM_QUEUE default off; one SQLite row per alarm (imported by cloudflare/room.mjs)
 optional.push("server/job-watchdog-store.mjs", "cloudflare/job-watchdog.mjs"); // ROOM_JOB_WATCHDOG default off; progress beats and rebootAlarm (imported by cloudflare/room.mjs)
+optional.push("server/room-history.mjs"); // ROOM_SQLITE_HISTORY default off; one-room census per alarm (imported by cloudflare/room.mjs and server/durable-alarm-turn.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");

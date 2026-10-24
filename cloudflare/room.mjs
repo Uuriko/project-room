@@ -37,6 +37,7 @@ import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from
 import { DURABLE_ALARM_SLICE_GAP_MS } from '../server/durable-alarm-queue.mjs';
 import { durableAlarmQueueEnabled, runDurableAlarmTurn } from '../server/durable-alarm-turn.mjs';
 import { jobWatchdogEnabled, WATCHDOG_NAME } from '../server/job-watchdog-store.mjs';
+import { historyCensusSummary, noteHistoryCensus, refreshRoomHistoryCensus, sqliteHistoryEnabled } from '../server/room-history.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -603,7 +604,7 @@ export class ProjectRoom extends DurableObject {
         alarmAt: Number.isSafeInteger(armed?.alarmAt) ? armed.alarmAt : null,
         snapshot,
         receipt,
-        history: null
+        history: sqliteHistoryEnabled(this.env) ? historyCensusSummary(this.store.db) : null
       });
     } catch (error) {
       console.error(`[job-watchdog] beat failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200)}`);
@@ -615,6 +616,14 @@ export class ProjectRoom extends DurableObject {
     const alarmAt = Date.now() + DURABLE_ALARM_SLICE_GAP_MS;
     await this.ctx.storage.setAlarm(alarmAt);
     return { rebooted: true, alarmAt };
+  }
+  // One room of the history census. The projection cap is unchanged.
+  async refreshRoomHistory() {
+    if (this.paused || !this.store) return { skipped: "paused" };
+    if (!sqliteHistoryEnabled(this.env)) return { skipped: "off" };
+    const summary = refreshRoomHistoryCensus(this.store.db);
+    noteHistoryCensus(summary);
+    return { scanned: summary.scanned, historyBytes: summary.historyBytes, roomsAtCap: summary.roomsAtCap };
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
@@ -869,6 +878,7 @@ export default {
     if (durableAlarmQueueEnabled(env)) {
       await env.ROOM.getByName('invite-only-pilot').ensureJobAlarm({ includeSlow: true });
       await armJobWatchdog(env);
+      await refreshSqliteHistory(env);
       return;
     }
     let room = env.ROOM.getByName('invite-only-pilot');
@@ -880,6 +890,7 @@ export default {
       catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
     }
     await armJobWatchdog(env);
+    await refreshSqliteHistory(env);
     if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
@@ -891,6 +902,16 @@ async function armJobWatchdog(env) {
   try { await env.JOB_WATCHDOG.getByName(WATCHDOG_NAME).ensureArmed(); }
   catch (error) {
     console.error(`[job-watchdog] arm failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200)}`);
+  }
+}
+
+// One room when the queue flag is off. With the queue flag on, the alarm
+// slice owns the census row, so this helper does not add a second wake.
+async function refreshSqliteHistory(env) {
+  if (!sqliteHistoryEnabled(env) || durableAlarmQueueEnabled(env)) return;
+  try { await env.ROOM.getByName('invite-only-pilot').refreshRoomHistory(); }
+  catch (error) {
+    console.error(`[history] census failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200)}`);
   }
 }
 
