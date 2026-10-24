@@ -10,13 +10,17 @@
 // Exit 0 clean, 1 conflict, 2 usage, 3 Room unreachable with --strict.
 // Without --strict an unreachable Room prints a notice and passes, so a
 // network blip never blocks local work; --warn reports conflicts and passes.
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { agentConnectionFromEnvironment, connectionDiagnostic } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { CoordError, guardConflicts, normalizePath } from "../client/room-coord.mjs";
 
-export const USAGE = "Usage: room-guard [--files a,b | --base REF] [--strict] [--warn] [--json]";
+export const USAGE = "Usage: room-guard [--files a,b | --base REF] [--strict] [--warn] [--json] [--prs [--repo OWNER/NAME]] [--claim ID]\n"
+  + "  --prs     also list files that other open pull requests change (advisory: open PRs carry no lease)\n"
+  + "  --mine    branch prefixes that are yours, e.g. claude/ (default: the current branch's prefix)\n"
+  + "  --claim   compare your claim's file list with the changed files (advisory)";
 
 // Git C-quotes a name-status path when it is not plain ASCII. Octal escapes
 // are UTF-8 bytes. A still-quoted token does not match the leased path.
@@ -84,12 +88,23 @@ function defaultGit(args) {
 }
 
 export function parseGuardArgs(argv) {
-  const options = { strict: false, warn: false, json: false, files: undefined, base: undefined };
+  const options = { strict: false, warn: false, json: false, files: undefined, base: undefined, prs: false, repo: undefined, claim: undefined, mine: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--strict") options.strict = true;
     else if (arg === "--warn") options.warn = true;
     else if (arg === "--json") options.json = true;
+    else if (arg === "--prs") options.prs = true;
+    else if (arg === "--repo" || arg === "--claim" || arg === "--mine") {
+      const value = argv[i + 1];
+      if (!value || value.startsWith("--")) return { error: `${arg} needs a value` };
+      i += 1;
+      if (arg === "--repo") {
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return { error: "--repo must be OWNER/NAME" };
+        options.repo = value;
+      } else if (arg === "--mine") options.mine = value.split(",").map(item => item.trim()).filter(Boolean);
+      else options.claim = value;
+    }
     else if (arg === "--files" || arg === "--base") {
       const value = argv[i + 1];
       if (!value || value.startsWith("--")) return { error: `${arg} needs a value` };
@@ -99,6 +114,7 @@ export function parseGuardArgs(argv) {
     } else return { error: `Unknown option ${arg}` };
   }
   if (options.files && options.base) return { error: "Pass either --files or --base, not both" };
+  if ((options.repo || options.mine) && !options.prs) return { error: "--repo and --mine only apply with --prs" };
   return { options };
 }
 
@@ -107,7 +123,72 @@ const describe = conflict => `${conflict.file} is held by ${conflict.owner} unde
   + `${conflict.leaseExpiresAt ? ` until ${conflict.leaseExpiresAt}` : ""}`;
 
 // Pure decision: returns { code, lines, conflicts } so the CLI and tests share it.
-export async function runGuard({ files, client, memberId, strict = false, warn = false, now, unavailable } = {}) {
+// A held path covers a file when they are equal or the held path is a
+// directory prefix of it (same rule as guardConflicts).
+const coversPath = (held, file) => held === file || file.startsWith(held.endsWith("/") ? held : `${held}/`);
+
+// Files other open pull requests change. Open PRs carry no lease, so these
+// are advisory: they never change the exit code. Files already reported as
+// claimed by another member are left to that report.
+// Your own PRs are skipped: the current branch, and every branch under the
+// same agent prefix ("claude/x" skips "claude/*"), since agents here share
+// one GitHub account and branch prefixes are how they tell their PRs apart.
+export function selfPrefixes(selfBranch, mine) {
+  if (Array.isArray(mine)) return mine;
+  return selfBranch && selfBranch.includes("/") ? [`${selfBranch.split("/")[0]}/`] : [];
+}
+
+export function prOverlaps(openPrs, files, { selfBranch = null, mine, claimed = new Set() } = {}) {
+  const wanted = new Set(files.map(normalizePath));
+  const prefixes = selfPrefixes(selfBranch, mine);
+  const isMine = branch => Boolean(branch) && (branch === selfBranch || prefixes.some(prefix => branch.startsWith(prefix)));
+  const overlaps = [];
+  for (const pr of Array.isArray(openPrs) ? openPrs : []) {
+    if (!pr || isMine(pr.branch)) continue;
+    const touched = [...new Set((pr.files ?? []).map(normalizePath))].filter(file => wanted.has(file) && !claimed.has(file)).sort();
+    if (touched.length) overlaps.push({ number: pr.number, branch: pr.branch ?? null, updatedAt: pr.updatedAt ?? null, files: touched });
+  }
+  return overlaps.sort((a, b) => a.number - b.number);
+}
+
+// How a claim's file list matches the change: files changed outside the
+// claim (invisible to everyone else's guard) and claimed files not changed
+// (holding them blocks others for nothing).
+export function claimAccuracy(claims, claimId, files) {
+  const claim = (Array.isArray(claims) ? claims : claims?.items ?? claims?.claims ?? []).find(item => item?.id === claimId);
+  if (!claim) return { found: false };
+  const held = [...new Set((claim.files ?? []).map(normalizePath))];
+  const changed = [...new Set(files.map(normalizePath))];
+  return {
+    found: true,
+    unclaimedChanges: changed.filter(file => !held.some(path => coversPath(path, file))).sort(),
+    unusedClaims: held.filter(path => !changed.some(file => coversPath(path, file))).sort(),
+  };
+}
+
+const prAge = (updatedAt, nowMs) => {
+  const ms = nowMs - Date.parse(updatedAt ?? "");
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const hours = Math.round(ms / 3600000);
+  return hours < 48 ? `, updated ${hours}h ago` : `, updated ${Math.round(hours / 24)}d ago`;
+};
+
+// Group PR overlaps by file, newest PRs first, so a hot shared file shows
+// as one line instead of fifty.
+export function overlapsByFile(overlaps, nowMs, { shown = 3 } = {}) {
+  const byFile = new Map();
+  for (const pr of overlaps) for (const file of pr.files) {
+    if (!byFile.has(file)) byFile.set(file, []);
+    byFile.get(file).push(pr);
+  }
+  return [...byFile].sort(([a], [b]) => a.localeCompare(b)).map(([file, prs]) => {
+    const newest = [...prs].sort((a, b) => (Date.parse(b.updatedAt ?? "") || 0) - (Date.parse(a.updatedAt ?? "") || 0));
+    const listed = newest.slice(0, shown).map(pr => `#${pr.number} ${pr.branch ?? ""}${prAge(pr.updatedAt, nowMs)}`.trim());
+    return `  ${file}: ${prs.length} open PR${prs.length === 1 ? "" : "s"}; newest ${listed.join("; ")}${prs.length > shown ? `; +${prs.length - shown} more` : ""}`;
+  });
+}
+
+export async function runGuard({ files, client, memberId, strict = false, warn = false, now, unavailable, openPrs, prsUnavailable, selfBranch, mine, claimId } = {}) {
   if (!files.length) return { code: 0, lines: ["room-guard: no changed files"], conflicts: [] };
   try { files.forEach(normalizePath); }
   catch (error) {
@@ -125,13 +206,77 @@ export async function runGuard({ files, client, memberId, strict = false, warn =
     return { code: strict ? 3 : 0, lines: [`room-guard: Room unreachable (${code})${strict ? "" : "; not blocking"}`], conflicts: [] };
   }
   const conflicts = guardConflicts(claims, files, { memberId, now });
-  if (!conflicts.length) return { code: 0, lines: [`room-guard: ${files.length} file(s) clear of other members' live claims`], conflicts };
-  const lines = [
+  const lines = conflicts.length ? [
     `room-guard: ${conflicts.length} file(s) are claimed by another member`,
     ...conflicts.map(conflict => `  ${describe(conflict)}`),
     "  Ask the owner in the room, wait for the lease, or take a handoff: room-coord handoff <id> --to <you>"
-  ];
-  return { code: warn ? 0 : 1, lines, conflicts };
+  ] : [`room-guard: ${files.length} file(s) clear of other members' live claims`];
+  const extra = {};
+  if (openPrs !== undefined || prsUnavailable) {
+    if (prsUnavailable) lines.push(`room-guard: open pull requests unavailable (${prsUnavailable}); not checked`);
+    else {
+      const nowMs = typeof now === "number" ? now : Date.now();
+      const overlaps = prOverlaps(openPrs, files, { selfBranch, mine, claimed: new Set(conflicts.map(conflict => conflict.file)) });
+      extra.prOverlaps = overlaps;
+      if (overlaps.length) {
+        lines.push(`room-guard: ${overlaps.length} other open pull request(s) change the same files (advisory, no lease)`);
+        lines.push(...overlapsByFile(overlaps, nowMs));
+        lines.push("  Ask in the room who is still working on them before you edit; a stale PR can be ignored or closed by its owner");
+      } else lines.push(`room-guard: no other open pull request changes these files (${openPrs.length} checked)`);
+    }
+  }
+  if (claimId) {
+    const accuracy = claimAccuracy(claims, claimId, files);
+    extra.claimAccuracy = accuracy;
+    if (!accuracy.found) lines.push(`room-guard: claim ${claimId} not found on the board`);
+    else if (!accuracy.unclaimedChanges.length && !accuracy.unusedClaims.length) lines.push(`room-guard: claim ${claimId} lists exactly the changed files`);
+    else {
+      if (accuracy.unclaimedChanges.length) lines.push(`room-guard: changed but not in claim ${claimId} (others' guards cannot see these): ${accuracy.unclaimedChanges.join(", ")}`);
+      if (accuracy.unusedClaims.length) lines.push(`room-guard: in claim ${claimId} but not changed (held for nothing): ${accuracy.unusedClaims.join(", ")}`);
+      lines.push("  Files cannot be edited on a claim: create a corrected claim and close this one");
+    }
+  }
+  return { code: conflicts.length && !warn ? 1 : 0, lines, conflicts, ...extra };
+}
+
+const execFileAsync = promisify(execFile);
+
+// Open pull requests and their changed files, through the GitHub CLI.
+export async function fetchOpenPrs(repo, { gh = (args) => execFileAsync("gh", args, { maxBuffer: 32 * 1024 * 1024 }).then(r => r.stdout), concurrency = 8 } = {}) {
+  // Explicit page numbers instead of --paginate: some GitHub proxies refuse
+  // the numeric-id URLs that pagination Link headers point at.
+  const pages = async path => {
+    const rows = [];
+    for (let page = 1; page <= 30; page += 1) {
+      const batch = JSON.parse(await gh(["api", `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`]));
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return rows;
+  };
+  const prs = (await pages(`repos/${repo}/pulls?state=open`))
+    .map(pr => ({ number: pr.number, branch: pr.head?.ref ?? null, updatedAt: pr.updated_at ?? null, files: [] }));
+  let next = 0;
+  const worker = async () => {
+    while (next < prs.length) {
+      const pr = prs[next++];
+      pr.files = (await pages(`repos/${repo}/pulls/${pr.number}/files`)).flatMap(file => [file.filename, file.previous_filename].filter(Boolean));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, prs.length) }, worker));
+  return prs;
+}
+
+function originRepo() {
+  const result = spawnSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" });
+  const match = /github\.com[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(result.stdout?.trim() ?? "");
+  return match ? match[1] : null;
+}
+
+function currentBranch() {
+  const result = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" });
+  const branch = result.stdout?.trim();
+  return result.status === 0 && branch && branch !== "HEAD" ? branch : null;
 }
 
 async function main() {
@@ -147,8 +292,20 @@ async function main() {
     client = new RoomAgentClient(config);
     memberId = config.memberId;
   } catch (error) { unavailable = connectionDiagnostic(error).code; }
-  const result = await runGuard({ files, client, memberId, strict: options.strict, warn: options.warn, unavailable });
-  if (options.json) console.log(JSON.stringify({ code: result.code, conflicts: result.conflicts }, null, 2));
+  let openPrs;
+  let prsUnavailable;
+  if (options.prs) {
+    const repo = options.repo ?? originRepo();
+    if (!repo) prsUnavailable = "no GitHub origin; pass --repo OWNER/NAME";
+    else {
+      try { openPrs = await fetchOpenPrs(repo); }
+      catch (error) { prsUnavailable = error?.code === "ENOENT" ? "gh CLI not installed" : "gh api failed"; }
+    }
+  }
+  const result = await runGuard({ files, client, memberId, strict: options.strict, warn: options.warn, unavailable,
+    openPrs, prsUnavailable, selfBranch: currentBranch(), mine: options.mine, claimId: options.claim });
+  if (options.json) console.log(JSON.stringify({ code: result.code, conflicts: result.conflicts,
+    ...(result.prOverlaps ? { prOverlaps: result.prOverlaps } : {}), ...(result.claimAccuracy ? { claimAccuracy: result.claimAccuracy } : {}) }, null, 2));
   else (result.code ? console.error : console.log)(result.lines.join("\n"));
   process.exitCode = result.code;
 }
