@@ -9,7 +9,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, readFileSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, existsSync, mkdirSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -24,6 +24,65 @@ import {
   validateReportMetadata,
 } from '../bridge/lib/fence.mjs';
 import { createBridge } from '../bridge/lib/bridge.mjs';
+
+// ---------------------------------------------------------------------------
+// Socket fixture dirs (#4459): Unix socket paths are length-capped (104
+// bytes on macOS, 108 on Linux, kernel-enforced) — a long TMPDIR (the macOS
+// test wrapper points it at a descriptive worktree's .tmp/) makes
+// `<dir>/sockets/a.sock` overflow, and every socket fixture then fails in
+// its before hook with `listen EINVAL` before any assertion runs.
+// socketTempDir() keeps the TMPDIR location while the longest socket path
+// fits, otherwise falls back to a short private mkdtemp under /tmp (0700,
+// per-fixture — never a shared fixed path), and throws an actionable
+// preflight error naming the remedy if no base can fit a socket path.
+// ---------------------------------------------------------------------------
+const SOCKET_PATH_MAX = process.platform === 'darwin' ? 104 : 108;
+const LONGEST_SOCKET_SUFFIX = '/sockets/a.sock';
+function socketPathLength(dir) {
+  return Buffer.byteLength(join(dir, LONGEST_SOCKET_SUFFIX)) + 1; // + trailing NUL
+}
+function socketTempDir(prefix) {
+  for (const base of [...new Set([tmpdir(), '/tmp'])]) {
+    // mkdtempSync appends six random characters to the prefix.
+    if (socketPathLength(join(base, `${prefix}XXXXXX`)) <= SOCKET_PATH_MAX) {
+      return mkdtempSync(join(base, prefix));
+    }
+  }
+  const wouldBeDir = join(tmpdir(), `${prefix}XXXXXX`);
+  throw new Error(
+    `test setup: Unix socket path ${join(wouldBeDir, LONGEST_SOCKET_SUFFIX)} would be ` +
+    `${socketPathLength(wouldBeDir)} bytes, over the ${SOCKET_PATH_MAX}-byte limit, and no ` +
+    `shorter base directory fits either — point TMPDIR at a shorter path (or run from a ` +
+    `shorter checkout) and re-run (#4459)`,
+  );
+}
+
+test('socket fixture dir stays within the socket path limit under a long TMPDIR (#4459)', async () => {
+  const prevTmpdir = process.env.TMPDIR;
+  // A deliberately long prefix, shaped like a descriptive worktree's .tmp/:
+  // a socket path under it overflows the limit the old code hit.
+  const longTmp = join(tmpdir(), `long-checkout-${'x'.repeat(96)}`, '.tmp');
+  process.env.TMPDIR = longTmp;
+  let d;
+  try {
+    assert.ok(socketPathLength(join(longTmp, 'hb-XXXXXX')) > SOCKET_PATH_MAX,
+      'precondition: the long TMPDIR really overflows');
+    d = socketTempDir('hb-');
+    assert.ok(!d.startsWith(longTmp), 'socket fixtures must not inherit the long TMPDIR');
+    assert.ok(socketPathLength(d) <= SOCKET_PATH_MAX, `socket path under ${d} must fit the limit`);
+    // And a server can actually bind the longest socket path under it.
+    mkdirSync(join(d, 'sockets'), { recursive: true });
+    const srv = createServer();
+    await new Promise((resolve, reject) => {
+      srv.on('error', reject);
+      srv.listen(join(d, 'sockets', 'a.sock'), resolve);
+    });
+    await new Promise((resolve) => srv.close(resolve));
+  } finally {
+    if (prevTmpdir === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmpdir;
+    if (d) rmSync(d, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Fake herdr server: newline-delimited JSON over a Unix socket.
@@ -154,7 +213,7 @@ const auditEntries = () =>
   readFileSync(auditLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'hb-'));
+  dir = socketTempDir('hb-');
   mkdirSync(join(dir, 'sockets'), { recursive: true });
   const uid = process.getuid?.() ?? 1000;
   const wsA = join(dir, 'ws-a'); const wsB = join(dir, 'ws-b');
@@ -475,7 +534,7 @@ test('write with no response retries once with the same key, then 504', async ()
 test('circuit breaker opens after 5 consecutive failures and probes back', async () => {
   // point tenant-a at a dead socket by swapping its entry mid-test is not
   // possible; instead fail at the socket level via failConnect on a temp bridge
-  const dir2 = mkdtempSync(join(tmpdir(), 'hbc-'));
+  const dir2 = socketTempDir('hbc-');
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   writeFileSync(tenantsFile2, JSON.stringify({ tenants: {
@@ -510,7 +569,7 @@ test('half-open probe failing with a non-transport error does not wedge the brea
   // an application error (pane_not_found — proof the server is live) ran
   // neither recordSuccess nor recordFailure, leaking halfOpenProbe=true and
   // wedging the tenant's breaker open forever.
-  const dir2 = mkdtempSync(join(tmpdir(), 'hbp-'));
+  const dir2 = socketTempDir('hbp-');
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   const socketPath = join(dir2, 'live.sock');
@@ -673,7 +732,7 @@ test('GET /v1/events streams socket events as SSE with heartbeats', async () => 
 });
 
 test('dual-key rotation: previous generation token accepted with prev key id', async () => {
-  const dir2 = mkdtempSync(join(tmpdir(), 'hbr-'));
+  const dir2 = socketTempDir('hbr-');
   const tenantsFile2 = join(dir2, 'tenants.json');
   const { writeFileSync } = await import('node:fs');
   writeFileSync(tenantsFile2, JSON.stringify({ tenants: {
