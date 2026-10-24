@@ -66,7 +66,7 @@
   },
   "core": {
     "add_land_item": {
-      "inputSchema": "bb1792782a4e4949",
+      "inputSchema": "77bcd0f000cfe606",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -266,7 +266,7 @@
   },
   "full": {
     "add_land_item": {
-      "inputSchema": "bb1792782a4e4949",
+      "inputSchema": "77bcd0f000cfe606",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2402,7 +2402,7 @@
   },
   "enrolled": {
     "add_land_item": {
-      "inputSchema": "bb1792782a4e4949",
+      "inputSchema": "77bcd0f000cfe606",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
