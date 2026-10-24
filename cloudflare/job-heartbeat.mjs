@@ -18,6 +18,11 @@ export const STALE_PERIODS = 3;
 // streak + its start so the stall has an age on the surface instead of
 // riding invisibly inside a numeric summary on an 'ok' job.
 export const OVERDUE_DEGRADE_TICKS = 3;
+// The keeper's stuck-state census (#4128) rides the same machinery: a
+// summary `unreachable` count is work no due branch can ever reach, so
+// unlike overdue it cannot clear by waiting — but the streak threshold
+// is shared so one corrupt-then-repaired row does not flap the surface,
+// and the grade is the same degraded (reason 'escrow_unreachable').
 // A cron RPC shares the request Durable Object. Each job gets this long,
 // then it stops at the next item so a slow tick cannot pin the input gate.
 // One budget for both runtimes (#3767): the value lives in the registry
@@ -207,6 +212,18 @@ export function applyOutcomes(previous, outcomes) {
         record.overdueSinceAt = null;
       }
     }
+    // Unreachable streak (#4128): the same tracking for the keeper's
+    // stuck-state census. Only a tick carrying the field speaks; a
+    // summary with unreachable: 0 closes the streak.
+    if (summary && Number.isFinite(summary.unreachable)) {
+      if (summary.unreachable > 0) {
+        record.unreachableStreak = (prior.unreachableStreak ?? 0) + 1;
+        record.unreachableSinceAt = Number.isFinite(prior.unreachableSinceAt) && (prior.unreachableStreak ?? 0) > 0 ? prior.unreachableSinceAt : at;
+      } else {
+        record.unreachableStreak = 0;
+        record.unreachableSinceAt = null;
+      }
+    }
     next[outcome.job] = record;
   }
   return next;
@@ -240,7 +257,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     // polling it) can see it; still not a 503: no tick has failed, the
     // work is late, and the streak fields below carry its age.
     const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
-      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue' : null;
+      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue'
+      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.unreachableStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_unreachable' : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -266,6 +284,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastSummaryAt: iso(record.lastSummaryAt),
       overdueStreak: Number.isFinite(record.overdueStreak) ? record.overdueStreak : null,
       overdueSinceAt: iso(record.overdueSinceAt ?? null),
+      unreachableStreak: Number.isFinite(record.unreachableStreak) ? record.unreachableStreak : null,
+      unreachableSinceAt: iso(record.unreachableSinceAt ?? null),
       required: job.required === true,
       stale,
       degraded,
