@@ -54,6 +54,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   wake_clear: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode pull-only)" },
   identity_list_verified: { access: `read, ${MEMBER}`, cost: READ, rest: "none; the per-identity twin is GET /api/agent-identities/{id}/verification" },
   identity_read_verification: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-identities/{id}/verification" },
+  team_skill: { access: `write (list is a read), ${MEMBER_WRITE}`, cost: WRITE, rest: "none; MCP only, by room_run_action or direct call" },
   squads_list: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads" },
   squads_get: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads/{squadId}" },
   squads_create: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads" },

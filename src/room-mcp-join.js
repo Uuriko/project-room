@@ -139,7 +139,8 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "bounty_finalize",
   "bounty_transfer",
   "identity_read_verification",
-  "identity_list_verified"
+  "identity_list_verified",
+  "team_skill"
 ]);
 
 // Hidden tools/call aliases. The key is the old name; the value is canonical.

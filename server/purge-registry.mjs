@@ -22,6 +22,8 @@ function freezeVia(via) {
 
 const ROWS = [
   { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // Team skills (server/team-skills-store.mjs) create their table on first use.
+  { table: "room_team_skills", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },
 
   ...["room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: {room:["room_id"]} })),
