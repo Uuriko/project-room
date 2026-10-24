@@ -744,9 +744,10 @@ export class BountyEscrow {
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
     this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
-    // server/bounty-receipts.mjs. When null (the default — production key
-    // provisioning is a later slice), transitions return `signed: []` and
-    // journal entries are not stamped.
+    // server/bounty-receipts.mjs; production passes the operator-configured
+    // signer (receiptSignerFromEnv) through RoomStore. When null (the
+    // default when no signer is configured), transitions return
+    // `signed: []` and journal entries are not stamped.
     this._receipts = receipts;
   }
 

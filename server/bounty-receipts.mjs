@@ -13,13 +13,16 @@
 // chains, transactions, or cash value. Amounts say "credits moved", never
 // money.
 //
-// Key management: test keys only in this slice. Generate in-memory with
-// generateReceiptKeyPair() or import a local 0600 file with importSeed() —
-// the caller owns storage. The signer is injected into BountyEscrow via the
-// `receipts` constructor option; when absent, transitions return
-// `signed: []` and no journal entries are stamped. Production key
-// provisioning (operator key registry, rotation, validity windows) is a
-// later slice — see docs/bounty-receipts.md for the trust statement.
+// Key management: generate in-memory with generateReceiptKeyPair() or
+// import a local 0600 file with importSeed() — the caller owns storage.
+// The signer is injected into BountyEscrow via the `receipts` constructor
+// option; when absent, transitions return `signed: []` and no journal
+// entries are stamped. Production provisioning is the operator env surface
+// below (receiptSignerFromEnv): the operator generates and custodies the
+// seed, the deploy carries it as the ROOM_RECEIPT_SIGNER_SEED secret, and
+// RoomStore wires the resulting signer into the production escrow.
+// Operator key registry, rotation, and validity windows remain a later
+// slice — see docs/bounty-receipts.md for the trust statement.
 //
 // Pure: node:crypto only, no I/O, no dependencies.
 import {
@@ -271,6 +274,37 @@ export function createReceiptSigner({ seedHex, ref }) {
   const x = createPublicKey(importSeed(seedHex)).export({ format: "jwk" }).x;
   const pubkeyHex = Buffer.from(x, "base64url").toString("hex");
   return Object.freeze({ seedHex, pubkeyHex, ref });
+}
+
+// --- operator configuration surface -------------------------------------------
+//
+// The ONLY production arming surface for receipt signing. Env names follow
+// the ROOM_ operator-secret convention (ROOM_IDENTITY_HASH_KEY,
+// ROOM_BOOTSTRAP_*): on Cloudflare these are Worker secrets
+// (`wrangler secret put ROOM_RECEIPT_SIGNER_SEED`), on the node entry they
+// are process env. The seed value itself is key material: it is generated
+// and custodied by the operator, never committed, never logged, and never
+// stored in the room database (a database leak must not mint receipts).
+export const RECEIPT_SIGNER_SEED_ENV = "ROOM_RECEIPT_SIGNER_SEED";
+export const RECEIPT_SIGNER_REF_ENV = "ROOM_RECEIPT_SIGNER_REF";
+// Default issuer ref stamped into every receipt when the operator does not
+// name the key: receipts name the role, and the pubkey beside it is the
+// actual trust binding (verifyBountyReceipt's expectedPubkey).
+export const DEFAULT_RECEIPT_SIGNER_REF = "escrow-keeper";
+
+// Build the production signer from an env-like object (process.env on the
+// node entry, the Worker env in cloudflare/room.mjs). Returns null when the
+// seed is unset or blank — signing stays inert, exactly the historical
+// default, so existing installs boot unchanged. A seed that IS present but
+// invalid throws via createReceiptSigner: a misconfigured key must fail
+// boot loudly, never silently degrade to unsigned receipts.
+export function receiptSignerFromEnv(env = globalThis.process?.env ?? {}) {
+  const rawSeed = typeof env?.[RECEIPT_SIGNER_SEED_ENV] === "string"
+    ? env[RECEIPT_SIGNER_SEED_ENV].trim() : "";
+  if (!rawSeed) return null;
+  const rawRef = typeof env?.[RECEIPT_SIGNER_REF_ENV] === "string"
+    ? env[RECEIPT_SIGNER_REF_ENV].trim() : "";
+  return createReceiptSigner({ seedHex: rawSeed, ref: rawRef || DEFAULT_RECEIPT_SIGNER_REF });
 }
 
 // --- receipt shape ------------------------------------------------------------

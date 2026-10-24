@@ -2,6 +2,7 @@ import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
 import { stitchConfigFromEnv } from "./server/inbox-stitch.mjs";
+import { receiptSignerFromEnv } from "./server/bounty-receipts.mjs";
 import { createRoomServer } from "./server/http.mjs";
 import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
 import { defaultServerArgs } from "./server/boot-options.mjs";
@@ -40,7 +41,7 @@ const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), 
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
 try {
-  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
+  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env), receiptSigner: receiptSignerFromEnv(process.env) });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,

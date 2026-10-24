@@ -98,6 +98,7 @@ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-sch
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
+import { receiptSignerFromEnv } from "./bounty-receipts.mjs"; // Receipt signer arming: operator env -> production escrow.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
@@ -1367,7 +1368,7 @@ class ProjectionCache {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, receiptSigner = receiptSignerFromEnv(), integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
@@ -1474,7 +1475,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
-    this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
+    // Receipt signer (receiptSignerFromEnv, or an explicit signer passed by
+    // an entry point): null keeps movements unsigned (`signed: []`); a
+    // configured signer makes every production escrow movement carry a
+    // verifiable signed receipt. Exposed as store.receiptSigner so the
+    // escrow fallback construction sites sign identically.
+    if (receiptSigner !== null && !(typeof receiptSigner === "object"
+      && typeof receiptSigner.seedHex === "string" && typeof receiptSigner.pubkeyHex === "string"
+      && typeof receiptSigner.ref === "string"))
+      throw new Error("receiptSigner must be null or a createReceiptSigner() signer");
+    this.receiptSigner = receiptSigner;
+    this.bountyEscrow = new BountyEscrow(this, { now: () => this.now(), receipts: receiptSigner }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,

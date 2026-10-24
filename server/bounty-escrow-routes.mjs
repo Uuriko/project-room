@@ -146,7 +146,7 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} bounty ${escrowRoute}`, fail: reject });
-  const escrow = store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store);
+  const escrow = store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store, { receipts: store.receiptSigner ?? null });
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
   const key = payload => idemKeyOf(req, payload);
