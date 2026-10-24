@@ -11,7 +11,11 @@ export const ABUSE_RATE_TABLES = Object.freeze(["abuse_rate_buckets"]);
 
 // Families whose reset on eviction is an abuse hole. `write` is the shared
 // room-write bucket, so claim creation and message posts are both covered.
+// `agent-connect` is the shared /a + /join invite-code lookup bucket: every
+// lookup burns a scrypt hash, so an eviction-fresh budget per isolate made
+// the 30/min limit unenforceable on the deployed build (DEFECT-PLP-1).
 export const ABUSE_RATE_FAMILIES = Object.freeze(new Set([
+  "agent-connect",
   "login",
   "password-login",
   "password-login-ip",
