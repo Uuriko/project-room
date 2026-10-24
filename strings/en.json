@@ -524,5 +524,12 @@
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",
-  "result.previewActions": "Preview actions"
+  "result.previewActions": "Preview actions",
+  "connection.outageTitle": "Room temporarily unavailable",
+  "connection.staleAvailability": "Last known availability · connection interrupted",
+  "connection.stalePresenceNote": "Availability is stale while the room reconnects.",
+  "composer.saved": "Message saved. ",
+  "composer.savedHistoryPending": "Message saved; history is reconnecting. ",
+  "composer.viewSaved": "View message",
+  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery."
 }

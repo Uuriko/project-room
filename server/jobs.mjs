@@ -19,7 +19,8 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -588,8 +589,20 @@ export const JOBS = Object.freeze([
     // The summary is the watch: the gauges ride the heartbeat on every
     // tick, and a crossed limit fails the tick by name so the probe
     // pages before the store reaches the hard cap.
-    async run(store) {
-      const gauges = measureStoreGrowth(store);
+    // A projection past the line is first relieved through the guarded
+    // archive door (server/store-relief.mjs), then measured again; only a
+    // breach that relief could not clear fails the tick.
+    // Relief needs a verified recovery point (the newest verified daily
+    // backup, at most a day old); without one it archives nothing.
+    async run(store, ctx = {}) {
+      let gauges = measureStoreGrowth(store);
+      let relief = null;
+      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
+        const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
+        const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
+        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        gauges = { ...measureStoreGrowth(store), relief };
+      }
       const breach = storeGrowthBreach(gauges);
       if (!breach) return gauges;
       console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
