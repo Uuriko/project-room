@@ -28,6 +28,7 @@ const STATUS_BY_CODE = new Map(Object.entries({
   collision_invalid: 422, collision_lock_held: 409, collision_lock_not_found: 404,
   collision_lock_expired: 409, collision_forbidden: 403,
   approval_invalid: 422, approval_not_found: 404, approval_not_human: 403, approval_transition: 409,
+  approval_version_changed: 409,
   routing_invalid: 422, routing_not_found: 404, routing_transition: 409,
   assignment_not_found: 404, lock_not_found: 404,
   handoff_no_account_scope: 409, handoff_forbidden: 403,
@@ -222,9 +223,9 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const human = asHuman();
         const fields = body(req);
-        if (!shape(fields, { required: ["decision"], optional: ["note", "editedBody"] })
+        if (!shape(fields, { required: ["decision"], optional: ["note", "editedBody", "expectedVersion"] })
           || !["approve", "edit", "reject"].includes(fields.decision)) {
-          invalidInput(reject, '{decision: "approve"|"edit"|"reject", note?, editedBody?}');
+          invalidInput(reject, '{decision: "approve"|"edit"|"reject", note?, editedBody?, expectedVersion?}');
         }
         if (fields.decision === "edit" && (fields.editedBody === null || fields.editedBody === undefined)) {
           return reject(422, "invalid_input", 'decision "edit" requires editedBody with the requested changes.');
@@ -238,6 +239,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           note: fields.note ?? null,
           editedBody: fields.editedBody ?? null,
           reason: fields.note ?? null,
+          expectedVersion: fields.expectedVersion ?? null,
         });
         return json(res, 200, { proposal });
       }

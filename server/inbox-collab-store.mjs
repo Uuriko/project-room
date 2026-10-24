@@ -337,14 +337,17 @@ export class InboxCollabStore {
     if (op.op === "propose") {
       return entry.approvals.propose(op.threadId, { draft: op.draft, byAgent: op.byAgent, channel: op.channel });
     }
-    if (op.op === "approve") return entry.approvals.approve(proposalId, { by: op.by, note: op.note });
+    // expectedVersion is absent on ops recorded before it existed; replay
+    // then behaves exactly as when they were first applied.
+    const expectedVersion = op.expectedVersion ?? null;
+    if (op.op === "approve") return entry.approvals.approve(proposalId, { by: op.by, note: op.note, expectedVersion });
     if (op.op === "requestEdits") {
-      return entry.approvals.requestEdits(proposalId, { by: op.by, edits: op.edits, note: op.note });
+      return entry.approvals.requestEdits(proposalId, { by: op.by, edits: op.edits, note: op.note, expectedVersion });
     }
     if (op.op === "resubmit") {
       return entry.approvals.resubmit(proposalId, { draft: op.draft, byAgent: op.byAgent });
     }
-    if (op.op === "reject") return entry.approvals.reject(proposalId, { by: op.by, reason: op.reason });
+    if (op.op === "reject") return entry.approvals.reject(proposalId, { by: op.by, reason: op.reason, expectedVersion });
     throw new Error(`collab replay: unknown approval op ${op.op}`);
   }
 
@@ -560,15 +563,16 @@ export class InboxCollabStore {
     return entry.approvals.list({ status });
   }
 
-  decideApproval(roomId, proposalId, { decision, by, note = null, editedBody = null, reason = null }) {
+  decideApproval(roomId, proposalId, { decision, by, note = null, editedBody = null, reason = null, expectedVersion = null }) {
     const entry = this.#entry(roomId);
     const row = this.db.prepare(
       "SELECT ops_json, clock_json, id_json FROM collab_approvals WHERE room_id=? AND proposal_id=?")
       .get(roomId, proposalId);
     if (!row) throw notFound("approval_not_found");
-    const op = decision === "approve" ? { op: "approve", by, note }
+    const base = decision === "approve" ? { op: "approve", by, note }
       : decision === "edit" ? { op: "requestEdits", by, edits: editedBody, note }
       : { op: "reject", by, reason };
+    const op = expectedVersion === null ? base : { ...base, expectedVersion };
     return this.#transact(roomId, entry,
       () => this.#runApprovalOp(entry, proposalId, op),
       ({ result: record, clocks, ids }) => {
