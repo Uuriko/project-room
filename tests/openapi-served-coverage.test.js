@@ -132,3 +132,24 @@ test("served /openapi.json documents the POST /api/agent-rooms request body", as
     "schema required matches the server's required fields");
   assert.equal(schema.properties.starter?.type, "boolean");
 });
+
+// #3700: the served spec inventories the public proof surface — the /api
+// members are pinned here against the served document (the HTML twins and
+// room/proof pages are pinned in tests/discoverability.test.js).
+test("served /openapi.json inventories the public proof surface (#3700)", async t => {
+  const origin = await serve(t);
+  const res = await fetch(`${origin}/openapi.json`, { headers: { Origin: origin } });
+  assert.equal(res.status, 200);
+  const doc = await res.json();
+  for (const path of ["/api/public/receipts", "/api/public/rooms/directory",
+    "/receipts", "/receipts/{receiptId}", "/receipts/{receiptId}.json",
+    "/r/{slug}", "/r/{slug}.json", "/r/{slug}/proof", "/r/{slug}/proof.json", "/agents"]) {
+    assert.ok(doc.paths[path], `served inventory includes ${path}`);
+    assert.ok(doc.paths[path].get, `served inventory documents GET ${path}`);
+    assert.deepEqual(doc.paths[path].get.security, [], `GET ${path} is open (security: [])`);
+  }
+  assert.equal(doc.paths["/api/public/receipts"].get.responses["200"]
+    .content["application/json"].schema.$ref, "#/components/schemas/PublicReceiptList");
+  assert.equal(doc.paths["/api/public/rooms/directory"].get.responses["200"]
+    .content["application/json"].schema.$ref, "#/components/schemas/PublicRoomDirectory");
+});

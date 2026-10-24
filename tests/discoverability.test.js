@@ -656,10 +656,108 @@ test("cold walkthrough stranger surface: every documented no-credential endpoint
     "/api/public-work/match",
     "/api/public-work/receipts/{receiptId}", "/api/public-work/receipts/{receiptId}/artifact",
     "/api/share-links/preview",
+    // Public proof surface (#3700).
+    "/receipts", "/api/public/receipts", "/receipts/{receiptId}", "/receipts/{receiptId}.json",
+    "/r/{slug}", "/r/{slug}.json", "/r/{slug}/proof", "/r/{slug}/proof.json",
+    "/agents", "/api/public/rooms/directory",
   ];
   for (const path of stranger) {
     const route = byPath.get(path);
     assert.ok(route, `stranger endpoint documented: ${path}`);
     assert.equal(route.auth, "none", `${path} needs no credential`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Public proof surface (#3700): the receipts / proof / room / directory
+// routes are in the inventory with their real shapes, and the served spec
+// emits them. Shapes are pinned against the handlers, not the table: the
+// receipts list is queryPublicReceipts (limit 1-50 default 20, room/agent/
+// cursor filters, 422 invalid_receipt_query), the proof page is
+// roomProofView (cursor, 422 invalid_proof_query), the directory is
+// RoomDirectory.list (after, limit clamped 1-100 default 50).
+// ---------------------------------------------------------------------------
+
+const PUBLIC_PROOF_CONTRACT = {
+  "/receipts": ["GET", "HEAD"],
+  "/api/public/receipts": ["GET", "HEAD"],
+  "/receipts/{receiptId}": ["GET", "HEAD"],
+  "/receipts/{receiptId}.json": ["GET", "HEAD"],
+  "/r/{slug}": ["GET", "HEAD"],
+  "/r/{slug}.json": ["GET", "HEAD"],
+  "/r/{slug}/proof": ["GET", "HEAD"],
+  "/r/{slug}/proof.json": ["GET", "HEAD"],
+  "/agents": ["GET", "HEAD"],
+  "/api/public/rooms/directory": ["GET"],
+};
+
+test("public proof surface (#3700): inventoried with real methods, params and schemas", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  for (const [path, methods] of Object.entries(PUBLIC_PROOF_CONTRACT)) {
+    const entry = DISCOVERABILITY_ROUTES.find(e => e.path === path);
+    assert.ok(entry, `route table lists ${path}`);
+    assert.equal(entry.auth, "none", `${path} needs no credential`);
+    assert.deepEqual([...entry.methods].sort(), [...methods].sort(), `route table methods for ${path}`);
+  }
+  const doc = await (await get(origin, "/openapi.json")).json();
+  for (const path of Object.keys(PUBLIC_PROOF_CONTRACT)) {
+    assert.ok(doc.paths[path], `openapi.json documents ${path}`);
+    for (const method of PUBLIC_PROOF_CONTRACT[path]) {
+      const op = doc.paths[path][method.toLowerCase()];
+      assert.ok(op, `openapi.json documents ${method} ${path}`);
+      assert.deepEqual(op.security, [], `${method} ${path} is open (security: [])`);
+      assert.ok(op.responses["200"], `${method} ${path} documents 200`);
+    }
+  }
+  // Query parameters match the handlers.
+  const listParams = new Map(doc.paths["/api/public/receipts"].get.parameters.map(p => [p.name, p]));
+  assert.deepEqual([...listParams.keys()].sort(), ["agent", "cursor", "limit", "room"]);
+  assert.equal(listParams.get("limit").schema.maximum, 50);
+  assert.equal(listParams.get("limit").schema.default, 20);
+  assert.equal(listParams.get("room").schema.maxLength, 128);
+  assert.equal(listParams.get("agent").schema.maxLength, 80);
+  assert.match(doc.paths["/api/public/receipts"].get.responses["422"].description, /invalid_receipt_query/);
+  const dirParams = new Map(doc.paths["/api/public/rooms/directory"].get.parameters.map(p => [p.name, p]));
+  assert.deepEqual([...dirParams.keys()].sort(), ["after", "limit"]);
+  assert.equal(dirParams.get("limit").schema.maximum, 100);
+  assert.equal(dirParams.get("limit").schema.default, 50);
+  const proofParams = new Map(doc.paths["/r/{slug}/proof.json"].get.parameters.map(p => [p.name, p]));
+  assert.deepEqual([...proofParams.keys()].sort(), ["cursor", "slug"]);
+  assert.match(doc.paths["/r/{slug}/proof.json"].get.responses["422"].description, /invalid_proof_query/);
+  // Response schemas are emitted and name the real document shapes.
+  for (const name of ["PublicReceipt", "PublicReceiptList", "PublicRoomPage", "PublicRoomProof", "PublicRoomDirectory"]) {
+    assert.ok(doc.components.schemas[name], `served spec carries the ${name} schema`);
+  }
+  assert.equal(doc.paths["/api/public/receipts"].get.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/PublicReceiptList");
+  assert.equal(doc.paths["/receipts"].get.responses["200"].content["text/html"].schema.type, "string");
+  assert.equal(doc.paths["/receipts/{receiptId}.json"].get.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/PublicReceipt");
+  // Live reads: the inventoried routes are served with the documented types.
+  const list = await get(origin, "/api/public/receipts");
+  assert.equal(list.status, 200, "GET /api/public/receipts is served");
+  const listBody = await list.json();
+  assert.equal(listBody.schema, "project-room-public-receipt-list/1");
+  assert.ok(Array.isArray(listBody.receipts) && "nextCursor" in listBody);
+  const head = await fetch(`${origin}/api/public/receipts`, { method: "HEAD", headers: { Origin: origin } });
+  assert.equal(head.status, 200, "HEAD /api/public/receipts is served");
+  assert.equal(await head.text(), "", "HEAD answers no body");
+  const html = await get(origin, "/receipts");
+  assert.equal(html.status, 200, "GET /receipts is served");
+  assert.match(html.headers.get("content-type"), /text\/html/);
+  const directory = await get(origin, "/api/public/rooms/directory");
+  assert.equal(directory.status, 200, "GET /api/public/rooms/directory is served");
+  const directoryBody = await directory.json();
+  assert.ok(Array.isArray(directoryBody.rooms) && "nextCursor" in directoryBody);
+  const agents = await get(origin, "/agents");
+  assert.equal(agents.status, 200, "GET /agents is served");
+  assert.match(agents.headers.get("content-type"), /text\/html/);
+  // Templated reads answer their real 404 (not the unknown-route fallthrough
+  // for a *missing* route — these ids match the handlers' own patterns).
+  const missingReceipt = await get(origin, "/receipts/pwr_0000000000000000.json");
+  assert.equal(missingReceipt.status, 404, "GET /receipts/{id}.json 404s for an unknown receipt");
+  const missingRoom = await get(origin, "/r/no-such-room-3700.json");
+  assert.equal(missingRoom.status, 404, "GET /r/{slug}.json 404s for an unknown room");
+  const missingProof = await get(origin, "/r/no-such-room-3700/proof.json");
+  assert.equal(missingProof.status, 404, "GET /r/{slug}/proof.json 404s for an unknown room");
 });
