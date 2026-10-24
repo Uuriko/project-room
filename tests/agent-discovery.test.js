@@ -666,6 +666,19 @@ test("anonymous MCP catalog is seven tools (four join + two public-work + identi
   assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
 });
 
+test("front-door packets scope the query-parameter rule and name the MCP catalogs distinctly (#3634)", () => {
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!packet.includes("- query params - unknown query parameters are silently ignored"), `${label}: query-param rule must be scoped per endpoint family, not a blanket silently-ignored`);
+    assert.ok(packet.includes("- query params - there is no single global rule"), `${label}: query-param bullet must state the per-family rule`);
+    assert.ok(packet.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), `${label}: the strict public-work list rule must be stated`);
+    assert.ok(packet.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), `${label}: the lenient family must be stated as the scoped case`);
+    assert.ok(!packet.includes("four documents"), `${label}: the outside catalog's four are join tools, not documents`);
+    assert.ok(!packet.includes("about 22"), `${label}: the member core total is exact (22), never about`);
+    assert.ok(packet.includes("public-work catalog by default: 11 tools - the seven public-work tools plus the four join tools"), `${label}: the outside catalog must be named with its exact 11-tool total`);
+    assert.ok(packet.includes("no-credential catalog"), `${label}: the anonymous catalog must be named distinctly from the outside seven`);
+  }
+});
+
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
   const text = llmsTxt();
   // llmstxt.org: H1, then a blockquote summary, before anything else.
