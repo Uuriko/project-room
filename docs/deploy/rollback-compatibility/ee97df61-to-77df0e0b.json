@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "current": {
+    "prod": {
+      "versionId": "2ae701ef-57d6-427a-95a1-5898d5b49d76",
+      "sourceRevision": "ee97df6132c37f8a41cc8925a00792b6bbd26e1d"
+    },
+    "entry": {
+      "versionId": "da0edf74-e2ac-4e2b-a50f-ddde930d4cf2",
+      "sourceRevision": "ee97df6132c37f8a41cc8925a00792b6bbd26e1d"
+    }
+  },
+  "targets": {
+    "prod": {
+      "versionId": "bf533d21-d4cc-4596-86db-4537e662e4e6",
+      "sourceRevision": "77df0e0b7ce777ca0bdfe61bddd7320b0b352c60"
+    },
+    "entry": {
+      "versionId": "5e696acc-769d-44d7-8528-2f978c0f6c46",
+      "sourceRevision": "77df0e0b7ce777ca0bdfe61bddd7320b0b352c60"
+    }
+  },
+  "checks": {
+    "oldCodeNewData": {
+      "result": "passed",
+      "evidence": "https://github.com/Uuriko/project-room/blob/3bda2e64817d32887f79d7d5d8e738446cdf76ff/docs/deploy/rollback-compatibility/evidence-ee97df61-to-77df0e0b.md"
+    },
+    "retainedRuntime": {
+      "result": "passed",
+      "evidence": "https://github.com/Uuriko/project-room/blob/3bda2e64817d32887f79d7d5d8e738446cdf76ff/docs/deploy/rollback-compatibility/evidence-ee97df61-to-77df0e0b.md"
+    },
+    "workerBindings": {
+      "result": "passed",
+      "evidence": "https://github.com/Uuriko/project-room/blob/3bda2e64817d32887f79d7d5d8e738446cdf76ff/docs/deploy/rollback-compatibility/evidence-ee97df61-to-77df0e0b.md"
+    }
+  }
+}
