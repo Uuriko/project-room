@@ -56,7 +56,12 @@ test("isLeaseExpired: only active claims with a lapsed lease expire", () => {
   assert.equal(isLeaseExpired(claimed, T0 + 6 * H), true); // boundary counts as expired
   assert.equal(isLeaseExpired(claimed, T0 + 7 * H), true);
   const started = updateWork(claimed, "quill", { state: "in_progress", now: T0 });
-  assert.equal(isLeaseExpired(started, T0 + 7 * H), true);
+  // RESIZE (#3753 / CN-10, 2026-10-18): a started (in_progress) claim
+  // no longer expires — started work is preserved work product (the
+  // join's 249 destroyed WIP episodes had all entered in_progress).
+  // The boundary/idle assertions above and below are unchanged: a
+  // never-started claim still lapses exactly at its lease time.
+  assert.equal(isLeaseExpired(started, T0 + 7 * H), false);
   const done = updateWork(started, "quill", { state: "done", now: T0 });
   assert.equal(isLeaseExpired(done, T0 + 700 * H), false); // done never expires
   assert.equal(isLeaseExpired({ id: "plain" }, T0 + 700 * H), false); // unclaimed never expires
