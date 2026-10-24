@@ -413,6 +413,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_rooms",
   "public_directory_entries",
   "public_read_model_backfill",
+  // public_publication_cursor: sequence last copied into the public page.
+  // The cron writes it. A missing row means that room is due. Older writers
+  // have no path to it. The id walk does not read it, so a wiped public
+  // page can still be rebuilt.
+  "public_publication_cursor",
   // room_public_receipts_setting: the recorded per-room opt-in/out itself,
   // mirrored by the public read model (#3594). Same class as the four tables
   // above — older writers have no path to it.

@@ -24,6 +24,7 @@ const EMPTY_UNTIL_CRON = new Set([
   // backfill cursor is written by cron. Same exceptions as the recovery audit.
   "public_rooms",
   "public_read_model_backfill",
+  "public_publication_cursor",
   "room_public_receipts_setting",
   "private_update_marks",
   "private_update_commands",

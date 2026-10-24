@@ -11,7 +11,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { START_ROOM_URL } from "../server/room-entry.mjs";
-import { PUBLIC_START_URL, backfillPublicReadModel } from "../server/public-read-model.mjs";
+import { PUBLIC_START_URL, backfillPublicReadModel, publishChangedRooms } from "../server/public-read-model.mjs";
+import { JOBS, jobEnabled } from "../server/jobs.mjs";
 
 const SENTINEL = "SENTINEL-private-9f3a-not-public";
 
@@ -272,6 +273,42 @@ test("opening the store does not backfill, and one batch publishes a bounded set
   const published = JSON.stringify(store.db.prepare("SELECT slug, title, purpose, names_json, tasks_json FROM public_rooms").all());
   assert.equal(published.includes(SENTINEL), false);
   assert.equal(published.includes("room-private"), false);
+});
+
+function drainPublicBackfill(store) {
+  let result = { done: false };
+  for (let step = 0; step < 40 && !result.done; step += 1) result = backfillPublicReadModel(store, { limit: 50 });
+  return result;
+}
+
+test("after the backfill, a quiet pass parses nothing and one write parses that room", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-public-changed-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  for (const id of ["room-a", "room-b", "room-private"]) store.initialize(initialRoom(id));
+  const keyA = store.issueAccessKey("room-a", "owner");
+  command(store, keyA, "room-a", "page-a", "room.public_page_set", { enabled: true });
+  const job = JOBS.find(item => item.name === "public-read-model");
+  assert.equal(drainPublicBackfill(store).done, true);
+  assert.equal(jobEnabled(job, {}, store), false);
+  const quiet = publishChangedRooms(store);
+  assert.deepEqual(quiet, { done: true, rooms: 0, receipts: 0, cards: 0 });
+  const pagesBefore = store.db.prepare("SELECT COUNT(*) AS n FROM public_rooms").get().n;
+  command(store, keyA, "room-a", "note-a", "message.posted", { messageId: "note-a", body: "changed" });
+  assert.equal(jobEnabled(job, {}, store), true);
+  const changed = publishChangedRooms(store);
+  assert.equal(changed.rooms, 1);
+  assert.equal(changed.done, true);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM public_rooms").get().n, pagesBefore);
+  const again = publishChangedRooms(store);
+  assert.equal(again.rooms, 0);
+  assert.equal(jobEnabled(job, {}, store), false);
+  const privateKey = store.issueAccessKey("room-private", "owner");
+  command(store, privateKey, "room-private", "note-p", "message.posted", { messageId: "note-p", body: SENTINEL });
+  const parsed = publishChangedRooms(store);
+  assert.equal(parsed.rooms, 1);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM public_rooms").get().n, pagesBefore);
+  assert.equal(JSON.stringify(store.db.prepare("SELECT slug, title, purpose FROM public_rooms").all()).includes(SENTINEL), false);
 });
 
 const percentile = (samples, p) => {

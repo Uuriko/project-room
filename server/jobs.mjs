@@ -9,7 +9,7 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
-import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { backfillPublicReadModel, publishChangedRooms } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -140,6 +140,15 @@ function backfillPending(store) {
   const row = read(store, "SELECT done FROM public_read_model_backfill WHERE id=1");
   if (!row) return true;
   return Number(row.done) !== 1;
+}
+
+// Quiet when every room's cursor matches its sequence. One indexed lookup.
+function publicationPending(store) {
+  if (backfillPending(store)) return true;
+  return Boolean(read(store, `SELECT 1 AS hit FROM rooms r
+    LEFT JOIN public_publication_cursor c ON c.room_id = r.id
+    WHERE c.room_id IS NULL OR r.sequence > c.sequence
+    LIMIT 1`)?.hit);
 }
 
 function gmailOn(env) {
@@ -507,11 +516,14 @@ export const JOBS = Object.freeze([
     name: "public-read-model",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    enabled(_env, store) { return store ? backfillPending(store) : true; },
-    disabledReason: () => "Public read model backfill is finished",
+    enabled(_env, store) { return store ? publicationPending(store) : true; },
+    disabledReason: () => "No room has changed since its public page was published",
     async run(store, ctx) {
-      if (ctx.room?.backfillPublicReadModel) return ctx.room.backfillPublicReadModel();
-      return backfillPublicReadModel(store, { limit: 20, deadline: ctx.deadline });
+      if (backfillPending(store)) {
+        if (ctx.room?.backfillPublicReadModel) return ctx.room.backfillPublicReadModel();
+        return backfillPublicReadModel(store, { limit: 20, deadline: ctx.deadline });
+      }
+      return publishChangedRooms(store, { limit: 20, deadline: ctx.deadline ?? Infinity });
     }
   }),
   defineJob({

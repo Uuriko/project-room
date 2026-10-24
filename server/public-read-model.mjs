@@ -90,6 +90,22 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
     cursor TEXT,
     done INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS public_publication_cursor (
+    room_id TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL
+  );
+`;
+
+// The cursor table is part of PUBLIC_READ_MODEL_SCHEMA so a database that
+// only has the public tables can still be built. The cascade cannot live
+// there: those callers exec the schema before `rooms` exists, and
+// CREATE TRIGGER ... ON rooms then fails. The store installs this after
+// `rooms` is present. The stamp hashes it, so a warm wake still applies it.
+export const PUBLIC_PUBLICATION_CURSOR_ROOM_GONE = `
+  CREATE TRIGGER IF NOT EXISTS public_publication_cursor_room_gone AFTER DELETE ON rooms
+  BEGIN
+    DELETE FROM public_publication_cursor WHERE room_id=OLD.id;
+  END;
 `;
 
 const hashId = (prefix, roomId, localId) =>
@@ -729,7 +745,9 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
   if (cursor.done) return { done: true, rooms: 0, receipts: 0, cards: 0 };
   const expired = () => Date.now() >= deadline;
   if (cursor.phase === "rooms") {
-    const rows = store.db.prepare("SELECT id, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(cursor.cursor ?? "", cap);
+    const rows = store.db.prepare("SELECT id, sequence, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(cursor.cursor ?? "", cap);
+    const remember = store.db.prepare(`INSERT INTO public_publication_cursor (room_id, sequence) VALUES (?, ?)
+      ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence`);
     let rooms = 0;
     let last = cursor.cursor ?? "";
     for (const row of rows) {
@@ -743,6 +761,11 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
         const state = hydrateWorkItems(store.db, row.id, JSON.parse(row.projection));
         if (state?.room?.id) syncRoomPublication(store, { roomId: state.room.id, state, previous: null, auth: null });
       } catch { /* a corrupt projection is not a public page */ }
+      // The cursor records the sequence we published. A later write bumps
+      // rooms.sequence and the incremental pass picks that room up. The
+      // id walk itself does not consult this cursor, so wiping public_rooms
+      // and restarting the backfill still rebuilds every page.
+      remember.run(row.id, row.sequence);
     }
     if (rows.length < cap) saveCursor(store, "receipts", "", false);
     else saveCursor(store, "rooms", last, false);
@@ -782,6 +805,30 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
   if (rows.length < cap) saveCursor(store, "directory", last, true);
   else saveCursor(store, "directory", last, false);
   return { done: rows.length < cap, rooms: 0, receipts: 0, cards };
+}
+
+// After the one-time id walk, publish only rooms whose sequence moved.
+// A quiet pass reads one index and parses nothing.
+export function publishChangedRooms(store, { limit = PUBLIC_BACKFILL_BATCH, deadline = Infinity } = {}) {
+  const cap = Number.isInteger(limit) && limit > 0 && limit <= 100 ? limit : PUBLIC_BACKFILL_BATCH;
+  const rows = store.db.prepare(`SELECT r.id, r.sequence, r.projection
+    FROM rooms r
+    LEFT JOIN public_publication_cursor c ON c.room_id = r.id
+    WHERE c.room_id IS NULL OR r.sequence > c.sequence
+    ORDER BY r.id LIMIT ?`).all(cap);
+  const remember = store.db.prepare(`INSERT INTO public_publication_cursor (room_id, sequence) VALUES (?, ?)
+    ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence`);
+  let rooms = 0;
+  for (const row of rows) {
+    if (Date.now() >= deadline) return { done: false, rooms, receipts: 0, cards: 0, budgetExceeded: true };
+    rooms += 1;
+    try {
+      const state = hydrateWorkItems(store.db, row.id, JSON.parse(row.projection));
+      if (state?.room?.id) syncRoomPublication(store, { roomId: state.room.id, state, previous: null, auth: null });
+    } catch { /* a corrupt projection is not a public page */ }
+    remember.run(row.id, row.sequence);
+  }
+  return { done: rows.length < cap, rooms, receipts: 0, cards: 0 };
 }
 
 // An unpublished room or receipt stays out of listings, detail reads,
