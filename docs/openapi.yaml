@@ -10996,7 +10996,7 @@ paths:
       security:
         - bearerAuth: []
       responses:
-        '200': { description: "{ subscriptions: [{ subscriptionId, url, events, createdAt }] }" }
+        '200': { description: "{ subscriptions: [{ subscriptionId, url, events, rooms, createdAt }] }. rooms is \"all\" or a room id array." }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
     post:
@@ -11024,13 +11024,20 @@ paths:
         must reject deliveries older than 5 minutes (replay resistance) and
         should deduplicate on deliveryId. Retryable failures (429/5xx)
         back off exponentially (5s doubling, 10m cap) up to 5 attempts, then
-        dead-letter; other 4xx responses are never retried. Room scope: a
-        subscription receives only events from rooms its identity is linked
-        in (identity_links) — a subscription whose identity never joined a
-        room hears nothing from it. Targeted DMs additionally deliver only
-        to the sender's and the addressed member's subscriptions. A pending
-        delivery whose identity is unlinked before dispatch is skipped, not
-        sent.
+        dead-letter; other 4xx responses are never retried. Room scope: pass
+        rooms as room ids this identity is seated in, or "*" for every seated
+        room. Each id must be a room the identity is an active member of
+        (422 room_not_member otherwise). Omit rooms before 2026-11-23 and the
+        subscription receives every seated room; the 201 then includes
+        scope.rooms "all" and a warning. From 2026-11-23, rooms is required
+        (422 rooms_required). A scoped subscription does not receive events
+        from rooms it does not name. Leaving a room removes that room from
+        the subscription; when the list becomes empty the subscription is
+        disabled and kept. A subscription whose identity is not seated in
+        the event's room hears nothing from it. Targeted DMs additionally
+        deliver only to the sender's and the addressed member's
+        subscriptions. A pending delivery whose identity is unlinked before
+        dispatch is skipped, not sent.
       security:
         - bearerAuth: []
       requestBody:
@@ -11044,11 +11051,16 @@ paths:
                 url: { type: string, format: uri, description: 'https only, public hosts only — IP literals, localhost, and private/link-local/reserved ranges are rejected (SSRF guard, 422)' }
                 events: { type: array, items: { type: string }, minItems: 1 }
                 secret: { type: string, description: "optional caller-supplied signing secret" }
+                rooms:
+                  description: 'Room ids, or "*" for every seated room. Optional until 2026-11-23.'
+                  oneOf:
+                    - { type: string, enum: ["*"] }
+                    - { type: array, minItems: 1, maxItems: 50, items: { type: string } }
       responses:
-        '201': { description: "{ subscriptionId, secretRef, url, events, createdAt } — the signing secret is never returned; secretRef is an opaque sentinel" }
+        '201': { description: "{ subscriptionId, secretRef, url, events, rooms, createdAt, scope?, warning? } — the signing secret is never returned; secretRef is an opaque sentinel. rooms is \"all\" or a room id array. scope and warning are present when rooms was omitted during the grace window and the subscription is unscoped." }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
-        '422': { description: invalid_subscription_request }
+        '422': { description: "invalid_subscription_request, room_not_member, or rooms_required" }
         '429': { description: rate_limited }
   /api/agent-webhooks/{subscriptionId}:
     delete:
