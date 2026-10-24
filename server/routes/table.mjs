@@ -31,6 +31,7 @@ import { SQUAD_ROUTES } from "./squads.mjs"; // plan-squads
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_PARITY_NOTE = /^(?:mcp:[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*|exempt:\S.{7,})$/;
+export const ROUTE_PUBLICATION_NOTE = /^(?:gate:public-visibility|open:\S.{7,})$/;
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Every `type` name the route-table schema validator (schemaErrors in
@@ -81,6 +82,12 @@ export function assertRouteRow(row) {
   // thing; "exempt:<reason>" says why there is none. tests/route-parity-notes.test.js
   // requires it on every row not in scripts/route-parity-baseline.json.
   if (row.parity !== undefined && !ROUTE_PARITY_NOTE.test(String(row.parity))) problems.push("parity");
+  // #3674: publication declaration. "gate:public-visibility" says the public
+  // read passes through the one publication gate (server/public-visibility.mjs);
+  // "open:<reason>" says why the surface serves no gated content.
+  // tests/route-publication.test.js requires it on every scope:"public" row;
+  // an undeclared public row is treated as closed there (fail-closed).
+  if (row.publication !== undefined && !ROUTE_PUBLICATION_NOTE.test(String(row.publication))) problems.push("publication");
   return problems;
 }
 
