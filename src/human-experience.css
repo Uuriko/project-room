@@ -63,3 +63,9 @@
 #assistant-face .assistant-face-actions > .text-button { margin: 0; min-height: 24px; }
 .human-experience #also-send-label:not([hidden]) { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; }
 .human-experience #also-send-to-channel { width: auto; margin: 0; flex: 0 0 auto; }
+
+.agent-connect-checks { list-style: none; margin: var(--space-3) 0; padding: 0; display: grid; gap: var(--space-2); }
+.agent-connect-checks li { min-height: 44px; display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.agent-connect-checks li[data-done="true"] { color: var(--text); }
+#agent-connect-snippet { width: 100%; min-height: 8rem; font: inherit; }
+#agent-copy-snippet { min-height: 44px; }

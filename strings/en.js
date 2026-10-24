@@ -543,5 +543,12 @@ export default {
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "connect.snippet.copied": "Copied the snippet.",
+  "connect.check.connected": "Connected",
+  "connect.check.read": "Read",
+  "connect.check.post": "First post",
+  "connect.check.done": "Done",
+  "connect.check.waiting": "Waiting",
+  "connect.check.line": "{label} · {state}"
 };

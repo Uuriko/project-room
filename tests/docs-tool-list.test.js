@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
 import { CORE_MCP_TOOLS } from "../src/room-mcp-join.js";
-import { llmsTxt } from "../server/agent-discovery.mjs";
+import { llmsFullTxt } from "../server/agent-discovery.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(join(root, rel), "utf8");
@@ -51,14 +51,14 @@ function assertSetEqual(actual, expected, label) {
   assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, label);
 }
 
-test("llms.txt core-set enumerations match the live core profile", () => {
-  const text = llmsTxt();
+test("llms-full.txt core-set enumerations match the live core profile", () => {
+  const text = llmsFullTxt();
   const lists = [];
   for (const m of text.matchAll(/(?:essential tools|compact core set)[ —:\-]+(.+?)(?: — plus|\.\s)/gs)) {
     lists.push(toolTokens(m[1]));
   }
-  assert.ok(lists.length > 0, "llms.txt enumerates the core set at least once");
-  for (const list of lists) assertSetEqual(list, core, "llms.txt core set == live CORE_MCP_TOOLS");
+  assert.ok(lists.length > 0, "llms-full.txt enumerates the core set at least once");
+  for (const list of lists) assertSetEqual(list, core, "llms-full.txt core set == live CORE_MCP_TOOLS");
 });
 
 test("tools.md core-set sentence matches the live core profile", () => {
