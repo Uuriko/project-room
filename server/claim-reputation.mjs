@@ -30,7 +30,10 @@
 //                                            HOARDING_CAP open claims, an
 //                                            immediate claim_hoarded (-4))
 //   state_changed to done                    -> claim_completed (+3)
-//   released (clean owner release)           -> claim_released (+1)
+//   released (clean owner release)           -> claim_released (+1, first
+//                                            paid release per lane+claim
+//                                            only — #3308 farming guard;
+//                                            repeat releases score 0)
 //   lease_expired                            -> claim_flaked (-6, existing
 //                                            weight) to the previous owner
 //   reviewed with verdict changes_requested  -> claim_judged_bad (-10)
@@ -74,7 +77,7 @@ export const HOARDING_CAP = 5;
 // tracker's signal vocabulary; signalTyped throws on unknown types).
 export const CLAIM_REPUTATION_SIGNAL_TYPES = Object.freeze([
   "claim_completed",  // +3: claimed work finished and marked done
-  "claim_released",   // +1: owner released cleanly before expiry (correct behavior)
+  "claim_released",   // +1: owner released cleanly before expiry (correct behavior); first paid release per lane+claim only (#3308)
   "claim_flaked",     // -6: existing weight, lease expiry (observable flake)
   "claim_judged_bad", // -10: review verdict changes_requested (judged bad work)
   "claim_hoarded"     // -4: claim opened while the lane held >= HOARDING_CAP open
@@ -113,6 +116,9 @@ function foldClaims(rows) {
   const settled = new Map(); // claimId -> true (a full lifecycle closed; a later
                              //  claim action re-opens a fresh lifecycle instead
                              //  of staying invisible behind `seen`)
+  const paidReleases = new Set(); // `${agent}\n${claimId}` — (lane, claim) pairs
+                             //  whose first release already paid claim_released
+                             //  (#3308 guard: repeat releases score 0)
   const laneOpen = new Map(); // agentId -> open-claim count at the fold frontier
   const inc = agent => laneOpen.set(agent, (laneOpen.get(agent) ?? 0) + 1);
   const dec = agent => {
@@ -138,6 +144,20 @@ function foldClaims(rows) {
       claimId, seq: row.seq, at: row.atMs, agent, type,
       weight: BOUNTY_SIGNAL_WEIGHTS[type]
     }));
+  };
+  // claim_released pays only the FIRST paid release per (lane, claim) pair
+  // across the whole folded history (#3308): claim -> release -> re-claim ->
+  // release cycling of one item by one lane costs nothing, so without this
+  // guard each cycle farmed +1 standing (~40 cycles reached the trusted
+  // band). paidReleases is fold state only — a pure function of the rows —
+  // so replay stays deterministic and nothing new is persisted. Returns
+  // true when the signal was emitted (the release paid).
+  const emitRelease = (claimId, row, agent) => {
+    const key = `${agent}\n${claimId}`;
+    if (paidReleases.has(key)) return false;
+    paidReleases.add(key);
+    emit(claimId, row, agent, "claim_released");
+    return true;
   };
 
   for (const row of rows) {
@@ -190,13 +210,15 @@ function foldClaims(rows) {
         break;
       }
       case "released": {
-        if (position) { emit(claimId, row, position, "claim_released"); closePosition(claimId); }
+        // The position closes either way; only the first paid release per
+        // (lane, claim) emits the +1 (#3308 guard, see emitRelease).
+        if (position) { emitRelease(claimId, row, position); closePosition(claimId); }
         else if (!observed) {
           // Mid-history release of a claim we never saw open: price it once,
           // then close the unseen lifecycle so a later claimed/reassigned
           // opens a fresh position (RC-2026-10-05-156 residual).
           const who = laneOf(data.ownerId);
-          if (who) emit(claimId, row, who, "claim_released");
+          if (who) { if (!emitRelease(claimId, row, who)) seen.set(claimId, true); }
           else seen.set(claimId, true);
           closePosition(claimId);
         }
