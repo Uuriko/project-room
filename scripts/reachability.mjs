@@ -47,6 +47,9 @@ export const KEEP = [
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
   "src/seed.js",
+  // Shared append journal. Callers still import the per-kind modules until
+  // the migration PR; this file is the implementation those modules move to.
+  "server/journal.mjs",
   // Build-time-only data module: imported by scripts/build-capabilities.mjs,
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
