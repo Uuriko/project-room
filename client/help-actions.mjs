@@ -2,6 +2,7 @@ import { validId } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
@@ -22,10 +23,10 @@ const actions = new Map(definitions.map(([name, status, title, description, extr
   const properties = { ...common, ...(status ? { expectedOfferRevision: revision, reason: text } : {}), ...extra };
   return [name, { status, type: status ? HELP_OFFER_UPDATED : HELP_OFFER_OPENED,
     tool: { name, title, description: description + " Keep the exact input and requestId after an unknown result. Read current offers after a receipt; receipts describe the original operation, not current selection.",
-      inputSchema: { type: "object", properties, required: Object.keys(properties), additionalProperties: false },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
+      inputSchema: { type: "object", properties, required: Object.keys(properties), additionalProperties: false } } }];
 }));
-export const helpTools = [...actions.values()].map(action => action.tool);
+// Titles/annotations are attached from src/mcp-tool-annotations.mjs only (COMP-DEEP #4).
+export const helpTools = [...actions.values()].map(action => annotateMcpTool(action.tool));
 export const isHelpTool = name => actions.has(name);
 
 function commandData(action, args) {

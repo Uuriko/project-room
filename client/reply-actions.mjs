@@ -5,6 +5,7 @@ import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -31,9 +32,10 @@ const definitions = [
     { requestId: id, requestMessageId: id, expectedRequestRevision: revision, reason: text }]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>
-  [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false },
-    annotations: { readOnlyHint: route !== null, destructiveHint: route === null, idempotentHint: true, openWorldHint: false } } }]));
-export const replyTools = [...actions.values()].map(action => action.tool);
+  [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false } } }]));
+// Titles/annotations are attached from src/mcp-tool-annotations.mjs only
+// (COMP-DEEP #4): routed reads and command writes used to share one stamp.
+export const replyTools = [...actions.values()].map(action => annotateMcpTool(action.tool));
 export const isReplyTool = name => actions.has(name);
 export const replyRoute = name => actions.get(name)?.route;
 export function validReplyArguments(name, args) {

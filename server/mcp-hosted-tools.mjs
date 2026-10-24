@@ -5,14 +5,20 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_BLURBS } from "../src/room-mcp-join.js";
 import { hostedStdioToolDefinitions } from "./mcp-full-profile.mjs";
+import { annotateMcpTool, mcpToolAnnotation } from "../src/mcp-tool-annotations.mjs";
 import { base64LengthForBytes } from "./room-attachment-bytes.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 
 const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
-const tool = (name, description, inputSchema, readOnlyHint = true) => ({
-  name, description, inputSchema,
-  annotations: { readOnlyHint, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-});
+// Annotations and titles come only from src/mcp-tool-annotations.mjs —
+// there is no template default to inherit (COMP-DEEP #4). The legacy
+// readOnlyHint argument stays as a cross-check against the registry.
+const tool = (name, description, inputSchema, readOnlyHint = true) => {
+  if (mcpToolAnnotation(name).annotations.readOnlyHint !== readOnlyHint) {
+    throw new Error(`MCP tool "${name}": readOnlyHint argument disagrees with src/mcp-tool-annotations.mjs`);
+  }
+  return annotateMcpTool({ name, description, inputSchema });
+};
 const idField = { type: "string", minLength: 1, maxLength: 128 };
 const roomIdField = { ...idField, description: "Room id this identity is linked to." };
 const commandIdField = { ...idField, description: "Client command id. Stable across retries." };

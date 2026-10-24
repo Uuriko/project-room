@@ -175,7 +175,10 @@ const HOSTED_STDIO_WRITE_TOOLS = new Set([
 const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
   "bounty_list", "bounty_read_balances", "bounty_read_history",
 ]);
-function hostedStdioWriteTool(name) {
+// Exported for the annotation truth gate (tests/mcp-annotation-truth.test.js):
+// this classifier is derived from the dispatch families, not from the
+// annotations, so the gate can cross-check the two against each other.
+export function hostedStdioWriteTool(name) {
   if (HOSTED_STDIO_WRITE_TOOLS.has(name)) return true;
   if (isHelpTool(name)) return true;
   if (isWorkTool(name)) return true;

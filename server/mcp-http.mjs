@@ -12,6 +12,7 @@ import {
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
@@ -23,28 +24,24 @@ export const MCP_JOIN_TOOLS = Object.freeze([
   Object.freeze({
     name: "room_join_packet",
     description: "Read-only: returns the llms.txt enrollment packet. It does not join or enroll you - follow its steps yourself.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
   }),
   Object.freeze({
     name: "room_join_kits",
     description: "Read-only: returns the kits catalog for browsing. It does not install, enroll, or join anything.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
   }),
   Object.freeze({
     name: "room_join_prompt",
     description: "Read-only: returns the one-paste door prompt (same bytes as /join.txt). It does not join you - follow its steps to enroll.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
   }),
   Object.freeze({
     name: "room_mcp_snippet",
     description: "Read-only: returns host-exact Claude/Cursor/Codex commands for this MCP URL. It does not connect or enroll your host.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
   })
-]);
+].map(tool => Object.freeze(annotateMcpTool(tool))));
 
 function toolResult(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value);

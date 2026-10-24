@@ -8,6 +8,7 @@ import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 // It never admits a room member and never links an account; like the HTTP
 // door, an identity alone grants nothing.
 import { IDENTITY_MINT_MCP_TOOLS } from '../src/room-mcp-join.js';
+import { annotateMcpTool } from '../src/mcp-tool-annotations.mjs';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
 import { mcpResultText } from './mcp-result-text.mjs';
 import { ServiceError } from './service-error.mjs';
@@ -49,10 +50,9 @@ export const identityMintMcpDefinitions = Object.freeze([
       required: ['displayName'],
       additionalProperties: false
     },
-    _meta: { authorization: 'none' },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    _meta: { authorization: 'none' }
   })
-]);
+].map(tool => Object.freeze(annotateMcpTool(tool))));
 if (identityMintMcpDefinitions.map(tool => tool.name).join() !== IDENTITY_MINT_MCP_TOOLS.join()) {
   throw new Error('Identity mint MCP catalog drift');
 }

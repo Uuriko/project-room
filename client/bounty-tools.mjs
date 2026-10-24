@@ -21,14 +21,22 @@
 //
 // Credits are valueless ledger units: no cash-out, no chain touch, no money.
 // Pure definitions plus argument validation; no I/O, no dependencies.
+import { annotateMcpTool, mcpToolAnnotation } from "../src/mcp-tool-annotations.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties = {}, required = []) =>
   ({ type: "object", properties, required, additionalProperties: false });
-const tool = (name, description, inputSchema, readOnlyHint = true) => ({
-  name, description, inputSchema,
-  annotations: { readOnlyHint, destructiveHint: false, idempotentHint: readOnlyHint, openWorldHint: false }
-});
+// Annotations and titles come only from src/mcp-tool-annotations.mjs
+// (COMP-DEEP #4). This family's entries keep the values this factory used
+// to compute — idempotentHint tracks readOnlyHint there because the
+// optional idempotencyKey makes keyless writes execute every time. The
+// legacy readOnlyHint argument stays as a cross-check against the registry.
+const tool = (name, description, inputSchema, readOnlyHint = true) => {
+  if (mcpToolAnnotation(name).annotations.readOnlyHint !== readOnlyHint) {
+    throw new Error(`MCP tool "${name}": readOnlyHint argument disagrees with src/mcp-tool-annotations.mjs`);
+  }
+  return annotateMcpTool({ name, description, inputSchema });
+};
 
 export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in-review", "paid", "cancelled"]);
 
