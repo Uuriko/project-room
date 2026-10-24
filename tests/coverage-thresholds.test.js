@@ -25,14 +25,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  checkCoverageManifests,
   checkThresholds,
   coverableLines,
   coveredLinesForPayload,
   evaluateModules,
   groupFunctionsByUrl,
   lineCoverage,
+  listCoveragePayloadFiles,
   listModuleFiles,
   loadConfig,
+  readCoverageManifests,
   readCoveragePayloads,
   subtractIntervals,
 } from "../scripts/coverage-thresholds.mjs";
@@ -318,6 +321,142 @@ test("real V8: split-process coverage equals single-process coverage", () => {
     // All six lines of target.mjs are coverable and at least the taken
     // branches are covered in both modes.
     assert.ok(covTogether.size >= 4, `expected >=4 lines, got ${covTogether.size}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- T-1: coverage from the unit shards (shard collection + --evaluate) ---
+
+const shardManifest = (index, overrides = {}) => ({
+  kind: "unit-shard-coverage",
+  index,
+  total: 3,
+  files: [`tests/shard-${index}.test.js`],
+  planHash: "plan-a",
+  status: 0,
+  signal: null,
+  payloadCount: 4,
+  revision: "rev-a",
+  runId: "run-a",
+  runAttempt: "1",
+  ...overrides,
+});
+
+test("listCoveragePayloadFiles finds payloads recursively and ignores other evidence files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cov-gate-shards-"));
+  try {
+    mkdirSync(join(dir, "coverage-shard-1-of-3"), { recursive: true });
+    mkdirSync(join(dir, "coverage-shard-2-of-3"), { recursive: true });
+    writeFileSync(join(dir, "coverage-shard-1-of-3", "coverage-111.json"), "{}");
+    writeFileSync(join(dir, "coverage-shard-2-of-3", "coverage-222.json"), "{}");
+    writeFileSync(join(dir, "coverage-shard-1-of-3", "coverage-manifest.json"), "{}");
+    writeFileSync(join(dir, "unit-shard-1-of-3-attempt-1.json"), "{}");
+    writeFileSync(join(dir, "unit-junit-1-of-3-attempt-1.xml"), "<xml/>");
+    const files = listCoveragePayloadFiles(dir);
+    assert.deepEqual(
+      files.map(f => f.split("/").slice(-2).join("/")),
+      ["coverage-shard-1-of-3/coverage-111.json", "coverage-shard-2-of-3/coverage-222.json"]
+    );
+    assert.deepEqual(listCoveragePayloadFiles(join(dir, "missing")), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("checkCoverageManifests: empty set keeps the legacy no-manifest behaviour", () => {
+  assert.deepEqual(checkCoverageManifests([]), { ok: true, errors: [] });
+});
+
+test("checkCoverageManifests: a complete, agreeing, successful set passes", () => {
+  const check = checkCoverageManifests([shardManifest(1), shardManifest(2), shardManifest(3)]);
+  assert.deepEqual(check, { ok: true, errors: [] });
+});
+
+test("checkCoverageManifests: missing, duplicate, failed, empty, or stale shards fail closed", () => {
+  const missing = checkCoverageManifests([shardManifest(1), shardManifest(3)]);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.errors.some(e => e.includes("missing coverage manifest for shard 2/3")));
+
+  const duplicate = checkCoverageManifests([shardManifest(1), shardManifest(1), shardManifest(2), shardManifest(3)]);
+  assert.equal(duplicate.ok, false);
+  assert.ok(duplicate.errors.some(e => e.includes("duplicate coverage manifest for shard 1/3")));
+
+  const failed = checkCoverageManifests([shardManifest(1), shardManifest(2, { status: 1 }), shardManifest(3)]);
+  assert.equal(failed.ok, false);
+  assert.ok(failed.errors.some(e => e.includes("did not succeed")));
+
+  const empty = checkCoverageManifests([shardManifest(1), shardManifest(2, { payloadCount: 0 }), shardManifest(3)]);
+  assert.equal(empty.ok, false);
+  assert.ok(empty.errors.some(e => e.includes("no coverage payloads")));
+
+  const stale = checkCoverageManifests([shardManifest(1), shardManifest(2, { planHash: "plan-b" }), shardManifest(3)]);
+  assert.equal(stale.ok, false);
+  assert.ok(stale.errors.some(e => e.includes("planHash disagrees")));
+
+  const garbage = checkCoverageManifests([null]);
+  assert.equal(garbage.ok, false);
+});
+
+test("readCoverageManifests parses manifests nested under an artefact root", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cov-gate-manifests-"));
+  try {
+    mkdirSync(join(dir, "coverage-shard-1-of-3"), { recursive: true });
+    writeFileSync(
+      join(dir, "coverage-shard-1-of-3", "coverage-manifest.json"),
+      JSON.stringify(shardManifest(1))
+    );
+    const manifests = readCoverageManifests([dir]);
+    assert.equal(manifests.length, 1);
+    assert.equal(manifests[0].index, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--evaluate CLI: merges shard dirs and applies the same threshold verdicts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cov-gate-cli-"));
+  const script = new URL("../scripts/coverage-thresholds.mjs", import.meta.url).pathname;
+  try {
+    const shardA = join(dir, "shard-a");
+    const shardB = join(dir, "shard-b");
+    mkdirSync(shardA, { recursive: true });
+    mkdirSync(shardB, { recursive: true });
+    // Payloads parse but cover nothing: every module measures 0%.
+    writeFileSync(join(shardA, "coverage-1.json"), JSON.stringify({ result: [] }));
+    writeFileSync(join(shardB, "coverage-2.json"), JSON.stringify({ result: [] }));
+    const configFor = threshold => {
+      const p = join(dir, `config-${threshold}.json`);
+      writeFileSync(p, JSON.stringify({ version: 1, modules: { machine: { dir: "machine", threshold } } }));
+      return p;
+    };
+    const run = args =>
+      spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+
+    // Threshold 0: 0% meets it — the merged evaluate passes.
+    const pass = run(["--evaluate", shardA, shardB, "--config", configFor(0)]);
+    assert.equal(pass.status, 0, pass.stderr);
+    assert.match(pass.stdout, /machine/);
+
+    // Threshold 100: the identical merged data breaches — exit 1, not 2.
+    const breach = run(["--evaluate", shardA, shardB, "--config", configFor(100)]);
+    assert.equal(breach.status, 1, breach.stderr);
+    assert.match(breach.stdout, /FAIL/);
+
+    // A shard dir with no payloads is a usage error (exit 2): partial
+    // shard data must never be evaluated as if it were the whole suite.
+    const emptyDir = join(dir, "empty");
+    mkdirSync(emptyDir, { recursive: true });
+    const missing = run(["--evaluate", shardA, emptyDir, "--config", configFor(0)]);
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /no coverage payloads/);
+
+    // Stale manifests (shards from different plans) are a usage error too.
+    writeFileSync(join(shardA, "coverage-manifest.json"), JSON.stringify(shardManifest(1, { total: 2 })));
+    writeFileSync(join(shardB, "coverage-manifest.json"), JSON.stringify(shardManifest(2, { total: 2, planHash: "other" })));
+    const stale = run(["--evaluate", shardA, shardB, "--config", configFor(0)]);
+    assert.equal(stale.status, 2);
+    assert.match(stale.stderr, /planHash disagrees/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
