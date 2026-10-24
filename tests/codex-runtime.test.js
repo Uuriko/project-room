@@ -99,6 +99,31 @@ test("interrupt acknowledgement remains stopping until terminal observation", as
   await assert.rejects(executing, /interrupted/);
   await assert.rejects(host.steer(binding, "later", "No"), /not accepting/);
 });
+test("cancellation before the start response interrupts the original turn once its identity arrives", async t => {
+  const { host, rpc } = setup(t, { complete: false });
+  const request = rpc.request;
+  let releaseStart;
+  const startResponse = new Promise(resolve => { releaseStart = resolve; });
+  rpc.request = async (method, params) => {
+    const result = await request(method, params);
+    if (method === "turn/start") await startResponse;
+    return result;
+  };
+  const controller = new AbortController();
+  const executing = host({ ...input, signal: controller.signal }, { binding });
+  const cancelled = assert.rejects(executing, /cancellation requested/);
+  await waitUntil(() => rpc.calls.some(call => call.method === "turn/start"));
+  controller.abort(); controller.abort();
+  assert.equal(rpc.calls.filter(call => call.method === "turn/interrupt").length, 0);
+  releaseStart();
+  await cancelled;
+  assert.deepEqual(rpc.calls.filter(call => call.method === "turn/interrupt"), [
+    { method: "turn/interrupt", params: { threadId: "thread-one", turnId: "turn-one" } }
+  ]);
+  assert.deepEqual(await host.reconcile(binding), { status: "stopping" });
+  await assert.rejects(host(input, { binding }), /already exists/);
+  assert.equal(rpc.calls.filter(call => call.method === "turn/start").length, 1);
+});
 test("foreign room identity fails before authorization or runtime access", async t => {
   const { host, rpc, authorized } = setup(t);
   await assert.rejects(host(input, { binding: { ...binding, roomId: "foreign" } }), /wrong Room/);
