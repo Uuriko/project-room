@@ -30,6 +30,7 @@ import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases
 import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
+import { experimentalRoutesFrozen, isExperimentalRoute } from "./experimental-routes.mjs";
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
@@ -1241,6 +1242,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // and isolated compatibility fixtures without exposing import/send flows.
       if (!enableDeferredInbox && (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")
         || url.pathname.startsWith("/api/auth/gmail/"))) reject(404, "not_found", "Not found");
+      // Experimental families stay mounted. The freeze flag defaults off.
+      if (experimentalRoutesFrozen() && isExperimentalRoute(url.pathname)) {
+        reject(404, "experimental_route_frozen", "This route is frozen.");
+      }
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
