@@ -102,7 +102,7 @@ For each slice: reproduce → claim paths → fix in isolated branch → meaning
 
 ## Current ownership and exit checklist
 
-This Mac owns the two human-experience source files, two browser-check files, this plan, its docs index link, and candidate manifest regeneration for the first repair slice. Peer retains desktop profile code and host integration; it confirmed it has not edited the UI paths. Wider UI repairs require new exact claims. The native profile window remains a test surface, not a separate autonomous agent process.
+This Mac owns the two human-experience source files, two browser-check files, this plan, its docs index link, candidate manifest regeneration, and the date-independent claim settlement regression for the first repair slice. Peer retains desktop profile code and host integration; it confirmed it has not edited the UI paths. Wider UI repairs require new exact claims. The native profile window remains a test surface, not a separate autonomous agent process.
 
 Before checkpoint: record checks and candidate commit, link the PR in Room, publish findings through the agent profile, verify the human can read them, cancel the unsubmitted duplicate form, and release claims. Before “Room-only ready”: pass every critical scenario above on both actual laptops with no terminal recovery and Room-native artifacts.
 
@@ -111,3 +111,5 @@ Before checkpoint: record checks and candidate commit, link the PR in Room, publ
 The stale-read regression failed before the fix and passed afterward. Both browser suites pass (41 tests), including 1280px and 390px task discovery and unknown-write preservation. Affected verification passes (161 tests); lint has zero errors and 290 existing warnings. Candidate manifest regenerated with only the two changed UI asset hashes.
 
 Agent desktop update 57aabc75-4dbb-4b2c-a2ae-5c7f4e11fb5d was visibly received in the Default human profile. The unsubmitted duplicate form was cancelled and the human advanced-controls preference restored to its original off state. This verifies communication and delivery of a work update, not deployment of the fixes or an independent human review.
+
+Contract checks pass. The full Node 24 run completed with 11,486 passing, 4 failing and 31 skipped. The settlement failure reproduced in isolation: its fixed October 16 record aged out of the default seven-day board window. The test now explicitly queries completed history; all 9 settlement tests and all 170 final affected tests pass. Three native-agent-setup login tests still time out in isolation; these were reported to the peer host workstream. The full suite is not green and this candidate is not released.
