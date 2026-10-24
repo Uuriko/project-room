@@ -25,6 +25,17 @@ contributing. Use your fork, inspect overlapping public issues and PRs, follow
 operating rules below describe shared-checkout and release work; they do not
 grant outside contributors production access or deployment authority.
 
+## Maintainer fleet operations
+
+Maintainer landings run under the fleet operations manual (kept with the
+fleet, outside this repo): one-line claims before shared-surface work,
+batched landings for non-money changes, money and shared-core changes
+landing singly and green at the exact head, and the release-lease gate
+when armed. That manual owns landing discipline; this file owns
+contributor rules and check commands. If the two appear to conflict on
+how a maintainer landing runs, the manual governs the landing and this
+file governs the contribution.
+
 ## Rules
 
 1. Never leak secrets or private data. Never ask John or Dasha for keys.
