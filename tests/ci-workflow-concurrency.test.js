@@ -227,6 +227,52 @@ test("required merge-gate jobs stay present and the unit suite is one job", () =
   assert.doesNotMatch(coverageIf, /pull_request/);
 });
 
+// The workflow `if` is the boundary GitHub evaluates. Heavy jobs must see
+// ready-to-land on a non-draft pull request, and must still run when the
+// event is not a pull request. pin-gate and review-mechanical stay on every
+// pull-request push, including drafts.
+test("heavy pull-request jobs wait for ready-to-land", () => {
+  const label = "contains(github.event.pull_request.labels.*.name, 'ready-to-land')";
+  const open = (file) => parse(readFileSync(join(WORKFLOWS, file), "utf8"));
+  const expectsLabel = (file, id, cond) => {
+    assert.equal(cond.includes(label), true, `${file} ${id} must wait for ready-to-land`);
+    assert.equal(cond.includes("github.event.pull_request.draft == false"), true, `${file} ${id} must skip drafts`);
+    assert.equal(cond.includes("github.event_name != 'pull_request'"), true, `${file} ${id} must still run off pull_request`);
+  };
+
+  const testWf = open("test.yml");
+  for (const type of ["labeled", "synchronize"]) {
+    assert.equal(testWf.on.pull_request.types.includes(type), true, `test.yml missing ${type}`);
+  }
+  for (const id of ["test", "contract", "lint", "browser", "cloudflare"]) {
+    expectsLabel("test.yml", id, String(testWf.jobs[id].if));
+  }
+  assert.equal(String(testWf.jobs.coverage.if).includes("ready-to-land"), false);
+
+  for (const file of ["schema-gate.yml", "machine.yml", "relay.yml"]) {
+    const wf = open(file);
+    for (const type of ["labeled", "synchronize"]) {
+      assert.equal(wf.on.pull_request.types.includes(type), true, `${file} missing ${type}`);
+    }
+    for (const [id, job] of Object.entries(wf.jobs)) expectsLabel(file, id, String(job.if));
+  }
+
+  const gates = open("pr-gates.yml");
+  for (const type of ["labeled", "synchronize"]) {
+    assert.equal(gates.on.pull_request.types.includes(type), true, `pr-gates.yml missing ${type}`);
+  }
+  expectsLabel("pr-gates.yml", "gates", String(gates.jobs.gates.if));
+  assert.equal(String(gates.jobs["quarantined-tests"].if).includes("ready-to-land"), false);
+
+  for (const file of ["pin-gate.yml", "review-mechanical.yml"]) {
+    const text = readFileSync(join(WORKFLOWS, file), "utf8");
+    const wf = parse(text);
+    assert.equal(text.includes("ready-to-land"), false, `${file} stays on every pull-request push`);
+    assert.equal(wf.on.pull_request.types.includes("synchronize"), true, `${file} must keep synchronize`);
+  }
+  assert.equal(open("pin-gate.yml").jobs["pin-check"].if, undefined);
+});
+
 test("Cloudflare CI runs canonical runtime then browser scripts and preserves failure", t => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
   const step = workflow.jobs.cloudflare.steps.find(item => item.name === "Verify the shared Workers runtime and restart journey");

@@ -4,7 +4,9 @@ on:
   pull_request:
     # ready_for_review starts the heavy jobs after a draft is marked ready.
     # opened/synchronize/reopened are the default pull_request types.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # labeled starts the run when the landing loop adds ready-to-land.
+    # synchronize re-runs it while that label is still on the pull request.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [main]
   merge_group:
@@ -34,12 +36,12 @@ jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
   # immediately. Shards run unless this job explicitly sets browser=false.
   # docs_only is true only when every file is markdown or under docs/.
-  # Drafts skip this job; ready_for_review runs it once the PR is reviewable.
-  # `github.event.pull_request.draft == false` is the draft guard. A non-PR
-  # event has no draft flag, and `null == false` is false in Actions
-  # expressions, so every heavy job also allows non-pull_request events.
+  # Pull-request work waits for the ready-to-land label and a non-draft PR.
+  # Push, schedule, merge_group, and workflow_dispatch have no pull_request
+  # payload; null == false is false in Actions expressions, so those events
+  # are allowed by the event_name guard instead of the label check.
   changes:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -60,7 +62,7 @@ jobs:
     needs: [changes]
     # Drafts skip the job (the check reports once the PR is ready). A docs-only
     # diff still runs the job so the required `contract` check reports success.
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -90,7 +92,7 @@ jobs:
     needs: [changes]
     # A docs-only diff cannot add the refresh marker. Drafts skip it. Push and
     # ready code pull requests still run it.
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.docs_only != 'true'
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -105,7 +107,7 @@ jobs:
           echo "visual refresh marker check passed (ref=$GITHUB_REF)"
   lint:
     needs: [changes]
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -139,7 +141,7 @@ jobs:
   # writes unit-all-*.json for the duration refresh.
   unit:
     needs: [changes]
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.docs_only != 'true'
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -204,7 +206,7 @@ jobs:
     # Skip only when the merge-base diff explicitly does not touch browser
     # paths. A skipped or failed filter, and every main push, still runs shards.
     # Main pushes skip the shards (nightly + PRs still run them).
-    if: always() && !cancelled() && github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+    if: always() && !cancelled() && github.event_name != 'push' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -246,7 +248,7 @@ jobs:
   # the intended matrix was complete: require each exact-run completion receipt.
   browser:
     needs: [changes, browser-shards]
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -288,7 +290,7 @@ jobs:
         run: node scripts/browser-shards-check.mjs browser-evidence
   cloudflare:
     needs: [changes]
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -405,7 +407,7 @@ jobs:
         run: node scripts/coverage-thresholds.mjs
   test:
     needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
-    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

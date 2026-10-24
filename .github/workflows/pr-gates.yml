@@ -17,7 +17,7 @@ name: pr-gates
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
   push:
     branches: [main]
   merge_group:
@@ -37,7 +37,9 @@ concurrency:
 
 jobs:
   gates:
-    if: github.event_name != 'schedule'
+    # Main pushes, merge-group, and manual runs stay. Pull requests run this
+    # job only when ready-to-land is set and the PR is not a draft.
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
