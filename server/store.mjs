@@ -7,6 +7,7 @@ import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
+import { AdverseDecisionPackets, adverseDecisionPacketsSchema } from "./adverse-decision-packets.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
@@ -1140,7 +1141,7 @@ function roomSchemaStamp() {
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema, adverseDecisionPacketsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
@@ -1472,6 +1473,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
+    this.adverseDecisionPackets = new AdverseDecisionPackets(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
@@ -1945,6 +1947,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkReviews.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkReviewsSchema);
       this.publicWorkReviews.verifySchema();
+      this.adverseDecisionPackets.verifySchema({ allowAbsent: true });
+      this.db.exec(adverseDecisionPacketsSchema);
+      this.adverseDecisionPackets.verifySchema();
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();

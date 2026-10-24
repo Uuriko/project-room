@@ -29,6 +29,7 @@
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 
@@ -88,6 +89,8 @@ const runPure = (reject, fn) => {
       if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
     }
+    // #3615: the adverse-decision packet service speaks ServiceError.
+    if (error instanceof ServiceError) reject(error.status, error.code, error.message);
     throw error;
   }
 };
@@ -314,8 +317,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
     return idem(payload, "bounty.claim", 200, () => {
-      const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
-      return { roomId, bounty, receipt };
+      const { bounty, receipt, notice } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+      return { roomId, bounty, receipt, ...(notice ? { notice } : {}) };
     });
   }
   if (escrowRoute === "submit" && req.method === "POST") {
@@ -384,6 +387,23 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     return idem(payload, "bounty.finalize", 200, () => {
       const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
       return { roomId, bounty, action, receipt };
+    });
+  }
+  if (escrowRoute === "decision-packet" && req.method === "GET") {
+    // #3615 (R-4): the affected claimant reads their own adverse-decision
+    // packet — plain-language explanation, factors, agent-participation
+    // disclosure, data relied on, correction path, human-review route.
+    const packet = runPure(reject, () => store.adverseDecisionPackets.forBounty(roomId, caller, bountyId));
+    return json(res, 200, { roomId, packet });
+  }
+  if (escrowRoute === "decision-packet-followup" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["kind", "statement"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{kind: correction|human_review_request, statement, idempotencyKey?}");
+    return idem(payload, "bounty.decision-packet-followup", 201, () => {
+      const followup = runPure(reject, () => store.adverseDecisionPackets.fileBountyFollowup(roomId, caller, bountyId,
+        { kind: payload.kind, statement: payload.statement }));
+      return { roomId, followup };
     });
   }
   if (escrowRoute === "balances" && req.method === "GET") {

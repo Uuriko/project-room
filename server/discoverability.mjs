@@ -96,6 +96,15 @@ const SHARE_LINK_PREVIEW_BODY = Object.freeze({ required: true, content: { "appl
   },
 } } } });
 
+// POST /api/public-work/receipts/{receiptId}/decision-packet/followups (#3615):
+// exact(input, ["kind", "statement"]) in server/adverse-decision-packets.mjs.
+const DECISION_PACKET_FOLLOWUP_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["kind", "statement"], properties: {
+    kind: { type: "string", enum: ["correction", "human_review_request"], description: "correction fixes data the decision relied on (not a dispute; no money moves); human_review_request routes the decision to a human reviewer who was not the original decider." },
+    statement: { type: "string", minLength: 1, maxLength: 2000, description: "What is wrong and what it should say (correction), or why a human should look again (review request)." },
+  },
+} } } });
+
 // POST /api/session: exact(data, ["accessKey"]) in server/http.mjs.
 // QA2 2026-10-04: the served OpenAPI omitted the whole session surface.
 const SESSION_CREATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
@@ -183,6 +192,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/public-work/receipts/{receiptId}/artifact", ["GET", "HEAD"], "none", "Fetch the exact UTF-8 contribution bytes for independent digest checking.", "getPublicWorkArtifact",
     { operationIds: { HEAD: "headPublicWorkArtifact" }, publicWork: "artifact" }),
   route("/api/public-work/receipts/{receiptId}/review", ["GET", "HEAD"], "identity-secret", "Read only your own contribution feedback, without room admission.", "getContributorReview", { operationIds: { HEAD: "headContributorReview" }, publicReview: "contributor" }),
+  route("/api/public-work/receipts/{receiptId}/decision-packet", ["GET", "HEAD"], "identity-secret", "Read your own adverse-decision packet for a rejected or failed-verification contribution: plain-language explanation, principal factors, agent-participation disclosure, data relied on, correction path and human-review route. No room admission.", "getAdverseDecisionPacket", { operationIds: { HEAD: "headAdverseDecisionPacket" } }),
+  route("/api/public-work/receipts/{receiptId}/decision-packet/followups", ["POST"], "identity-secret", "File a correction or a human-review request against your own adverse-decision packet.", "fileAdverseDecisionPacketFollowup", { requestBodies: { POST: DECISION_PACKET_FOLLOWUP_BODY } }),
   route("/api/rooms/{roomId}/public-work/results", ["GET", "HEAD"], "room-member", "Owner-only submitted results, including withdrawn offers.", "listPublicWorkResults", { operationIds: { HEAD: "headPublicWorkResults" }, publicReview: "list" }),
   route("/api/rooms/{roomId}/public-work/receipts/{receiptId}", ["GET", "HEAD"], "room-member", "Owner or currently designated reviewer: inspect exact review revision and authority.", "inspectPublicWorkReview", { operationIds: { HEAD: "headPublicWorkReview" }, publicReview: "inspect" }),
   ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
