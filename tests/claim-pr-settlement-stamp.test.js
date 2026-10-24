@@ -122,7 +122,8 @@ test("the single-claim read and the board list agree on settlement", async t => 
   };
   const call = (route, id) => handleWorkClaims({
     req: { method: "GET" }, res: {},
-    url: new URL("https://room.example/api/rooms/commons/work-claims"),
+    // Settlement is independent of the default seven-day history window.
+    url: new URL("https://room.example/api/rooms/commons/work-claims?state=done"),
     store, roomId: "commons",
     auth: { member: { id: "owner", kind: "human", permissions: ["manage_claims"] } },
     workClaimRoute: route, workClaimId: id, helpers, registry: store.workClaims
