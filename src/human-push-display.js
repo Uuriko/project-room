@@ -5,10 +5,24 @@
 
 const ACTION_TITLES = { approve: "Approve", reject: "Reject", reply: "Reply" };
 
-function countTitle(mention, dm, waiting) {
-  if (dm > 0 && mention === 0) return waiting === 1 ? "Direct message" : "Direct messages";
-  if (mention > 0 && dm === 0) return waiting === 1 ? "Mention" : "Mentions";
-  return "Mentions and DMs";
+function countTitle(mention, dm, decision, waiting) {
+  // One kind waiting: name it (with its singular form). Several: name
+  // them all, so a decision push never renders as a mention — the
+  // classes stay legible apart.
+  const kinds = [
+    mention > 0 ? "mention" : null,
+    dm > 0 ? "dm" : null,
+    decision > 0 ? "decision" : null
+  ].filter(Boolean);
+  if (kinds.length === 0) return "Mentions and DMs";
+  if (kinds.length === 1) {
+    if (kinds[0] === "mention") return waiting === 1 ? "Mention" : "Mentions";
+    if (kinds[0] === "dm") return waiting === 1 ? "Direct message" : "Direct messages";
+    return waiting === 1 ? "Decision needed" : "Decisions needed";
+  }
+  const labels = { mention: "Mentions", dm: "DMs", decision: "Decisions needed" };
+  const parts = kinds.map(kind => labels[kind]);
+  return parts.length === 2 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
 function countBody(waiting) {
@@ -74,12 +88,13 @@ export function notificationFromPush(payload) {
   const counts = payload && typeof payload === "object" ? payload.counts : null;
   const mention = Number.isInteger(counts?.mention) && counts.mention > 0 ? counts.mention : 0;
   const dm = Number.isInteger(counts?.dm) && counts.dm > 0 ? counts.dm : 0;
-  const waiting = mention + dm;
+  const decision = Number.isInteger(counts?.decision) && counts.decision > 0 ? counts.decision : 0;
+  const waiting = mention + dm + decision;
   const roomId = typeof payload?.roomId === "string" && payload.roomId ? payload.roomId : null;
   const url = roomPath(payload?.data?.url) || roomPath(payload?.notification?.navigate_url) || roomPath(payload?.url)
     || (roomId ? `/?room=${encodeURIComponent(roomId)}` : "/");
   const title = shortLabel(payload?.notification?.title) || shortLabel(payload?.title)
-    || richTitle(payload, mention, dm, waiting) || countTitle(mention, dm, waiting);
+    || richTitle(payload, mention, dm, waiting) || countTitle(mention, dm, decision, waiting);
   const body = richBody(payload, mention, dm, waiting) ?? countBody(waiting);
   return {
     title,
