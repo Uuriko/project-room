@@ -2,6 +2,7 @@ import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
+import { isRoomArchived } from "./events.js";
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
@@ -419,7 +420,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     refreshAgentCode();
   }
   function sync() {
-    $("#invite-people-button").hidden = !(canManage() || inRoom());
+    // An archived room is read only: no new invitations (QA 2026-10-20).
+    $("#invite-people-button").hidden = !(canManage() || inRoom()) || Boolean(getState() && isRoomArchived(getState()));
     refreshAgentCode();
     applyKitChrome();
     if (manager.open && kitOnly) {

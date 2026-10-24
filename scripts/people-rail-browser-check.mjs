@@ -90,16 +90,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     await page.locator("#people-panel > summary").click();
   }
   assert.equal(await page.locator("#people-hint, #people-wake-hint").count(), 0, "no repeated onboarding paragraphs in the member list");
+  // QA 2026-10-20 (#4421): Settings no longer carries a Create Room block.
   await openSettings(page);
-  await page.locator("#create-room-details > summary").click();
-  const createCopy = await page.locator("#create-room-details").innerText();
-  // UI calming: the Create Room block was de-jargoned — no API route, secret,
-  // schema, or fragment explanation; it points at ⌘K → Create Room.
-  assert.match(createCopy, /Start your own room/);
-  assert.match(createCopy, /account workspace/);
-  assert.doesNotMatch(createCopy, /POST \/room\/api\/agent-rooms/);
-  assert.doesNotMatch(createCopy, /pri_/);
-  assert.doesNotMatch(createCopy, /share https:\/\/www\.getdasha\.com\/room#room/);
+  assert.equal(await page.locator("#create-room-details").count(), 0);
   mkdirSync("test-results", { recursive: true });
   await closeSettings(page);
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });

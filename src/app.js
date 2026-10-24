@@ -7,13 +7,13 @@ import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
-import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID, memberHistoryVisibility } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, emptyTimelineHtml } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -2468,8 +2468,10 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
-  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false
+    && !isRoomArchived(state) && $("#invite-people-button") && !$("#invite-people-button").hidden);
+  const historyHidden = Boolean(session?.member?.id) && memberHistoryVisibility(state, session.member.id) === "since_join";
+  if (!messages.length && !workEntries.length) list.innerHTML = emptyTimelineHtml({ historyHidden, canInvite: showInvite });
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -4897,7 +4899,6 @@ function roomActionEntries() {
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite", words: "share join link people agents", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-people-button", activate: true },
-    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", always: true },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
@@ -5062,7 +5063,6 @@ function chooseRoomAction(id) {
   if (id === "activity") { closeRoomActions(false); updatesUi?.open("all"); return; }
   if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
-  if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
   if (id === "landing") { openSettings("land-queue-panel"); return; }
   if (id === "permissions") { openSettings("room-permissions"); return; }
   if (id === "settings") { openSettings(); return; }
