@@ -28,6 +28,128 @@ change resource policy, promote a version or grant itself access.
 
 ## Local entry point
 
+### Automatic data inputs
+
+Jobs may declare `dataInputs` beside `input`. The executor materializes these
+before starting recipe code and supplies `ROOM_TASK_DATA`, the path to a JSON
+manifest of named local copies, source provenance, byte counts and SHA-256
+hashes. Existing jobs without data declarations keep their previous behavior.
+The normal local watcher and authenticated Room host use this same path; an
+agent does not need to download or copy each file itself.
+
+The local owner or desktop folder picker registers a folder once with
+`source-register` and this JSON:
+
+```json
+{
+  "id": "project-documents",
+  "root": "/absolute/path/to/selected/folder",
+  "rooms": ["my-room"],
+  "capabilities": ["document-process"],
+  "requesters": []
+}
+```
+
+The root's filesystem identity is pinned. Symlink traversal and paths outside
+that folder are refused. An empty `requesters` list authorizes local jobs only;
+list specific remote requester member IDs to share this source with them.
+Room execution grants are still required separately. `sources` lists grants
+without exposing absolute paths; `source-remove` revokes future reads. Removing
+a source does not erase copies already delivered to an existing run.
+
+Example submission:
+
+```json
+{
+  "room": "my-room",
+  "operation": "process-document-001",
+  "capability": "document-process",
+  "input": {},
+  "dataInputs": [
+    {"name": "report.pdf", "kind": "folder", "sourceId": "project-documents", "path": "reports/latest.pdf"}
+  ]
+}
+```
+
+An optional `sha256` pins expected folder-file contents; otherwise the first
+execution snapshots the current bytes and records their hash. Replaying a
+completed operation does not refetch or rerun. A new operation can use newer
+source bytes. Changing declarations under an existing operation ID is refused.
+
+Room tasks can include the same optional `dataInputs` field in the capability
+task envelope. For an attachment, use
+`{name, kind:"room-file", id:<fileId>, sha256:<expectedHash>}`. The host obtains it
+using its existing authenticated connection. The attachment must be committed
+to this exact request message and uploaded by its requester. A worker's access
+to some other private message does not allow a requester to borrow that access.
+Credentials never enter the recipe environment or input manifest.
+
+The owner-private cache deduplicates verified bytes and evicts least recently
+used cache entries within a budget. Each run receives a separate copy, so cache
+eviction cannot remove its inputs. Current Room file reads return full bytes:
+cache reuse here saves storage, not a claimed reduction in download bandwidth.
+The default limits are 16 MiB per file, 64 MiB per job and 256 MiB cache, up to
+32 inputs. Local policy `dataLimits` can adjust these (file maximum 64 MiB,
+job maximum 1 GiB, cache maximum 4 GiB). Existing Room upload/API limits still
+apply independently. Disk reserve is checked before caching/copying. These are
+input/cache budgets, not retention limits for all historical run directories.
+Failed or mismatched inputs stop before recipe execution and return a durable
+failure; they do not cause an automatic retry of uncertain external effects.
+
+The folder-picker-facing API and CLI are implemented here. Native picker
+wiring, automatic external-service OAuth, background folder ingestion, peer
+transfer and large streaming downloads remain separate integration work.
+
+### Whole-system source and result contract
+
+The complete workflow is: select/connect source → discover authorized changes
+→ pin needed inputs → select execution placement → materialize missing data →
+execute → verify outputs → deliver to the chosen destination → retain/expire.
+The source service remains authoritative. Local caches and indexes are derived
+views, not a new home for every document or conversation.
+
+Extend the existing input contract with adapters in this order:
+
+1. GitHub: exact commit trees and selected issue/PR evidence. Existing
+   repository packages already pin commits. Webhooks signal changes; verify
+   the referenced state and avoid rerunning identical work.
+2. Drive/Docs/Sheets: select specific files/folders, consume change cursors,
+   download blobs or export native documents, record format and version.
+   Detect permission loss, removals and export changes. A notification means
+   inspect the source; it is not itself complete file content.
+3. Slack and mail: explicitly selected threads/attachments or chosen intake
+   rules. Preserve participants and visibility boundaries. Drafting a result
+   and sending it remain distinct operations with existing authorization.
+4. Structured data and artifact storage: bounded read-only queries, consistent
+   snapshots and content-addressed exports. Put expensive scans beside their
+   source and transfer the useful result where possible.
+5. Finder/editor/browser actions: thin clients of these same capabilities,
+   returning a result to the app where work began with a durable Room link.
+
+All adapters need source identity, current authorization, immutable content
+identity where possible, observed version/time, deletion semantics, an
+incremental cursor, resource budgets, and an output destination. Expired change
+cursors require bounded rescan/reconciliation. Input recipes should not receive
+broad connector credentials. Installed Codex connectors are not automatically
+OAuth credentials for the standalone Project Room desktop app.
+
+Write-back must compare the source revision before replacing a document and
+preserve an idempotent operation receipt. Source revocation prevents new work
+and removes derived cached/indexed data according to retention policy; an
+offline machine cannot promise instantaneous revocation. Local-only processing,
+peer sharing and cloud-agent context inclusion are distinct choices.
+
+Human setup should be one source selection with a useful default workflow;
+agents should receive source handles and structured status. Routine authorized
+work should not require repeated approval. The system should report which
+stage needs attention, with a repair action, rather than expose internal setup
+steps as the ordinary user journey.
+
+References: [Drive changes](https://developers.google.com/workspace/drive/api/guides/manage-changes),
+[Drive downloads/exports](https://developers.google.com/workspace/drive/api/guides/manage-downloads),
+[GitHub webhooks](https://docs.github.com/en/webhooks/about-webhooks),
+[Slack events](https://docs.slack.dev/apis/events-api/).
+
 Use `node scripts/room-evolution.mjs --help`. Commands take one JSON file and
 return JSON. The default state directory is
 `~/Library/Application Support/Project Room/evolution`, private to the OS user.
