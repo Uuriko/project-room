@@ -1,6 +1,8 @@
 // Workerd proof that GET /api/operator/export is answered by the Durable
-// Object: 404 when the backup token is unset, 401 or 405 when it is set and
-// the request does not match, NDJSON when the token matches.
+// Object: 404 when the export token is unset, 401 or 405 when it is set and
+// the request does not match, NDJSON when the token matches. TM-2: this
+// door reads ROOM_EXPORT_TOKEN; the split matrix across both doors lives
+// in backup-token-split.check.mjs.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -22,7 +24,7 @@ test("operator export streams NDJSON for the backup token and refuses anything e
     compatibilityDate: "2026-07-30",
     compatibilityFlags: ["nodejs_compat"],
     durableObjects: { ROOM: { className: "ProjectRoom", useSQLite: true } },
-    bindings: { ROOM_ORIGIN: origin, ROOM_BACKUP_TOKEN: backupToken }
+    bindings: { ROOM_ORIGIN: origin, ROOM_EXPORT_TOKEN: backupToken }
   });
   const call = (headers = {}, method = "GET") => mf.dispatchFetch(origin + "/api/operator/export", { method, headers: { "CF-Connecting-IP": "192.0.2.10", ...headers } });
   try {
@@ -39,7 +41,7 @@ test("operator export streams NDJSON for the backup token and refuses anything e
   }
 });
 
-test("operator export is 404 when ROOM_BACKUP_TOKEN is unset", async () => {
+test("operator export is 404 when ROOM_EXPORT_TOKEN is unset", async () => {
   const bundled = await build({
     entryPoints: [fileURLToPath(new URL("./room.mjs", import.meta.url))],
     bundle: true, write: false, format: "esm", platform: "neutral",

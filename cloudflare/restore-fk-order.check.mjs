@@ -59,7 +59,7 @@ for (const messages of [10, 510]) {
         durableObjects: { ROOM: { className: "RestoreProbeRoom", useSQLite: true } },
         durableObjectsPersist: join(directory, "persist"),
         kvNamespaces: ["ROOM_BACKUPS_KV"], kvPersist: join(directory, "kv"),
-        bindings: { ROOM_ORIGIN: origin, ROOM_BACKUP_TOKEN: token },
+        bindings: { ROOM_ORIGIN: origin, ROOM_RESTORE_TOKEN: token },
       };
       mf = new Miniflare(config);
       seed = new RoomStore(join(directory, "seed.sqlite"));
