@@ -54,6 +54,18 @@ test("redeem 422 names the missing field", { timeout: 30000 }, async t => {
   assert.match(body.error?.message ?? "", /missing required field: displayName/);
 });
 
+test("redeem 422 copy names the identity fork (Bearer link vs new identity)", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await post(origin, "/api/agent-invites/redeem", { code: "nope" });
+  assert.equal(res.status, 422);
+  const body = await res.json();
+  assert.equal(body.error?.code, "invalid_invite");
+  assert.match(body.error?.message ?? "", /Authorization: Bearer/,
+    "the 422 teaches that an existing identity's secret can be sent as Bearer");
+  assert.match(body.error?.message ?? "", /identityMinted: true/,
+    "the 422 names the mint-branch signal on the 201");
+});
+
 test("redeem with the documented body shape passes validation to the store", { timeout: 30000 }, async t => {
   const { origin } = await serve(t);
   // Bare {code, displayName}: validation passes, so an unknown code answers
