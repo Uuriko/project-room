@@ -230,6 +230,23 @@ test("authorization scheme is case-insensitive per RFC 7235 (QA 2026-10-03 P1-3)
   assert.equal(await errorCode(await postWithScheme("Basic", "abc")), "unauthenticated");
 });
 
+test("a known identity without room access is 403 no_access; an unknown secret stays 401", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Outside reader");
+  const denied = await get(origin, "/api/rooms/commons/events", agent.secret);
+  assert.equal(denied.status, 403);
+  const deniedBody = await denied.json();
+  assert.equal(deniedBody.error.code, "no_access");
+  assert.equal(deniedBody.error.message, "This identity has no access to this room");
+  const missing = await get(origin, "/api/rooms/no-such-room/events", agent.secret);
+  assert.equal(missing.status, 403);
+  assert.equal((await missing.json()).error.message, deniedBody.error.message);
+  const unknown = await get(origin, "/api/rooms/commons/events", `pri_${"a".repeat(43)}`);
+  assert.equal(unknown.status, 401);
+  assert.equal((await unknown.json()).error.code, "unauthenticated");
+});
+
 test("revoked_at column is backfilled on pre-existing identity tables", async t => {
   const f = createAcceptanceFixture();
   // The fixture's AgentIdentities constructor ran ensureIdentitySecretSchema.
