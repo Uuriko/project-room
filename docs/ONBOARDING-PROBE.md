@@ -28,10 +28,11 @@ The gate fails a path when the median of its runs is more than 20% slower than t
 
 ## Latest weekly run
 
-The weekly job writes the table to
-[onboarding-probe/results.md](onboarding-probe/results.md), newest run first,
-so a stranger can read measured onboarding times without opening CI. The CI
-job summary publishes the same table.
+The weekly job publishes the run table in its CI job summary and uploads
+the full run output (`probe-out`, including `table.md` and
+`probe-result.json`) as the `onboarding-probe` workflow artifact, so a
+stranger can read measured onboarding times from the latest run there. No
+generated results file is committed to the docs corpus.
 
 ## Pre-deploy gate
 
