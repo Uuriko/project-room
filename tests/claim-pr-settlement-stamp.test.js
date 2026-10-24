@@ -111,12 +111,13 @@ test("the board page exposes settlement for every claim shape", () => {
 });
 
 test("the single-claim read and the board list agree on settlement", async t => {
-  const store = new RoomStore(":memory:");
+  // Inject the fixture clock at construction: the board list hides done
+  // claims older than DONE_WINDOW_MS relative to the store clock, so the
+  // list leg must run on the same frozen clock as the fixture, not the
+  // wall clock (which aged this fixture out on 2026-10-23).
+  const store = new RoomStore(":memory:", { now: () => NOW });
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
-  // Pin the route clock to the fixture time: the board list hides done claims
-  // older than DONE_WINDOW_MS, so the real clock would age this fixture out.
-  store.now = () => NOW;
   store.workClaims.set("commons", finishedMerged("read-asserted", 4110));
   const helpers = {
     json: (_res, status, value) => ({ status, value }),
@@ -134,6 +135,7 @@ test("the single-claim read and the board list agree on settlement", async t => 
   assert.equal(read.value.pullRequest.settlement, "asserted");
   const list = await call("list");
   const listed = list.value.claims.find(item => item.id === "read-asserted");
+  assert.ok(listed, "the board list should contain the done claim inside its window");
   assert.equal(listed.pullRequest.settlement, "asserted");
   assert.equal(store.workClaims.get("commons", "read-asserted").pullRequest.settlement, undefined,
     "neither read wrote the derived field back to the stored record");
