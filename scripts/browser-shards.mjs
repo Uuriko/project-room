@@ -82,17 +82,30 @@ export function verifyBrowserShards(plan, receipts, { matrixResult, revision, ru
   // what lets one failed shard be re-run without re-running the whole
   // matrix, and lets a re-run aggregator accept the untouched shards'
   // earlier receipts. runId + revision + planHash still bind every receipt
-  // to this exact run and suite.
-  const attemptNumber = receipt => {
-    const n = Number(receipt?.runAttempt);
-    return Number.isFinite(n) ? n : -1;
+  // to this exact run and suite. Attempt handling mirrors verifyUnitShards
+  // exactly: a receipt's attempt must be a well-formed positive integer,
+  // must not exceed the aggregator's own attempt, and a second receipt for
+  // the same shard+attempt is refused instead of silently dropped.
+  const attemptNumber = value => {
+    if ((typeof value !== "string" && typeof value !== "number")
+      || !/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) {
+      throw new Error("Browser shard receipt has invalid run attempt");
+    }
+    return Number(value);
   };
+  const currentAttempt = attemptNumber(runAttempt);
+  const seen = new Set();
   const latest = new Map();
   for (const receipt of receipts) {
     const index = receipt?.index;
     if (!Number.isInteger(index) || index < 1 || index > SHARD_COUNT) throw new Error("Browser shard receipt has invalid index");
+    const attempt = attemptNumber(receipt.runAttempt);
+    if (attempt > currentAttempt) throw new Error("Browser shard receipt is from a future attempt");
+    const key = `${index}:${attempt}`;
+    if (seen.has(key)) throw new Error("Duplicate browser shard receipt attempt");
+    seen.add(key);
     const current = latest.get(index);
-    if (!current || attemptNumber(receipt) > attemptNumber(current)) latest.set(index, receipt);
+    if (!current || attempt > attemptNumber(current.runAttempt)) latest.set(index, receipt);
   }
   if (latest.size !== SHARD_COUNT) throw new Error("Missing or duplicate browser shard receipts");
   for (const shard of plan.shards) {

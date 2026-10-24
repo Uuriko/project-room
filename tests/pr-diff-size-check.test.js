@@ -82,10 +82,17 @@ test("lockfile and generated files are excluded from the count", () => {
       [800, 200, "client/app.min.js"], // excluded
       [100, 50, "docs/site.js.map"], // excluded
     ]),
-    prBody: "no justification",
+    // 12,150 excluded lines is over the excluded cap (10x threshold), so
+    // this shape now needs — and carries — a real justification (#3913 F5).
+    prBody: [
+      "## Large diff justification:",
+      "This refreshes the lockfile and the generated bundles from one",
+      "dependency update, so they must move together in a single change.",
+    ].join("\n"),
   });
   assert.equal(r.ok, true);
   assert.equal(r.counted, 150);
+  assert.equal(r.excluded, 12150);
 });
 
 test("yarn and pnpm locks are excluded too", () => {

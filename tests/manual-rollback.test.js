@@ -165,6 +165,9 @@ for (const [label, mutate] of [
   ['wrong source pair', f => { f.evidence.targets.prod.sourceRevision = f.currentSha; }],
   ['wrong allocation pair', f => { f.evidence.current.entry.versionId = another; }],
   ['mutable evidence reference', f => { f.evidence.checks.oldCodeNewData.evidence = 'https://github.com/Uuriko/project-room/blob/main/report.md'; }],
+  ['evidence from another repository', f => { f.evidence.checks.workerBindings.evidence = 'https://github.com/SomeoneElse/other-repo/actions/runs/123/attempts/1'; }],
+  ['evidence from a lookalike repository', f => { f.evidence.checks.oldCodeNewData.evidence = 'https://github.com/Uuriko/project-room-fork/actions/runs/123'; }],
+  ['blob evidence at a commit that is not in this repo', f => { f.evidence.checks.retainedRuntime.evidence = `https://github.com/Uuriko/project-room/blob/${'e'.repeat(40)}/report.md`; }],
 ]) test(`equal schemas still refuse ${label} before any mutation`, async t => {
   const f = await fixture(t); mutate(f); await f.commitEvidence();
   const result = await f.attempt();
@@ -181,6 +184,15 @@ test('working-tree-only qualification cannot admit a rollback', async t => {
   f.evidence.current.prod.versionId = prodCurrent;
   writeFileSync(join(f.dir, 'qualification.json'), JSON.stringify(f.evidence));
   assert.equal((await f.attempt()).code, 1);
+  assert.deepEqual(f.rolled(), []);
+});
+
+test('blob evidence pinned to a commit in this repo qualifies', async t => {
+  const f = await fixture(t);
+  f.evidence.checks.oldCodeNewData.evidence = `https://github.com/Uuriko/project-room/blob/${f.oldSha}/server/writer-fence.mjs`;
+  await f.commitEvidence();
+  const result = await f.preflight();
+  assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(f.rolled(), []);
 });
 
