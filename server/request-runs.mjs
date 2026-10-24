@@ -62,7 +62,10 @@ export class RequestRuns {
           || request.revision !== input.expectedRequestRevision || request.contextEventId !== input.contextEventId)
           fail("request_run_changed", "Request changed, paused or closed; inspect the original attempt");
       }
-      if (input.action === "delivered" && request.status !== "answered")
+      // A recorded reply closes the request either way: answered or declined
+      // (the addressed agent's terminal refusal). Both are delivered replies;
+      // neither says whether the task succeeded.
+      if (input.action === "delivered" && !["answered", "declined"].includes(request.status))
         fail("request_run_not_delivered", "The original request has no recorded answer");
       // Intermediate host reports are only meaningful while the request is
       // still open: a cancelled or declined (or already answered) request must
