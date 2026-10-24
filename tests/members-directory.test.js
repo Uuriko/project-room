@@ -31,6 +31,19 @@ const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
 const errorCode = async res => (await res.json()).error?.code;
 
 const SKILL = id => ({ id, name: `Skill ${id}`, description: `Does ${id}.`, tags: ["fixtures"], evidence: ["sha256:".padEnd(71, "ab")] });
+const RESOLVING_HASH = SKILL("seed").evidence[0]; // sha256:abab… — seeded below
+const DANGLING_HASH = `sha256:${"cd".repeat(32)}`; // well-formed, resolves to nothing
+
+// Seed a public receipt whose evidence list carries `hash`, so the hash
+// resolves in the store the directory reads.
+function seedResolvingReceipt(f, hash, id = "wcr_seed00000000000000000000001") {
+  f.store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json,
+     pull_request, merged_at, verification_state, hashes_json, at, start_href)
+    VALUES (?, 'Seeded receipt', 'work-claim', 'commons', 'commons', 'Commons', '[]', '[]',
+     NULL, NULL, 'verified', ?, '2026-10-18T00:00:00.000Z', '/?start=room')`)
+    .run(id, JSON.stringify([hash]));
+}
 
 function setup() {
   const f = createAcceptanceFixture();
@@ -79,8 +92,9 @@ test("publish requires the skills:publish scope", async t => {
   assert.equal(await errorCode(res), "insufficient_scope");
 });
 
-test("publish stores the set, labels unevidenced skills self-declared, replace works", async t => {
+test("publish stores the set: resolving evidence stays attested, unevidenced skills are declared-unconfirmed, replace works", async t => {
   const { f, identity } = setup();
+  seedResolvingReceipt(f, RESOLVING_HASH);
   const origin = await startServer(t, f);
   const key = await issueScopedKey(origin, identity.secret, ["skills:publish"]);
 
@@ -100,7 +114,7 @@ test("publish stores the set, labels unevidenced skills self-declared, replace w
   const card = await cardRes.json();
   assert.ok(Array.isArray(card.skills));
   assert.deepEqual(card.skills.map(s => [s.id, s.declaration]).sort(),
-    [["attested", "attested"], ["declared", "self-declared"]]);
+    [["attested", "attested"], ["declared", "declared-unconfirmed"]]);
 
   // Replace: the second publish is the whole new set.
   const res2 = await post(origin, "/api/agent-skills", { publish: true, skills: [SKILL("only")] }, key);
@@ -148,4 +162,84 @@ test("/skills catalog gains an opted-in members array", async t => {
   await post(origin, "/api/agent-skills", { publish: false, skills: [SKILL("catalog-skill")] }, key);
   const res2 = await (await get(origin, "/skills")).json();
   assert.ok(!res2.members.some(m => m.identityId === identity.identityId));
+});
+
+// DIRECTORY-TRUTH-FIX: "attested" must be earned by resolution. A
+// well-formed hash that resolves to nothing in the store attests
+// nothing (EXP-T4: the production directory's one attested skill was
+// attested by an unresolvable hash).
+test("evidence that resolves to nothing downgrades to declared-unconfirmed", async t => {
+  const { f, identity } = setup();
+  const origin = await startServer(t, f);
+  const key = await issueScopedKey(origin, identity.secret, ["skills:publish"]);
+
+  const res = await post(origin, "/api/agent-skills", {
+    publish: true,
+    skills: [{ id: "ghost", name: "Ghost", description: "Cites a hash that exists nowhere.", evidence: [DANGLING_HASH] }],
+  }, key);
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  assert.deepEqual(out.selfDeclared, ["ghost"]);
+
+  const card = await (await get(origin, `/api/agents/${identity.identityId}/card`)).json();
+  assert.deepEqual(card.skills.map(s => [s.id, s.declaration]), [["ghost", "declared-unconfirmed"]]);
+});
+
+test("mixed evidence — one resolving hash, one dangling — downgrades", async t => {
+  const { f, identity } = setup();
+  seedResolvingReceipt(f, RESOLVING_HASH);
+  const origin = await startServer(t, f);
+  const key = await issueScopedKey(origin, identity.secret, ["skills:publish"]);
+
+  const res = await post(origin, "/api/agent-skills", {
+    publish: true,
+    skills: [{ id: "mixed", name: "Mixed", description: "Half real.", evidence: [RESOLVING_HASH, DANGLING_HASH] }],
+  }, key);
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).selfDeclared, ["mixed"]);
+  const card = await (await get(origin, `/api/agents/${identity.identityId}/card`)).json();
+  assert.deepEqual(card.skills.map(s => [s.id, s.declaration]), [["mixed", "declared-unconfirmed"]]);
+});
+
+test("a stored card claiming attested on dangling evidence downgrades at render, and recovers when the evidence lands", async t => {
+  const { f, identity } = setup();
+  // A legacy row as written before evidence had to resolve.
+  const legacy = [{ id: "legacy", name: "Legacy", description: "Stored earlier.", tags: [], examples: [],
+    inputModes: ["text/plain"], outputModes: ["text/plain"], evidence: [DANGLING_HASH], declaration: "attested" }];
+  f.store.db.prepare(`INSERT INTO agent_skill_cards(identity_id, publish, skills_json, updated_at)
+    VALUES(?, 1, ?, ?) ON CONFLICT(identity_id) DO UPDATE SET publish=1, skills_json=excluded.skills_json`)
+    .run(identity.identityId, JSON.stringify(legacy), Date.now());
+  const origin = await startServer(t, f);
+
+  const before = await (await get(origin, `/api/agents/${identity.identityId}/card`)).json();
+  assert.deepEqual(before.skills.map(s => [s.id, s.declaration]), [["legacy", "declared-unconfirmed"]]);
+
+  // The declaration is re-derived at read, not a stored rewrite: once a
+  // record carrying the hash exists, the same stored row renders attested.
+  seedResolvingReceipt(f, DANGLING_HASH, "wcr_seed00000000000000000000002");
+  const after = await (await get(origin, `/api/agents/${identity.identityId}/card`)).json();
+  assert.deepEqual(after.skills.map(s => [s.id, s.declaration]), [["legacy", "attested"]]);
+});
+
+test("evidence resolves through work-claim blobs and public-work artifact hashes too", async t => {
+  const { f, identity } = setup();
+  const claimHash = `sha256:${"ef".repeat(32)}`;
+  f.store.db.prepare("INSERT INTO work_claims(room_id, claim_id, item_json, updated_at) VALUES('commons', 'claim-seed', ?, ?)")
+    .run(JSON.stringify({ id: "claim-seed", blobs: [claimHash] }), Date.now());
+  const artifactHash = `sha256:${"98".repeat(32)}`;
+  f.store.db.prepare(`INSERT INTO public_work_receipts
+    (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text,
+     artifact_sha256, artifact_bytes, receipt_json, created_at)
+    VALUES('pwr_seed', 'offer-seed', 'commons', 1, ?, 'artifact', ?, 8, '{}', ?)`)
+    .run(identity.identityId, artifactHash.slice("sha256:".length), Date.now());
+
+  const directory = f.store.membersDirectory;
+  const out = directory.setSkills(identity.identityId, { publish: true, skills: [
+    { id: "via-claim", name: "Via claim", description: "Blob evidence.", evidence: [claimHash] },
+    { id: "via-public-work", name: "Via public work", description: "Artifact evidence.", evidence: [artifactHash] },
+  ] });
+  assert.deepEqual(out.selfDeclared, []);
+  const card = directory.publicCard(identity.identityId);
+  assert.deepEqual(card.skills.map(s => [s.id, s.declaration]).sort(),
+    [["via-claim", "attested"], ["via-public-work", "attested"]]);
 });
