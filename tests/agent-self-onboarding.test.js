@@ -104,5 +104,22 @@ test("a duplicate agent room returns the same starter, and starter:false creates
   const opted = await optedResponse.json();
   assert.equal(optedResponse.status, 201, JSON.stringify(opted));
   assert.equal(opted.starter, null);
-  assert.equal(opted.next[0].action, "start-work");
+  for (const steps of [opted.next, opted.nextActions]) {
+    assert.ok(!steps.some(step => ["start-work", "finish-work"].includes(step.action)));
+  }
+  const taskStep = opted.next.find(step => step.action === "create-task");
+  const taskResponse = await fetch(`${origin}${taskStep.path}`, {
+    method: taskStep.method,
+    headers: { "content-type": "application/json", authorization: `Bearer ${minted.secret}` },
+    body: JSON.stringify({ ...taskStep.body, id: "first-real-task", title: "Review a sourced entry" })
+  });
+  assert.equal(taskResponse.status, 201, await taskResponse.text());
+  const replayResponse = await create({ roomId: "agent-plain", title: "Plain", purpose: "No starter.", starter: false });
+  const replay = await replayResponse.json();
+  assert.equal(replayResponse.status, 200);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.starter, null);
+  for (const steps of [replay.next, replay.nextActions]) {
+    assert.ok(!steps.some(step => ["start-work", "finish-work"].includes(step.action)));
+  }
 });

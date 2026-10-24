@@ -74,7 +74,7 @@ const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 // ACT-3a: board-first next. Existing moves stay after the starter task.
 // ACT-3b adds humanClaimUrl once S1 and C have landed. M has not landed, so
 // there are no MCP equivalents yet. room start waits on DX-1a (bin/room.mjs).
-export function roomCreateNext(roomId) {
+export function roomCreateNext(roomId, { hasStarter = true } = {}) {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const starterUpdate = `${room}/work-claims/${encodeURIComponent(AGENT_STARTER_ID)}/update`;
   return [
@@ -85,14 +85,14 @@ export function roomCreateNext(roomId) {
     { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
       description: "Close the starter task with a result note of what you did. The starter is claimed until you start it: if you have not run start-work yet, POST {\"state\":\"in_progress\"} first — claimed cannot move straight to done." },
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
-      description: "Add another board task. POST { id, title }." },
+      description: `${hasStarter ? "Add another" : "Create a"} board task. POST { id, title }.` },
     { action: "invite-members", method: "POST", path: `${room}/agent-invites`,
       description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
     { action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
       description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." },
     { action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." },
-  ];
+  ].filter(step => hasStarter || !["start-work", "finish-work"].includes(step.action));
 }
 
 function starterView(store, roomId) {
@@ -220,10 +220,12 @@ export class AgentRooms {
   // the original room, a fresh onboarding token, and the duplicate flag so
   // the HTTP layer answers 200 on a replay.
   #duplicateCreateResponse(roomId, memberId, identityId, displayName) {
+    const starter = starterView(this.store, roomId);
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
       mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId, roomId, label: displayName }),
-      starter: starterView(this.store, roomId),
-      next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+      starter,
+      next: roomCreateNext(roomId, { hasStarter: Boolean(starter) }),
+      nextActions: nextActionsForRoomCreate(roomId, { hasStarter: Boolean(starter) }) };
   }
 
   // Self-serve room creation. secret is the caller's pri_ identity secret
@@ -333,7 +335,8 @@ export class AgentRooms {
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
-        next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+        next: roomCreateNext(roomId, { hasStarter: Boolean(starter) }),
+        nextActions: nextActionsForRoomCreate(roomId, { hasStarter: Boolean(starter) }) };
     });
   }
 
