@@ -192,11 +192,41 @@ export class RoomDirectory {
   }
 
   // ---- public listing ------------------------------------------------------
-  list({ after = null, limit = DIRECTORY_DEFAULT_LIMIT } = {}) {
+  list({ after = null, limit = DIRECTORY_DEFAULT_LIMIT, q = null } = {}) {
     // An absent or blank limit means the default; a non-numeric one does too.
     const n = limit == null || limit === "" ? NaN : Number(limit);
     const pageSize = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), DIRECTORY_PAGE_LIMIT) : DIRECTORY_DEFAULT_LIMIT;
     if (after != null && (typeof after !== "string" || after.length > 384)) fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
+    // q is a real filter, never a silent no-op (QA-SEARCH-1): a present q
+    // must be a usable search term, and it matches case-insensitively
+    // against the entry's public title, purpose, and kind. Filtering runs
+    // over the built entries (the same fields the searcher sees), then the
+    // room-id cursor and page size apply to the filtered set.
+    let needle = null;
+    if (q != null) {
+      if (typeof q !== "string" || !q.trim() || q.trim().length > 120) fail(422, "invalid_query", "q must be a search term of at most 120 characters");
+      needle = q.trim().toLowerCase();
+    }
+    if (needle != null) {
+      const all = this.db.prepare(`
+        SELECT s.room_id AS roomId, s.listed_at AS listedAt
+        FROM room_directory_settings s
+        JOIN rooms r ON r.id = s.room_id
+        WHERE s.discoverable = 1 AND r.archived_at IS NULL
+        ORDER BY s.room_id ASC`).all();
+      const matched = all.flatMap(row => {
+        const entry = this._publicEntry(row.roomId, row.listedAt);
+        if (!entry) return [];
+        const haystack = [entry.title, entry.purpose, entry.kind];
+        return haystack.some(field => typeof field === "string" && field.toLowerCase().includes(needle)) ? [entry] : [];
+      });
+      const rest = after == null ? matched : matched.filter(entry => entry.roomId > after);
+      const page = rest.slice(0, pageSize);
+      return {
+        rooms: page,
+        nextCursor: rest.length > pageSize ? page[page.length - 1].roomId : null,
+      };
+    }
     const rows = this.db.prepare(`
         SELECT s.room_id AS roomId, s.listed_at AS listedAt
         FROM room_directory_settings s

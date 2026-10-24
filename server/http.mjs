@@ -1941,6 +1941,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.roomDirectory.list({
           after: url.searchParams.get("after"),
           limit: url.searchParams.get("limit"),
+          q: url.searchParams.get("q"),
         }));
       }
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
@@ -2163,6 +2164,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const queried = queryPublicReceipts(store, {
           room: url.searchParams.get("room"),
           agent: url.searchParams.get("agent"),
+          q: url.searchParams.get("q"),
           cursor: url.searchParams.get("cursor"),
           limit: limitRaw == null ? 20 : Number(limitRaw),
         });
