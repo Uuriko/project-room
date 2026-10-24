@@ -96,6 +96,8 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 ## Storage migration
 
+[Simplify, October 2026](design/SIMPLIFY-2026-10.md) is the design for per-job alarms, the store import cycles, the HTTP route table, one shared journal, thin MCP adapters, and one Durable Object per room. It is a design, not an execution queue.
+
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
 
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
