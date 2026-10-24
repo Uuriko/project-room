@@ -158,7 +158,7 @@ test("owner account session reads the full review; removed members are absent", 
   assert.equal(report.agentConnections[0].status, "key_issued");
   assert.equal(report.agentConnections[0].sponsorMemberId, "owner");
   assert.deepEqual(report.agentConnections[0].permissions, ["accept_work", "complete_work"]);
-  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1, membershipDelegations: 0, delegationDecisions: 0 });
+  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1, membershipDelegations: 0, delegationDecisions: 0, ownerDelegations: 0, ownerDelegateDecisions: 0 });
   assert.equal(report.lastActivityAt, [...report.members, ...report.guests].map(m => m.lastActivityAt).filter(Boolean).sort().at(-1));
   // The owner's room key (CLI path) reads the same report.
   const viaKey = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
@@ -346,4 +346,65 @@ test("a review of one identity shows both administration stores, and one revoke 
     "commons"
   ), false);
   assert.throws(() => f.store.delegation.revokeEffective(f.ownerKey, "commons", { identityId }), /No membership-administration authority/);
+});
+
+// #3779: the issue's STEP1–3 probe as acceptance — an owner-delegate-only
+// identity must read as holding owner authority in the review (path, member
+// flag, grants section, count, journal), the combination with a membership
+// delegation must raise the dual-grant hazard, and revoking the membership
+// delegation must leave the owner-delegate path visible, not return the
+// identity to an apparently ordinary member.
+test("owner-delegate grants surface in the review: delegate-only, combined hazard, and after the other grant is revoked", async t => {
+  const f = await fixture(t);
+  const identityId = f.identity.identityId;
+  // STEP1 — owner-delegate grant only.
+  f.store.ownerDelegates.grant(f.ownerKey, "commons", { identityId });
+  const before = assembleAccessReview(f.store, "commons");
+  const row = before.members.find(item => item.memberId === identityId);
+  assert.equal(row.ownerDelegate, true);
+  assert.deepEqual(row.authorityPaths, ["owner_delegate"]);
+  assert.equal(row.dualGrantHazard, false);
+  assert.equal(before.counts.ownerDelegations, 1);
+  assert.equal(before.counts.ownerDelegateDecisions, 1);
+  assert.equal(before.ownerDelegateDecisionsTruncated, false);
+  assert.deepEqual(before.ownerDelegateDecisions.map(item => [item.action, item.identityId, item.actorId]), [["grant", identityId, "owner"]]);
+  const grant = before.ownerDelegations.find(item => item.identityId === identityId);
+  assert.equal(grant.memberId, identityId);
+  assert.equal(grant.grantedBy, "owner");
+  assert.ok(grant.grantedAt && !Number.isNaN(Date.parse(grant.grantedAt)), "the grant carries its timestamp, never a secret");
+  assert.deepEqual(grant.authorityPaths, ["owner_delegate"]);
+  assert.equal(grant.auditSequence, before.ownerDelegateDecisions[0].sequence);
+  const identity = before.agentIdentities.find(item => item.identityId === identityId);
+  assert.deepEqual(identity.authorityPaths, ["owner_delegate"]);
+  assert.match(renderAccessReview(before), /Owner delegations \(1\):/);
+  assert.match(renderAccessReview(before), /Owner delegate decision journal \(1; showing 1 newest\)/);
+  // STEP2 — adding a membership-delegation grant combines into the hazard.
+  f.store.delegation.grant(f.ownerKey, "commons", { identityId });
+  const combined = assembleAccessReview(f.store, "commons");
+  const combinedRow = combined.members.find(item => item.memberId === identityId);
+  assert.deepEqual(combinedRow.authorityPaths, ["owner_delegate", "membership_delegation"]);
+  assert.equal(combinedRow.dualGrantHazard, true);
+  assert.equal(combined.ownerDelegations.find(item => item.identityId === identityId).dualGrantHazard, true);
+  assert.match(renderAccessReview(combined), /\[DUAL-GRANT HAZARD\]/);
+  // STEP3 — revoking the membership delegation leaves the owner-delegate
+  // authority visible in the review (the probe's invisible-authority case).
+  f.store.delegation.revoke(f.ownerKey, "commons", { identityId });
+  const after = assembleAccessReview(f.store, "commons");
+  const next = after.members.find(item => item.memberId === identityId);
+  assert.equal(next.ownerDelegate, true);
+  assert.deepEqual(next.authorityPaths, ["owner_delegate"]);
+  assert.equal(next.dualGrantHazard, false);
+  assert.equal(after.membershipDelegations.length, 0);
+  assert.equal(after.ownerDelegations.length, 1);
+  // Revoking the owner-delegate grant itself removes the path and the
+  // section entry, while the journal keeps both decisions for the record.
+  f.store.ownerDelegates.revoke(f.ownerKey, "commons", { identityId });
+  const revoked = assembleAccessReview(f.store, "commons");
+  const clearedRow = revoked.members.find(item => item.memberId === identityId);
+  assert.equal(clearedRow.ownerDelegate, false);
+  assert.deepEqual(clearedRow.authorityPaths, []);
+  assert.equal(revoked.ownerDelegations.length, 0);
+  assert.equal(revoked.counts.ownerDelegations, 0);
+  assert.equal(revoked.counts.ownerDelegateDecisions, 2);
+  assert.deepEqual(revoked.ownerDelegateDecisions.map(item => item.action), ["revoke", "grant"]);
 });
