@@ -690,7 +690,7 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return finish(maintenanceResponse(request), 'worker');
     // HTML, script, and discovery documents are static. Answering them here
     // keeps a cold or busy Durable Object from blanking the page.
-    const edge = await edgePublicResponse(request, env, url);
+    const edge = await edgePublicResponse(request, env, url, ctx);
     if (edge) return finish(edge, 'edge');
     // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
     // job is stale or failing, so a plain status check catches dead crons.

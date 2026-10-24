@@ -61,7 +61,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
         const path = new URL(request.url).pathname;
         if (path === '/og/fonts/Inter-Regular.ttf') return new Response(wordmarkFont);
         if (path === '/og/fonts/OFL.txt') return new Response(fontLicense);
-        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}' };
+        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}', '/join.html': 'join {{ASSET_BASE}}', '/agent-signin.html': 'signin {{ASSET_BASE}}' };
         if (!bodies[path]) return new Response(null, { status: 404 });
         return new Response(bodies[path]);
       }
@@ -151,6 +151,17 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(fontResponse.headers.get('cache-control'), 'public, max-age=86400');
     assert.equal(page.headers.get('cache-control'), 'no-store');
     assert.equal(page.headers.get('etag'), null);
+    const privacy = await call('/privacy');
+    assert.equal(privacy.status, 200, await privacy.clone().text());
+    assert.equal(privacy.headers.get('x-test-do-fetches'), '0');
+    assert.equal(privacy.headers.get('cache-control'), 'public, max-age=3600');
+    assert.match(await privacy.text(), /<h1>/);
+    const join = await call('/join');
+    assert.equal(join.status, 200, await join.clone().text());
+    assert.equal(join.headers.get('x-test-do-fetches'), '0');
+    assert.equal(await join.text(), 'join ');
+    const enroll = await call('/join', { method: 'POST', ip: '192.0.2.8' });
+    assert.notEqual(enroll.headers.get('x-test-do-fetches'), '0', await enroll.clone().text());
 
     const packet = await call('/llms.txt');
     assert.equal(packet.status, 200);

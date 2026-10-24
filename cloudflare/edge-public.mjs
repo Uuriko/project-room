@@ -9,6 +9,7 @@ import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from 
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
+import { LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml } from '../server/legal-pages.mjs';
 import { randomBytes } from 'node:crypto';
 
 const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -146,16 +147,36 @@ export function classifyEdgePath(pathname) {
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
+  if (hashedAssetFile(pathname)) return 'asset';
   if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
+  if (legalAlias(pathname)) return 'legal-alias';
+  if (LEGAL_SITEMAP_PATHS.includes(pathname)) return 'legal';
+  if (pathname === '/report') return 'report';
+  if (pathname === '/join' || pathname === '/join/' || pathname === '/room/join' || pathname === '/room/join/') return 'join';
+  if (pathname === '/agent-signin' || pathname === '/agent-signin/' || pathname === '/room/agent-signin' || pathname === '/room/agent-signin/') return 'agent-signin';
+  if (/^\/(?:room\/)?rooms\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\/?$/.test(pathname)) return 'room-page';
   return null;
 }
 
 const REVALIDATED_ASSET_TYPES = ['text/javascript', 'text/css', 'image/svg+xml', 'application/manifest+json'];
-export function assetCachePolicy(type) {
+const HASHED_ASSET = /^\/a\/[A-Za-z0-9._-]{8,128}\.(js|css)$/;
+// Content-hashed bundles keep their name for the life of those bytes.
+export function hashedAssetFile(pathname) {
+  const bare = pathname.startsWith('/room/') ? pathname.slice('/room'.length) : pathname;
+  return HASHED_ASSET.test(bare) ? bare.slice(1) : null;
+}
+export function assetCachePolicy(type, pathname = '') {
+  if (hashedAssetFile(pathname)) return 'public, max-age=31536000, immutable';
   const base = String(type).split(';')[0].trim();
   if ((base.startsWith('image/') && base !== 'image/svg+xml') || base.startsWith('font/')) return 'public, max-age=86400';
   if (REVALIDATED_ASSET_TYPES.includes(base)) return 'no-cache';
   return null;
+}
+const STATIC_PAGE_CACHE = 'public, max-age=300';
+function legalAlias(pathname) {
+  if (!pathname.startsWith('/room/')) return null;
+  const rest = pathname.slice('/room'.length);
+  return LEGAL_SITEMAP_PATHS.includes(rest) || rest === '/report' ? rest : null;
 }
 const assetEtags = new WeakMap();
 async function assetEtag(bytes) {
@@ -234,6 +255,21 @@ function discoveryResponse(request, url) {
 
 async function assetResponse(request, env, url) {
   const headers = baseHeaders(url);
+  const hashed = hashedAssetFile(url.pathname);
+  if (hashed) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(headers, 'GET, HEAD');
+    const bytes = await loadCachedAsset(env, hashed);
+    if (!bytes) {
+      headers.set('Content-Type', 'text/plain; charset=utf-8');
+      return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
+    }
+    const type = hashed.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8';
+    headers.set('Content-Type', type);
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('Content-Length', String(bytes.byteLength));
+    headers.set('X-Robots-Tag', 'noindex, nofollow');
+    return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+  }
   const servedPath = roomMarketingPath(url.pathname) ?? url.pathname;
   const canonical = publicSearchCanonical(servedPath, publicAssetPaths);
   const canonicalTarget = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : null;
@@ -273,7 +309,7 @@ async function assetResponse(request, env, url) {
   // same one-day cache the Node server gives them. Scripts, styles and SVG
   // keep unhashed names, so they revalidate on every load (no-cache) against a
   // content ETag and an unchanged file costs a 304. HTML stays no-store.
-  const policy = assetCachePolicy(type);
+  const policy = assetCachePolicy(type, servedPath);
   if (policy) {
     headers.set('Cache-Control', policy);
     const etag = await assetEtag(bytes);
@@ -287,14 +323,82 @@ async function assetResponse(request, env, url) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
+function htmlResponse(request, url, body, { cacheControl, csp, robots = 'all', canonical = null }) {
+  const headers = baseHeaders(url);
+  headers.set('Cache-Control', cacheControl);
+  headers.set('X-Robots-Tag', robots);
+  if (csp) headers.set('Content-Security-Policy', csp);
+  if (canonical) headers.set('Link', `<${ROOM_ORIGIN}${canonical}>; rel="canonical"`);
+  const bytes = new TextEncoder().encode(body);
+  headers.set('Content-Type', 'text/html; charset=utf-8');
+  headers.set('Content-Length', String(bytes.byteLength));
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+}
+
+// Legal and report HTML are pure documents. Caching them in the colo keeps a
+// repeat request off the renderer; the first request still never enters the
+// Durable Object.
+async function cachedDocument(request, url, response, ctx) {
+  const cache = globalThis.caches?.default;
+  if (!cache || request.method !== 'GET' || !response.ok) return response;
+  const key = new Request(new URL(url.pathname, url.origin), { method: 'GET' });
+  const put = cache.put(key, response.clone()).catch(() => {});
+  if (ctx?.waitUntil) ctx.waitUntil(put);
+  return response;
+}
+
+async function readCachedDocument(request, url) {
+  const cache = globalThis.caches?.default;
+  if (!cache || request.method !== 'GET') return null;
+  const key = new Request(new URL(url.pathname, url.origin), { method: 'GET' });
+  return cache.match(key).catch(() => null);
+}
+
+async function staticTemplateResponse(request, env, url, file) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');
+  const bytes = await loadCachedAsset(env, file);
+  if (!bytes) return null;
+  const assetBase = url.pathname.startsWith('/room/') ? '/room' : '';
+  const html = new TextDecoder().decode(bytes).replaceAll('{{ASSET_BASE}}', assetBase);
+  return htmlResponse(request, url, html, { cacheControl: STATIC_PAGE_CACHE, robots: 'noindex, nofollow' });
+}
+
 // Response for a path that must not enter the Durable Object, or null when
 // the request still belongs to the object (health, API, skills members).
-export async function edgePublicResponse(request, env, url) {
+export async function edgePublicResponse(request, env, url, ctx = null) {
   const kind = classifyEdgePath(url.pathname);
   if (!kind) return null;
+  // POST /join is the machine enrollment door. It stays on the Durable Object.
+  if (request.method === 'POST' && (url.pathname === '/join' || url.pathname === '/room/join')) return null;
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
+  if (kind === 'legal-alias') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');
+    const headers = baseHeaders(url);
+    headers.set('Cache-Control', 'public, max-age=3600');
+    headers.set('Location', `${ROOM_ORIGIN}${legalAlias(url.pathname)}${url.search}`);
+    return new Response(null, { status: 301, headers });
+  }
+  if (kind === 'legal' || kind === 'report') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');
+    const hit = await readCachedDocument(request, url);
+    if (hit) return hit;
+    const body = kind === 'legal' ? legalPageHtml(url.pathname) : reportPageHtml();
+    if (!body) return null;
+    const response = htmlResponse(request, url, body, {
+      cacheControl: LEGAL_CACHE_CONTROL,
+      csp: kind === 'legal' ? LEGAL_PAGE_CSP : REPORT_PAGE_CSP,
+      robots: kind === 'legal' ? 'all' : 'noindex',
+      canonical: url.pathname
+    });
+    return cachedDocument(request, url, response, ctx);
+  }
+  if (kind === 'join' || kind === 'agent-signin' || kind === 'room-page') {
+    if (kind === 'room-page' && !acceptPrefersHtml(request.headers.get('accept'))) return null;
+    const file = kind === 'agent-signin' ? 'agent-signin.html' : 'join.html';
+    return staticTemplateResponse(request, env, url, file);
+  }
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
   // method-guarded document) but the edge classified '/' as an asset and
   // answered 405. Decide it once, Node's way: 404 with the standard envelope,
