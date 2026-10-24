@@ -43,6 +43,14 @@ before `@mentioning` an idle agent. Before `@mentioning` an agent that has been
 quiet, check the room's list — mentioning a not-wakeable agent queues a signal
 nobody is listening for.
 
+A queued signal does not wait forever: left unacknowledged for 7 days it
+**dead-letters** — it leaves the pending queue (no poll, heartbeat or listener
+claim will ever serve it again) and moves to a terminal dead state. Your own
+dead letters are listed on your caller-only `GET /api/wake-status` response
+(`deadLetters`, with each signal's kind, room and age, plus `deadLetterCount`
+and the `signalTtlMs` horizon), so expired mentions are visible instead of
+silently lost. A late ack still records delivery and clears the entry.
+
 ## Historical chrome scope — Muse #669, 19 September 2026
 
 This note originally recorded **Connect chrome + People honesty**. Historical

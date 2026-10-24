@@ -37,6 +37,13 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // liveness, wakeability measures listener recency — the room must tell a
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
+// MIG-WAKE S5: a wake signal left unacknowledged past this horizon
+// dead-letters — it leaves the pending queue for a terminal, owner-visible
+// dead state (dead_at stamped, row kept) instead of pending forever. Seven
+// days is the spec's named horizon: the bridge client prunes its seen-state
+// entries after 7 idle days, so a signal the server still held past that
+// point had no consumer state left to wake against it.
+export const WAKE_SIGNAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -67,7 +74,10 @@ const PUSH_EVENT_TYPES = Object.freeze(["message.posted", "dm.posted", "bond.pro
 // (below) rebuilds the table row-preserving at boot, mirroring
 // convergeBountyDeployedSchema, because CREATE TABLE IF NOT EXISTS cannot
 // rewrite stored DDL and the strict DDL-text verifySchema compares it
-// verbatim.
+// verbatim. The S5 dead_at column (signal TTL / dead-letter) rides the
+// same convergence: a deployed table without it has drifted DDL, so the
+// boot rebuild adds it while copying every existing row (dead_at NULL —
+// pending, never retroactively dead).
 export const agentHeartbeatSchema = `
   CREATE TABLE IF NOT EXISTS agent_hosts (
     agent_id TEXT NOT NULL, host_id TEXT NOT NULL,
@@ -81,7 +91,7 @@ export const agentHeartbeatSchema = `
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
     room_id TEXT, message_id TEXT,
-    created_at INTEGER NOT NULL, delivered_at INTEGER
+    created_at INTEGER NOT NULL, delivered_at INTEGER, dead_at INTEGER
   );
   CREATE UNIQUE INDEX IF NOT EXISTS agent_wake_signals_coalesce ON agent_wake_signals(agent_id, COALESCE(room_id, ''), message_id);
   CREATE INDEX IF NOT EXISTS agent_wake_signals_pending ON agent_wake_signals(agent_id, delivered_at);
@@ -252,6 +262,17 @@ const signalView = row => {
   });
 };
 
+// MIG-WAKE S5: the owner-visible dead-letter entry — kind, room and age
+// are the spec's named fields; ageMs is the signal's age at death
+// (deadAt - createdAt, always >= WAKE_SIGNAL_TTL_MS), a stable number
+// that does not drift as the owner reads the list later.
+const deadLetterView = row => Object.freeze({
+  signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
+  roomId: row.room_id, messageId: row.message_id,
+  createdAt: row.created_at, deadAt: row.dead_at,
+  ageMs: row.dead_at - row.created_at,
+});
+
 // A pre-migration or read-only DB lacks these tables; that is the only error the
 // fail-closed reads below may absorb. Busy, locked and I/O errors must surface.
 function isMissingTable(error) {
@@ -400,9 +421,16 @@ export class AgentHeartbeats {
     for (const roomRow of this.roomActivityOf(agentId)) {
       if (lastPolledAt === null || roomRow.lastPolledAt > lastPolledAt) lastPolledAt = roomRow.lastPolledAt;
     }
+    // MIG-WAKE S5: the wake-status surface is where dead stock becomes
+    // owner-visible, so reading it applies expiry first (expiry itself
+    // degrades to a no-op on read-only / pre-convergence databases).
+    this.expireWakeSignals(agentId);
+    const dead = this.deadLettersOf(agentId);
     return Object.freeze({
       agentId, lastPolledAt, windowMs: WAKEABLE_WINDOW_MS,
       wakeable: lastPolledAt !== null && this.now() - lastPolledAt <= WAKEABLE_WINDOW_MS,
+      signalTtlMs: WAKE_SIGNAL_TTL_MS,
+      deadLetterCount: dead.total, deadLetters: dead.signals,
     });
   }
 
@@ -936,12 +964,15 @@ export class AgentHeartbeats {
       FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?`).get(agentId, roomKey);
     if (!lease || lease.leaseExpiresAt <= at || lease.fencingToken !== fencingToken)
       fail(409, "stale_listener", "no live listener lease for this fencing token — acquire a lease first");
+    // MIG-WAKE S5: the listener door honours the same TTL — expired
+    // stock is dead-lettered first and never claimed for delivery.
+    this.expireWakeSignals(agentId, at);
     const claimed = this.db.prepare(`INSERT INTO agent_wake_signal_claims
         (signal_id, agent_id, claimed_by, claimed_at, redelivered)
         SELECT s.signal_id, ?, ?, ?, CASE WHEN c.signal_id IS NULL THEN 0 ELSE 1 END
         FROM agent_wake_signals s
         LEFT JOIN agent_wake_signal_claims c ON c.signal_id = s.signal_id
-        WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
+        WHERE s.agent_id=? AND s.delivered_at IS NULL AND s.dead_at IS NULL AND (? IS NULL OR s.room_id=?)
           AND (c.signal_id IS NULL OR (c.claimed_by != ? AND NOT EXISTS (
             SELECT 1 FROM agent_wake_listener_leases o
             WHERE o.agent_id = s.agent_id AND o.fencing_token = c.claimed_by AND o.lease_expires_at > ?)))
@@ -1016,6 +1047,72 @@ export class AgentHeartbeats {
     return this.pendingWakePage(agentId, options).signals;
   }
 
+  // MIG-WAKE S5: dead-letter every unacknowledged signal of this agent
+  // whose age has passed WAKE_SIGNAL_TTL_MS. The row is KEPT and stamped
+  // (dead_at) — the dead state is a terminal, enumerable state, not a
+  // delete. Expiry is applied lazily on the delivery/status funnels
+  // (pendingWakePage, claimWakeBatch, wakeStatusOf): no timer exists,
+  // and none is needed — a signal nobody is reading cannot wake anyone,
+  // and the moment any door looks at the queue the stale stock is
+  // stamped before the read. A pre-convergence database (no dead_at
+  // column yet — read-only opens never migrate) reads as no expiry, and
+  // a read-only database cannot stamp anything: expiry there is a
+  // no-op and the read serves the already-stamped state (the write
+  // doors surface real write failures on their own statements).
+  // Returns the rows this call newly dead-lettered.
+  expireWakeSignals(agentId, at = this.now()) {
+    checkAgentId(agentId);
+    let rows;
+    try {
+      rows = this.db.prepare(`UPDATE agent_wake_signals SET dead_at=?
+        WHERE agent_id=? AND delivered_at IS NULL AND dead_at IS NULL AND created_at<=?
+        RETURNING signal_id AS signalId, kind, room_id AS roomId`)
+        .all(at, agentId, at - WAKE_SIGNAL_TTL_MS);
+    } catch (error) {
+      if (!isMissingTable(error) && !/readonly/i.test(String(error?.message ?? ""))) throw error;
+      return Object.freeze([]);
+    }
+    if (rows.length > 0) {
+      const batches = new Map();
+      for (const row of rows) {
+        const key = `${row.kind}\0${row.roomId ?? ""}`;
+        batches.set(key, (batches.get(key) ?? 0) + 1);
+      }
+      for (const [key, n] of batches) {
+        const [kind, room] = key.split("\0");
+        recordWakeEvent(this.db, { at, roomId: room === "" ? null : room, store: "signals",
+          event: "dead_lettered", kind, n, subjectId: agentId });
+      }
+    }
+    return Object.freeze(rows.map(row => Object.freeze(row)));
+  }
+
+  // MIG-WAKE S5: the agent's dead-letter list — signals that died
+  // unacknowledged and are STILL unhandled (dead_at set, delivered_at
+  // null), oldest death first. A late ack sets delivered_at and the
+  // entry leaves this list: membership is "dead AND unhandled", while
+  // both stamps stay on the row as its history. Read-only; a
+  // pre-convergence database reads as an empty list.
+  deadLettersOf(agentId, { limit = MAX_PENDING_WAKES } = {}) {
+    checkAgentId(agentId);
+    check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
+      422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
+    try {
+      const rows = this.db.prepare(`SELECT * FROM agent_wake_signals
+        WHERE agent_id=? AND dead_at IS NOT NULL AND delivered_at IS NULL
+        ORDER BY dead_at, signal_id LIMIT ?`).all(agentId, limit + 1);
+      const total = this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals
+        WHERE agent_id=? AND dead_at IS NOT NULL AND delivered_at IS NULL`).get(agentId).n;
+      return Object.freeze({
+        signals: Object.freeze(rows.slice(0, limit).map(deadLetterView)),
+        total, more: rows.length > limit,
+      });
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze({ signals: Object.freeze([]), total: 0, more: false });
+    }
+  }
+
   // One page of unacknowledged signals for the host's rooms, oldest first.
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
@@ -1035,10 +1132,14 @@ export class AgentHeartbeats {
         after = { createdAt: value[4], signalId: value[5] };
       } catch { check(false, 422, "invalid_wake_cursor", "Wake cursor does not match this scope"); }
     }
+    // MIG-WAKE S5: expiry runs on this funnel (heartbeat, poll and the
+    // pending reads all pass through here) before the page is read, so
+    // an expired signal is dead-lettered — never served as wakeable.
+    this.expireWakeSignals(agentId);
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
     const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
-      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
+      WHERE agent_id=? AND delivered_at IS NULL AND dead_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY created_at,signal_id LIMIT ?`)

@@ -49,6 +49,11 @@ export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
   "suppressed_policy", "failed", "delivered", "acked", "invalidated",
   "doorbell_delivered", "doorbell_failed", "ack_unregistered",
+  // MIG-WAKE S5: a mention signal that aged past WAKE_SIGNAL_TTL_MS
+  // unacknowledged and moved to the dead-letter state. A lifecycle
+  // transition, not a loss: the stock stays enumerable on the
+  // wake-status surface, so it never enters the failure rate.
+  "dead_lettered",
 ]);
 export const WAKE_FAILURE_REASONS = Object.freeze([
   "no_identity_link", "enqueue_error", "push_delivery_failed",
@@ -114,6 +119,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
 const emptyCounters = () => ({ emitted: 0, coalesced: 0, suppressed_no_host: 0,
   suppressed_no_identity: 0, suppressed_policy: 0, failed: 0, invalidated: 0,
   doorbell_delivered: 0, doorbell_failed: 0, ack_unregistered: 0,
+  dead_lettered: 0,
   deliveredByDoor: {}, ackedByDoor: {} });
 
 // Aggregate the counters + the stores' own stock into the accounting
@@ -124,7 +130,7 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
   const byStore = { signals: emptyCounters(), work: emptyCounters(), queue: emptyCounters() };
   const failures = { total: 0, byReason: {}, recent: [] };
   const stock = { signalsPending: null, signalsAcked: null, signalsPendingUnreachable: null,
-    signalsPendingAged: null, workPending: null, workAcked: null, workInvalidated: null,
+    signalsPendingAged: null, signalsDeadLettered: null, workPending: null, workAcked: null, workInvalidated: null,
     workPendingAged: null, queueByState: null, activityFanoutUnrecovered: null };
   const roomFilter = roomId === null ? null : roomId;
   try {
@@ -154,13 +160,16 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
   };
   const roomClause = roomFilter === null ? "" : " AND room_id=?";
   const roomParams = roomFilter === null ? [] : [roomFilter];
-  stock.signalsPending = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NULL${roomClause}`, ...roomParams);
+  // MIG-WAKE S5: pending means deliverable — dead-lettered stock
+  // (dead_at set, still unacked) is its own stock line, never pending.
+  stock.signalsPending = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NULL AND dead_at IS NULL${roomClause}`, ...roomParams);
   stock.signalsAcked = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NOT NULL${roomClause}`, ...roomParams);
-  stock.signalsPendingUnreachable = count(`SELECT COUNT(*) AS n FROM agent_wake_signals s WHERE s.delivered_at IS NULL
+  stock.signalsPendingUnreachable = count(`SELECT COUNT(*) AS n FROM agent_wake_signals s WHERE s.delivered_at IS NULL AND s.dead_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent_id = s.agent_id)${roomFilter === null ? "" : " AND s.room_id=?"}`,
     ...roomParams);
-  stock.signalsPendingAged = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NULL AND created_at <= ?${roomClause}`,
+  stock.signalsPendingAged = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NULL AND dead_at IS NULL AND created_at <= ?${roomClause}`,
     now - WAKE_STOCK_STALE_MS, ...roomParams);
+  stock.signalsDeadLettered = count(`SELECT COUNT(*) AS n FROM agent_wake_signals WHERE dead_at IS NOT NULL AND delivered_at IS NULL${roomClause}`, ...roomParams);
   stock.workPending = count(`SELECT COUNT(*) AS n FROM agent_work_wakes WHERE delivered_at IS NULL AND invalidated_at IS NULL${roomClause}`, ...roomParams);
   stock.workAcked = count(`SELECT COUNT(*) AS n FROM agent_work_wakes WHERE delivered_at IS NOT NULL${roomClause}`, ...roomParams);
   stock.workInvalidated = count(`SELECT COUNT(*) AS n FROM agent_work_wakes WHERE invalidated_at IS NOT NULL${roomClause}`, ...roomParams);

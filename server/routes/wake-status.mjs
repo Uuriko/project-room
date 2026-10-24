@@ -2,7 +2,11 @@
 //
 // Wakeable = the agent polled (GET /api/agent-wakes/poll) or heartbeated
 // within 24h. Two modes, both scoped (Instinct-3 review, PR #1565):
-//   - no query params: the caller's own { agentId, wakeable, windowMs };
+//   - no query params: the caller's own { agentId, wakeable, windowMs },
+//     plus (MIG-WAKE S5) the caller's own dead-letter list — signals
+//     that aged past the TTL unacknowledged, with kind/room/age. These
+//     are the caller's OWN signal stamps, never another agent's, and
+//     never poll timestamps, so the coarsening contract below holds;
 //   - ?roomId=: { wakeable[], notWakeable[] } for that room's members —
 //     the data side for the COMMS-02 mention-target warning ("before I
 //     @mention someone here, are they listening?").
@@ -43,11 +47,15 @@ export async function readWakeStatus(ctx) {
   ctx.rate(`wake-status-read:${auth.identityId}`, 120);
   return translateWith(ctx.reject)(async () => {
     const roomId = ctx.url.searchParams.get("roomId");
-    // Caller-only mode: your own wakeability, always allowed.
+    // Caller-only mode: your own wakeability, always allowed — and
+    // your own dead-letter list (S5): the visible terminal state for
+    // signals that expired unacknowledged, enumerable instead of lost.
     if (roomId === null) {
       const status = ctx.store.agentHeartbeats.wakeStatusOf(auth.identityId);
       return ctx.json(ctx.res, 200,
-        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs });
+        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs,
+          signalTtlMs: status.signalTtlMs, deadLetterCount: status.deadLetterCount,
+          deadLetters: status.deadLetters });
     }
     // Room mode: wakeability for the room's members. Room access keys are
     // bound to their room; identity credentials must be members of it.
