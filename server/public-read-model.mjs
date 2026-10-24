@@ -909,6 +909,22 @@ const executedChecksOf = value => {
   return checks;
 };
 
+// The receipt's resolvable source pointer, projected only in its exact
+// recorded shape: an artifact pointer naming THIS receipt whose digest
+// equals the record's own artifact digest and whose href is the one
+// canonical artifact path. Anything else — a pointer to another receipt,
+// a digest contradicting the record, an off-shape href — is not
+// projected: the public face never lends the receipt's authority to a
+// locator the record does not itself carry verbatim.
+const sourcePointerOf = record => {
+  const pointer = record?.sourcePointer;
+  if (!pointer || typeof pointer !== "object") return null;
+  if (pointer.kind !== "artifact" || pointer.receiptId !== record.receiptId) return null;
+  if (!HEX64.test(pointer.sha256 ?? "") || pointer.sha256 !== record.artifact?.sha256) return null;
+  if (pointer.href !== `/api/public-work/receipts/${record.receiptId}/artifact`) return null;
+  return { kind: "artifact", receiptId: pointer.receiptId, sha256: pointer.sha256, href: pointer.href };
+};
+
 export function publicWorkReceiptOutcome(store, receiptId) {
   if (typeof receiptId !== "string" || !receiptId.startsWith("pwr_")) return null;
   let record = null;
@@ -934,11 +950,13 @@ export function publicWorkReceiptOutcome(store, receiptId) {
     decidedAt: iso(decision?.at),
   } : null;
   const executed = executedChecksOf(record.executedChecks);
+  const sourcePointer = sourcePointerOf(record);
   return {
     state: review && WORK_DECISIONS.has(review.state) ? review.state : outcomeWord(record.state) ?? "submitted",
     verification: outcomeWord(record.verification) ?? "hash_only",
     checksReported: reportedChecks(record.checksReported),
     ...(executed.length ? { executedChecks: executed } : {}),
+    ...(sourcePointer ? { sourcePointer } : {}),
     review,
   };
 }

@@ -226,6 +226,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
     else if (receipt.verification) rows.push(`<div><dt>Verification</dt><dd>${escapeHtml(receipt.verification)}</dd></div>`);
     if (receipt.executedChecks?.length) rows.push(`<div><dt>Platform-executed checks</dt><dd>${receipt.executedChecks.map(check => `${escapeHtml(check.name)} — ${escapeHtml(check.result)}`).join("<br>")}</dd></div>`);
+    if (receipt.sourcePointer) rows.push(`<div><dt>Source artifact</dt><dd><a href="${escapeHtml(receipt.sourcePointer.href)}">The submitted artifact bytes</a> — hash them and compare against this receipt's recorded sha256 (<code>${escapeHtml(receipt.sourcePointer.sha256)}</code>); that re-derives what the platform's artifact check verified.</dd></div>`);
     if (receipt.checksReported?.length) rows.push(`<div><dt>Checks the worker reported</dt><dd>${receipt.checksReported.map(entry => escapeHtml(entry)).join("<br>")}</dd></div>`);
     return rows.join("");
   })() : "";
@@ -358,6 +359,7 @@ const publicJson = receipt => ({
   ...(receipt.state ? { state: receipt.state } : {}),
   ...(receipt.checksReported ? { checksReported: receipt.checksReported } : {}),
   ...(receipt.executedChecks ? { executedChecks: receipt.executedChecks } : {}),
+  ...(receipt.sourcePointer ? { sourcePointer: receipt.sourcePointer } : {}),
   ...(receipt.review ? { review: receipt.review } : {}),
   ...(receipt.lot ? { lot: receipt.lot } : {}),
   // The work receipt's payout cross-reference (#3781): the read model

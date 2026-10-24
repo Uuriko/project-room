@@ -563,6 +563,20 @@ export class PublicWorkClaims {
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            // The resolvable source pointer: the one source this receipt's
+            // verification claims are actually about. The platform's own
+            // executed checks run over the submitted artifact bytes (the
+            // finish-time criteria leg reads them; a verify PASS re-hashes
+            // the stored bytes), and those bytes are served at the named
+            // href, so an outsider can fetch them, hash them, and match
+            // the digest against the claim. The task's repository ref and
+            // file list are deliberately NOT the pointer: the ref is an
+            // unpinned name and the platform never reads repo state, so
+            // naming it would claim a source the verification never
+            // checked. Recorded here, at the single assembly point, so
+            // every receipt this writer issues carries it from birth and
+            // settlements inherit it unchanged.
+            sourcePointer: { kind: 'artifact', receiptId, sha256, href: `/api/public-work/receipts/${receiptId}/artifact` },
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.
