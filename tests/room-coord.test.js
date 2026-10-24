@@ -258,3 +258,21 @@ test('the room-coord CLI drives the same verbs and refuses malformed input befor
   assert.throws(() => parseArgs(['claim', 'x', '--files']), coded('usage_error'));
   assert.deepEqual(parseArgs(['claim', 'x', '--note=a=b', '--allow-overlap']).options, { note: 'a=b', 'allow-overlap': true });
 });
+
+
+test('incomplete claim pages cannot report clear coordination state or start a claim', async () => {
+  const partial = { claims: [], hasMore: true, nextCursor: 'remaining' };
+  assert.throws(() => guardConflicts(partial, ['src/app.js']), coded('incomplete_claims'));
+  assert.throws(() => claimOverlaps(partial), coded('incomplete_claims'));
+  await assert.rejects(coordStatus({ workClaims: async () => partial }), coded('incomplete_claims'));
+  let writes = 0;
+  const client = {
+    workClaims: async () => partial,
+    workClaim: async () => { writes += 1; },
+    workClaimGet: async () => { throw new Error('unexpected read'); },
+    releaseWorkItem: async () => { throw new Error('unexpected release'); },
+  };
+  await assert.rejects(claimAndVerify(client, 'new', { memberId: 'me', files: ['src/app.js'] }), coded('incomplete_claims'));
+  assert.equal(writes, 0);
+  assert.deepEqual(guardConflicts({ claims: [], hasMore: false, nextCursor: null }, ['src/app.js']), []);
+});
