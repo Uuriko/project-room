@@ -478,14 +478,29 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
-    const member = snapshot?.state?.members?.[this.#memberId];
+    const path = `/api/rooms/${encodeURIComponent(this.#roomId)}`;
+    let metadata;
+    try {
+      metadata = await this.#fetchPath(`${path}/agent-connection`, undefined, signal);
+      if (!metadata || Array.isArray(metadata) || metadata.contractVersion !== 1 || metadata.executionGranted !== false
+        || metadata.member?.id !== this.#memberId
+        || ["account", "csrf", "sessionBinding", "sessionRevision"].some(field => metadata[field] != null))
+        throw new RoomClientError(200, "identity_mismatch", "Room returned invalid agent connection metadata");
+    } catch (error) {
+      // Compatibility only for servers without this route. Refusals, malformed
+      // successes and transport failures must never downgrade validation.
+      if (!(error instanceof RoomClientError) || error.status !== 404 || error.code !== "not_found") throw error;
+      const snapshot = await this.#fetchPath(path, undefined, signal);
+      metadata = { roomId: snapshot?.roomId, viewerId: snapshot?.viewerId,
+        member: snapshot?.state?.members?.[this.#memberId], ownerId: snapshot?.state?.room?.ownerId };
+    }
+    const member = metadata.member;
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
-    const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+    const ownerAgent = member?.kind === "agent" && metadata.ownerId === this.#memberId;
+    if (metadata.roomId !== this.#roomId || metadata.viewerId !== this.#memberId
       || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {

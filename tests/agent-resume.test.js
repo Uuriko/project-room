@@ -191,7 +191,9 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const baselineClient = new RoomAgentClient({ ...config, fetchImpl: async (url, options) => {
     const response = await fetch(url, options); baselineRequests++; baselineBytes += Buffer.byteLength(await response.clone().text()); return response;
   } });
-  await baselineClient.roomContext();
+  // Measure the explicit full snapshot named by this test. roomContext is
+  // compact and its identity preflight no longer downloads room history.
+  await baselineClient.snapshot();
   const first = await resumeAgent({ connection: config });
   assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, []);
   assert.ok(first.obligations.some(x => x.id === 'task'));
