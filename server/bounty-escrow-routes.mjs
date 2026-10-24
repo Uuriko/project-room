@@ -390,6 +390,9 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const laneIdentity = identityOf(reject, identity);
     if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
       reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit balances.");
+    // #3962: a ledger read must not show a fresh room as unfunded —
+    // provision any outstanding genesis (per-member idempotent) first.
+    if (escrow.genesisOutstanding(roomId)) escrow.ensureGenesis(roomId);
     const balances = runPure(reject, () => escrow.balances(roomId, laneIdentity));
     return json(res, 200, { roomId, balances });
   }
@@ -397,6 +400,9 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const laneIdentity = identityOf(reject, identity);
     if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
       reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit history.");
+    // #3962: same provisioning as the balances read, so a history-first
+    // reader also sees the genesis movement instead of an empty ledger.
+    if (escrow.genesisOutstanding(roomId)) escrow.ensureGenesis(roomId);
     const params = url.searchParams;
     const state = params.get("state"), since = params.get("since");
     const receipts = runPure(reject, () => escrow.history(roomId, laneIdentity,
