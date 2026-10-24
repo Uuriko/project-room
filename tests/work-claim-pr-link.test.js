@@ -381,6 +381,8 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
 // it. No existing pr-link test covers a second round re-linking the same URL.
 test("re-linking a settled PR URL in a new round resets the link for re-polling", async t => {
   const { store, call } = await room(t);
+  let now = Date.now();
+  store.now = () => now;
   await call("create", null, { id: "relink-pr", title: "relink" });
   const claimed = (await call("claim", "relink-pr", {})).value;
   const linked = (await call("update", "relink-pr", {
@@ -395,12 +397,13 @@ test("re-linking a settled PR URL in a new round resets the link for re-polling"
   applyPullRequestWebhook(store, {
     action: "closed",
     pull_request: { html_url: URL_A, merged: false, state: "closed" },
-  });
+  }, { nowMs: now });
   const released = store.workClaims.get("commons", "relink-pr");
   assert.equal(released.state, "unclaimed");
   assert.equal(released.pullRequests[0].outcome, "closed");
 
   // Round 2: a new claim round re-links the same PR (it was reopened).
+  now += 1; // Separate rounds explicitly; machine speed must not choose their timestamps.
   const round2 = (await call("claim", "relink-pr", {})).value;
   assert.notEqual(round2.claimedAt, claimed.claimedAt);
   const relinked = (await call("update", "relink-pr", {

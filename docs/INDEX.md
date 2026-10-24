@@ -66,6 +66,8 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETU
 
 ## Machines
 
+[Continuous capabilities and durable laptop execution](CONTINUOUS-CAPABILITIES.md): versioned recipes, admission, recovery, and evidence.
+
 The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes are [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
 
 ## Self-host
