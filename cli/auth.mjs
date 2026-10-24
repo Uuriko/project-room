@@ -4,7 +4,7 @@
 // Later auth changes belong in this file.
 import { roomMcpUrlForHost } from "../src/room-mcp-join.js";
 import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
-import { keychainLookup, keychainStore } from "./keychain.mjs";
+import { keychainDelete, keychainLookup, keychainStore } from "./keychain.mjs";
 
 export function bearerHeader(secret) {
   if (typeof secret !== "string" || secret.length === 0) throw new Error("Missing identity secret");
@@ -19,12 +19,16 @@ export function readyUrl(origin) {
   return origin.replace(/\/$/, "") + edgeDoorApiPath(origin, "/api/ready");
 }
 
-export async function rememberSecret(account, secret, env = process.env) {
-  return keychainStore(account, secret, env);
+// loadSecret prefers the keychain, so a failed store must not leave an older
+// secret there: it would shadow the fresh one in the connection file.
+export async function rememberSecret(account, secret, env = process.env, options = {}) {
+  if (await keychainStore(account, secret, env, options)) return true;
+  await keychainDelete(account, env, options);
+  return false;
 }
 
-export async function loadSecret(account, fileSecret, env = process.env) {
-  const stored = await keychainLookup(account, env);
+export async function loadSecret(account, fileSecret, env = process.env, options = {}) {
+  const stored = await keychainLookup(account, env, options);
   if (typeof stored === "string" && stored.length > 0) return stored;
   if (typeof fileSecret !== "string" || fileSecret.length === 0) throw new Error("Saved connection has no identity secret");
   return fileSecret;
