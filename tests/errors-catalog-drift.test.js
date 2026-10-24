@@ -17,6 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentErrorAx, ERROR_REGISTRY, errorRegistryAx } from "../src/agent-error.mjs";
+import { ERROR_KEYS } from "../src/error-copy.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = join(ROOT, "server");
@@ -381,4 +382,147 @@ test("flagship #3055 codes name their catalogued recovery, not 'no known recover
     assert.doesNotMatch(ax.hint, /^Unknown error/, `${code} must not hit the Unknown fallthrough`);
     assert.match(ax.hint, recovery, `${code} hint must name its catalogued recovery`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// #3659 gate (standing): new error codes ship with agent recovery (checked
+// above by the #3055 AX test) AND a human remedy — or an explicit waiver.
+//
+// Two halves:
+//   (i) Catalog self-validation. Every row of the Full code index must be
+//       well-formed on its own terms: the HTTP cell is a real HTTP status
+//       (100-599) or the literal `internal`, and the Meaning cell is a
+//       message, not a pasted source fragment (the #3658 defect shape:
+//       emit-site code like `fail("x", message); }; export function ...`
+//       sitting where a human-readable meaning belongs). Rows already
+//       broken at the pin are grandfathered in
+//       tests/fixtures/errors-catalog-gate-baseline.json, shrink-only.
+//   (ii) Human remedy or waiver. A code catalogued after the pinned
+//       baseline must either have human remedy copy (an entry in
+//       src/error-copy.js ERROR_KEYS, the browser client's plain-language
+//       copy set) or a waiver entry in the baseline file carrying the
+//       marker `human: server-message-ok` and a reason — the declaration
+//       that the server message itself is the human-facing remedy for
+//       this code. Codes present at the pin without human copy are
+//       grandfathered in the baseline's humanWaivers list, shrink-only:
+//       when a grandfathered code gains ERROR_KEYS copy or leaves the
+//       catalog, its waiver must be deleted in the same change.
+// ---------------------------------------------------------------------------
+
+const GATE_BASELINE = JSON.parse(readFileSync(join(ROOT, "tests/fixtures/errors-catalog-gate-baseline.json"), "utf8"));
+const HUMAN_WAIVER_MARKER = "human: server-message-ok";
+
+// Full-index rows with every cell: [{code, status, meaning}]. Same " | "
+// split as catalogRetry()/catalogAxRows() (pipes inside cells are escaped).
+function catalogFullRows() {
+  const rows = [];
+  for (const line of catalogSection().split("\n")) {
+    const m = /^\| `([a-z][a-z0-9_]*)` \|/.exec(line);
+    if (!m) continue;
+    const cells = line.split(" | ");
+    rows.push({ code: m[1], status: cells[1] ? cells[1].trim() : "", meaning: cells[2] ? cells[2].trim() : "" });
+  }
+  return rows;
+}
+
+// Source-fragment patterns for Meaning cells: shapes that only occur when
+// emit-site source was pasted where a message belongs. Plain messages —
+// including ${placeholder} interpolations from the server's own message
+// templates — match none of these.
+const SOURCE_FRAGMENT_PATTERNS = [
+  /\bfail\s*\(/,
+  /\breject\s*\(/,
+  /new ServiceError\(/,
+  /new AgentPluginError\(/,
+  /\bthrow new\b/,
+  /\b(?:const|let|var)\s+[\w$]+\s*=/,
+  /=>/,
+  /\bexport\s+(?:function|const|default)\b/,
+  /\bfunction\s+[\w$]+\s*\(/,
+  /;\s*\}/,
+  /;;/,
+  /error:\s*\{\s*code:/,
+  /\bthis\.[\w$]+/,
+  /\.mjs\b/,
+  /^[A-Z][\w$]*Error\(\d+\)$/,
+  /\bcatch\s*\(/,
+];
+
+const meaningHasFragment = meaning => SOURCE_FRAGMENT_PATTERNS.some(re => re.test(meaning));
+const isRealStatus = status => status === "internal" || (/^\d{3}$/.test(status) && Number(status) >= 100 && Number(status) <= 599);
+
+test("catalog self-validation: HTTP cells are real statuses or internal (#3659)", () => {
+  const rows = catalogFullRows();
+  assert.ok(rows.length > 800, `expected the full catalogued row set, got ${rows.length} rows`);
+  const grandfathered = new Map(GATE_BASELINE.httpGrandfathered.map(e => [`${e.code}|${e.status}`, e]));
+  const invalid = [];
+  for (const { code, status } of rows) {
+    if (isRealStatus(status)) continue;
+    if (grandfathered.has(`${code}|${status}`)) continue;
+    invalid.push(`${code} (HTTP cell: ${JSON.stringify(status)})`);
+  }
+  assert.deepEqual(invalid, [], `catalog rows whose HTTP cell is not a real status or 'internal' (fix the cell, or grandfather it in tests/fixtures/errors-catalog-gate-baseline.json httpGrandfathered with a reason): ${invalid.join(", ")}`);
+  // Shrink-only: a grandfathered entry must still name a live invalid row.
+  const liveInvalid = new Set(rows.filter(r => !isRealStatus(r.status)).map(r => `${r.code}|${r.status}`));
+  const stale = [...grandfathered.keys()].filter(k => !liveInvalid.has(k));
+  assert.deepEqual(stale, [], `httpGrandfathered entries that no longer name an invalid catalog row — delete them (the list only shrinks): ${stale.join(", ")}`);
+});
+
+test("catalog self-validation: Meaning cells carry no source fragments (#3659)", () => {
+  const rows = catalogFullRows();
+  const grandfathered = new Set(GATE_BASELINE.meaningFragmentGrandfathered);
+  const bad = [];
+  for (const { code, status, meaning } of rows) {
+    if (!meaningHasFragment(meaning)) continue;
+    if (grandfathered.has(`${code}|${status}`)) continue;
+    bad.push(`${code}|${status}`);
+  }
+  assert.deepEqual(bad, [], `catalog Meaning cells containing pasted source fragments (write the message the server sends, not its emit-site code; pre-existing rows are grandfathered shrink-only in tests/fixtures/errors-catalog-gate-baseline.json): ${bad.join(", ")}`);
+  // Shrink-only: a grandfathered row must still exist and still be a fragment.
+  const liveFragments = new Set(rows.filter(r => meaningHasFragment(r.meaning)).map(r => `${r.code}|${r.status}`));
+  const stale = [...grandfathered].filter(k => !liveFragments.has(k));
+  assert.deepEqual(stale, [], `meaningFragmentGrandfathered entries whose row is gone or cleaned — delete them (the list only shrinks): ${stale.join(", ")}`);
+});
+
+test("new error codes ship a human remedy or a waiver (#3659)", () => {
+  assert.equal(GATE_BASELINE.humanWaivers.marker, HUMAN_WAIVER_MARKER, "the grandfather waiver block must carry the 'human: server-message-ok' marker");
+  const catalogued = new Set(catalogFullRows().map(r => r.code));
+  const pinned = new Set(GATE_BASELINE.codes);
+  const grandfatheredWaivers = new Set(GATE_BASELINE.humanWaivers.codes);
+  const entries = GATE_BASELINE.humanWaiverEntries;
+  const entryByCode = new Map(entries.map(e => [e.code, e]));
+
+  // The grandfather list is exactly the pinned, still-catalogued codes with
+  // no human copy: it may only shrink, never grow or drift.
+  for (const code of grandfatheredWaivers) {
+    assert.ok(pinned.has(code), `humanWaivers.codes names '${code}', which is not in the pinned baseline — new codes use humanWaiverEntries, never the grandfather list`);
+    assert.ok(catalogued.has(code), `humanWaivers.codes names '${code}', which is no longer catalogued — delete the waiver (the list only shrinks)`);
+    assert.ok(!ERROR_KEYS.has(code), `humanWaivers.codes names '${code}', which now has human remedy copy in ERROR_KEYS — delete the waiver (the list only shrinks)`);
+  }
+  for (const code of pinned) {
+    if (!catalogued.has(code) || ERROR_KEYS.has(code)) continue;
+    assert.ok(grandfatheredWaivers.has(code), `pinned code '${code}' has no ERROR_KEYS human copy and no grandfather waiver — restore the waiver or add the human copy`);
+  }
+
+  // Individual waivers: one per post-pin code, marker + a real reason.
+  for (const e of entries) {
+    assert.ok(catalogued.has(e.code), `humanWaiverEntries names '${e.code}', which is not catalogued — delete the entry`);
+    assert.ok(!pinned.has(e.code), `humanWaiverEntries names '${e.code}', which is a pinned code — pinned codes live in humanWaivers.codes or ERROR_KEYS, not in new entries`);
+    assert.equal(e.marker, HUMAN_WAIVER_MARKER, `waiver for '${e.code}' must carry the marker '${HUMAN_WAIVER_MARKER}'`);
+    assert.ok(typeof e.reason === "string" && e.reason.trim().length >= 16, `waiver for '${e.code}' must state a reason (why the server message itself is the human-facing remedy)`);
+    assert.ok(!ERROR_KEYS.has(e.code), `waiver for '${e.code}' is stale: the code now has ERROR_KEYS human copy — delete the entry`);
+  }
+  assert.equal(entryByCode.size, entries.length, "humanWaiverEntries must not repeat a code");
+
+  // The gate itself: every catalogued code is remedied or waived.
+  const uncovered = [];
+  for (const code of catalogued) {
+    if (ERROR_KEYS.has(code)) continue;
+    if (pinned.has(code)) {
+      if (!grandfatheredWaivers.has(code)) uncovered.push(`${code} (pinned, waiver missing)`);
+    } else if (!entryByCode.has(code)) {
+      uncovered.push(code);
+    }
+  }
+  assert.deepEqual(uncovered, [], `catalogued codes with no human remedy: add plain-language copy for the code (strings key error.<code> + src/error-copy.js ERROR_KEYS) or, if the server message itself is the human-facing remedy, add a humanWaiverEntries entry in tests/fixtures/errors-catalog-gate-baseline.json with marker '${HUMAN_WAIVER_MARKER}' and a reason: ${uncovered.join(", ")}`);
 });
