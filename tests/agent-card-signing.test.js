@@ -21,7 +21,7 @@ import {
 import { createAgentDirectory, DirectoryError } from "../server/agent-directory.mjs";
 
 const CARD = {
-  name: "Sig Test Agent",
+  name: "Sig Agent",
   description: "A synthetic agent for signed-card tests.",
   url: "https://agent.example.test/sig",
   capabilities: ["chat", "triage"],

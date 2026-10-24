@@ -24,6 +24,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError, toA2ACard } from "./agent-directory.mjs";
+import { excludedFromPublicDirectory, presentPublicCard } from "./public-directory-policy.mjs";
 import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-verification.mjs";
 import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
 import {
@@ -797,10 +798,11 @@ export class AgentPluginStore {
   publicCard(agentId, serviceOrigin = null) {
     return this.store.readTransaction(() => {
       const entry = this.cards.get(agentId);
-      if (!entry || entry.withdrawn || entry.visibility !== "public") {
+      if (!entry || entry.withdrawn || entry.visibility !== "public" || entry.provenance === "seeded"
+        || excludedFromPublicDirectory({ agentId, name: entry.card?.name })) {
         throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
       }
-      const doc = this.directory.get(agentId);
+      const doc = presentPublicCard(this.directory.get(agentId));
       return { ...doc, a2a: toA2ACard(doc, serviceOrigin) };
     });
   }

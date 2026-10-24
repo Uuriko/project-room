@@ -15,6 +15,7 @@ import {
   publicWorkTablesReadable,
   lotReceiptVisible,
 } from "./public-visibility.mjs"; // the one visibility definition every public read applies
+import { excludedFromPublicDirectory, scrubPublicDirectoryText } from "./public-directory-policy.mjs";
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
 const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
@@ -676,18 +677,41 @@ function directoryCounts(store, agentId, identityId) {
   return { roomCount, receiptCount };
 }
 
+function directoryCardRow(store, agentId) {
+  try {
+    return store.db.prepare(`SELECT visibility, withdrawn, provenance
+      FROM agent_directory_cards WHERE agent_id=?`).get(agentId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// A projection row with no card (legacy pages, direct fixtures) stays.
+// A card that is withdrawn, not public, or only seeded is not an opt-in.
+function passesPublicDirectoryGate(store, row) {
+  if (excludedFromPublicDirectory({ agentId: row.agent_id, name: row.name })) return false;
+  const card = directoryCardRow(store, row.agent_id);
+  if (!card) return true;
+  if (card.withdrawn || card.visibility !== "public" || card.provenance === "seeded") return false;
+  return true;
+}
+
 export function syncDirectoryCard(store, agentId) {
   if (typeof agentId !== "string" || !agentId) return;
   const write = () => {
-    const row = store.db.prepare(`SELECT card_json, visibility, owner_identity_id AS identityId, withdrawn
+    const row = store.db.prepare(`SELECT card_json, visibility, owner_identity_id AS identityId, withdrawn, provenance
       FROM agent_directory_cards WHERE agent_id=?`).get(agentId);
-    if (!row || row.withdrawn || row.visibility !== "public") {
+    const card = row ? parseJson(row.card_json, {}) : {};
+    const name = typeof card.name === "string" && card.name ? card.name : agentId;
+    if (!row || row.withdrawn || row.visibility !== "public" || row.provenance === "seeded"
+      || excludedFromPublicDirectory({ agentId, name })) {
       store.db.prepare("DELETE FROM public_directory_entries WHERE agent_id=?").run(agentId);
       return;
     }
-    const card = parseJson(row.card_json, {});
     const counts = directoryCounts(store, agentId, row.identityId);
     const skills = Array.isArray(card.skills) ? card.skills.filter(skill => typeof skill === "string") : [];
+    const publicName = scrubPublicDirectoryText(name) || "Agent";
+    const publicDescription = scrubPublicDirectoryText(typeof card.description === "string" ? card.description : "");
     store.db.prepare(`INSERT INTO public_directory_entries
       (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
       VALUES (?,?,?,?,?,?,?,?)
@@ -695,8 +719,7 @@ export function syncDirectoryCard(store, agentId) {
         name=excluded.name, description=excluded.description, skills_json=excluded.skills_json,
         identity_id=excluded.identity_id, receipt_count=excluded.receipt_count, room_count=excluded.room_count,
         updated_at=excluded.updated_at`
-    ).run(agentId, typeof card.name === "string" && card.name ? card.name : agentId,
-      typeof card.description === "string" ? card.description : "",
+    ).run(agentId, publicName, publicDescription,
       JSON.stringify(skills), row.identityId, counts.receiptCount, counts.roomCount, new Date().toISOString());
   };
   if (store.db.isTransaction) write();
@@ -1219,27 +1242,43 @@ export function roomPageReceipts(store, slug, receiptsEnabled, { limit = 5, afte
 
 export function queryDirectoryEntries(store, { cursor = null, limit = DIRECTORY_PAGE_SIZE } = {}) {
   const cap = Number.isInteger(limit) && limit > 0 && limit <= 50 ? limit : DIRECTORY_PAGE_SIZE;
-  let rows;
+  let after = null;
   if (cursor != null) {
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_cursor", message: "cursor is not an agent on this list" } };
     }
-    const current = store.db.prepare("SELECT name, agent_id FROM public_directory_entries WHERE agent_id=?").get(cursor);
-    if (!current) return { error: { status: 422, code: "invalid_cursor", message: "cursor is not an agent on this list" } };
-    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, receipt_count, room_count
-      FROM public_directory_entries WHERE name > ? OR (name = ? AND agent_id > ?)
-      ORDER BY name ASC, agent_id ASC LIMIT ?`).all(current.name, current.name, current.agent_id, cap + 1);
-  } else {
-    rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, receipt_count, room_count
-      FROM public_directory_entries ORDER BY name ASC, agent_id ASC LIMIT ?`).all(cap + 1);
+    after = store.db.prepare("SELECT name, agent_id FROM public_directory_entries WHERE agent_id=?").get(cursor);
+    if (!after) return { error: { status: 422, code: "invalid_cursor", message: "cursor is not an agent on this list" } };
   }
-  const page = rows.slice(0, cap).map(row => ({
-    agentId: row.agent_id,
-    name: row.name,
-    description: row.description,
-    skills: parseJson(row.skills_json, []),
-    receiptCount: row.receipt_count,
-    roomCount: row.room_count,
-  }));
-  return { agents: page, nextCursor: rows.length > cap ? page.at(-1)?.agentId ?? null : null };
+  const included = [];
+  let exhausted = false;
+  while (included.length <= cap && !exhausted) {
+    const params = [];
+    let where = "";
+    if (after) {
+      where = "WHERE name > ? OR (name = ? AND agent_id > ?)";
+      params.push(after.name, after.name, after.agent_id);
+    }
+    params.push(cap + 1);
+    const rows = store.db.prepare(`SELECT agent_id, name, description, skills_json, receipt_count, room_count
+      FROM public_directory_entries ${where}
+      ORDER BY name ASC, agent_id ASC LIMIT ?`).all(...params);
+    if (rows.length < cap + 1) exhausted = true;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      after = row;
+      if (!passesPublicDirectoryGate(store, row)) continue;
+      included.push({
+        agentId: row.agent_id,
+        name: scrubPublicDirectoryText(row.name) || "Agent",
+        description: scrubPublicDirectoryText(row.description),
+        skills: parseJson(row.skills_json, []),
+        receiptCount: row.receipt_count,
+        roomCount: row.room_count,
+      });
+      if (included.length > cap) break;
+    }
+  }
+  const page = included.slice(0, cap);
+  return { agents: page, nextCursor: included.length > cap ? page.at(-1)?.agentId ?? null : null };
 }

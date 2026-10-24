@@ -3,6 +3,7 @@ import {
   verifyCardSignature,
   verifyKeyRotation,
 } from "./agent-card-signing.mjs";
+import { excludedFromPublicDirectory, presentPublicCard, scrubPublicDirectoryText } from "./public-directory-policy.mjs";
 
 // HTTP-ready agent directory (lane D).
 //
@@ -333,10 +334,16 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
     const q = query.trim().toLowerCase();
     const docs = [...entries.values()]
       .filter(e => !e.withdrawn)
-      .filter(e => includeNonPublic || e.visibility === "public")
-      .filter(e => !q || `${e.card.name} ${e.card.description}`.toLowerCase().includes(q))
+      .filter(e => includeNonPublic || (e.visibility === "public" && e.provenance !== "seeded"
+        && !excludedFromPublicDirectory({ agentId: e.agentId, name: e.card?.name })))
+      .filter(e => {
+        if (!q) return true;
+        const name = includeNonPublic ? e.card.name : scrubPublicDirectoryText(e.card.name);
+        const description = includeNonPublic ? e.card.description : scrubPublicDirectoryText(e.card.description);
+        return `${name} ${description}`.toLowerCase().includes(q);
+      })
       .filter(e => capability === null || e.card.capabilities.includes(capability))
-      .map(cardDoc);
+      .map(e => includeNonPublic ? cardDoc(e) : presentPublicCard(cardDoc(e)));
     return Object.freeze(docs);
   };
 

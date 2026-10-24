@@ -164,7 +164,7 @@ async function publishCards(t) {
   const stranger = store.identities.create("dogfood dir stranger");
   const pub = async (agentId, visibility) => {
     // RC-2026-09-18-014: publishes must be signed (fresh keypair per card).
-    const card = cardFields(`Dogfood ${agentId}`);
+    const card = cardFields(`Lane ${agentId}`);
     const keyPair = generateKeyPair();
     const res = await post(origin, "/api/agent-directory/cards", {
       agentId, card, visibility,
@@ -176,9 +176,9 @@ async function publishCards(t) {
   };
   return {
     origin, store, keys, member, stranger,
-    publicId: await pub("dogfood-public", "public"),
-    roomId: await pub("dogfood-room", "room"),
-    privateId: await pub("dogfood-private", "private"),
+    publicId: await pub("lane-public", "public"),
+    roomId: await pub("lane-room", "room"),
+    privateId: await pub("lane-private", "private"),
   };
 }
 
