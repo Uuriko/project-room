@@ -95,6 +95,7 @@ export function renderReceiptsHtml(page) {
 <main>
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
+<p><a href="/receipts/gallery">Completed bounty gallery</a> — finished bounties shown as worked examples, each clonable as a template for a similar bounty.</p>
 ${items}
 ${next}
 </main>
@@ -381,4 +382,100 @@ export function receiptJson(receipt, verification = null) {
   // check ("checked just now") apart from stored values without parsing
   // the verdict.
   return { ...publicJson(receipt), ...(verification ? { verification } : {}) };
+}
+
+// --- Bounty gallery + clone-as-template (#3526) ---------------------------
+// The gallery page: completed bounties as worked examples, over the same
+// lot receipts as the detail pages. Entries come from
+// queryPublicBountyGallery (public-read-model); every field on an entry
+// is already public, and every interpolated string is escaped, like the
+// rest of this script-free surface.
+
+const galleryEntryJson = entry => ({
+  id: entry.id,
+  title: entry.title,
+  source: entry.source,
+  room: entry.room ?? null,
+  at: entry.at,
+  summary: entry.summary ?? null,
+  rubric: entry.rubric,
+  settled: entry.settled,
+  awardCredits: entry.awardCredits ?? null,
+  receiptHref: entry.receiptHref,
+  cloneHref: entry.cloneHref,
+});
+
+export function bountyGalleryJson(page) {
+  return {
+    schema: "project-room-public-bounty-gallery/1",
+    entries: (page.entries ?? []).map(galleryEntryJson),
+    nextCursor: page.nextCursor ?? null,
+  };
+}
+
+export function renderBountyGalleryHtml(page) {
+  const entries = Array.isArray(page?.entries) ? page.entries : [];
+  const description = "Completed bounties from Project Room rooms that chose to publish their receipts: the delivered work, the rubric it was judged against, and the settled amount — each clonable as a template for a similar bounty.";
+  const items = entries.map(entry => {
+    const rubric = (entry.rubric?.criteria ?? []).map(criterion =>
+      `<li><strong>${escapeHtml(criterion.criterionId)}</strong> — ${escapeHtml(criterion.description)}</li>`).join("");
+    const settled = typeof entry.settled?.amountCredits === "number"
+      ? `<p class="meta">Settled: ${escapeHtml(entry.settled.amountCredits)} credits paid to the worker${typeof entry.awardCredits === "number" ? ` · Award: ${escapeHtml(entry.awardCredits)} credits` : ""}${entry.settled?.kind ? ` · ${escapeHtml(entry.settled.kind)}` : ""}</p>` : "";
+    return `<article class="card">
+<h2><a href="${escapeHtml(entry.receiptHref)}">${escapeHtml(entry.title)}</a></h2>
+<p class="meta">${escapeHtml(when(entry.at))}${entry.room?.title ? ` · ${escapeHtml(entry.room.title)}` : ""}</p>
+${entry.summary ? `<p>${escapeHtml(entry.summary)}</p>` : ""}
+${rubric ? `<h3>Rubric</h3><ul>${rubric}</ul>` : ""}
+${settled}
+<p><a href="${escapeHtml(entry.cloneHref)}">Clone as template</a> — post a similar bounty pre-filled with this title and rubric.</p>
+</article>`;
+  }).join("") || `<p>No completed bounties to show yet. A bounty appears here once it settles with the worker paid, in a room whose owner turned on public receipts.</p>`;
+  const next = page?.nextCursor ? `<p><a href="/receipts/gallery?cursor=${escapeHtml(page.nextCursor)}">More completed bounties</a></p>` : "";
+  return `${head({ title: "Project Room — completed bounty gallery", description, path: "/receipts/gallery" })}
+<body><header><p><a href="/">Project Room</a></p></header>
+<main>
+<h1>Completed bounties</h1>
+<p>Finished work from rooms whose owners turned publishing on, shown as worked examples: what was delivered, the rubric it was judged against, and the settled amount. Clone any entry as a template to post a similar bounty.</p>
+${items}
+${next}
+<p><a href="/receipts">All public receipts</a></p>
+</main>
+<footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+</body></html>`;
+}
+
+// The clone page: the posting draft pre-filled from one gallery entry.
+// The template carries the entry's title and rubric shape only (the read
+// model's publicBountyTemplate builds it); this page shows exactly what
+// a poster would start from and links the posting flow. Script-free,
+// like every page on this surface.
+export function bountyTemplateJson(template) {
+  return {
+    schema: template.schema,
+    sourceReceiptId: template.sourceReceiptId,
+    title: template.title,
+    criteria: template.criteria,
+    rubric: template.rubric,
+  };
+}
+
+export function renderBountyCloneHtml(template) {
+  const description = `Post a bounty like “${template.title}”: the posting draft pre-filled from a completed Project Room bounty, with its title and rubric shape.`;
+  const rubric = (template.rubric ?? []).map(criterion =>
+    `<li><strong>${escapeHtml(criterion.criterionId)}</strong> — ${escapeHtml(criterion.description)}</li>`).join("");
+  return `${head({ title: `Clone as template — ${template.title}`, description, path: `/receipts/${template.sourceReceiptId}/clone` })}
+<body><header><p><a href="/">Project Room</a></p></header>
+<main>
+<h1>Clone as template</h1>
+<p>A posting draft pre-filled from the completed bounty <a href="/receipts/${escapeHtml(template.sourceReceiptId)}">${escapeHtml(template.title)}</a>. It carries the entry's title and rubric shape only — no poster or worker names, no amounts, and no other room content. Set your own award and deadline when you post.</p>
+<dl>
+<div><dt>Title</dt><dd>${escapeHtml(template.title)}</dd></div>
+<div><dt>Criteria</dt><dd>${escapeHtml(template.criteria)}</dd></div>
+</dl>
+${rubric ? `<h2>Rubric</h2><ul>${rubric}</ul>` : ""}
+<p><a href="/join">Post a bounty</a> — open the posting flow and start from this draft, or take the same draft as JSON at <a href="/receipts/${escapeHtml(template.sourceReceiptId)}/clone.json">/receipts/${escapeHtml(template.sourceReceiptId)}/clone.json</a>.</p>
+<p><a href="/receipts/gallery">Completed bounty gallery</a> · <a href="/receipts">All public receipts</a></p>
+</main>
+<footer><a href="${escapeHtml(template.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+</body></html>`;
 }
