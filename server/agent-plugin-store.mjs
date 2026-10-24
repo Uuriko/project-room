@@ -21,7 +21,8 @@
 // 409. Webhook subscribe and delivery resolve the hostname before opening
 // a socket; that lookup is the SSRF gate and runs outside the write
 // transaction.
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { EVENT_TYPES, isRoomArchived } from "../src/events.js";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError, toA2ACard } from "./agent-directory.mjs";
 import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-verification.mjs";
@@ -562,11 +563,150 @@ export class AgentPluginStore {
     });
   }
 
-  unverifyIdentity({ identityId }) {
+  // SEC2-C-B: who may administer membership for an identity — the caller
+  // administers a room the identity is seated in when, in that room, the
+  // caller's linked member is the room owner, holds manage_members, or
+  // holds an active membership-delegation grant (the identity-scoped
+  // mirror of MembershipDelegation.canAdministerMembership, whose caller
+  // there is a room-session member rather than an identity secret).
+  isMembershipAdminFor(identityId, callerId) {
+    if (typeof callerId !== "string" || !callerId) return false;
+    const seatedRooms = this.db.prepare(
+      "SELECT room_id AS roomId FROM identity_links WHERE identity_id=?").all(identityId).map(row => row.roomId);
+    return seatedRooms.some(roomId => this.#administersRoom(roomId, callerId));
+  }
+
+  // Does the caller identity administer membership in this one room
+  // (owner seat, active manage_members, or a membership-delegation grant)?
+  #administersRoom(roomId, callerId) {
+    if (typeof callerId !== "string" || !callerId) return false;
+    const link = this.db.prepare(
+      "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, callerId);
+    if (!link) return false;
+    let authority;
+    try { authority = this.store.roomAuthority(roomId); } catch { return false; }
+    if (authority.ownerId === link.memberId) return true;
+    const member = authority.members && Object.hasOwn(authority.members, link.memberId)
+      ? authority.members[link.memberId] : null;
+    if (member && member.active !== false && Array.isArray(member.permissions)
+      && member.permissions.includes("manage_members")) return true;
+    return Boolean(this.store.delegation?.hasGrant(roomId, callerId));
+  }
+
+  // Rooms where withdrawing this identity's attestation would suspend a
+  // seat: verified-gated, resolvable, not archived, active non-owner seat.
+  // The same filter #suspendUnverifiedSeats applies.
+  #gatedSeatRooms(identityId) {
+    const rooms = [];
+    const links = this.db.prepare(
+      "SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id=?").all(identityId);
+    for (const { roomId, memberId } of links) {
+      if (!this.verificationPolicies.get(roomId)?.requireVerified) continue;
+      let authority, state;
+      try {
+        authority = this.store.roomAuthority(roomId);
+        state = this.store.room(roomId).state;
+      } catch { continue; }
+      if (isRoomArchived(state)) continue;
+      if (authority.ownerId === memberId) continue;
+      const member = authority.members && Object.hasOwn(authority.members, memberId)
+        ? authority.members[memberId] : null;
+      if (!member || member.active === false) continue;
+      rooms.push(roomId);
+    }
+    return rooms;
+  }
+
+  // r195: the attestation is identity-wide and its withdrawal suspends
+  // seats in every gated room, so a non-attester's standing must cover
+  // every room the withdrawal reaches. Membership admin of one room (which
+  // any room owner can obtain by linking the identity into a room of their
+  // own, with no consent from the identity) is not standing over seats in
+  // rooms the caller does not administer. With no gated seat to protect,
+  // only the attester (or the system path) withdraws the attestation.
+  #administersEveryGatedSeat(identityId, callerId) {
+    const rooms = this.#gatedSeatRooms(identityId);
+    return rooms.length > 0 && rooms.every(roomId => this.#administersRoom(roomId, callerId));
+  }
+
+  // SEC2-C-B: seat re-evaluation after an attestation is withdrawn. In
+  // every room whose policy requires verified identities, the seat's
+  // admission basis is gone, so the member is suspended — deactivated
+  // through the normal command path (which also revokes the member's
+  // room connections and credentials), permissions preserved on the
+  // record, identity link kept so re-verification + an admin
+  // reactivation can restore the seat. Mirrors the account-deletion
+  // suspension pattern (a short-lived access key for the member being
+  // deactivated, then member.access_changed). Seats in rooms without
+  // the policy never depended on the attestation and are untouched;
+  // owner seats are not attestation-gated (account-deletion precedent)
+  // and surface through the owner-attention drift item instead. A room
+  // whose suspension cannot run (e.g. a guest-scoped seat) is named in
+  // the result, never silently skipped, and the same drift item keeps
+  // it visible.
+  #suspendUnverifiedSeats(identityId) {
+    const suspendedRooms = [];
+    const suspensionFailedRooms = [];
+    const links = this.db.prepare(
+      "SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id=?").all(identityId);
+    for (const { roomId, memberId } of links) {
+      if (!this.verificationPolicies.get(roomId)?.requireVerified) continue;
+      let authority, state;
+      try {
+        authority = this.store.roomAuthority(roomId);
+        state = this.store.room(roomId).state;
+      } catch { continue; } // link to a room that no longer resolves: nothing seated to re-evaluate
+      if (isRoomArchived(state)) continue;
+      if (authority.ownerId === memberId) continue;
+      const member = authority.members && Object.hasOwn(authority.members, memberId)
+        ? authority.members[memberId] : null;
+      if (!member || member.active === false) continue;
+      try {
+        const key = this.store.issueAccessKey(roomId, memberId, 60000);
+        this.store.command(key, roomId, { id: randomUUID(), type: EVENT_TYPES.MEMBER_ACCESS_CHANGED,
+          data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } });
+        suspendedRooms.push(roomId);
+      } catch {
+        suspensionFailedRooms.push(roomId);
+      }
+    }
+    return { suspendedRooms, suspensionFailedRooms };
+  }
+
+  // SEC2-C-B: revoking an attestation is no longer a silent strip. The
+  // verification check used to exist only at admission (link), and any
+  // room owner could delete any attestation while the member stayed
+  // seated with permissions and grants intact and no signal. Now, when
+  // an attestation exists, the caller must be its original attester or
+  // a membership admin of a room where the identity is seated; with no
+  // attestation there is nothing to protect and the historical no-op
+  // keeps its room-owner standing. A caller-less call is the system
+  // path (restore reconcile withdrawing rows to match a snapshot) and
+  // skips the caller check, but seat re-evaluation still fires. Every
+  // revocation re-evaluates the identity's seats in verified-gated
+  // rooms (#suspendUnverifiedSeats) inside the same transaction.
+  unverifyIdentity({ identityId, revokedBy = null }) {
     return this.mutate(() => {
+      const attestation = this.identityVerification.attestation(identityId);
+      if (attestation) {
+        const authorized = revokedBy == null
+          || revokedBy === attestation.verifiedBy
+          || this.#administersEveryGatedSeat(identityId, revokedBy);
+        if (!authorized) {
+          throw new AgentPluginError(403, "not_attestation_owner",
+            "Only the original attester, or a membership admin of every verified-gated room where this identity holds a seat, can revoke its verification attestation");
+        }
+      } else if (revokedBy != null
+        && !this.isRoomOwner(revokedBy) && !this.isMembershipAdminFor(identityId, revokedBy)) {
+        throw new AgentPluginError(403, "not_room_owner", "Only a room owner can revoke a verification attestation");
+      }
       const result = this.identityVerification.unverify(identityId);
       this.db.prepare("DELETE FROM agent_identity_verification WHERE identity_id=?").run(identityId);
-      return result;
+      const { suspendedRooms, suspensionFailedRooms } = this.#suspendUnverifiedSeats(identityId);
+      return Object.freeze({ ...result,
+        revokedBy: revokedBy ?? null,
+        suspendedRooms: Object.freeze(suspendedRooms),
+        suspensionFailedRooms: Object.freeze(suspensionFailedRooms) });
     });
   }
 
