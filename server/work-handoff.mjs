@@ -1,7 +1,8 @@
 // Structured agent-to-agent work handoff (B014). A frozen contract so any
 // agent can hand work to any other agent — or to John — with everything the
 // receiver needs: objective → status → next → blockers → files → validation.
-// Pure validator: no store, no network. A later slice persists handoffs.
+// The record validator below is pure (no store, no network); the typed
+// envelope journal later in this file is the slice that persists handoffs.
 import { createHash, randomUUID } from "node:crypto";
 import { PERMISSIONS } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
@@ -30,6 +31,10 @@ const handoffFile = value => {
   if (value.sha !== undefined && value.sha !== null) requireHandoff(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(value.sha), "invalid_work_handoff", "file sha must be a 40 or 64 char hex digest");
   return Object.freeze({ path: text(value.path, 1024, "file path"), kind: value.kind, sha: value.sha ?? null });
 };
+const fileList = values => {
+  requireHandoff(Array.isArray(values) && values.length <= 64, "invalid_work_handoff", "files must be a list of at most 64");
+  return Object.freeze(values.map(handoffFile));
+};
 // Validate and freeze one handoff record.
 export function workHandoff(value) {
   requireHandoff(value !== null && typeof value === "object" && !Array.isArray(value), "invalid_work_handoff", "handoff must be an object");
@@ -50,7 +55,10 @@ export function workHandoff(value) {
     summary: text(value.summary, 8192, "summary"),
     next: list(value.next ?? [], 2048, "next step"),
     blockers: list(value.blockers ?? [], 2048, "blocker"),
-    files: Object.freeze((value.files ?? []).map(handoffFile).slice(0, 64)),
+    // Files reject oversize like the sibling lists (#4064 H1): silently
+    // truncating the tail would hand the receiver a complete-looking
+    // file list that is missing entries.
+    files: fileList(value.files ?? []),
     validation: optionalText(value.validation, 8192, "validation"),
   };
   requireHandoff(record.status !== "blocked" || record.blockers.length > 0, "invalid_work_handoff", "a blocked handoff must name its blockers");
@@ -71,8 +79,8 @@ export { HandoffError };
 // The work handoff above is a status report. An envelope is a delegation:
 // everything the receiving agent needs to take the work and run with it —
 // objective, inputs (references, not blobs), scoped authority, expected
-// output, a machine-checkable acceptance test, termination conditions, and
-// full provenance. The journal records every terminal state (completed,
+// output, an acceptance test declared as named checks, termination
+// conditions, and full provenance. The journal records every terminal state (completed,
 // rejected, expired, escalated, cancelled) so the falsifiable claim "typed
 // handoffs reduce escalations" is measurable: escalation rate = escalated /
 // closed envelopes, comparable against the legacy owner-directed handoff
@@ -187,9 +195,15 @@ const envelopeExpectedOutput = value => {
     schema: value.schema === undefined || value.schema === null ? null : envelopeText(value.schema, 2048, "expectedOutput.schema") });
 };
 
-// Acceptance checks are machine-checkable by construction: each names a kind
-// the verifier can evaluate without reading prose. complete() requires the
-// recipient to name which declared checks passed.
+// Acceptance checks are declared in machine-readable form: each names a
+// kind and the work item or reviewer it concerns, so what was required is
+// never buried in prose. Completion does NOT evaluate them (#4064 H2):
+// the journal holds no work-state reader, and the completion input names
+// check kinds only, so two declared checks of the same kind cannot even
+// be told apart on the receipt. complete() requires the recipient to name
+// the declared checks they assert passed, and the receipt records that
+// assertion as checksAsserted — asserted by the recipient, never
+// verified by the journal.
 const checkKinds = Object.freeze(["work_completed", "result_submitted", "verification_recorded", "manual_review"]);
 const envelopeAcceptanceCheck = (value, i) => {
   const field = `acceptanceTest.checks[${i}]`;
@@ -325,9 +339,10 @@ export class HandoffEnvelopeJournal {
     }
     return true;
   }
-  // Offline integrity: every row's envelope names the envelope id and room
-  // it is keyed by, statuses stay in the enum, and every envelope starts
-  // proposed.
+  // Offline integrity: every row's envelope names the envelope id it is
+  // keyed by, statuses stay in the enum, and every envelope starts
+  // proposed. Envelopes carry no room field, so no room check occurs
+  // here; the room binding is the row's room_id column alone (#4064 H3).
   verify() {
     for (const row of this.db.prepare("SELECT * FROM handoff_envelopes").all()) {
       const envelope = JSON.parse(row.envelope), history = JSON.parse(row.history);
@@ -389,9 +404,11 @@ export class HandoffEnvelopeJournal {
   // illegal edges are refused, never silently rewritten. Actor rules:
   // accept/reject/complete by the recipient (to); cancel by the sender
   // (from); escalate by either party; expired only by the system sweep.
-  // complete() requires checksPassed: the non-empty subset of the declared
-  // acceptance checks the recipient asserts passed.
-  transition(roomId, envelopeId, status, { by = null, note = null, checksPassed = null } = {}) {
+  // complete() requires the recipient to assert which declared acceptance
+  // checks passed: pass them as checksAsserted (checksPassed remains
+  // accepted as the legacy input name). The receipt stores the assertion
+  // as checksAsserted; no declared check is evaluated (#4064 H2).
+  transition(roomId, envelopeId, status, { by = null, note = null, checksPassed = null, checksAsserted = null } = {}) {
     envelopeScope(roomId);
     agentId(envelopeId, "envelopeId");
     envelopeCheck(envelopeStatuses.includes(status), "invalid_envelope_status", `status must be one of ${envelopeStatuses.join(",")}`);
@@ -420,23 +437,24 @@ export class HandoffEnvelopeJournal {
       if ((status === "accepted" || status === "completed")
         && (now >= Date.parse(envelope.authority.expiresAt) || now >= Date.parse(envelope.termination.expiresAt)))
         envelopeFail(409, "envelope_expired", "This handoff has expired. Ask the sender for a new handoff.");
-      let passed = null;
+      let asserted = null;
       if (status === "completed") {
-        envelopeCheck(Array.isArray(checksPassed) && checksPassed.length >= 1, "envelope_checks_required",
-          "Completing an envelope requires naming the acceptance checks that passed.");
+        const assertedInput = checksAsserted ?? checksPassed;
+        envelopeCheck(Array.isArray(assertedInput) && assertedInput.length >= 1, "envelope_checks_required",
+          "Completing an envelope requires naming the acceptance checks asserted as passed.");
         const declared = new Set(envelope.acceptanceTest.checks.map(c => c.kind));
         // Each asserted pass is recorded as given: collapsing duplicate
         // kinds would merge two distinct declared checks of the same kind
         // into one, weakening the acceptance criteria on the receipt.
-        passed = Object.freeze(checksPassed.map((kind, i) => {
+        asserted = Object.freeze(assertedInput.map((kind, i) => {
           envelopeCheck(typeof kind === "string" && declared.has(kind), "envelope_unknown_check",
-            `checksPassed[${i}] is not a declared acceptance check`);
+            `checksAsserted[${i}] is not a declared acceptance check`);
           return kind;
         }));
-        envelopeCheck(passed.length >= 1, "envelope_checks_required", "At least one declared acceptance check must pass.");
+        envelopeCheck(asserted.length >= 1, "envelope_checks_required", "At least one declared acceptance check must be asserted.");
       }
       const entry = { status, at: new Date(now).toISOString(), ...(actor ? { by: actor } : {}),
-        ...(trimmed ? { note: trimmed } : {}), ...(passed ? { checksPassed: [...passed] } : {}) };
+        ...(trimmed ? { note: trimmed } : {}), ...(asserted ? { checksAsserted: [...asserted] } : {}) };
       const history = [...JSON.parse(row.history), entry];
       this.db.prepare("UPDATE handoff_envelopes SET status=?,updated_at=?,history=? WHERE room_id=? AND envelope_id=?")
         .run(status, now, JSON.stringify(history), roomId, envelopeId);

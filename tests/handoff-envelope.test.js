@@ -96,7 +96,7 @@ test("escalate on expiry requires an escalation target", () => {
   assert.equal(ok.termination.escalateTo, "agent-owner");
 });
 
-test("acceptance test needs at least one machine-checkable check", () => {
+test("acceptance test needs at least one declared check", () => {
   expectEnvelopeCode(() => validRecord({ acceptanceTest: { checks: [] } }), "invalid_handoff_envelope");
   expectEnvelopeCode(() => validRecord({ acceptanceTest: { checks: [{ kind: "vibes" }] } }), "invalid_handoff_envelope");
   const check = validRecord({ acceptanceTest: { checks: [{ kind: "manual_review", reviewer: "agent-owner" }] } });
@@ -157,7 +157,9 @@ test("recipient accepts, completes with named checks; history is append-only", (
   const done = journal.transition("room-1", envelopeId, "completed", { by: "agent-b", checksPassed: ["result_submitted"] });
   assert.equal(done.status, "completed");
   assert.deepEqual(done.history.map(h => h.status), ["proposed", "accepted", "completed"]);
-  assert.deepEqual(done.history[2].checksPassed, ["result_submitted"]);
+  // The receipt records the assertion as checksAsserted (#4064 H2).
+  assert.deepEqual(done.history[2].checksAsserted, ["result_submitted"]);
+  assert.equal(Object.hasOwn(done.history[2], "checksPassed"), false);
 });
 
 test("actor rules are enforced: only the recipient accepts/completes, only the sender cancels", () => {

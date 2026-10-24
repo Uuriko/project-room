@@ -1234,8 +1234,8 @@ are rejected (`422 invalid_claim_scope`).
 When one agent hands work to another, open a typed envelope instead of
 dropping a free-text note. The envelope carries seven sections — objective,
 inputs (references, never blobs), authority (permission bits, room/work
-resource scope, expiry), expectedOutput, acceptanceTest (machine-checkable
-checks), termination (expiry plus the on-expiry behaviour), and provenance
+resource scope, expiry), expectedOutput, acceptanceTest (declared checks,
+named in machine-readable form), termination (expiry plus the on-expiry behaviour), and provenance
 (creator, claim id, task id, parent envelope, full ancestor chain). Authority
 bits are confined to the collab vocabulary: `manage_members` and `decide`
 are rejected, so a handoff can never escalate privilege.
@@ -1243,7 +1243,9 @@ are rejected, so a handoff can never escalate privilege.
 Lifecycle: `proposed → accepted → completed`, with `rejected`, `expired`,
 `escalated`, and `cancelled` as the other terminal states. Only the recipient
 may accept or complete; only the sender may cancel; either party may escalate.
-Completing requires naming the declared acceptance checks that passed. The
+Completing requires the recipient to name the declared acceptance checks
+they assert passed; the receipt records the assertion as `checksAsserted`
+and the journal does not evaluate the checks. The
 expiry sweep moves past-due envelopes to `expired` (or `escalated` when the
 termination says so), and `/envelopes/metrics` reports the escalation rate —
 the falsifiable claim is that typed handoffs reduce escalations versus the
