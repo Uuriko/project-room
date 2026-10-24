@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { setTimeout as delay } from 'node:timers/promises';
-import { openEvolution, events, requireThat } from '../client/evolution/store.mjs';
+import { openEvolution, events } from '../client/evolution/store.mjs';
 import { installPackage, activate, evaluate, rollback } from '../client/evolution/registry.mjs';
+import { watchLocalCapabilities, executionMetrics } from '../client/evolution/scheduler.mjs';
 import { runCapabilityHost } from '../client/evolution/host.mjs';
 import { watchRoomCapabilities } from '../client/evolution/room-service.mjs';
 import { installRepositoryPackage } from '../client/evolution/repository-package.mjs';
@@ -31,6 +31,8 @@ export async function command(store, name, args = {}, signal) {
     case 'interaction-open': return openRoomInteraction(store, { ...args, connection: readAgentConnection(args.connectionDirectory), signal });
     case 'interaction-read': return readRoomInteraction(store, { ...args, connection: readAgentConnection(args.connectionDirectory), signal });
     case 'room-publish': return publishJobArtifacts(store, { ...args, connection: readAgentConnection(args.connectionDirectory), signal });
+    case 'watch': return watchLocalCapabilities(store, { signal, intervalMs: args.intervalMs, emit: value => console.log(JSON.stringify(value)) });
+    case 'metrics': return executionMetrics(store);
     case 'configure': return configure(store, args);
     case 'install-repository': return installRepositoryPackage(store, args);
     case 'install': return installPackage(store, args.root, args.manifest);
@@ -51,25 +53,14 @@ export async function command(store, name, args = {}, signal) {
 async function main() {
   const [name, input] = process.argv.slice(2);
   if (!name || name === '--help') {
-    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|events|cancel|reconcile|feedback|room-run|room-watch|room-host|room-publish|interaction-open|interaction-read|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
+    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|metrics|events|cancel|reconcile|feedback|room-run|room-watch|room-host|room-publish|interaction-open|interaction-read|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
   }
   const store = openEvolution(process.env.ROOM_EVOLUTION_DIRECTORY ?? defaultDirectory());
   const controller = new AbortController(); const stop = () => controller.abort();
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
   try {
     const args = input ? JSON.parse(readFileSync(input, 'utf8')) : {};
-    if (name === 'watch') {
-      const intervalMs = args.intervalMs ?? 1000; requireThat(Number.isInteger(intervalMs) && intervalMs >= 200 && intervalMs <= 60000, 'invalid_interval');
-      while (!controller.signal.aborted) {
-        const queued = store.db.prepare("SELECT id FROM jobs WHERE state='queued' ORDER BY rowid LIMIT 50").all();
-        for (const job of queued) {
-          if (controller.signal.aborted) break;
-          const result = await runJob(store, job.id, { signal: controller.signal });
-          if (result.claimed) console.log(JSON.stringify({ jobId: job.id, state: result.job.state, pin: result.job.pin }));
-        }
-        try { await delay(intervalMs, undefined, { signal: controller.signal }); } catch { break; }
-      }
-    } else console.log(JSON.stringify(await command(store, name, args, controller.signal)));
+    console.log(JSON.stringify(await command(store, name, args, controller.signal)));
   } finally { process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); store.close(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => { console.error(JSON.stringify({ error: error.message })); process.exitCode = 1; });
