@@ -90,11 +90,13 @@ The rationale for its `limits` and `observability` values lives here instead.
   200,000-event reopen costs 500 ms of CPU or more. The limit still applies
   only on the Paid plan's Standard usage model (Free plan is a fixed 10 ms);
   the platform maximum is 300,000.
-- `observability.enabled` is true with `head_sampling_rate` 1 so console output
-  (for example the one-time "Operator bootstrap skipped" warning) and uncaught
-  errors are kept in Workers Logs for seven days. Logging every request fits the
-  included 20M events/month at pilot volume; lower the sampling rate if that
-  changes. No request bodies or credentials are logged.
+- `observability.enabled` is true with `head_sampling_rate` 1 so a log line
+  that the Worker emits is kept, including uncaught errors and the one-time
+  "Operator bootstrap skipped" warning. Successful request lines
+  (`room.request`, `room.do_request` with status 200–399) are sampled at 10%
+  in `request-timing.mjs`. Errors and every other status are always emitted.
+  The platform rate stays at 1 because a head sample would also drop errors.
+  No request bodies or credentials are logged.
 - An invalid or expired `ROOM_BOOTSTRAP_*` window is logged once per isolate and
   skipped; the Worker keeps serving an empty workspace instead of failing every
   request. Fix or remove both settings; nothing is provisioned until they are valid.

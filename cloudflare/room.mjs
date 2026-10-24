@@ -38,7 +38,7 @@ import { countOpenPublicReports } from '../server/legal-store.mjs'; // open publ
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
-import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { appDurationMs, logRoomRequest, requestPath, shouldSampleRequestLog, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
@@ -205,7 +205,7 @@ export class ProjectRoom extends DurableObject {
         if (cold.phases) line.phases = cold.phases;
         console.info(JSON.stringify(line));
       }
-      console.info(JSON.stringify({
+      if (shouldSampleRequestLog(response.status)) console.info(JSON.stringify({
         event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
       return withServerTiming(response, 'app', appMs);
