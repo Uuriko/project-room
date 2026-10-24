@@ -127,20 +127,33 @@ test("displayName must be text when present: null is rejected, not stored as \"n
   assert.equal((await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Named" })).status, 201);
 });
 
-test("legacy 8-symbol sha256 codes no longer redeem (unsalted fallback removed)", async t => {
+test("legacy 8-symbol codes are retired: 410 invite_format_retired, classified by format alone (#3672)", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const legacy = "RM-7K2P9QXZ"; // pre-v2 format: 8 symbols, no 0/O/1/I/L
   const now = Date.now();
   store.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
     VALUES(?,?,?,?,?,?,?)`).run(sha256(legacy), "commons", "owner", JSON.stringify(["accept_work"]), "Legacy Bot", now, now + 3600000);
-  // The stale row may still list, but redeeming the legacy code fails: the
-  // bare-sha256 lookup is gone, so the scrypt of the presented code matches nothing.
+  // The stale row may still list, but the legacy code does not redeem: the
+  // bare-sha256 fallback is NOT restored (unsalted sha256 over a ~40-bit code
+  // space is offline-invertible with DB read access). Instead the retired
+  // format is named honestly — 410 invite_format_retired — at both lookup
+  // sites, redeem and preview.
   const res = await redeem(origin, legacy.toLowerCase(), "Legacy Bot");
-  assert.equal(res.status, 404, JSON.stringify(res.json));
+  assert.equal(res.status, 410, JSON.stringify(res.json));
+  assert.equal(res.json.error.code, "invite_format_retired");
+  assert.match(res.json.error.message, /retired code format/);
+  const previewed = await post(origin, "/api/agent-invites/preview", { code: legacy });
+  assert.equal(previewed.status, 410, JSON.stringify(previewed.json));
+  assert.equal(previewed.json.error.code, "invite_format_retired");
+  // Classification is by format alone: a legacy-format code that was never
+  // issued gets the same 410 (no sha256 lookup, nothing leaks about rows).
+  const unissued = await redeem(origin, "RM-AAAAAAAA");
+  assert.equal(unissued.status, 410);
+  assert.equal(unissued.json.error.code, "invite_format_retired");
   // A legacy-length code with v2-only symbols is neither format: rejected up front.
   assert.equal((await redeem(origin, "RM-0000AAAA")).status, 404);
-  // Unknown codes in either format, and lengths that are neither, all fail alike.
-  for (const code of ["RM-AAAAAAAA", "RM-AAAAAAAAAAAAAAAA", "RM-AAAAAAAAAAAA", "RM-AAAAAAAAAAAAAAAAAAAA"]) {
+  // Unknown v2 codes, and lengths that are neither format, keep the 404.
+  for (const code of ["RM-AAAAAAAAAAAAAAAA", "RM-AAAAAAAAAAAA", "RM-AAAAAAAAAAAAAAAAAAAA"]) {
     const unknown = await redeem(origin, code);
     assert.equal(unknown.status, 404, code);
     assert.equal(unknown.json.error.code, "invite_unavailable");
@@ -226,7 +239,7 @@ test("a code is single-use: the second redemption fails", async t => {
 
 test("unknown, revoked, and expired codes fail distinctly", async t => {
   const { store, origin, ownerKey } = await serve(t);
-  const unknown = await redeem(origin, "RM-AAAAAAAA");
+  const unknown = await redeem(origin, "RM-AAAAAAAAAAAAAAAA");
   assert.equal(unknown.status, 404);
   // R10: a never-issued code must not be blamed on expiry or prior use.
   assert.equal(unknown.json.error.code, "invite_unavailable");
