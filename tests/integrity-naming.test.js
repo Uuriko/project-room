@@ -8,6 +8,14 @@
 // help_history), the failing room's id rides the failure detail through
 // the whole reporting chain; every other record id (invitations above
 // all) stays off the surface, and the public error string stays id-free.
+//
+// CURE-INTEGRITY-SCAN amendment: a room PARKED by the backfill (the
+// wedged-room case below) no longer fails the tick, so it no longer
+// shapes a failure detail — its name lives where the full outstanding
+// list always lived, the token-gated operator status, and its presence
+// rides the public summary as counts (blockedRooms / blockedFailures /
+// blockedSince). Rooms that were scanned and FAILED (messages_parity,
+// help_history) keep the failure-detail naming exactly as before.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -53,7 +61,7 @@ async function certify(store, roomId) {
   return false;
 }
 
-test("wedged room: the poisoned room is named on the job detail and operator status; the public health view stays id-free", async t => {
+test("wedged room: the parked room is named on the operator status; the public health view carries counts and stays id-free", async t => {
   const store = await settle(t, ["alpha", "gamma"]);
   post(store, "gamma", "g1", "first");
   post(store, "gamma", "g2", "second");
@@ -71,30 +79,37 @@ test("wedged room: the poisoned room is named on the job detail and operator sta
   }
   assert.ok(recorded, "the backfill step records gamma's failure");
 
-  // The job's own output names the room in its failure detail, while the
-  // public error string stays id-free (the #3544 pin still holds).
+  // The job's verdict is now the scannable rooms': the park does not fail
+  // the tick or shape a failure detail. The blocked set rides as its own
+  // numbers, and gamma — no longer certified at its moved head — is not
+  // counted among the verified rooms.
   const run = await integrityJob.run(store, { deadline: Date.now() + 5000 });
-  assert.ok(Number(run.errors) >= 1);
-  assert.equal(run.failureDetail.subcheck, "messages_backfill");
-  assert.equal(run.failureDetail.code, "messages_backfill_failed");
-  assert.equal(run.failureDetail.recordId, "gamma", "the job detail names the poisoned room");
-  assert.ok(!run.scanError.includes("gamma"), "the public error string carries no id");
+  assert.equal(run.errors, undefined);
+  assert.equal(run.failureDetail, undefined);
+  assert.equal(run.blockedFailures, 1);
+  assert.equal(run.blockedRooms, 1);
+  assert.equal(run.verifiedRooms, 1, "alpha remains verified; the parked room is not laundered into the count");
 
-  // The heartbeat chain behind GET /api/health/jobs is public: it keeps
-  // the sanitized code/sub-check but never the room's id — a private
-  // room's id is block evidence (integrity-block-health on main). The
-  // name lives on the job detail (above) and operator status (below).
+  // The heartbeat chain behind GET /api/health/jobs is public: the tick
+  // reads as the success it is, the summary carries the blocked set as
+  // counts, and the room's id never appears — a private room's id is
+  // block evidence (integrity-block-health on main). The name lives on
+  // the operator status (below).
   const outcomes = await runCronJobs(
     { integrity: () => integrityJob.run(store, { deadline: Date.now() + 5000 }) },
     { now: () => Date.now(), log: () => {} }
   );
   const view = jobHealthView(applyOutcomes({}, outcomes), Date.now()).jobs.find(job => job.name === "integrity");
-  assert.equal(view.lastErrorCode, "messages_backfill_failed");
-  assert.equal(view.lastErrorSubcheck, "messages_backfill");
+  assert.equal(view.status, "ok");
+  assert.equal(view.consecutiveFailures, 0);
+  assert.equal(view.lastErrorCode, null);
+  assert.equal(view.lastSummary.blockedRooms, 1);
+  assert.equal(view.lastSummary.blockedFailures, 1);
   assert.equal(view.lastErrorRecordId, undefined, "the public health view carries no record id");
   assert.ok(!JSON.stringify(view).includes("gamma"), "the public health view contains no block evidence");
 
-  // The token-gated operator status carries the full outstanding list.
+  // The token-gated operator status carries the full outstanding list,
+  // the parked room named — the diagnosis surface the name was for.
   const rows = operatorStatus(store).integrityFailures;
   assert.ok(
     rows.some(row => row.step === "messages_backfill" && row.recordId === "gamma"),
