@@ -19,7 +19,13 @@ import { pullRequestSettlement, withPullSettlement, recordPullOutcome } from "..
 import { syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../server/work-claim-routes.mjs";
 
-const NOW = Date.UTC(2026, 9, 16, 2, 0, 0);
+// The fixture clock rides the wall clock: every fixture timestamp below is
+// a fixed offset from NOW, so the done fixture claim (last updated
+// NOW - 2000_000) always sits inside the board list's seven-day done
+// window, which handleWorkClaims computes against the real clock. A fixed
+// calendar NOW here expired on 2026-10-23T01:26:40Z and took the
+// read/list agreement test down with it.
+const NOW = Date.now();
 const ROOM = "stamp-room";
 const SHA = "d".repeat(40);
 const pr = number => `https://github.com/Uuriko/project-room/pull/${number}`;
@@ -111,7 +117,9 @@ test("the board page exposes settlement for every claim shape", () => {
 });
 
 test("the single-claim read and the board list agree on settlement", async t => {
-  const store = new RoomStore(":memory:");
+  // Pin the store clock to the fixture clock so the list leg's done
+  // window is evaluated against the same instant the fixture used.
+  const store = new RoomStore(":memory:", { now: () => NOW });
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
   // Pin the route clock to the fixture time: the board list hides done claims
