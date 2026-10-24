@@ -15,7 +15,8 @@ import { googleConfig } from '../server/google-oauth.mjs';
 import { githubConfig } from '../server/github-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
-import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
+import { magicLinkMailerFromEnv, resendTransport } from '../server/resend-mailer.mjs';
+import { BACKUP_ALERT_TO, deliverBackupAlert } from '../server/backup-alert.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { channelDrainTickShape, CHANNEL_DRAIN_INFLIGHT_KEY } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
@@ -564,7 +565,31 @@ export class ProjectRoom extends DurableObject {
     }
     if (this.paused || !this.store) return { skipped: "paused" };
     await yieldToQueuedRequests();
-    return this.#runDueJobs({ includeSlow: true, onlyJob: name });
+    const outcomes = await this.#runDueJobs({ includeSlow: true, onlyJob: name });
+    if (name === "room-backup") await this.#reviewBackupAlert();
+    return outcomes;
+  }
+  // After the room-backup heartbeat is durable. One notice per incident,
+  // cleared on the next success. A missing mailer does not mark the
+  // incident sent; the attempt stamp keeps the cron from logging it
+  // every half hour.
+  async #reviewBackupAlert() {
+    const now = Date.now();
+    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY) ?? {};
+    const from = typeof this.env?.ROOM_MAGIC_FROM === "string" && this.env.ROOM_MAGIC_FROM
+      ? this.env.ROOM_MAGIC_FROM
+      : "Project Room <noreply@trydemigod.com>";
+    const transport = resendTransport({ apiKey: this.env?.RESEND_API_KEY, from });
+    const outcome = await deliverBackupAlert({
+      record: stored["room-backup"],
+      now,
+      send: transport ? message => transport({ ...message, to: BACKUP_ALERT_TO }) : null,
+    });
+    if (outcome.reason === "mail_unconfigured" || outcome.reason === "send_failed") {
+      console.info(JSON.stringify({ event: "room.backup_alert", sent: false, reason: outcome.reason }));
+    }
+    if (outcome.record === stored["room-backup"]) return;
+    await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, { ...stored, "room-backup": outcome.record });
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {

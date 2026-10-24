@@ -230,6 +230,17 @@ async function runChecks(origin, fetchImpl, limitMs) {
       return fail("jobs", 503, "http_status");
     }
     if (!parsed || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return fail("jobs", 200, "jobs_missing");
+    // A full Worker board lists the slow safety jobs. room-backup and
+    // integrity have to be on that board: omitting either one is a missing
+    // watcher. A partial fixture is not that board and is judged only by
+    // the rows it carries. The names stay here so this worker does not
+    // import the job registry.
+    const names = new Set(parsed.jobs.map(job => (job && typeof job.name === "string" ? job.name : "")));
+    const fullBoard = ["land-queue", "webhook-dispatch", "retention", "store-growth", "claim-prs"].every(name => names.has(name));
+    if (fullBoard) {
+      const missing = ["room-backup", "integrity"].filter(name => !names.has(name));
+      if (missing.length) return fail("jobs", response.status, "job_missing", missing.join(", "));
+    }
     const active = parsed.jobs.filter(job => job && typeof job === "object" && job.enabled !== false && job.status !== "disabled");
     const nameOf = job => (typeof job.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(job.name) ? job.name : "job");
     // #3894: a required job reporting disabled means the deployment lost

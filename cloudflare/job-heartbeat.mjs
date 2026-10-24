@@ -3,7 +3,8 @@ import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNext
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
 // it back without auth. A job whose lastSuccessAt is older than 3x its period is
-// stale. A disabled job is not stale. This is the signal that was missing when
+// stale, unless the registry sets staleAfterMs (room-backup uses 26 hours).
+// A disabled job is not stale. This is the signal that was missing when
 // every cron tick failed with a DO RPC error for weeks while page health checks
 // stayed green.
 
@@ -223,8 +224,10 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
   const gatesKnown = env != null || store != null;
   const jobs = CRON_JOBS.map(job => {
     const record = stored?.[job.name] ?? {};
-    const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
     const source = REGISTRY.find(item => item.name === job.name);
+    const staleAfterSeconds = Number.isFinite(source?.staleAfterMs)
+      ? Math.round(source.staleAfterMs / 1000)
+      : job.periodSeconds * STALE_PERIODS;
     const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
     const reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
     const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
