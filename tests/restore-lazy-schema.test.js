@@ -28,6 +28,23 @@ function fixture(t) {
   return { dir, source };
 }
 for (const mode of ["file", "buffered", "streaming"]) {
+  test(`${mode} does not initialize unrelated runtime schemas for an older backup`, t => {
+    const dir = mkdtempSync(join(tmpdir(), "restore-old-schema-"));
+    const source = new RoomStore(join(dir, "source.sqlite"));
+    t.after(() => { source.close(); rmSync(dir, { recursive: true, force: true }); });
+    source.initialize(initialRoom());
+    const names = store => store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => row.name);
+    const before = names(source), ndjson = exportNdjsonText(source.db), path = join(dir, "target.sqlite");
+    let target;
+    if (mode === "file") { replayNdjson(ndjson, path); target = new RoomStore(path, { readOnly: true }); }
+    else {
+      target = new RoomStore(path);
+      if (mode === "buffered") replayNdjsonInto(ndjson, target);
+      else { const session = createBackupReplaySession(target); session.writeText(ndjson); session.finish(); }
+    }
+    try { assert.deepEqual(names(target), before); }
+    finally { target.close(); }
+  });
   test(`${mode} restores populated runtime-only tables`, t => {
     const { dir, source } = fixture(t), ndjson = exportNdjsonText(source.db), path = join(dir, "target.sqlite");
     let target, receipt;

@@ -526,7 +526,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (existsSync(filename)) throw new Error("Refusing to replay into an existing store");
   const store = new RoomStore(filename);
   try {
-    ensureRestoreSchema(store);
+    ensureRestoreSchema(store, byTable.keys());
     // #3599: sanitized cells resolve to safe substitutes, never the
     // placeholder; legacy streams get the legacy resolutions.
     const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });

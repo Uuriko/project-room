@@ -13,11 +13,16 @@ export const RESTORE_RUNTIME_TABLES = Object.freeze([
   "patrol_messages", "patrol_findings", "patrol_blocks", ...OAUTH_PROVIDER_TABLES
 ]);
 
-export function ensureRestoreSchema(store) {
-  store.db.exec(wakeListenerLeaseSchema);
-  store.db.exec(wakeRoomActivitySchema);
-  store.db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
-  store.ensureIntegrityFailures();
-  ensurePatrolSchema(store);
-  ensureOAuthProviderSchema(store.db);
+export function ensureRestoreSchema(store, tables) {
+  const needed = new Set(tables);
+  const has = names => names.some(name => needed.has(name));
+  // Do not expand older backups into every optional feature's schema. The extra
+  // schema made Workers fail the whole-database quick_check with
+  // SQLITE_NOMEM, even when those empty tables were not in the backup.
+  if (has(["agent_wake_listener_leases", "agent_wake_signal_claims"])) store.db.exec(wakeListenerLeaseSchema);
+  if (needed.has("agent_wake_room_activity")) store.db.exec(wakeRoomActivitySchema);
+  if (needed.has("projection_shape_upgrades")) store.db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
+  if (needed.has("integrity_failures")) store.ensureIntegrityFailures();
+  if (has(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"])) ensurePatrolSchema(store);
+  if (has(OAUTH_PROVIDER_TABLES)) ensureOAuthProviderSchema(store.db);
 }
