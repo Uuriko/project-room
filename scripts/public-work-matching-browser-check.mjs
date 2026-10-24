@@ -87,7 +87,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   // Front-door batch B-4: the human's View receipt link opens the human
   // receipt page, not raw JSON; the JSON stays as the secondary link.
   assert.equal(receiptPath, `/receipts/${submitted.receipt.receiptId}`);
-  assert.match(await (await visitor.request.get(f.origin + receiptPath)).text(), /Verification tier:/);
+  assert.match(await (await visitor.request.get(f.origin + receiptPath)).text(), /data-verdict="room-recorded"/);
   const jsonPath = await visitor.locator('#contribution-status a', { hasText: 'Receipt JSON' }).getAttribute('href');
   assert.equal((await (await visitor.request.get(f.origin + jsonPath)).json()).receiptId, submitted.receipt.receiptId);
   const [download] = await Promise.all([visitor.waitForEvent('download'), visitor.locator('#contribution-artifact').click()]);
