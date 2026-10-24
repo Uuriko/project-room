@@ -298,7 +298,7 @@ function historyForWorkItem(item, facts) {
 // order. Board verdicts are approve / changes_requested / comment; a
 // verification pass and an owner approval are approvals, everything else
 // sent the item back, which is a changes_requested.
-function reviewsForWorkItem(item, facts) {
+function reviewsForWorkItem(item, facts, basis = null) {
   const sequenceOf = eventId => {
     const events = facts?.events ?? [];
     const index = events.findIndex(event => event.id === eventId);
@@ -314,6 +314,13 @@ function reviewsForWorkItem(item, facts) {
       summary: cleanText(verification.summary, 2000) ?? "verification",
       url: null,
       at: eventAt(facts, verification.eventId, item.updatedAt),
+      // #3712: a verification-derived review carries the claim basis it
+      // stands against (the projected row's own basis facts, computed by
+      // boardClaimForWorkItem), or the kernel's reviewed-completion gate
+      // (canCloseWork) can never see it as current through the board door.
+      // Owner-decision reviews carry none: they are not verification
+      // reviews and no basis is invented for them.
+      ...(basis ? { basis } : {}),
       order: sequenceOf(verification.eventId),
     });
   }
@@ -333,9 +340,15 @@ function reviewsForWorkItem(item, facts) {
   return reviews.slice(-MAX_REVIEWS).map(({ order, ...review }) => review);
 }
 
-// Attestations: one per completion (receipt history + current receipt).
+// Attestations: one per completion (receipt history + current receipt),
+// plus the verifier's attestation for each passed verification (#3712).
 // The producer attests the delivery; the completion event supplies the
-// time (receipts carry no timestamp of their own).
+// time (receipts carry no timestamp of their own). The verifier's
+// attestation mirrors the review route's shape: recordReview binds an
+// attestation to an approve verdict only, timestamped at the review and
+// noted with its summary — the completion gate matches it to the derived
+// review by member and exact time, so it is projected from the same
+// verification event the review is derived from.
 function attestationsForWorkItem(item, facts) {
   const receipts = [...(item.receiptHistory ?? []), ...(item.receipt ? [item.receipt] : [])];
   const attestations = [];
@@ -346,6 +359,15 @@ function attestationsForWorkItem(item, facts) {
       memberId,
       at: eventAt(facts, receipt.eventId, item.updatedAt),
       note: cleanText(receipt.summary, 512),
+    });
+  }
+  const verifications = [...(item.verificationHistory ?? []), ...(item.verification ? [item.verification] : [])];
+  for (const verification of verifications) {
+    if (!verification?.verifierId || verification.result !== "pass") continue;
+    attestations.push({
+      memberId: verification.verifierId,
+      at: eventAt(facts, verification.eventId, item.updatedAt),
+      note: (cleanText(verification.summary, 2000) ?? "verification").slice(0, 512),
     });
   }
   return attestations;
@@ -464,7 +486,24 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
   }
   const cappedHistory = capBoardHistory(history);
   history = cappedHistory.history; historyOmitted += cappedHistory.dropped;
-  const reviews = reviewsForWorkItem(item, facts);
+  // #3712: the basis a verification-derived review stands against,
+  // derived only from the projected row's own basis facts — the same
+  // fields reviewBasisFor reads back off the row at the completion gate
+  // (owner and claimedAt from the item's claim, revision / CI head /
+  // delivery preserved from the existing board row, exactly as the row
+  // below carries them). No field is invented: with no accountable
+  // owner there is no basis to bind, and none is attached.
+  const projectedBasis = typeof owner === "string" && owner.length > 0 ? Object.freeze({
+    version: 1,
+    owner,
+    claimedAt: claimedAt ?? null,
+    revision: typeof existing?.revision === "string" ? existing.revision : null,
+    headSha: typeof existing?.ci?.headSha === "string" ? existing.ci.headSha : null,
+    deliveryDigest: typeof existing?.delivery?.digest === "string" ? existing.delivery.digest : null,
+    deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0
+      ? existing.deliveryGeneration : 0,
+  }) : null;
+  const reviews = reviewsForWorkItem(item, facts, projectedBasis);
   const attestations = attestationsForWorkItem(item, facts);
   const evidence = evidenceForWorkItem(item);
 
