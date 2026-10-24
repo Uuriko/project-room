@@ -34,8 +34,12 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
     await page.locator("#message-input").fill(composer);
     const card = page.locator('[data-work-record-id="' + config.workItemId + '"]');
     await card.locator(".work-details > summary").click();
-    await card.getByRole("button", { name: stage === "export" ? "Use my AI" : "Paste AI draft", exact: true }).click();
+    await card.getByRole("button", { name: "Use my AI", exact: true }).click();
     await page.locator("#portable-dialog").waitFor();
+    // "Paste AI draft" is no longer a button on the card: it is the portable
+    // dialog's result mode, reached via #portable-add-result (the same path
+    // portable-work-browser-check and draft-return-browser-check drive).
+    if (stage === "return") await page.locator("#portable-add-result").click();
     let packet = null, message = null, selectedResult = null;
     if (stage === "export") {
       assert.equal(await page.locator("#portable-source").isChecked(), false);
@@ -62,6 +66,11 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       assert.equal(message.authorId, "owner"); assert.equal(message.body, parsed.body);
       assert.equal(message.workItemId, config.workItemId); assert.equal(message.proposal.packetId, parsed.packetId);
       assert.equal(message.proposal.attribution, "manual-unverified");
+      // Per-message actions live in the "⋯" overflow menu (UI calming #2);
+      // open this message's menu before clicking Save as result, as
+      // native-draft-browser-check and refine-draft-browser-check do.
+      const resultMenu = page.locator('[data-message-record-id="' + message.id + '"] details.message-more');
+      if (!await resultMenu.evaluate(node => node.open)) await resultMenu.locator("summary").click();
       await page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
       await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
       assert.equal(await page.locator('[name="producerId"]').inputValue(), "");
@@ -108,9 +117,15 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       assert.equal(selectedResult.current.next.memberId, work.accountableMemberId);
       assert.equal(selectedResult.current.next.completionEventId, current.receipt.eventId);
       await card.locator('[data-read-result]').click();
-      await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, parsed.body);
+      // An ordinary short answer never fills the reader: loadExactResult
+      // closes it and reveals the source conversation message instead
+      // ("short result stays in the conversation", as
+      // refine-draft-browser-check asserts). Wait for focus to land on the
+      // returned message's row and read the exact text back from it.
+      await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, message.id);
+      assert.equal(await page.locator("#result-dialog").isVisible(), false);
+      assert.equal(await page.locator('[data-message-record-id="' + message.id + '"] .message-body').textContent(), parsed.body);
       await page.screenshot({ path: join(directory, "result.png") });
-      await page.locator("#close-result").click();
       assert.deepEqual(commands.map(command => command.type), ["message.posted", "work.completed", ...(loseCompletionResponse ? ["work.completed"] : [])]);
     }
     assert.equal(await page.locator("#message-input").inputValue(), composer);

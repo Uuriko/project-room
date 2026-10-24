@@ -22,6 +22,7 @@ test("the formerly orphaned suites are wired into the derived list", () => {
   const suites = deriveBrowserSuites(new URL("../scripts", import.meta.url).pathname);
   for (const file of [
     "scripts/activity-feed-browser-check.mjs",
+    "scripts/manual-owner-exercise-check.mjs",
     "scripts/message-menu-phone-browser-check.mjs",
     "scripts/refine-draft-browser-check.mjs",
   ]) assert.ok(suites.includes(file), `${file} must stay wired`);
@@ -29,12 +30,12 @@ test("the formerly orphaned suites are wired into the derived list", () => {
 
 test("known-failing suites stay excluded until their issues close", () => {
   // Wiring a red suite would merge a permanently red required gate; the
-  // exclusions name the tracking issues instead (#3842, #3837).
+  // exclusion names the tracking issue instead (#3842). The manual-owner
+  // exercise left this list when #3837 closed; it is pinned as wired above.
   assert.match(BROWSER_SUITE_EXCLUSIONS["qa5-a11y-c-browser-check.mjs"], /#3842/);
-  assert.match(BROWSER_SUITE_EXCLUSIONS["manual-owner-exercise-check.mjs"], /#3837/);
   const suites = deriveBrowserSuites(new URL("../scripts", import.meta.url).pathname);
   assert.ok(!suites.includes("scripts/qa5-a11y-c-browser-check.mjs"));
-  assert.ok(!suites.includes("scripts/manual-owner-exercise-check.mjs"));
+  assert.ok(suites.includes("scripts/manual-owner-exercise-check.mjs"));
 });
 
 test("derivation: a new check file joins the suite unless explicitly excluded", t => {
