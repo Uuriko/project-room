@@ -24,7 +24,7 @@
     "docs/agents/index.md": "sha256:59a60ccc19fe696b3aa5e4ef94b437cc1c6e4ce350b7e48d486fd489fe3aef4f",
     "docs/agents/langgraph.md": "sha256:2bcc9a9ef0f9334a86a7ff7355bb22956f206429f9d8fae2551834d028761eae",
     "docs/agents/openai-agents-sdk.md": "sha256:9ebcc0730e72b257ae3a19957d54bedd773f548a738c3d2a8a80f7bbe6af283b",
-    "docs/agents/paste.md": "sha256:6c4beccb8d2174d0b5f93f036bdbfd13ac1f37d8f067c65bf15afe5e98abf26a",
+    "docs/agents/paste.md": "sha256:c0271f518e31defbecad3c4e217b94917d8c157697f72bfbbeb1d2d6dac900e0",
     "docs/agents/vscode.md": "sha256:2731527a7e7c2ee0ebcef7b81de5c2900803607a4b97fc6415efb61aaab889dd",
     "examples/integrations/aider/README.md": "sha256:bb73998fbec477d88018355c33ffcd010cb96b1767e0b90364691894e71d384d",
     "examples/integrations/claude-code/README.md": "sha256:4173a2fd32fd3de7515555b8d27278920106b014d7cd6b1cd80af90e9c55ecc5",
