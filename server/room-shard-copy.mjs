@@ -3,6 +3,7 @@
 // on the command path: nothing in the Worker calls it unless a later step
 // does, and only when the caller asks.
 import { createHash } from "node:crypto";
+import { perRoomObjectsEnabled } from "./room-shard-flag.mjs";
 import { ROOM_TABLE_KEYS, roomKeyColumn } from "./room-shard-tables.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -77,6 +78,15 @@ export function roomHomeDigest(storeOrDb, roomId) {
   const projection = db.prepare("SELECT projection FROM rooms WHERE id = ?").get(roomId);
   const projectionBytes = projection ? Buffer.byteLength(projection.projection) : 0;
   return { events: rows.length, eventsHash: hash.digest("hex"), messages, projectionBytes };
+}
+
+// Dual-write is another copy of the same primary keys, not a second
+// store.command. Flag off leaves the shard untouched. The Worker does not
+// call this from the command path.
+export function mirrorRoomIfEnabled(env, pilot, shard, roomId) {
+  if (!perRoomObjectsEnabled(env)) return { mirrored: false };
+  copyRoomRows(pilot, shard, roomId);
+  return { mirrored: true };
 }
 
 export function compareRoomHomes(pilot, shard, roomId) {
