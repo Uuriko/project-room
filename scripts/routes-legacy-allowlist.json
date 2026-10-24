@@ -3804,6 +3804,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/directory/seed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-directory/cards"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/agent-card"
     }
   ],
   "routes": [
@@ -7326,6 +7338,18 @@
     {
       "method": "HEAD",
       "path": "/tools.txt"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-directory/cards"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/agent-card"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/agent-card"
     }
   ]
 }

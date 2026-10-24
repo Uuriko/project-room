@@ -4,6 +4,14 @@
 // the room itself. Identity purge revokes the identity and deletes its
 // `delete` rows. Account purge runs the account-deletion executor and then
 // the account-scoped `delete` rows.
+//
+// The root tables "rooms" and "accounts" deliberately have no row here:
+// they carry no room/identity/account key — they ARE the room and the
+// account. The executors delete them directly (server/operator-purge.mjs
+// deletes the rooms row after the rows below; account purge's executor
+// deletes the accounts row), and the purge completeness test scopes rows
+// to keyed tables, with purge counts covering every deleted child row
+// excluding the room itself.
 
 function freezeMatch(match) {
   const out = {};
