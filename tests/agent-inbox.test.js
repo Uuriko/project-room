@@ -168,3 +168,74 @@ test("inbox discovery finds older open requests outside its DM window through ex
   assert.equal(historical.next[0].required, false);
   assert.equal(historical.next[0].actionRole, "context_discovery");
 });
+
+
+test("incremental inbox drains mixed bursts without skipping either stream", async t => {
+  const fixture = createAcceptanceFixture(), origin = await startServer(t, fixture);
+  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  const store = fixture.store;
+  const start = store.room(roomId).sequence;
+  const expectedDMs = [], expectedMentions = [];
+  const other = store.identities.create("Private recipient");
+  store.identities.link(ownerSecret, roomId, { identityId: other.identityId, displayName: "Private recipient", permissions: [] });
+  const otherId = store.authenticate(other.secret, roomId).member.id;
+  const ownerId = store.authenticate(ownerSecret, roomId).member.id;
+  store.dmConsents.request(roomId, ownerId, otherId, "fixture");
+  store.dmConsents.decide(roomId, otherId, ownerId, "approve");
+  for (let i = 0; i < 12; i++) {
+    const id = `burst-${i}`, dm = i < 5 || i === 11;
+    const mention = i >= 5;
+    store.command(ownerSecret, roomId, { id, type: "message.posted", data: {
+      messageId: id, body: mention ? "@Friend check this" : "Direct update",
+      ...(dm ? { toMemberId: memberId } : {})
+    } });
+    if (dm) expectedDMs.push(id);
+    if (mention) expectedMentions.push(id);
+    store.command(ownerSecret, roomId, { id: `private-${i}`, type: "message.posted", data: {
+      messageId: `private-${i}`, body: "Private aside about @Friend", toMemberId: otherId
+    } });
+  }
+  for (const limit of [1, 2, 3, 7]) {
+    let after = start;
+    const dms = [], mentions = [];
+    for (let page = 0; page < 20; page++) {
+      const inbox = store.agentInbox(friendSecret, roomId, { after, limit });
+      assert.ok(inbox.directMessages.length <= limit);
+      assert.ok(inbox.directMentions.length <= limit);
+      dms.push(...inbox.directMessages.map(row => row.messageId));
+      mentions.push(...inbox.directMentions.map(row => row.messageId));
+      if (inbox.cursor.after === after) break;
+      assert.ok(inbox.cursor.after > after);
+      after = inbox.cursor.after;
+    }
+    assert.deepEqual(dms.sort(), [...expectedDMs].sort());
+    assert.deepEqual(mentions.sort(), [...expectedMentions].sort());
+  }
+  const recent = store.agentInbox(friendSecret, roomId, { limit: 1 });
+  assert.equal(recent.directMessages[0].messageId, "burst-11");
+});
+
+test("incremental inbox advances past filtered mentions and sees later arrivals", async t => {
+  const fixture = createAcceptanceFixture(), origin = await startServer(t, fixture);
+  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  const store = fixture.store, start = store.room(roomId).sequence;
+  for (const id of ["deleted-mention", "live-mention"]) {
+    store.command(ownerSecret, roomId, { id, type: "message.posted", data: {
+      messageId: id, body: "@Friend please inspect"
+    } });
+  }
+  store.command(ownerSecret, roomId, { id: "delete-mention", type: "message.deleted", data: {
+    messageId: "deleted-mention", expectedMessageRevision: 0
+  } });
+  const first = store.agentInbox(friendSecret, roomId, { after: start, limit: 1 });
+  assert.deepEqual(first.directMentions, []);
+  assert.ok(first.cursor.after > start);
+  const second = store.agentInbox(friendSecret, roomId, { after: first.cursor.after, limit: 1 });
+  assert.deepEqual(second.directMentions.map(row => row.messageId), ["live-mention"]);
+  store.command(ownerSecret, roomId, { id: "arrived-later", type: "message.posted", data: {
+    messageId: "arrived-later", body: "New work", toMemberId: memberId
+  } });
+  const third = store.agentInbox(friendSecret, roomId, { after: second.cursor.after, limit: 1 });
+  assert.deepEqual(third.directMessages.map(row => row.messageId), ["arrived-later"]);
+  assert.equal(store.agentInbox(friendSecret, roomId, { after: third.cursor.after, limit: 1 }).cursor.after, third.cursor.after);
+});

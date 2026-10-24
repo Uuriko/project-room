@@ -5674,11 +5674,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
+      // Incremental polls share ONE bounded event window. Independently taking
+      // the newest N from each stream and then advancing to their maximum loses
+      // older unseen events. Select the earliest N distinct candidate events,
+      // then render both streams only through that boundary in this transaction.
+      // Deleted/answered mentions may render nothing; the scan still advances.
+      // after=0 intentionally remains the legacy recent-head snapshot.
+      const candidates = after > 0 ? this.db.prepare(`
+        SELECT sequence FROM events WHERE room_id=? AND sequence>?
+          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
+        UNION
+        SELECT e.sequence FROM mention_states m JOIN events e
+          ON e.room_id=m.room_id AND e.id=m.message_event_id
+        WHERE m.room_id=? AND m.mentioned_member_id=?
+          AND m.state IN ('delivered','acknowledged','timed_out') AND e.sequence>?
+          AND json_extract(e.body,'$.type')=?
+          AND (json_extract(e.body,'$.data.toMemberId') IS NULL
+            OR json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
+        ORDER BY sequence ASC LIMIT ?
+      `).all(roomId, after, T.MESSAGE_POSTED, memberId,
+        roomId, memberId, after, T.MESSAGE_POSTED, memberId, memberId, limit) : null;
+      const through = candidates ? (candidates.at(-1)?.sequence ?? after) : Number.MAX_SAFE_INTEGER;
       const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
          ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
+        .all(roomId, after, through, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -5716,7 +5737,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after, through });
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -5725,10 +5746,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
-      // The poll cursor: the highest sequence either event-log list
-      // returned, or the caller's own `after` when nothing was newer.
-      // Standing lists carry no sequence and never move it.
-      const cursorAfter = Math.max(after,
+      // Incremental cursor tracks scanned candidates, including filtered rows.
+      // Legacy snapshots use their newest returned event; standing lists never
+      // move the cursor. A snapshot is not a complete historical catch-up.
+      const cursorAfter = candidates ? through : Math.max(after,
         ...directMessages.map(row => row.sequence),
         ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
@@ -5774,6 +5795,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
+           AND json_extract(e.body,'$.type')=?
+           AND (json_extract(e.body,'$.data.toMemberId') IS NULL
+             OR json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
          ORDER BY e.sequence DESC LIMIT ?`
       );
       // R211-1 v2 (John's Tab r213, 13063): `after` stays fixed and each
@@ -5785,7 +5809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let through = window?.through ?? Number.MAX_SAFE_INTEGER;
       while (rows.length < limit) {
         const want = limit - rows.length + 1;
-        const batch = stmt.all(roomId, memberId, after, through, want);
+        const batch = stmt.all(roomId, memberId, after, through, T.MESSAGE_POSTED, memberId, memberId, want);
         if (!batch.length) break;
         const nextThrough = batch[batch.length - 1].sequence - 1;
         for (const row of batch) {

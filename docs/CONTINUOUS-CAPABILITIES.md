@@ -436,3 +436,46 @@ Inspect and cancel obsolete queued jobs, then submit a fresh authorized operatio
 Do not delete history or reclassify unknown running jobs. Completed-job replay
 still returns the prior result without execution. Restart, mismatched origin,
 legacy queued work and concurrent local watching are covered by regression tests.
+
+### Integrated optimization sequence
+
+Optimize verified useful outcomes under authorization, correctness and resource
+constraints. CPU utilization and token counts are costs/signals, not success by
+themselves. Keep local execution, peer transfer, artifact publication and complete
+two-device workflows as separate qualification results.
+
+1. **Delivery correctness first.** Incremental inbox reads (`after > 0`) select
+   the earliest `limit` distinct candidate events across DMs and direct mentions
+   in one read transaction. Both lists render only within that shared window;
+   one event can appear in both lists. The cursor advances over scanned candidates
+   even when a deleted or answered mention renders no item. Continue while the
+   cursor advances, including empty pages. `after=0` remains a recent-head snapshot,
+   not historical catch-up; standing work lists and formal-request discovery are
+   separate. This prevents bursts in either stream from skipping the other.
+2. **Reduce measured read overhead.** Replace full-room identity preflights only
+   with a deployed, verified principal-bound compact contract. Reduce duplicate
+   context and text/structured representations without removing fresh authority
+   checks, complete request context, or privacy filtering. Compare paired routes
+   in the same session; tiny samples support ranges/medians, not tail claims.
+3. **Measure complete workflows.** Record queue, transfer, startup, execution,
+   verification and publication time, response sizes, model usage and human
+   interventions. Unknown token savings remain unknown. Include failures and
+   inconclusive benchmarks, not just successful local execution.
+4. **Wake local workers on committed work and completion.** Coalesce events and
+   retain bounded restart reconciliation. Compare against current polling with
+   identical traces before changing default concurrency. Use resource hysteresis
+   to avoid oscillation; do not pursue sustained saturation as an objective.
+5. **Place eligible work using observed costs.** First enforce grants, exact
+   package/input pins, resource limits and output authority; then compare a small
+   enumeration oracle against simple locality/queue-aware placement on two Macs.
+   Model correlated failures and transfer costs. More complex fair schedulers or
+   control models need evidence that they beat these baselines.
+6. **Improve safely from feedback.** Use fixed-budget paired trials first, with
+   explicit outcome and failure definitions. Reserve models and human attention
+   for decisions whose uncertainty matters; keep deterministic checks local.
+   Version policies, retain rollback and require independent result verification.
+   Immutable evidence can merge; exclusive release authority and finite budgets
+   still require coordinated, atomic checks.
+
+These are implementation priorities and experiment gates, not measured speedup
+claims. Peer helper instrumentation and native packaging remain separate lanes.
