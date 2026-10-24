@@ -13,7 +13,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, reconcileLandedDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -488,6 +488,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    reconcileLandedComposerDrafts();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -2826,6 +2827,38 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   persistDrafts();
   if (acceptedFiles.size) void refreshRoomFiles();
 }
+function paintSavedDelivery(messageId) {
+  const delivery = $("#message-delivery");
+  const visible = state.messages.some(message => message.id === messageId);
+  delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
+  const link = document.createElement("a");
+  link.href = recordHref("message", messageId); link.textContent = uiText("composer.viewSaved");
+  delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
+  delivery.hidden = false;
+}
+// A pending send whose message is already in state landed, whatever its
+// response said. Reconcile every such draft; when the composer's own draft
+// reconciled, repaint it the way a confirmed submission does and show the
+// delivery line for the message that is actually in the room. Returns true
+// when the active draft reconciled, so a Send press that triggered this can
+// be consumed instead of minting a second command for the same text.
+function reconcileLandedComposerDrafts() {
+  if (!state) return false;
+  const reconciled = reconcileLandedDrafts(drafts, state.messages);
+  if (!reconciled.length) return false;
+  const activeKey = composerKey();
+  const active = reconciled.find(entry => entry.key === activeKey);
+  if (active) {
+    const cleared = !drafts.entries.has(activeKey);
+    if (cleared && assistantDraft) assistantDraft = null;
+    restoreComposer(drafts.get(cleared ? composerKey() : activeKey));
+    if (cleared) $("#also-send-to-channel").checked = false;
+    updateReply(); syncRequestComposer(); renderComposerError();
+    paintSavedDelivery(active.message.id);
+  }
+  persistDrafts();
+  return Boolean(active);
+}
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
@@ -4206,6 +4239,11 @@ $("#message-form").addEventListener("submit", e => {
     if (composerFiles.length) { setComposerError(uiText("composer.file.requestMode")); return; }
     submitRequest(e.currentTarget); return;
   }
+  // A Send press for a draft whose message already landed (its response was
+  // lost) is a reconciliation, not a send: consume it, so an edit typed over
+  // the stale "Draft kept" error can never mint a second command here and
+  // post a near-duplicate of an instruction already in the room.
+  if (reconcileLandedComposerDrafts()) return;
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const askRoom = humanExperience.intent(content);
   if (!content.body) return;
@@ -4242,18 +4280,19 @@ $("#message-form").addEventListener("submit", e => {
       await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
+      // A lost response is not a failed send when the message has already
+      // landed: a snapshot that beat this rejection here has reconciled (or
+      // now reconciles) the draft and shown the delivery line, so there is
+      // no failure left to paint over it.
+      if (!sharedRequest && state.messages.some(message => message.id === (sendingCommand.data.messageId || sendingCommand.id))) {
+        reconcileLandedComposerDrafts();
+        return;
+      }
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;
-    const delivery = $("#message-delivery");
-    const savedMessageId = data.messageId || sendingCommand.id;
-    const visible = state.messages.some(message => message.id === savedMessageId);
-    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
-    const link = document.createElement("a");
-    link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
-    delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
-    delivery.hidden = false;
+    paintSavedDelivery(data.messageId || sendingCommand.id);
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
