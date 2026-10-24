@@ -22,6 +22,7 @@
   "src/app.js",
   "src/audit-receipts.mjs",
   "src/auth-signin-ui.js",
+  "src/board-fixed-view.js",
   "src/board-keyboard.mjs",
   "src/board-mine.js",
   "src/board-ui.js",

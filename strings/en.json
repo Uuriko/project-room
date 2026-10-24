@@ -542,5 +542,19 @@
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "board.fixed.show": "Fixed states",
+  "board.fixed.hide": "Current columns",
+  "board.fixed.col.needs": "Needs you",
+  "board.fixed.col.ready": "Ready",
+  "board.fixed.col.claimed": "Claimed",
+  "board.fixed.col.review": "In review",
+  "board.fixed.col.done": "Done",
+  "board.fixed.face": "{owner} · {state} · {age}",
+  "board.fixed.face.noage": "{owner} · {state}",
+  "board.fixed.age.now": "Just now",
+  "board.fixed.age.m": "{count}m",
+  "board.fixed.age.h": "{count}h",
+  "board.fixed.age.d": "{count}d",
+  "board.fixed.stale": "Stale claim"
 }

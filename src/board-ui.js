@@ -6,6 +6,7 @@ import { workStatus } from "./work-status.js";
 
 import { needsMeHtml } from "./board-mine.js";
 import { uiText } from "./strings.js";
+import { arrangeFixedColumns, claimAge, claimStateId, readBoardFixedFlag, staleClaim, writeBoardFixedFlag } from "./board-fixed-view.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -709,7 +710,19 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
+function fixedFaceHtml(item, owner, now) {
+  const stateId = claimStateId(item);
+  const state = stateId ? uiText(`board.fixed.col.${stateId}`) : "";
+  const age = claimAge(item, now);
+  const ageText = !age ? "" : age.unit === "now" ? uiText("board.fixed.age.now") : uiText(`board.fixed.age.${age.unit}`, { count: age.count });
+  const line = ageText
+    ? uiText("board.fixed.face", { owner, state, age: ageText })
+    : uiText("board.fixed.face.noage", { owner, state });
+  const stale = staleClaim(item, now) ? ["<p class=\"claim-stale\">", escapeHtml(uiText("board.fixed.stale")), "</p>"].join("") : "";
+  return ["<p class=\"claim-face\">", escapeHtml(line), "</p>", stale].join("");
+}
+
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, fixedView = false) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -815,7 +828,8 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  const face = fixedView ? fixedFaceHtml(item, owner, now) : "";
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${face}${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -878,7 +892,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null, fixedView = false, fixedToggle = false } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -900,7 +914,13 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const fixedRows = fixedView ? arrangeFixedColumns(columns) : null;
+  const columnSections = fixedRows
+    ? fixedRows.map(([id, rows]) => {
+      const body = rows.map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, true)).join("") || ["<p class=\"form-hint\">", colEmpty, "</p>"].join("");
+      return ["<section aria-labelledby=\"board-col-", id, "\"><h3 id=\"board-col-", id, "\">", escapeHtml(uiText(`board.fixed.col.${id}`)), "</h3>", body, "</section>"].join("");
+    }).join("")
+    : COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
@@ -915,7 +935,8 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
+  const fixedButton = fixedToggle ? ["<button ", "type=\"button\" ", "class=\"button\" ", "data-boardfix ", "aria-pressed=\"", fixedView ? "true" : "false", "\">", escapeHtml(uiText(fixedView ? "board.fixed.hide" : "board.fixed.show")), "</button>"].join("") : "";
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${fixedButton}${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {
@@ -999,7 +1020,8 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy,
+      fixedView: readBoardFixedFlag(globalThis.location?.search ?? "", globalThis.sessionStorage ?? null), fixedToggle: true
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
@@ -1169,6 +1191,12 @@ export function installWorkBoard({ client, getState, getSession }) {
     paint();
   });
   root.addEventListener("click", event => {
+    const fix = event.target?.dataset && Object.hasOwn(event.target.dataset, "boardfix") ? event.target : null;
+    if (fix && root.contains(fix)) {
+      writeBoardFixedFlag(globalThis.sessionStorage, fix.getAttribute("aria-pressed") !== "true");
+      paint();
+      return;
+    }
     const retry = event.target.closest("[data-board-retry]");
     if (retry && root.contains(retry)) { retry.disabled = true; void load({ force: true }); return; }
     const clear = event.target.closest("[data-board-filter-clear]");
