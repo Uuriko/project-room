@@ -1,5 +1,5 @@
 // Workerd proof that GET /api/operator/export is answered by the Durable
-// Object: 404 when the backup token is unset, 401 or 405 when it is set and
+// Object: 404 when the backup token is unset or wrong, 405 when it is set and
 // the request does not match, NDJSON when the token matches.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +8,7 @@ import { build } from "esbuild";
 import { Miniflare } from "miniflare";
 
 const origin = "https://room.example.test";
-const backupToken = "operator-backup-value";
+const backupToken = "operator-backup-value-0123456789abcdef";
 
 test("operator export streams NDJSON for the backup token and refuses anything else", async () => {
   const bundled = await build({
@@ -27,7 +27,7 @@ test("operator export streams NDJSON for the backup token and refuses anything e
   const call = (headers = {}, method = "GET") => mf.dispatchFetch(origin + "/api/operator/export", { method, headers: { "CF-Connecting-IP": "192.0.2.10", ...headers } });
   try {
     const wrong = await call({ authorization: "Bearer wrong-token" });
-    assert.equal(wrong.status, 401);
+    assert.equal(wrong.status, 404);
     const posted = await call({ authorization: `Bearer ${backupToken}` }, "POST");
     assert.equal(posted.status, 405);
     const ok = await call({ authorization: `Bearer ${backupToken}` });

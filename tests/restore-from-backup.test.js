@@ -21,7 +21,7 @@ import {
 import { writeKvBackup, backupObjectKey, backupPartKey, BACKUP_KV_PART_BYTES } from "../cloudflare/room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const OPERATOR_TOKEN = "<MASKED_SECRET_001>";
+const OPERATOR_TOKEN = "test-operator-" + "token-0123456789abcdef0123";
 const KEY = "room-backups/2026-10-14.ndjson";
 
 function openStore(t, name) {
@@ -84,12 +84,12 @@ test("restore-from-backup replays the KV backup into an empty store, verified", 
   assert.ok(target.room("commons").state.members.agent, "restored members are present");
 });
 
-test("restore-from-backup gates: unconfigured token 404, bad token 401, missing backup 404, bad key 422, non-empty 409", async t => {
+test("restore-from-backup gates: unconfigured token 404, bad token 404, missing backup 404, bad key 422, non-empty 409", async t => {
   const seeded = seedStore(t);
   const { kv } = await backupToKv(t, seeded);
   const target = openStore(t, "restore-kv-gates-");
   assert.equal((await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), undefined, target, kv)).status, 404);
-  assert.equal((await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY, token: "wrong" }), OPERATOR_TOKEN, target, kv)).status, 401);
+  assert.equal((await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY, token: "wrong" }), OPERATOR_TOKEN, target, kv)).status, 404);
   const missing = await operatorRestoreFromBackupResponse(fakeRequest({ key: "room-backups/2020-01-01.ndjson" }), OPERATOR_TOKEN, target, kv);
   assert.equal(missing.status, 404);
   assert.equal((await missing.json()).error.code, "backup_not_found");
@@ -236,7 +236,12 @@ const PROOF_BODY_CHARS = 24_000;
 // accounts row's secret material is re-derived — credentials never
 // survive a restore as live values (#3599), so its re-export digest
 // differs from the exported row's by design.
-const PROOF_DIGEST_ALLOWLIST = new Set(["public_work_claim_writer_permit", "accounts"]);
+// operator_actions joins the digest allowlist for exactly one reason:
+// SECURITY-FIX C4 makes a successful restore append its own audit row to
+// the restored store after landing, so that table's digest carries one
+// extra, self-describing row (count- and identity-checked in the loop
+// below) on top of the byte-exact restored content.
+const PROOF_DIGEST_ALLOWLIST = new Set(["public_work_claim_writer_permit", "accounts", "operator_actions"]);
 
 test("restore-from-backup restores an event-dominated backup above the cap at production part size and scale", async t => {
   const startedAt = Date.now();
@@ -354,6 +359,16 @@ test("restore-from-backup restores an event-dominated backup above the cap at pr
       // created lazily); anything else means the restore lost a table.
       assert.ok(REPLAY_SKIPPED_TABLES.includes(table),
         `table ${table} exists on only one side of the restore and is not replay-skipped`);
+      continue;
+    }
+    if (table === "operator_actions") {
+      // SECURITY-FIX C4: the restore's own audit row is the one legitimate
+      // extra row — restored content exact, plus that row, identified here.
+      assert.equal(countOf(target.db, table), countOf(seeded.db, table) + 1, "row count matches for operator_actions plus the C4 restore audit row");
+      const auditRow = target.db.prepare("SELECT action, result FROM operator_actions ORDER BY at DESC, id DESC LIMIT 1").get();
+      assert.equal(auditRow.action, "backup_restore_from_backup");
+      assert.equal(auditRow.result, "success");
+      tablesCompared += 1;
       continue;
     }
     assert.equal(countOf(target.db, table), countOf(seeded.db, table), `row count matches for ${table}`);

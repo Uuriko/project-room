@@ -204,7 +204,7 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
     if (url.pathname === '/api/operator/export') {
-      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db, this.store));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
     // Object's storage. Same operator token as the export; fail-closed on a

@@ -19,7 +19,7 @@ import { writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { withPublicWorkClaimWriter } from "../server/public-work-claim-fence.mjs";
 import { createWork } from "../server/work-claims.mjs";
 
-const OPERATOR_TOKEN = "<MASKED_SECRET_003>";
+const OPERATOR_TOKEN = "permit-restore-" + "operator-token-0123456789abcdef";
 const KEY = "room-backups/2026-10-14.ndjson";
 const NAMESPACE = `public_${"ef".repeat(16)}`;
 
