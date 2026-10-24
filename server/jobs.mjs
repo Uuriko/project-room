@@ -19,7 +19,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
-import { relieveProjections } from "./store-relief.mjs";
+import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -599,7 +599,7 @@ export const JOBS = Object.freeze([
       if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
-        relief = relieveProjections(store, { limitBytes, recovery });
+        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
         gauges = { ...measureStoreGrowth(store), relief };
       }
       const breach = storeGrowthBreach(gauges);
