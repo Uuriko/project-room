@@ -7772,7 +7772,8 @@ paths:
         Strikes decay after 30 days — decay always offers a way back. The
         ladder gates claims only: it never bans and never touches payouts.
         Only funded bounties are claimable; double claims get 409. Emits
-        `bounty.claimed`. API keys need `rooms:write`.
+        `bounty.claimed`. API keys need `rooms:write`. Claims close at the
+        deadline.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -7840,7 +7841,7 @@ paths:
         Claimant-only: posts the deliverable + evidence receipt, moving the
         bounty CLAIMED → SUBMITTED (in-review). The evidence follows the
         work.completed receipt shape. Emits `bounty.submitted`. API keys
-        need `rooms:write`.
+        need `rooms:write`. Submissions close at the deadline.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -7884,7 +7885,9 @@ paths:
         citing the rubric version pinned at accept time. The approval is
         recorded as an explicit event and only the approval converts the
         locked escrow into claimant attribution. Emits `bounty.accepted`.
-        API keys need `rooms:write`.
+        API keys need `rooms:write`. Acceptances close at the deadline: a
+        post-deadline accept is refused and the bounty settles through the
+        keeper instead.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
