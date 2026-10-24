@@ -478,7 +478,10 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    // The existing work view carries the same principal, membership and owner
+    // fields without transferring message history or audit bodies. This remains
+    // a fresh authenticated read per operation, never a cached authority grant.
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
