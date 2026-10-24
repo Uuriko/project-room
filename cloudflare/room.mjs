@@ -94,6 +94,9 @@ function roomOrigin(env) {
 
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
+// Reads that carry the job list: refresh the heartbeat snapshot first.
+const JOB_LIST_READS = new Set(['/api/owner/overview']);
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -140,8 +143,13 @@ export class ProjectRoom extends DurableObject {
     catch (error) { console.warn(`room github auth disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    // The owner overview's job list reads the heartbeat view, refreshed on
+    // each recorded tick and before each overview read (the Node scheduler
+    // records are absent in the Durable Object, so the list was empty here).
+    this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      jobHealth: () => this.jobHealthSnapshot,
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
       push: vapidFromEnv(env),
       googleAuth,
@@ -204,6 +212,7 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
+    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
     if (url.pathname === '/api/operator/export') {
       return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
     }
@@ -277,12 +286,17 @@ export class ProjectRoom extends DurableObject {
           this.channelDrainOutcomeHeld = null;
         }
       }
+      this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
       return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
     };
     const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
     this.cronTickTail = pending;
     try { return await pending; }
     finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
+  }
+  async refreshJobHealthSnapshot() {
+    try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
+    catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
