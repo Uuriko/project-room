@@ -65,11 +65,33 @@ export const API_KEY_SCOPE_WILDCARD_NOTE = "prefix:* wildcard grants every scope
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 
+// Does any scope in the list cover the required scope? Exact match, or a
+// prefix wildcard ("rooms:*" covers every "rooms:..." scope).
+const scopeCovers = (scopes, requiredScope) => scopes.some(scope => {
+  if (scope === requiredScope) return true;
+  if (scope.endsWith(":*")) return requiredScope.startsWith(scope.slice(0, -1));
+  return false;
+});
+
+// The caller's current-permissions list, validated with the same scope
+// grammar as issuance. Returns a frozen copy.
+const validateCurrentScopes = currentScopes => {
+  check(Array.isArray(currentScopes), "currentScopes must be an array if given");
+  check(currentScopes.every(s => typeof s === "string" && s.length > 0 && SCOPE_PATTERN.test(s)),
+    "every currentScopes entry must be a scope string ([A-Za-z0-9_.:*-]+)");
+  return Object.freeze([...currentScopes]);
+};
+
 // Create an agent API-key manager. store is a caller-owned Map (keyId -> record).
-export function createAgentApiKeys({ store, clock, random } = {}) {
+// onCredentialChange, when given, is called after a successful rotate/revoke
+// with { keyId, identityId, reason: "rotated" | "revoked", scopes } so the
+// owner can release claims and leases held under the old secret.
+export function createAgentApiKeys({ store, clock, random, onCredentialChange } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(random === undefined || typeof random === "function", "random must be a function if given");
+  check(onCredentialChange === undefined || typeof onCredentialChange === "function",
+    "onCredentialChange must be a function if given");
   const keys = store ?? new Map();
   const now = clock ?? Date.now;
   const newSecret = random ?? (() => base64url(randomBytes(MIN_SECRET_ENTROPY_BYTES)));
@@ -140,10 +162,25 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     return null;
   };
 
+  const notifyCredentialChange = (record, reason) => {
+    if (onCredentialChange === undefined) return;
+    onCredentialChange(Object.freeze({
+      keyId: record.keyId,
+      identityId: record.identityId,
+      reason,
+      scopes: Object.freeze([...record.scopes]),
+    }));
+  };
+
   // Rotate a key: the old secret stops working, a new secret is issued
-  // (shown once). Scopes/identity/expiry carry over.
-  const rotate = keyId => {
+  // (shown once). Scopes/identity/expiry carry over. When the caller passes
+  // the connection's current permissions ({ currentScopes }), the response
+  // also names the effective-grant delta: grantChange partitions the key's
+  // scopes into those current permissions still cover (effectiveScopes) and
+  // those they no longer cover (droppedScopes).
+  const rotate = (keyId, { currentScopes } = {}) => {
     check(typeof keyId === "string" && keyId.length > 0, "keyId must be a non-empty string");
+    const checkedCurrent = currentScopes === undefined ? undefined : validateCurrentScopes(currentScopes);
     const record = keys.get(keyId);
     check(record, `unknown key "${keyId}"`);
     check(!record.revoked, `key "${keyId}" is revoked and cannot rotate`);
@@ -151,7 +188,16 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     record.keyHash = sha256(secret);
     record.lastUsedAt = null;
     record.lastUsedUa = null; // rotation issues a fresh secret: old usage telemetry must not ride along
-    return Object.freeze({ ...publicRecord(record), secret });
+    const rotated = { ...publicRecord(record), secret };
+    if (checkedCurrent !== undefined) {
+      const effectiveScopes = record.scopes.filter(s => scopeCovers(checkedCurrent, s));
+      rotated.grantChange = Object.freeze({
+        effectiveScopes: Object.freeze(effectiveScopes),
+        droppedScopes: Object.freeze(record.scopes.filter(s => !effectiveScopes.includes(s))),
+      });
+    }
+    notifyCredentialChange(record, "rotated");
+    return Object.freeze(rotated);
   };
 
   const revoke = keyId => {
@@ -160,6 +206,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     check(record, `unknown key "${keyId}"`);
     check(!record.revoked, `key "${keyId}" is already revoked`);
     record.revoked = true;
+    notifyCredentialChange(record, "revoked");
     return publicRecord(record);
   };
 
@@ -172,18 +219,23 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
   };
 
   // Scope check with prefix wildcards ("rooms:*"), mirroring token-scopes.
-  const grants = (keyId, requiredScope) => {
+  // Effective grant = key scope AND current permissions: when the caller
+  // passes the connection's current permissions ({ currentScopes }), a
+  // scope is granted only if BOTH the key and the current permissions
+  // cover it, so narrowing a connection's settings takes effect without
+  // reissuing its key — and current permissions can never widen a key.
+  // Omitting the option keeps the key-only check.
+  const grants = (keyId, requiredScope, { currentScopes } = {}) => {
     check(typeof keyId === "string" && keyId.length > 0, "keyId must be a non-empty string");
     check(typeof requiredScope === "string" && requiredScope.length > 0,
       "requiredScope must be a non-empty string");
+    const checkedCurrent = currentScopes === undefined ? undefined : validateCurrentScopes(currentScopes);
     const record = keys.get(keyId);
     if (!record || record.revoked) return false;
     if (record.expiresAt !== null && now() >= record.expiresAt) return false;
-    return record.scopes.some(scope => {
-      if (scope === requiredScope) return true;
-      if (scope.endsWith(":*")) return requiredScope.startsWith(scope.slice(0, -1));
-      return false;
-    });
+    if (!scopeCovers(record.scopes, requiredScope)) return false;
+    if (checkedCurrent !== undefined && !scopeCovers(checkedCurrent, requiredScope)) return false;
+    return true;
   };
 
   return Object.freeze({ issue, verify, rotate, revoke, keysForIdentity, grants });
