@@ -461,10 +461,13 @@ export class ProjectRoom extends DurableObject {
     let webhookDeliveries = { deleted: 0 };
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
+    let wakeSignals = { deleted: 0, claimsDeleted: 0 };
     try {
       webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
+      // #3910 F3: acked wake signals + their claim rows past retention.
+      wakeSignals = this.store.agentHeartbeats.pruneWakeSignals({ now: Date.now() });
     } finally {
       console.info(JSON.stringify({
         event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
@@ -472,10 +475,11 @@ export class ProjectRoom extends DurableObject {
         eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
         webhookDeleted: webhookDeliveries?.deleted ?? 0,
         oauthPruned: oauthProvider?.pruned ?? 0,
-        abuseRatePruned: abuseRateBuckets?.pruned ?? 0
+        abuseRatePruned: abuseRateBuckets?.pruned ?? 0,
+        wakeSignalsDeleted: wakeSignals?.deleted ?? 0
       }));
     }
-    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets, wakeSignals };
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.

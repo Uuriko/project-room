@@ -208,6 +208,11 @@ export class WakeQueue {
   // enqueue coalesces: one row per queue key. A still-pending wake absorbs the
   // new intent and keeps the earliest due time; a leased one is left alone; a
   // done one starts a fresh cycle; a dead one stays parked until requeue.
+  // The receipt's `absorbed` flag says which happened (#3910 F2): true when
+  // the caller's intent was taken (fresh row, or a pending row that now
+  // carries it), false when a leased row was left alone and the new intent
+  // was dropped — a coalesced receipt alone used to read as success either
+  // way, so a caller could not tell its intent had been discarded.
   enqueue(token, roomId, request, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
@@ -243,12 +248,12 @@ export class WakeQueue {
           this.db.prepare("UPDATE wake_queue SET intent=?,due_at=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?")
             .run(intentJson, dueAt, now, roomId, auth.member.id, request.queueKey);
         }
-        receipt = { requestId: request.requestId, queueKey: request.queueKey, state: row.state, coalesced: true, dueAt: row.state === "pending" ? Math.min(row.due_at, request.dueAt) : row.due_at };
+        receipt = { requestId: request.requestId, queueKey: request.queueKey, state: row.state, coalesced: true, absorbed: row.state === "pending", dueAt: row.state === "pending" ? Math.min(row.due_at, request.dueAt) : row.due_at };
       } else {
         if (row?.state === "done") this.db.prepare("DELETE FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").run(roomId, auth.member.id, request.queueKey);
         this.db.prepare("INSERT INTO wake_queue (room_id,member_id,queue_key,intent,state,due_at,attempts,max_attempts,lease_owner,lease_expires_at,last_error,created_at,updated_at) VALUES(?,?,?,?,'pending',?,0,?,NULL,NULL,NULL,?,?)")
           .run(roomId, auth.member.id, request.queueKey, intentJson, request.dueAt, request.maxAttempts, now, now);
-        receipt = { requestId: request.requestId, queueKey: request.queueKey, state: "pending", coalesced: false, dueAt: request.dueAt };
+        receipt = { requestId: request.requestId, queueKey: request.queueKey, state: "pending", coalesced: false, absorbed: true, dueAt: request.dueAt };
       }
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
       return { ...this.current(auth, roomId), receipt, duplicate: false };
