@@ -16,6 +16,13 @@
       "sizes": [
         "any"
       ]
+    },
+    {
+      "src": "https://room.trydemigod.com/icons/icon-512.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
     }
   ],
   "remotes": [
@@ -30,6 +37,10 @@
           "isSecret": true
         }
       ]
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://room.trydemigod.com/mcp/chatgpt"
     }
   ]
 }

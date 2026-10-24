@@ -13,8 +13,33 @@ import { withOpenWorldHint } from "./content-trust.mjs";
 import { LEAN_MCP_TOOLS, actionMetaToolDefs } from "./mcp-action-search.mjs";
 import { withMcpToolContract } from "./mcp-tool-contracts.mjs";
 
+// MCP directory metadata (Claude connector directory, ChatGPT apps): every
+// listed tool carries a human title and explicit readOnlyHint and
+// destructiveHint. Names stay at 64 characters or fewer.
+const DESTRUCTIVE_NAME = /(?:^|_)(?:delete|revoke|remove|disband|unsubscribe|clear|unlink|kick|ban|purge|archive|reject|cancel|release)(?:_|$)/;
+const READ_NAME = /(?:^|_)(?:get|list|read|search|check|card|context|needs_me|recommend|status|preview|my_review|whoami|catalog|kit|packet|doc)(?:_|$)/;
+const TITLE_WORDS = { mcp: "MCP", dm: "DM", api: "API", id: "ID", url: "URL", pr: "PR", ui: "UI" };
+export function mcpToolTitle(name) {
+  const words = String(name).split(/[_.]+/).filter(Boolean).map(word => TITLE_WORDS[word] ?? word);
+  const text = words.join(" ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+export function withDirectoryMetadata(tool) {
+  if (!tool || typeof tool.name !== "string") return tool;
+  const annotations = { ...(tool.annotations ?? {}) };
+  const readOnly = typeof annotations.readOnlyHint === "boolean" ? annotations.readOnlyHint
+    : READ_NAME.test(tool.name) && !DESTRUCTIVE_NAME.test(tool.name);
+  annotations.readOnlyHint = readOnly;
+  if (typeof annotations.destructiveHint !== "boolean") annotations.destructiveHint = !readOnly && DESTRUCTIVE_NAME.test(tool.name);
+  if (readOnly) annotations.destructiveHint = false;
+  const title = typeof tool.title === "string" && tool.title ? tool.title : (annotations.title ?? mcpToolTitle(tool.name));
+  annotations.title = title;
+  return { ...tool, title, annotations };
+}
+const listedTool = tool => withDirectoryMetadata(withOpenWorldHint(tool));
+
 export function livePublicMcpTools() {
-  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(withOpenWorldHint);
+  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(listedTool);
 }
 
 // Same list tools/list returns. Default is the core profile (short blurbs,
@@ -44,7 +69,7 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
   const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
-  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
+  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(listedTool);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and
   // room_run_action for the long tail. The meta tools are listed only here;
@@ -71,7 +96,7 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
   });
   const joinTools = profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) })) : MCP_JOIN_TOOLS;
   const listed = [...tools, ...joinTools];
-  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
+  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(listedTool);
 }
 
 // The card's enrolled tier is the member catalog: the default (core) list a

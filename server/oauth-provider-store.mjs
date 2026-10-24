@@ -82,6 +82,11 @@ export function ensureOAuthProviderSchema(db) {
   // the table, and the column is nullable so old rows stay valid.
   const columns = db.prepare("PRAGMA table_info(oauth_provider_codes)").all().map(column => column.name);
   if (!columns.includes("family_id")) db.exec("ALTER TABLE oauth_provider_codes ADD COLUMN family_id TEXT");
+  // RFC 8707 audience: tokens minted with a resource indicator remember it.
+  for (const table of ["oauth_provider_codes", "oauth_provider_access_tokens", "oauth_provider_refresh_tokens"]) {
+    const have = db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+    if (!have.includes("resource")) db.exec(`ALTER TABLE ${table} ADD COLUMN resource TEXT`);
+  }
   ready.add(db);
 }
 
@@ -129,23 +134,23 @@ export function createOAuthProviderSqlite(db) {
        name=excluded.name, redirect_uris_json=excluded.redirect_uris_json, expires_at=excluded.expires_at`
   ).run(row.clientId, row.name, JSON.stringify(row.redirectUris), row.expiresAt);
   const saveCode = row => db.prepare(
-    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id,resource)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(code_hash) DO UPDATE SET used=excluded.used, family_id=excluded.family_id`
   ).run(row.codeHash, row.clientId, row.userId, row.redirectUri, JSON.stringify(row.scopes),
-    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used), row.familyId ?? null);
+    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used), row.familyId ?? null, row.resource ?? null);
   const saveAccess = row => db.prepare(
-    `INSERT INTO oauth_provider_access_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,ip,user_agent)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_access_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,ip,user_agent,resource)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(token_hash) DO UPDATE SET revoked=excluded.revoked`
   ).run(row.tokenHash, row.clientId, row.userId, JSON.stringify(row.scopes), row.familyId,
-    row.createdAt, row.expiresAt, flag(row.revoked), row.ip ?? null, row.userAgent ?? null);
+    row.createdAt, row.expiresAt, flag(row.revoked), row.ip ?? null, row.userAgent ?? null, row.resource ?? null);
   const saveRefresh = row => db.prepare(
-    `INSERT INTO oauth_provider_refresh_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,rotated_by,ip,user_agent)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_refresh_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,rotated_by,ip,user_agent,resource)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(token_hash) DO UPDATE SET revoked=excluded.revoked, rotated_by=excluded.rotated_by`
   ).run(row.tokenHash, row.clientId, row.userId, JSON.stringify(row.scopes), row.familyId,
-    row.createdAt, row.expiresAt, flag(row.revoked), row.rotatedBy ?? null, row.ip ?? null, row.userAgent ?? null);
+    row.createdAt, row.expiresAt, flag(row.revoked), row.rotatedBy ?? null, row.ip ?? null, row.userAgent ?? null, row.resource ?? null);
 
   const clients = {
     get(clientId) {
@@ -167,7 +172,7 @@ export function createOAuthProviderSqlite(db) {
       return watch({
         codeHash: row.code_hash, clientId: row.client_id, userId: row.user_id, redirectUri: row.redirect_uri,
         scopes: scopesOf(row.scopes_json), codeChallenge: row.code_challenge, createdAt: row.created_at,
-        expiresAt: row.expires_at, used: row.used === 1, familyId: row.family_id ?? null
+        expiresAt: row.expires_at, used: row.used === 1, familyId: row.family_id ?? null, resource: row.resource ?? null
       }, saveCode);
     },
     set(_codeHash, record) { touch(); saveCode(record); return this; },
@@ -181,7 +186,7 @@ export function createOAuthProviderSqlite(db) {
       return watch({
         tokenHash: row.token_hash, clientId: row.client_id, userId: row.user_id, scopes: scopesOf(row.scopes_json),
         familyId: row.family_id, createdAt: row.created_at, expiresAt: row.expires_at, revoked: row.revoked === 1,
-        ip: row.ip ?? null, userAgent: row.user_agent ?? null
+        ip: row.ip ?? null, userAgent: row.user_agent ?? null, resource: row.resource ?? null
       }, saveAccess);
     },
     set(_tokenHash, record) { touch(); saveAccess(record); return this; },
@@ -200,7 +205,7 @@ export function createOAuthProviderSqlite(db) {
       return watch({
         tokenHash: row.token_hash, clientId: row.client_id, userId: row.user_id, scopes: scopesOf(row.scopes_json),
         familyId: row.family_id, createdAt: row.created_at, expiresAt: row.expires_at, revoked: row.revoked === 1,
-        rotatedBy: row.rotated_by ?? null, ip: row.ip ?? null, userAgent: row.user_agent ?? null
+        rotatedBy: row.rotated_by ?? null, ip: row.ip ?? null, userAgent: row.user_agent ?? null, resource: row.resource ?? null
       }, saveRefresh);
     },
     set(_tokenHash, record) { touch(); saveRefresh(record); return this; },

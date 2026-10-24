@@ -2923,6 +2923,22 @@
     },
     {
       "method": "GET",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "GET",
       "path": "/mcp/claude"
     },
     {
@@ -2984,6 +3000,10 @@
     {
       "method": "POST",
       "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/register"
     },
     {
       "method": "POST",
@@ -3480,6 +3500,22 @@
     {
       "method": "POST",
       "path": "/room/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/chatgpt"
     },
     {
       "method": "GET",
@@ -6537,6 +6573,22 @@
     },
     {
       "method": "GET",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp/chatgpt"
+    },
+    {
+      "method": "GET",
       "path": "/mcp/claude"
     },
     {
@@ -6598,6 +6650,10 @@
     {
       "method": "POST",
       "path": "/oauth/authorize"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/register"
     },
     {
       "method": "POST",
@@ -7110,6 +7166,22 @@
     {
       "method": "POST",
       "path": "/room/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/room/mcp/chatgpt"
+    },
+    {
+      "method": "POST",
+      "path": "/room/mcp/chatgpt"
     },
     {
       "method": "GET",
