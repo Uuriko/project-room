@@ -14,6 +14,11 @@
 //     failAttempt(ctx, { key }) -> { status, code? },
 //                              // an attempt with this key that fails BEFORE
 //                              // anything is journaled (R5)
+//     reopen(ctx),             // R6: reopen the surface's store over the
+//                              // same durable state (restart)
+//     crashAttempt(ctx, { key }) -> { status, code? },
+//                              // R6: run the operation inside the store's
+//                              // transaction and throw before commit
 //     effectCount(ctx, { key, actor }) -> number,
 //                              // effects attributable to this key (+ actor)
 //     normalize(body) -> comparable body for replay deep-equality,
@@ -22,9 +27,10 @@
 // Scenarios (§A.1): R1 same key+payload · R2 same key, different payload ·
 // R3 same key, foreign scope · R4 same key, different actor · R5 failure
 // before persist, then retry · R6 crash between execute and persist
-// (CONTROL ROWS ONLY in this slice — rows 5 and 6, driven in the test file
-// via PR-0 fixture reopen() + a rollback "crash"; R6 for any other row is
-// PR-3, separately chartered) · R7 no key supplied · R8 concurrent
+// (PR-2 covered the control rows 5 and 6 only; PR-3 extends R6 to every
+// non-control row — restart-after-commit via the surface store's reopen
+// and a transaction-rollback crash via the adapter's crashAttempt, see
+// runR6Restart / runR6Crash below) · R7 no key supplied · R8 concurrent
 // duplicates (duplicate count and order from PR-0's seeded interleaving
 // generator; concurrency is modelled by submission order, per that
 // generator's discipline — no timers, no wall-clock).
@@ -52,6 +58,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "conflict-409", order: "after", code: "work_claim_exists" },
     r5: true,
+    r6: { restart: "conflict-409", crash: "rollback" },
     r7: { first: "refused", code: "invalid_claim_input" },
     r8: "conflict-409",
   }),
@@ -66,6 +73,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "refused", order: "before", code: "work_not_owner", status: 403 },
     r5: true,
+    r6: { restart: "conflict-409", crash: "rollback" },
     r7: "n/a",
     r8: "conflict-409",
   }),
@@ -80,6 +88,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "refused", order: "after", code: "invite_redeem_identity_mismatch", status: 403 },
     r5: true,
+    r6: { restart: "replay", crash: "rollback" },
     r7: { first: "executes", second: "conflict-409", code: "invite_already_used" },
     r8: "replay",
   }),
@@ -94,6 +103,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "refused", order: "after", code: "owner_required", status: 403 },
     r5: true,
+    r6: { restart: "replay", crash: "rollback" },
     r7: { first: "refused", code: "invalid_guest_invite" },
     r8: "replay",
   }),
@@ -136,6 +146,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "independent", order: "after" },
     r5: true,
+    r6: { restart: "replay", crash: "rollback" },
     r7: { first: "executes", second: "executes" },
     r8: "replay",
   }),
@@ -149,6 +160,7 @@ export const ROWS = Object.freeze([
     r3: "independent",
     r4: { behaviour: "refused", order: "after", code: "capability_grant_required", status: 403 },
     r5: "n/a",
+    r6: { restart: "upsert", crash: "rollback" },
     r7: { first: "executes", second: "executes" },
     r8: "n/a",
   }),
@@ -179,6 +191,18 @@ export const DIVERGENCES = Object.freeze([
     debt: "bounty-escrow idemExecute treats a null/undefined key as a declared bypass: it executes every time with no journal. The production routes always supply a key, but the boundary itself blesses keyless double-execution on a money path — flagged as adoption debt in the §A.3 inventory sense.",
   }),
   Object.freeze({
+    id: "RM-R6-WORK-CLAIM-CREATE-RESTART-NO-REPLAY", row: 1, scenario: "R6",
+    debt: "PR-3 extension of RM-R1-WORK-CLAIM-CREATE-NO-REPLAY across a restart: the claim itself is durable (the production registry is SQLite-backed and the retry after reopen still finds it), but with no replay journal the retry is refused 409 work_claim_exists instead of replaying the stored 201 — the original response remains unrecoverable even though the effect survived the restart exactly once.",
+  }),
+  Object.freeze({
+    id: "RM-R6-WORK-CLAIM-CLOSE-RESTART-NO-REPLAY", row: 2, scenario: "R6",
+    debt: "PR-3 extension of RM-R1-WORK-CLAIM-CLOSE-NO-REPLAY across a restart: the closed state survives reopen, but a duplicate close after restart is refused 409 work_claim_terminal instead of replaying the stored 200.",
+  }),
+  Object.freeze({
+    id: "RM-R6-SPEND-GRANT-RESTART-REEXECUTES", row: 8, scenario: "R6",
+    debt: "PR-3 extension of RM-R7-SPEND-GRANT-NO-KEY-SURFACE across a restart: with no journal there is nothing to replay, so a retry after restart RE-EXECUTES the issue as an upsert. The effect count stays one only because issue is keyed (roomId, agentId) — a retry carrying different terms after a restart silently replaces the grant, exactly as a same-process retry does.",
+  }),
+  Object.freeze({
     id: "RM-R7-SPEND-GRANT-NO-KEY-SURFACE", row: 8, scenario: "R7",
     debt: "spend-grant issue has no idempotency key surface at all: every issue executes (as an upsert of the (room, agent) grant terms). A lost 201 retried with different terms silently replaces the grant; there is no journal to replay or conflict against. This row's R1/R2/R5/R8 are therefore NOT_APPLICABLE, not passed.",
   }),
@@ -190,12 +214,11 @@ export const NOT_APPLICABLE = Object.freeze([
   Object.freeze({ row: 8, scenario: "R2", status: "n/a — no key surface, so no key+payload binding exists to conflict" }),
   Object.freeze({ row: 8, scenario: "R5", status: "n/a — no journal, so there is no journaled-then-failed state to retry against; a failed issue writes nothing because the route runs in one store.transaction" }),
   Object.freeze({ row: 8, scenario: "R8", status: "n/a — no key surface; concurrent grant issuance races are pinned by the existing tests/spend-grant-races.test.js" }),
-  Object.freeze({ row: 1, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
-  Object.freeze({ row: 2, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
-  Object.freeze({ row: 3, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
-  Object.freeze({ row: 4, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
-  Object.freeze({ row: 7, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
-  Object.freeze({ row: 8, scenario: "R6", status: "n/a in this slice — R6 beyond the two control rows is PR-3, separately chartered (PREP §A.5)" }),
+  // PR-3: R6 has NO n/a entries. Every non-control row was probed at the
+  // PR-2 base and proved harnessable (durable work-claim registry for rows
+  // 1-2, RoomStore reopen/rollback for rows 3/4/8, a file-backed escrow
+  // store for row 7), so the former "R6 = PR-3" declarations are retired
+  // and replaced by the runR6Restart / runR6Crash pins below.
 ]);
 
 const isSuccess = (res) => res.status >= 200 && res.status < 300;
@@ -297,6 +320,58 @@ export async function runR5(adapter, row, ctx, key) {
   assert.ok(isSuccess(retry), `R5 row ${row.id}: retry after failure must execute fresh, got ${retry.status} ${retry.code ?? ""}`);
   assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 1, `R5 row ${row.id}: exactly one effect overall`);
   return { failed, retry };
+}
+
+// R6 (PR-3) — restart after commit: the adapter reopens its store over the
+// SAME durable state (PR-0 fixture reopen() for RoomStore rows, a durable
+// work-claim registry over the reopened store for rows 1-2, a file-backed
+// SQLite reopen for the escrow row), then the same key+payload is retried.
+// The row's declared restart mode pins the ACTUAL outcome: "replay" (the
+// journal survived and the stored outcome is returned), "conflict-409"
+// (the effect survived but there is no journal to replay — rows 1-2, the
+// RM-R6-*-NO-REPLAY debt), or "upsert" (no journal at all: the retry
+// re-executes and the effect stays one only because issue is keyed —
+// row 8). In every mode the effect count after restart + retry is 1:
+// no double effect.
+export async function runR6Restart(adapter, row, ctx, key) {
+  const first = await adapter.submit(ctx, { key, payload: "same", actor: "primary" });
+  assert.ok(isSuccess(first), `R6-restart row ${row.id}: first submit failed ${first.status} ${first.code ?? ""}`);
+  assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 1, `R6-restart row ${row.id}: effect count after first submit`);
+  await adapter.reopen(ctx);
+  assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 1,
+    `R6-restart row ${row.id}: the committed effect itself must survive the restart`);
+  const retry = await adapter.submit(ctx, { key, payload: "same", actor: "primary" });
+  if (row.r6.restart === "replay") {
+    assert.ok(isSuccess(retry), `R6-restart row ${row.id}: the journal survives the restart, so the retry replays, got ${retry.status} ${retry.code ?? ""}`);
+    assert.deepEqual(adapter.normalize(retry.body), adapter.normalize(first.body),
+      `R6-restart row ${row.id}: replayed body after restart must equal the stored outcome`);
+  } else if (row.r6.restart === "conflict-409") {
+    expectConflict(row, retry, `R6-restart row ${row.id}`);
+  } else if (row.r6.restart === "upsert") {
+    assert.ok(isSuccess(retry), `R6-restart row ${row.id}: the retry re-executes as an upsert, got ${retry.status} ${retry.code ?? ""}`);
+  } else {
+    assert.fail(`R6-restart row ${row.id}: undeclared restart mode ${row.r6.restart}`);
+  }
+  assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 1, `R6-restart row ${row.id}: no double effect after restart + retry`);
+  return { first, retry };
+}
+
+// R6 (PR-3) — transaction-rollback crash: the adapter's crashAttempt runs
+// the surface's real operation inside the store's transaction and throws
+// after the effect write, before commit (the §A.4 "after-effect-before-
+// commit" point, reached through the transaction seam each surface
+// already offers). The atomicity invariant is then observed directly:
+// effect and journal are BOTH absent, never effect-without-journal, and
+// a retry with the same key+payload executes exactly once.
+export async function runR6Crash(adapter, row, ctx, key) {
+  const crashed = await adapter.crashAttempt(ctx, { key });
+  assert.ok(!isSuccess(crashed), `R6-crash row ${row.id}: the crash attempt itself must fail, got ${crashed.status}`);
+  assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 0,
+    `R6-crash row ${row.id}: atomicity invariant — effect and journal are both absent after the rollback`);
+  const retry = await adapter.submit(ctx, { key, payload: "same", actor: "primary" });
+  assert.ok(isSuccess(retry), `R6-crash row ${row.id}: the retry after the crash executes fresh, got ${retry.status} ${retry.code ?? ""}`);
+  assert.equal(await adapter.effectCount(ctx, { key, actor: "primary" }), 1, `R6-crash row ${row.id}: exactly one effect overall`);
+  return { crashed, retry };
 }
 
 // R7 — no key supplied: the row's declared legacy behaviour.

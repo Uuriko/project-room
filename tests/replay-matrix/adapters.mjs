@@ -18,9 +18,23 @@
 //             bounty-escrow-routes.mjs:88 and is mirrored in `caught`);
 //   row 8:    issueSpendGrantRoute from server/spend-grants.mjs (the
 //             function server/routes/spend-grants.mjs dispatches to).
+//
+// PR-3 adds R6 to every adapter: reopen() over the same durable state and
+// crashAttempt() running the operation inside the store's transaction and
+// throwing before commit. Rows 1-2 get dedicated R6 adapters (below)
+// because their PR-2 adapters drive the in-memory registry fixture,
+// which by construction cannot be reopened or rolled back; the R6
+// adapters drive the PRODUCTION shape — the durable SQLite registry
+// (server/work-claim-sqlite.mjs) that RoomStore owns — over a PR-0
+// conformance store, with the crash reached through a registry whose
+// transaction runner throws after the handler's writes, before commit.
 
 import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createWorkClaimRegistry, handleWorkClaims } from "../../server/work-claim-routes.mjs";
+import { createDurableWorkClaimRegistry } from "../../server/work-claim-sqlite.mjs";
 import { BountyEscrow } from "../../server/bounty-escrow.mjs";
 import { issueSpendGrantRoute } from "../../server/spend-grants.mjs";
 import { createConformanceFixture } from "../helpers/conformance-fixture.mjs";
@@ -102,6 +116,94 @@ export const workClaimCloseAdapter = {
   normalize: body => body,
 };
 
+// ------------------------------------------------- work claims, R6 (PR-3)
+// The durable shape: a PR-0 conformance store, its own workClaims registry
+// (createDurableWorkClaimRegistry over the store's db, driven by the
+// store's transaction — exactly how RoomStore constructs it), and the
+// real handleWorkClaims with the real store (claim commits also append
+// the work_claim.updated room event inside the same transaction, so the
+// rollback crash is observed on effect + event together).
+async function wcCallDurable(ctx, memberId, route, id, body, registry) {
+  try {
+    const res = await handleWorkClaims({
+      req: { method: "POST", body }, res: {},
+      url: new URL(`https://room.example/api/rooms/${ctx.room}/work-claims`),
+      store: ctx.store, roomId: ctx.room,
+      auth: { member: { id: memberId, kind: WC_MEMBERS[memberId].kind, permissions: WC_MEMBERS[memberId].permissions } },
+      workClaimRoute: route, workClaimId: id, helpers: wcHelpers, registry: registry ?? ctx.registry,
+    });
+    return { status: res.status, code: res.value?.error?.code, body: res.value };
+  } catch (error) {
+    return { status: error?.status ?? 500, code: error?.code ?? "simulated_crash", body: undefined };
+  }
+}
+function wcDurableCtx(t) {
+  const fixture = createConformanceFixture(t);
+  return { fixture, store: fixture.store, registry: fixture.store.workClaims, room: fixture.fixture.roomId };
+}
+// A registry over the same db whose transaction runner executes the
+// handler's writes and then throws before the store transaction commits:
+// the §A.4 crash point, reached through the registry seam handleWorkClaims
+// itself uses (`registry.transaction ? registry.transaction(run) : run()`).
+function wcCrashRegistry(ctx) {
+  return createDurableWorkClaimRegistry(ctx.store.db, {
+    transaction: fn => ctx.store.transaction(() => {
+      const out = fn();
+      throw new Error("simulated crash between execute and persist");
+    }),
+  });
+}
+export const workClaimCreateR6Adapter = {
+  name: "work-claim-create-r6",
+  async setup(t) { return wcDurableCtx(t); },
+  async submit(ctx, { key, payload }) {
+    const body = key === null ? { title: "Matrix claim" }
+      : { id: key, title: payload === "different" ? "DIFFERENT TITLE" : "Matrix claim" };
+    return wcCallDurable(ctx, "owner", "create", null, body);
+  },
+  async crashAttempt(ctx, { key }) {
+    return wcCallDurable(ctx, "owner", "create", null, { id: key, title: "Matrix claim" }, wcCrashRegistry(ctx));
+  },
+  async reopen(ctx) {
+    ctx.fixture.reopen();
+    ctx.store = ctx.fixture.store;
+    ctx.registry = ctx.fixture.store.workClaims;
+  },
+  async effectCount(ctx, { key }) {
+    return key && ctx.registry.has(ctx.room, key) ? 1 : 0;
+  },
+  normalize: body => body,
+};
+export const workClaimCloseR6Adapter = {
+  name: "work-claim-close-r6",
+  async setup(t) { return wcDurableCtx(t); },
+  async ensureClaim(ctx, key) {
+    if (!ctx.registry.has(ctx.room, key)) {
+      const created = await wcCallDurable(ctx, "owner", "create", null, { id: key, title: "Matrix claim" });
+      if (created.status !== 201 && created.status !== 409) throw new Error(`close R6 setup create failed: ${created.status}`);
+    }
+  },
+  async submit(ctx, { key, payload }) {
+    await this.ensureClaim(ctx, key);
+    const verb = payload === "different" ? "cancel" : "close";
+    return wcCallDurable(ctx, "owner", verb, key, {});
+  },
+  async crashAttempt(ctx, { key }) {
+    await this.ensureClaim(ctx, key);
+    return wcCallDurable(ctx, "owner", "close", key, {}, wcCrashRegistry(ctx));
+  },
+  async reopen(ctx) {
+    ctx.fixture.reopen();
+    ctx.store = ctx.fixture.store;
+    ctx.registry = ctx.fixture.store.workClaims;
+  },
+  async effectCount(ctx, { key }) {
+    const item = key ? ctx.registry.get(ctx.room, key) : null;
+    return item?.state === "closed" ? 1 : 0;
+  },
+  normalize: body => body,
+};
+
 // ---------------------------------------------------------------- agent invites
 function agentInviteCtx(t, overrides = {}) {
   const fixture = createConformanceFixture(t, overrides);
@@ -150,6 +252,26 @@ export const agentInviteAdapter = {
       return { status: 200 };
     } catch (error) { return caught(error); }
   },
+  // R6 (PR-3): redeem() journals its receipt in the same store transaction
+  // as the code burn, so wrapping it in an outer transaction and throwing
+  // before commit rolls back burn + receipt + membership together.
+  async crashAttempt(ctx, { key }) {
+    // The code is minted BEFORE the crash transaction opens: the crash
+    // rolls back the redeem, not the pre-existing invite it targets.
+    const code = agentCode(ctx, `${key}:same`, "Matrix Bot", ["accept_work", "complete_work"]);
+    try {
+      ctx.store.transaction(() => {
+        ctx.store.invites.redeem(code, { displayName: "Matrix Bot", requestId: key });
+        throw new Error("simulated crash between execute and persist");
+      });
+      return { status: 200 };
+    } catch (error) { return { status: 500, code: "simulated_crash" }; }
+  },
+  async reopen(ctx) {
+    ctx.fixture.reopen();
+    ctx.store = ctx.fixture.store;
+    ctx.ownerKey = ctx.store.issueAccessKey(ctx.room, "owner");
+  },
   async effectCount(ctx, { key }) {
     if (!key) return 0;
     return ctx.store.db.prepare("SELECT count(*) n FROM agent_invite_redeem_receipts WHERE request_id=?").get(key).n;
@@ -188,6 +310,24 @@ export const guestInviteAdapter = {
         { requestId: key, guestLabel: "Matrix Visit", expectedOwnerRevision: 99 });
       return { status: 201 };
     } catch (error) { return caught(error); }
+  },
+  // R6 (PR-3): mint() writes the invite row and its authority row inside
+  // one store.transaction; the outer-transaction throw rolls both back.
+  async crashAttempt(ctx, { key }) {
+    try {
+      ctx.store.transaction(() => {
+        ctx.store.guestInvites.mint(ctx.ownerKey, ctx.room,
+          { requestId: key, guestLabel: "Matrix Visit", expectedOwnerRevision: 0 });
+        throw new Error("simulated crash between execute and persist");
+      });
+      return { status: 201 };
+    } catch (error) { return { status: 500, code: "simulated_crash" }; }
+  },
+  async reopen(ctx) {
+    ctx.fixture.reopen();
+    ctx.store = ctx.fixture.store;
+    ctx.ownerKey = ctx.store.issueAccessKey(ctx.room, "owner");
+    ctx.actorKey = ctx.store.issueAccessKey(ctx.room, "actor-1");
   },
   async effectCount(ctx, { key }) {
     if (!key) return 0;
@@ -321,20 +461,66 @@ const ESCROW_FOREIGN_ROOM = "room-foreign";
 const LANES = { primary: "id:agent/jill", second: "id:agent/grokbot" };
 const ESCROW_CONFLICTS = ["idempotency_key_reused", "idempotency_actor_mismatch"];
 const NOW_MS = 1_786_000_000_000;
+function bountyStore(file) {
+  const db = new DatabaseSync(file);
+  const transaction = fn => {
+    db.exec("SAVEPOINT replay_matrix");
+    try { const out = fn(); db.exec("RELEASE replay_matrix"); return out; }
+    catch (error) { db.exec("ROLLBACK TO replay_matrix"); db.exec("RELEASE replay_matrix"); throw error; }
+  };
+  const store = { db, transaction, readTransaction: transaction };
+  const escrow = new BountyEscrow(store, { now: () => NOW_MS, allowLegacyStringLanes: true });
+  return { db, store, escrow };
+}
 export const bountyEscrowAdapter = {
   name: "bounty-escrow-fund",
-  async setup() {
-    const db = new DatabaseSync(":memory:");
-    const transaction = fn => {
-      db.exec("SAVEPOINT replay_matrix");
-      try { const out = fn(); db.exec("RELEASE replay_matrix"); return out; }
-      catch (error) { db.exec("ROLLBACK TO replay_matrix"); db.exec("RELEASE replay_matrix"); throw error; }
-    };
-    const store = { db, transaction, readTransaction: transaction };
-    const escrow = new BountyEscrow(store, { now: () => NOW_MS, allowLegacyStringLanes: true });
+  // PR-3: the escrow store is a real file under TMPDIR scratch (never
+  // ":memory:") so R6 can close and reopen it — the idempotency journal
+  // must survive the reopen exactly as it survives a process restart.
+  async setup(t) {
+    const directory = mkdtempSync(join(tmpdir(), "replay-matrix-bounty-"));
+    const file = join(directory, "bounty.sqlite");
+    const { db, store, escrow } = bountyStore(file);
     escrow.ensureGenesis(ESCROW_ROOM);
     escrow.ensureGenesis(ESCROW_FOREIGN_ROOM);
-    return { db, escrow, room: ESCROW_ROOM, bounties: new Map(), fundCounts: new Map(), keylessCount: 0 };
+    if (t && typeof t.after === "function") t.after(() => {
+      try { db.close(); } catch { /* already closed by reopen */ }
+      rmSync(directory, { recursive: true, force: true });
+    });
+    return { directory, file, db, store, escrow, room: ESCROW_ROOM, bounties: new Map(), fundCounts: new Map(), keylessCount: 0 };
+  },
+  async reopen(ctx) {
+    ctx.db.close();
+    const fresh = bountyStore(ctx.file);
+    ctx.db = fresh.db; ctx.store = fresh.store; ctx.escrow = fresh.escrow;
+  },
+  // R6 (PR-3): an outer savepoint around idemExecute (whose own
+  // transaction is a nested savepoint) — throwing after the fund +
+  // journal insert and rolling back to the outer savepoint removes both.
+  // fundCounts is harness bookkeeping for the thunk's executions, not a
+  // persisted effect, so the crashed attempt's increment is restored to
+  // keep the counter aligned with the rolled-back database state; the
+  // persisted journal is asserted separately via journalCount.
+  async crashAttempt(ctx, { key }) {
+    const bounty = this.bountyFor(ctx, "primary", key);
+    const countKey = `${ctx.room}:primary:${key}`;
+    const before = ctx.fundCounts.get(countKey) ?? 0;
+    try {
+      ctx.db.exec("SAVEPOINT rm_crash");
+      ctx.escrow.idemExecute(ctx.room, key, "bounty.fund", 200, () => {
+        ctx.fundCounts.set(countKey, (ctx.fundCounts.get(countKey) ?? 0) + 1);
+        return ctx.escrow.fundBounty(ctx.room, bounty.bountyId, { funder: LANES.primary });
+      }, { callerLane: LANES.primary, bountyId: bounty.bountyId, payload: { amount: 10, bountyId: bounty.bountyId } });
+      throw new Error("simulated crash between execute and persist");
+    } catch (error) {
+      try { ctx.db.exec("ROLLBACK TO rm_crash"); ctx.db.exec("RELEASE rm_crash"); } catch { /* already rolled back */ }
+      if (before === 0) ctx.fundCounts.delete(countKey); else ctx.fundCounts.set(countKey, before);
+      return { status: 500, code: "simulated_crash" };
+    }
+  },
+  async journalCount(ctx, { key }) {
+    if (!key) return 0;
+    return ctx.db.prepare("SELECT count(*) n FROM bounty_idempotency WHERE idem_key=?").get(key).n;
   },
   async setupForeign(_t, primary) {
     return { ...primary, room: ESCROW_FOREIGN_ROOM, bounties: new Map() };
@@ -412,6 +598,25 @@ export const spendGrantAdapter = {
     } catch (error) { return caught(error); }
   },
   async failAttempt() { throw new Error("spend-grant R5 is declared n/a — the driver must not call failAttempt"); },
+  // R6 (PR-3): issueSpendGrantRoute runs in one store.transaction (the
+  // capability edge and the terms row commit together); wrapping it in
+  // an outer transaction and throwing before commit rolls both back, so
+  // a crashed issue leaves no grant at all and the retry executes once.
+  async crashAttempt(ctx) {
+    try {
+      ctx.store.transaction(() => {
+        issueSpendGrantRoute(ctx.store, ctx.ownerKey, ctx.room, { agentId: "actor-1", capCents: "5000", perTxCapCents: "1000" });
+        throw new Error("simulated crash between execute and persist");
+      });
+      return { status: 201 };
+    } catch (error) { return { status: 500, code: "simulated_crash" }; }
+  },
+  async reopen(ctx) {
+    ctx.fixture.reopen();
+    ctx.store = ctx.fixture.store;
+    ctx.ownerKey = ctx.store.issueAccessKey(ctx.room, "owner");
+    ctx.actorKey = ctx.store.issueAccessKey(ctx.room, "actor-1");
+  },
   async effectCount(ctx) {
     return ctx.store.db.prepare("SELECT count(*) n FROM spend_grant_terms WHERE room_id=? AND agent_id='actor-1'").get(ctx.room).n;
   },
@@ -428,6 +633,19 @@ export const ADAPTERS = Object.freeze({
   4: guestInviteAdapter,
   5: buyerSignoffAdapter,
   6: attentionAdapter,
+  7: bountyEscrowAdapter,
+  8: spendGrantAdapter,
+});
+
+// PR-3: the adapter each non-control row's R6 scenarios drive. Rows 3, 4,
+// 7 and 8 reuse their PR-2 adapters (now reopenable); rows 1-2 use the
+// dedicated durable-registry adapters, since the PR-2 in-memory registry
+// cannot be reopened or rolled back by construction.
+export const R6_ADAPTERS = Object.freeze({
+  1: workClaimCreateR6Adapter,
+  2: workClaimCloseR6Adapter,
+  3: agentInviteAdapter,
+  4: guestInviteAdapter,
   7: bountyEscrowAdapter,
   8: spendGrantAdapter,
 });
