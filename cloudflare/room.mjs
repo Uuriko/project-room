@@ -92,6 +92,21 @@ function roomOrigin(env) {
   return origin;
 }
 
+// TM-2: resolve the split backup credentials for the operator export and
+// restore doors. Each door's handler reads a missing or sub-16-char value
+// as "unconfigured" (404), so the values pass through untouched — except
+// when both secrets hold the same usable value: then one credential would
+// open both doors, the split would be void, and both doors fail closed
+// until the operator sets distinct values.
+function splitBackupTokens(env) {
+  const exportToken = env.ROOM_EXPORT_TOKEN;
+  const restoreToken = env.ROOM_RESTORE_TOKEN;
+  if (typeof exportToken === 'string' && exportToken.length >= 16 && exportToken === restoreToken) {
+    return { exportToken: undefined, restoreToken: undefined };
+  }
+  return { exportToken, restoreToken };
+}
+
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
 export class ProjectRoom extends DurableObject {
@@ -204,21 +219,29 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
+    // TM-2 split: the backup doors no longer share one credential.
+    // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
+    // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
+    // restore doors and stays unset outside a restore incident, so they
+    // answer 404 in normal operation. The retired ROOM_BACKUP_TOKEN opens
+    // nothing. If both secrets are configured to the same usable value the
+    // split is void, so both doors fail closed until the values differ.
+    const backupTokens = splitBackupTokens(this.env);
     if (url.pathname === '/api/operator/export') {
-      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+      return respond(operatorExportResponse(request, backupTokens.exportToken, this.store.db));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
-    // Object's storage. Same operator token as the export; fail-closed on a
-    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    // Object's storage. Restore token only; fail-closed on a non-empty store
+    // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
     // the current backup is past it (#3409), so the parts are pulled and
     // replayed one at a time instead of uploaded whole.
     if (url.pathname === '/api/operator/restore-from-backup') {
-      return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
+      return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
