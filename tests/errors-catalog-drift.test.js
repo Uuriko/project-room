@@ -329,6 +329,16 @@ const REGISTRY_FIXTURES = [
       assert.match(nextTextOf(ax), /agent-invites/);
       assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /Ask the owner to mint/);
     }],
+  // #3960: the email gate refuses the caller's OWN account — the advice
+  // must name the verify/resend remedy and never the generic 403
+  // self-loop ("room_check_access" / "Ask the owner to mint").
+  ["email_unverified", { httpStatus: 403, message: "Verify your email before this action" },
+    ax => {
+      assert.equal(ax.reason, "email_unverified");
+      assert.match(ax.hint, /verified email/);
+      assert.match(nextTextOf(ax), /email\/verify\/resend/);
+      assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /Ask the owner to mint|room_check_access/);
+    }],
   ["proof_required", { httpStatus: 428, message: "Identity mint proof required" },
     ax => {
       assert.match(ax.hint, /SHA-256/);
@@ -340,7 +350,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "email_unverified", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
     "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
