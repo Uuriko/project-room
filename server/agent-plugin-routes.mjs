@@ -608,29 +608,36 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, { summary });
   });
 
-  // RC-2026-09-18-049: identity verification tiers. The attester must be a
-  // room owner (someone who owns at least one room); the attestation is
-  // global to the identity. Reads are public so other agents can gate on
-  // the tier.
+  // RC-2026-09-18-049: identity verification tiers. SECURITY-FIX C1
+  // (HUNT-ADVERSARY P1): the attester must own a room in which the target
+  // identity is a linked member — room ownership alone is free to mint, so
+  // ownership-anywhere was a self-bootstrapped trust tier. A standing
+  // attestation is withdrawn only by its attester of record. Reads are
+  // public so other agents can gate on the tier.
   const VERIFY_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verify$/;
   const VERIFICATION_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verification$/;
 
   const verifyIdentity = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-verify:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
-      reject(403, "not_room_owner", "Only a room owner can attest an agent identity as verified");
-    }
     if (!store.identities.get(identityId)) reject(404, "identity_not_found", "No such agent identity");
+    if (!store.agentPlugin.canAttestIdentity(auth.identityId, identityId)) {
+      reject(403, "no_attestation_relationship", "Verification requires an attestation relationship: attest an identity that is a linked member of a room you own");
+    }
     return json(res, 201, store.agentPlugin.verifyIdentity({ identityId, verifiedBy: auth.identityId }));
   });
 
   const unverifyIdentity = translate(async (req, res, { identityId }) => {
     const auth = ownerAuth(req);
-    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
+    const attestation = store.agentPlugin.verificationAttestation(identityId);
+    if (attestation) {
+      if (attestation.verifiedBy !== auth.identityId) {
+        reject(403, "not_attester", "Only the attester of record can revoke this verification attestation");
+      }
+    } else if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
       reject(403, "not_room_owner", "Only a room owner can revoke a verification attestation");
     }
-    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId }));
+    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId, unverifiedBy: auth.identityId }));
   });
 
   const identityVerification = translate(async (req, res, { identityId }) => {
