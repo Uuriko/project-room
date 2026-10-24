@@ -1,6 +1,6 @@
 # Secret scanning
 
-Two gates, one detector (`server/secret-scan.mjs`):
+Three gates, one detector (`server/secret-scan.mjs`):
 
 1. **Tree scan** — `scripts/secret-scan-check.mjs`. Runs in the contract CI job
    (`node check.mjs` spawns it). Walks `server/`, `src/`, `scripts/`,
@@ -10,6 +10,25 @@ Two gates, one detector (`server/secret-scan.mjs`):
    only ADDED lines of `git diff <base>...HEAD` (default base `origin/main`).
    Same detector, same line allowlist, same scope policy — the two gates
    never disagree about a line.
+
+3. **Write scan (W10, bright line B2)** — `server/secret-write-scan.mjs`.
+   Runtime, at the shared persistence layers: room commands
+   (`validateCommand` in `server/store.mjs`: message posted/edited, peer
+   DMs, and the delivery texts `work.completed`, `work.handoff_recorded`,
+   `verification.recorded`), the work-claim kernel
+   (`server/work-claims.mjs`: finish note, delivery bundle, review
+   summaries), and the public-work finish
+   (`server/public-work-claims.mjs`: artifact text, reported checks,
+   criteria attestation). A credential-shaped string is refused with the
+   error code `secret_detected` and the content is **not persisted** —
+   never redacted-and-saved. The write scan runs a high-confidence subset
+   of the detector's patterns (provider/format shapes only); the generic
+   assignment, bearer-token and high-entropy rules stay CI-only because
+   legitimate deliveries are full of env lookups, fixtures, hashes and
+   documented bearer examples (the false-positive probe set lives in
+   `tests/secret-write-scan.test.js`). The one inherited allowlist entry
+   is AWS's documented example key, `AKIAIOSFODNN7EXAMPLE`. Refusals name
+   the field and the shape only — never any part of the matched value.
 
 Exit codes (diff gate): `0` clean, `1` findings, `2` usage/environment error.
 Findings print `path:line [rule] label (preview)` — previews are redacted,

@@ -7,6 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { findSecretInFields, secretDetectedMessage, SECRET_DETECTED_CODE } from './secret-write-scan.mjs'; // W10/B2: scan-on-write.
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -505,6 +506,19 @@ export class PublicWorkClaims {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+          // W10 (bright line B2): scan-on-write. The artifact text is the
+          // one delivery surface that persists content verbatim (into
+          // public_work_receipts), so it — plus the reported checks and
+          // any criteria attestation — is scanned here, in apply(), the
+          // shared path for direct and matched finishes, BEFORE the
+          // receipt INSERT, the settlement attach, and the kernel's done
+          // transition. A refusal persists nothing and burns no
+          // generation: the claimant re-submits clean on the same claim.
+          {
+            const hit = findSecretInFields({ artifactText: input.artifactText, checksReported: input.checksReported,
+              ...(input.criteriaAttestation !== undefined ? { criteriaAttestation: input.criteriaAttestation } : {}) });
+            if (hit) fail(422, SECRET_DETECTED_CODE, secretDetectedMessage(hit.field, hit.label));
+          }
           // #3547: the delivery bundle's criteria leg. artifactText +
           // checksReported stay the bundle's v1 serialization; when the
           // deliverer adds a per-criterion attestation, the platform

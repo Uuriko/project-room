@@ -73,19 +73,29 @@ const findingAllowed = (allowlist, line, start, end) =>
     matchSpans(line, regex).some(([a, b]) => a < end && start < b));
 // Scan text for secrets. allowlist is an array of RegExp; a finding is
 // suppressed only when an allowlist match overlaps that finding's span.
-export function scanText(text, { allowlist, safeEntropyTokens } = {}) {
+// patternIds (optional) restricts the scan to the named PATTERNS rules and
+// includeEntropy:false skips the high-entropy rule — the write-path scan
+// (server/secret-write-scan.mjs, W10) uses both to run a high-confidence
+// subset of this same detector instead of a parallel pattern set. The
+// defaults keep the CI tree/diff scans byte-for-byte unchanged.
+export function scanText(text, { allowlist, safeEntropyTokens, patternIds, includeEntropy } = {}) {
   check(typeof text === "string" && text.length <= 10 * 1024 * 1024, "text must be a string up to 10 MiB");
   check(allowlist === undefined || (Array.isArray(allowlist) && allowlist.every(r => r instanceof RegExp)),
     "allowlist must be an array of RegExp");
   const lines = text.split("\n");
-  return scanLines(lines, { allowlist, safeEntropyTokens });
+  return scanLines(lines, { allowlist, safeEntropyTokens, patternIds, includeEntropy });
 }
-export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
+export function scanLines(lines, { allowlist, safeEntropyTokens, patternIds, includeEntropy } = {}) {
   check(Array.isArray(lines) && lines.length <= 200000, "lines must be an array of at most 200000");
   check(allowlist === undefined || (Array.isArray(allowlist) && allowlist.every(r => r instanceof RegExp)),
     "allowlist must be an array of RegExp");
   check(safeEntropyTokens === undefined || (Array.isArray(safeEntropyTokens) && safeEntropyTokens.every(value => typeof value === "string")),
     "safeEntropyTokens must be an array of exact strings");
+  check(patternIds === undefined || (Array.isArray(patternIds) && patternIds.length > 0
+    && patternIds.every(id => PATTERNS.some(pattern => pattern.id === id))),
+    "patternIds must name rules in PATTERNS");
+  check(includeEntropy === undefined || typeof includeEntropy === "boolean", "includeEntropy must be a boolean");
+  const patterns = patternIds === undefined ? PATTERNS : PATTERNS.filter(pattern => patternIds.includes(pattern.id));
   const safeTokens = new Set(safeEntropyTokens ?? []);
   const findings = [];
   // Same tokenization as before (split on whitespace/quotes/brackets), but
@@ -96,13 +106,14 @@ export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
     const lineNo = index + 1;
     // Every hit of a rule, not only the first. An allowlisted earlier match
     // must not hide a later secret of the same rule on this line.
-    for (const pattern of PATTERNS) {
+    for (const pattern of patterns) {
       for (const [start, end] of matchSpans(line, pattern.regex)) {
         if (findingAllowed(allowlist, line, start, end)) continue;
         findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
           preview: redact(line.slice(start, end)) }));
       }
     }
+    if (includeEntropy === false) return;
     let tm;
     tokenRe.lastIndex = 0;
     while ((tm = tokenRe.exec(line)) !== null) {
