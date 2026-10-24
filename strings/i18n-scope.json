@@ -101,6 +101,7 @@
   "src/room-charter.js",
   "src/room-deep-link.js",
   "src/room-instructions.js",
+  "src/room-lanes.js",
   "src/room-layout.js",
   "src/room-mcp-join.js",
   "src/room-roster.js",

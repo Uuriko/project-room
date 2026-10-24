@@ -542,5 +542,20 @@
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "lanes.show": "Show lanes",
+  "lanes.hide": "Hide lanes",
+  "lanes.conversation": "Conversation",
+  "lanes.work": "Work",
+  "lanes.receipts": "Receipts",
+  "lanes.tabs": "Conversation, work, and receipts",
+  "lanes.updates.one": "1 update",
+  "lanes.updates": "{count} updates",
+  "lanes.catchup.finished": "Since you left: {finished} finished.",
+  "lanes.catchup.needs.one": "Since you left: 1 needs you.",
+  "lanes.catchup.needs.many": "Since you left: {needsYou} need you.",
+  "lanes.catchup.both.one": "Since you left: {finished} finished, 1 needs you.",
+  "lanes.catchup.both.many": "Since you left: {finished} finished, {needsYou} need you.",
+  "lanes.empty.work": "No open work in this room.",
+  "lanes.empty.receipts": "No receipts in this room."
 }

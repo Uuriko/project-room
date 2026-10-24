@@ -7,6 +7,7 @@ import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
+import { installRoomLanes, syncRoomLanes, readLanesFlag } from "./room-lanes.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
@@ -2528,6 +2529,7 @@ function renderMessages() {
     if (now.top < 0 || now.bottom > innerHeight) settledFocus.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
+  syncRoomLanes();
 }
 function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
@@ -7936,11 +7938,23 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
+  installRoomLanes(() => {
+    const enabled = readLanesFlag(location.search, sessionStorage);
+    return {
+      enabled,
+      state,
+      viewerId: session?.member?.id ?? "",
+      brief: enabled && briefView.owns(briefView.chain) ? briefView.brief : null,
+      needsYou: enabled && state?.workItems && session?.member?.id
+        ? needsAttention({ workItems: state.workItems, memberId: session.member.id, ownerId: state.room?.ownerId ?? null })
+        : [],
+    };
+  });
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
-  renderMessages = () => { priorMessages(); paintChat(); };
+  renderMessages = () => { priorMessages(); paintChat(); syncRoomLanes(); };
 }
 // --- end W board ---
 
