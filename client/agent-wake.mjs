@@ -40,8 +40,10 @@ function signals(value) {
   });
 }
 export class AgentWakeClient {
-  #connection; #fetch; #room; #fencingToken = null; #listenerRequired = false;
-  constructor({ connection, fetchImpl = fetch }) {
+  #connection; #fetch; #room; #fencingToken = null; #listenerRequired = false; #deliveryProtocol;
+  constructor({ connection, fetchImpl = fetch, deliveryProtocol = 'legacy' }) {
+    if (!['legacy', 'combined', 'auto'].includes(deliveryProtocol)) throw usage();
+    this.#deliveryProtocol = deliveryProtocol;
     this.#room = new RoomAgentClient({ ...connection, fetchImpl });
     // CX5-FIX: two supported listener credentials — the pri_ identity
     // secret (identity-level listener), or the rak_ API key standard
@@ -91,6 +93,11 @@ export class AgentWakeClient {
   }
   async setup({ hostId, cadenceSeconds, listener = false }) {
     hostOptions(hostId, cadenceSeconds); await this.#room.checkConnection();
+    return this.#registerVerified({ hostId, cadenceSeconds, listener });
+  }
+  // Private: callers must have just verified this connection. This is not a
+  // permission cache and cannot be invoked by an external adapter.
+  async #registerVerified({ hostId, cadenceSeconds, listener }) {
     const value = await this.#request('/api/agent-heartbeats', { hostId, mode: 'wakeable', cadenceSeconds,
       // The lease is per-room: name the connection's pinned room when it
       // has one (the scoped setup credential is bound to it anyway), else
@@ -117,30 +124,79 @@ export class AgentWakeClient {
     return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: listener && !listenerInfo.acquired ? [] : signals(value.pendingWakes),
       ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
-  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null }) {
+  async #receive({ hostId, cadenceSeconds, waitMs, cursor }) {
+    const value = await this.#request('/api/agent-wakes/receive', { roomId: this.#connection.roomId,
+      memberId: this.#connection.memberId, hostId, cadenceSeconds, waitMs, cursor }, waitMs + 15000);
+    const connection = value.connection;
+    const beforeConnection = value.beforeConnection;
+    if (value.contractVersion !== 1 || value.hostId !== hostId || !id(value.agentId)
+      || !['signals_received', 'wait_completed', 'listener_contended'].includes(value.status)
+      || connection?.status !== 'credential_accepted' || connection.roomId !== this.#connection.roomId
+      || connection.memberId !== this.#connection.memberId || connection.kind !== 'agent'
+      || beforeConnection?.status !== 'credential_accepted' || beforeConnection.roomId !== this.#connection.roomId
+      || beforeConnection.memberId !== this.#connection.memberId || beforeConnection.kind !== 'agent'
+      || !Array.isArray(beforeConnection.permissions)
+      || !Array.isArray(connection.permissions) || !object(value.listener)
+      || typeof value.listener.acquired !== 'boolean' || !Number.isFinite(value.waitedMs)
+      || typeof value.timedOut !== 'boolean' || value.acknowledged !== false
+      || value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
+    const pendingWakes = signals(value.pendingWakes);
+    this.#listenerRequired = true;
+    this.#fencingToken = null;
+    if (value.status !== 'listener_contended') {
+      if (!value.listener.acquired || typeof value.listener.fencingToken !== 'string' || !value.listener.fencingToken) throw invalid();
+      this.#fencingToken = value.listener.fencingToken;
+    } else if (pendingWakes.length) throw invalid();
+    const observation = { connection: { ...connection, origin: this.#connection.origin },
+      observedThroughBySource: {}, scope: 'delivery_only', contextRead: false };
+    return { version: 1, status: value.status, hostId, pendingWakes, more: value.more === true,
+      nextCursor: value.nextCursor ?? null, waitedMs: value.waitedMs, timedOut: value.timedOut,
+      acknowledged: false, observations: { before: { ...observation, connection: { ...beforeConnection, origin: this.#connection.origin } }, after: observation },
+      sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed', serverTiming: value.timing };
+  }
+  async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion, cursor = null, deliveryOnly = false }) {
     hostOptions(hostId, cadenceSeconds);
-    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
-    const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
+    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000 || typeof deliveryOnly !== 'boolean'
+      || deliveryOnly && (attentionCursor !== undefined || sinceVersion !== undefined)) throw usage();
+    if (deliveryOnly && this.#deliveryProtocol !== 'legacy') {
+      try { return await this.#receive({ hostId, cadenceSeconds, waitMs, cursor }); }
+      catch (error) {
+        // Only an unsupported door permits compatibility fallback. Never turn
+        // denied access, timeouts or malformed responses into a second attempt.
+        if (this.#deliveryProtocol !== 'auto' || ![404, 405].includes(error.status)) throw error;
+        this.#deliveryProtocol = 'legacy';
+      }
+    }
+    // Pointer-only hosts need current authority, not the full work/attention
+    // projection. They must read selected context separately before acting.
+    const deliveryObservation = async () => ({ connection: await this.#room.checkConnection(),
+      observedThroughBySource: {}, scope: 'delivery_only', contextRead: false });
+    const before = deliveryOnly ? await deliveryObservation()
+      : await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
     requireConnection(before);
     const contended = (after = before) => ({ version: 1, status: 'listener_contended', hostId,
       pendingWakes: [], timedOut: false, waitedMs: 0, acknowledged: false,
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' });
     // Raw HTTP polling remains observation. Standard receiving adapters own
     // the room queue before exposing pointers to their host.
-    const registered = await this.setup({ hostId, cadenceSeconds, listener: true });
+    const registered = deliveryOnly
+      ? await this.#registerVerified({ hostId, cadenceSeconds, listener: true })
+      : await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!registered.listener.acquired) return contended();
     const receivingToken = this.#fencingToken;
     const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs + (cursor === null ? '' : '&cursor=' + encodeURIComponent(cursor)), undefined, waitMs + 10000);
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
     if (value.nextCursor != null && (typeof value.nextCursor !== 'string' || value.nextCursor.length > 1024)) throw invalid();
-    const after = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
+    const after = deliveryOnly ? await deliveryObservation() : await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
       attentionCursor: before.observedThroughBySource.attention?.cursor });
     requireConnection(after);
     // Authority reads and a slow poll can outlive the lease. Revalidate
     // before dispatch; a newly acquired token cannot bless the old page.
     // Even an empty page can trigger startup attention from its observations.
-    const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
+    const renewed = deliveryOnly
+      ? await this.#registerVerified({ hostId, cadenceSeconds, listener: true })
+      : await this.setup({ hostId, cadenceSeconds, listener: true });
     if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
     return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes, more: value.more === true, nextCursor: value.nextCursor ?? null,
       timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,

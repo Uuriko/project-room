@@ -27,13 +27,17 @@ export function runCodexQueue(args, { executable = 'codex', timeoutMs = 15000 } 
 
 // A journal receipt is transport acceptance only. No Room ACK, reply or readiness
 // is inferred. Pending/uncertain writes survive restart and require reconciliation.
-export async function queueRoomPointer({ binding, pointer, journal, authorize, run = runCodexQueue }) {
+export async function queueRoomPointer({ binding, pointer, journal, authorize, ready = async () => true, run = runCodexQueue }) {
   validateQueueBinding(binding);
   const fields = ['roomId', 'signalId', 'messageId', 'workItemId', 'requestId'];
   if (!pointer || Array.isArray(pointer) || pointer.roomId !== binding.roomId || !id(pointer.signalId)
     || Object.keys(pointer).some(key => !fields.includes(key) || !id(pointer[key]))) throw new Error('invalid_pointer');
   const canonical = Object.fromEntries(fields.filter(key => pointer[key] !== undefined).map(key => [key, pointer[key]]));
   if (typeof authorize !== 'function' || await authorize() !== true) throw new Error('access_denied');
+  // Refusal before dispatch intent is provably unexecuted and may be checked
+  // again later. Never turn an uninvoked command into an ambiguous receipt.
+  if (typeof ready !== 'function') throw new Error('invalid_readiness_check');
+  if (await ready() !== true) return { status: 'deferred', duplicate: false, execution: 'not_started' };
   mkdirSync(journal, { recursive: true, mode: 0o700 });
   privateNode(lstatSync(journal), true);
   const key = digest([binding.origin, binding.roomId, binding.memberId, binding.threadId, pointer.signalId]);

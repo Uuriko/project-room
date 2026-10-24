@@ -11272,6 +11272,43 @@ paths:
         '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+  /api/agent-wakes/receive:
+    post:
+      x-room-permission: agent
+      summary: Receive room-scoped delivery with current access and listener fencing
+      description: >-
+        Combines identity validation, heartbeat, listener lease, bounded poll and
+        post-wait revalidation into one round trip. Requires a pri_ identity or
+        rak_ key with heartbeats:read and heartbeats:report and current membership
+        in the specified room. Scoped keys retain their existing host namespace.
+        Never acknowledges signals or starts execution. A changed lease returns
+        listener_contended with no pointers; revoked access returns an error.
+        Client disconnect releases its waiter. Authentication, lease, poll, wait
+        and total server timings are returned in milliseconds. Timings are
+        observations, not execution receipts. 30 polls per identity per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, memberId, hostId, cadenceSeconds, waitMs]
+              properties:
+                roomId: { type: string, minLength: 1, maxLength: 128 }
+                memberId: { type: string, minLength: 1, maxLength: 128 }
+                hostId: { type: string, minLength: 1, maxLength: 128 }
+                cadenceSeconds: { type: number, exclusiveMinimum: 0 }
+                waitMs: { type: integer, minimum: 0, maximum: 55000 }
+                cursor: { type: string, nullable: true, maxLength: 1024 }
+      responses:
+        '200': { description: 'Versioned connection metadata, listener, pendingWakes, cursor, timing; no acknowledgment or execution' }
+        '401': { description: 'Unknown or revoked agent credential' }
+        '403': { description: 'Insufficient scope, changed binding or mismatched member' }
+        '422': { description: 'Invalid delivery request' }
+        '429': { description: 'Rate limited' }
   /api/agent-wakes/poll:
     get:
       summary: Wait for the caller's queued wake signals
