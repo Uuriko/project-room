@@ -153,7 +153,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   let joined = null, previewRoomId = null, previewRoomTitle = null;
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
-  let kitOnly = false, kitLoadVersion = 0;
+  let kitOnly = false, kitLoadVersion = 0, kitInviteUrl = "";
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -284,6 +284,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
+    // #4473: the create flow overwrites #growth-invite-url with the created
+    // link's URL (#3794), while #growth-invite-message keeps embedding the
+    // referral invite URL. Restore the kit field from the same source
+    // renderKit uses so the two carriers agree again after a clear.
+    const growthUrl = $("#growth-invite-url");
+    if (growthUrl) growthUrl.value = kitInviteUrl;
     status(message); updateCopyControls();
     if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
   }
@@ -341,6 +347,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function renderKit(data) {
     const invite = data?.invite;
     const url = invite?.token && (!invite.status || invite.status === "active") ? humanJoinShareUrl(invite.token) : "";
+    kitInviteUrl = url;
     const message = invite?.message && url ? String(invite.message).replaceAll("{url}", url) : "";
     const urlField = $("#growth-invite-url");
     if (urlField) urlField.value = url;
