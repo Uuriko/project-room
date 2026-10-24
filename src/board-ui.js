@@ -331,20 +331,25 @@ export function currentApprovalFor(item, memberId) {
 //   owner) and can never hold an approval on their own claim, so the
 //   approval-gated condition was unsatisfiable for exactly the person
 //   the kernel authorizes; the owner gets the control, nobody else does.
-// - reviewed policies: the viewer must hold a current approval, and
-//   under independent_principal (#3885) must additionally hold the
-//   verify permission (canCloseWork's verifyMembers) — approvers
-//   without it were offered a Verify the kernel always refuses.
+// - reviewed policies: the viewer must hold a current approval, must
+//   not be the owner or a superseded claim's viewer, must be an active
+//   member of the reviewers set (canCloseWork's reviewMembers: may
+//   write work claims or hold verify), and under independent_principal
+//   (#3885) must additionally hold the verify permission (canCloseWork's
+//   verifyMembers) — approvers without it were offered a Verify the
+//   kernel always refuses. The supersededBy / reviewers-set legs are
+//   #4046's mirror, folded in when that PR merged up over this function.
 export function canVerifyFromBoard(item, viewer, members, roomPolicy = null) {
   if (!item || item.state !== "delivered" || !viewer?.id) return false;
   const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
   if (policy === "self_attested") return item.owner === viewer.id;
-  if (item.owner === viewer.id) return false;
+  if (item.owner === viewer.id || item.supersededBy) return false;
   if (!currentApprovalFor(item, viewer.id)) return false;
-  if (policy === "independent_principal") {
-    const member = members?.[viewer.id];
-    return Boolean(member && member.active !== false && (member.permissions ?? []).includes("verify"));
-  }
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  const permissions = new Set(member.permissions ?? []);
+  if (!viewer.write && !permissions.has("verify")) return false;
+  if (policy === "independent_principal") return permissions.has("verify");
   return true;
 }
 
@@ -381,17 +386,31 @@ export function claimSendBackBody(item, memberId) {
   return { state: "in_progress", requestId: sendBackRequestId(item, memberId), ...basis };
 }
 
+// The basis a review is recorded against, in the kernel's reviewBasis
+// shape (server/work-claims.mjs reviewBasisFor). The board holds every
+// field on the item it renders, so the review submit names the basis
+// the reviewer actually read (#3889): without expectedBasis, an
+// identical re-review after the basis moved (a new CI head) was a
+// silent kernel no-op while the board announced "Reviewed".
+export function claimReviewBasis(item) {
+  if (!item?.owner) return null;
+  return {
+    version: 1, owner: item.owner, claimedAt: item.claimedAt ?? null,
+    revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
+    deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0,
+  };
+}
+
 // The review POST body (#3889): the reviewer names the basis they
 // actually read — the board holds every field of the kernel's
 // reviewBasisFor — so an identical re-review after the basis moved is a
 // deliberate refresh where the kernel allows one (a sole CI head move),
 // instead of a silent no-op the board announces as "Reviewed". A basis
-// that no longer matches is refused as a conflict by the kernel.
+// that no longer matches is refused as a conflict by the kernel. An
+// ownerless item has no basis to name; the body stays the plain pair.
 export function claimReviewBody(item, verdict, summary) {
-  return { verdict, summary, expectedBasis: { version: 1, owner: item?.owner ?? null,
-    claimedAt: item?.claimedAt ?? null, revision: item?.revision ?? null,
-    headSha: item?.ci?.headSha ?? null, deliveryDigest: item?.delivery?.digest ?? null,
-    deliveryGeneration: item?.deliveryGeneration ?? 0 } };
+  const basis = claimReviewBasis(item);
+  return basis ? { verdict, summary, expectedBasis: basis } : { verdict, summary };
 }
 
 // #3889 readback: after the board reloads, the submitted review counts
