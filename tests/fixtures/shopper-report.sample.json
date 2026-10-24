@@ -1,0 +1,198 @@
+{
+  "reportId": "shr_d7ee9b16714777942866b51a3ae19f37cdb425a384962e9c24562c7ad1e5057e",
+  "schema": "shopper-report/1",
+  "generatedAt": "2026-10-16T01:53:42.234Z",
+  "summon": {
+    "summonId": "sum_fixture_001",
+    "roomId": "fixture-room",
+    "requestedBy": "owner"
+  },
+  "shopper": {
+    "identityId": "ai_QJNvs78lMzFYCmRi",
+    "displayName": "Mystery Shopper",
+    "provenance": "platform-shopper/1",
+    "mode": "public-door-only"
+  },
+  "scope": {
+    "origin": "http://127.0.0.1:4319",
+    "namespaceId": "public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a",
+    "testTaskIds": [
+      "shopper-test:glossary",
+      "shopper-test:held"
+    ],
+    "realTasksObservedNotAttempted": 1
+  },
+  "outcome": "completed-loop",
+  "steps": [
+    {
+      "step": "fetch-front-door",
+      "status": "ok",
+      "severity": "none",
+      "expected": "GET /llms.txt answers 200 and names the public-work door",
+      "observed": "llms.txt answered 200 and names the public-work door",
+      "calls": [
+        {
+          "method": "GET",
+          "path": "/llms.txt",
+          "status": 200,
+          "ms": 171.3,
+          "responseSha256": "25bf6f35f94e7ecdee9a70fc35a6e239a9c84f72086e8fb1aa345919bc4f8bf8",
+          "excerpt": "# Uuriko Project Room > Agent-native collaboration rooms: persistent rooms where people and AI agents talk and work together. Work items carry next actions and receipts; agents join as named members. One HTTP call enrolls you — no human login required. ## Start here - [Full agent"
+        }
+      ]
+    },
+    {
+      "step": "mint-identity",
+      "status": "ok",
+      "severity": "none",
+      "expected": "A fresh identity can be minted with no prior credential",
+      "observed": "Minted identity ai_QJNvs78lMzFYCmRi with no prior credential",
+      "calls": [
+        {
+          "method": "POST",
+          "path": "/api/agent-identities",
+          "status": 201,
+          "ms": 260.3,
+          "responseSha256": "2d4b90e6d63c1f9afc59c6c84bca13b3b9bb88eaf204b13c17e0605a54112107",
+          "excerpt": "{\"identityId\":\"ai_QJNvs78lMzFYCmRi\",\"displayName\":\"Mystery Shopper\",\"secret\":\"<redacted>\",\"publicKey\":\"YMOWDZm7jP+8rcAQEFKzVpcFmOWaSWrzUlvLIX7GRKg=\",\"privateKey\":\"<redacted>\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own "
+        }
+      ]
+    },
+    {
+      "step": "list-board",
+      "status": "ok",
+      "severity": "none",
+      "expected": "GET /api/public-work/tasks returns the public board",
+      "observed": "Board listed 3 tasks, 2 claimable",
+      "calls": [
+        {
+          "method": "GET",
+          "path": "/api/public-work/tasks?limit=100",
+          "status": 200,
+          "ms": 31.8,
+          "responseSha256": "cb7ba47c2e1ebf9fee3c993e58a4e93af7b163901ad6d8b8e0b4ae1a80435565",
+          "excerpt": "{\"tasks\":[{\"schema\":\"public-work-task/1\",\"taskId\":\"real:launch-notes\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title\":\"Write the launch not"
+        }
+      ]
+    },
+    {
+      "step": "scope-board",
+      "status": "ok",
+      "severity": "none",
+      "expected": "The summoned room's tasks are identifiable in the board",
+      "observed": "3 of 3 board tasks carry the room's namespace",
+      "calls": [
+        {
+          "method": "GET",
+          "path": "/api/public-work/tasks?limit=100",
+          "status": 200,
+          "ms": 31.8,
+          "responseSha256": "cb7ba47c2e1ebf9fee3c993e58a4e93af7b163901ad6d8b8e0b4ae1a80435565",
+          "excerpt": "{\"tasks\":[{\"schema\":\"public-work-task/1\",\"taskId\":\"real:launch-notes\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title\":\"Write the launch not"
+        }
+      ]
+    },
+    {
+      "step": "read-task",
+      "status": "ok",
+      "severity": "none",
+      "expected": "One test task reads back with terms, criteria and files",
+      "observed": "Test task shopper-test:glossary reads back with 2 acceptance criteria and 1 declared files",
+      "calls": [
+        {
+          "method": "GET",
+          "path": "/api/public-work/tasks/shopper-test%3Aglossary",
+          "status": 200,
+          "ms": 46.8,
+          "responseSha256": "360715c10aaac75302e73c44c5bd73e7931154fe920d196f4948074e15057173",
+          "excerpt": "{\"schema\":\"public-work-task/1\",\"taskId\":\"shopper-test:glossary\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title\":\"Micro-task: one-line gloss"
+        }
+      ]
+    },
+    {
+      "step": "match",
+      "status": "ok",
+      "severity": "none",
+      "expected": "POST /api/public-work/match recommends without claiming",
+      "observed": "Match recommended the test task without claiming it",
+      "calls": [
+        {
+          "method": "POST",
+          "path": "/api/public-work/match",
+          "status": 200,
+          "ms": 73.9,
+          "responseSha256": "1594dd2d0dadd3983b0b0b21689f3df11dac3169e20194ef2d691f17985a73c3",
+          "excerpt": "{\"recommendations\":[{\"task\":{\"schema\":\"public-work-task/1\",\"taskId\":\"shopper-test:glossary\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title\""
+        }
+      ]
+    },
+    {
+      "step": "guard-real-task",
+      "status": "ok",
+      "severity": "none",
+      "expected": "Real (non-test) claimable work is observed and NOT attempted",
+      "observed": "1 real claimable task(s) in the room were observed and deliberately not attempted",
+      "calls": []
+    },
+    {
+      "step": "claim-test-task",
+      "status": "ok",
+      "severity": "none",
+      "expected": "The shopper claims a marked test task",
+      "observed": "Claimed test task shopper-test:glossary at generation 1",
+      "calls": [
+        {
+          "method": "POST",
+          "path": "/api/public-work/tasks/shopper-test%3Aglossary/claim",
+          "status": 200,
+          "ms": 125.4,
+          "responseSha256": "5c572271e8562e830d9ce802bae499d666ffadcd83ad80e7755fb2b22536982c",
+          "excerpt": "{\"action\":\"claimed\",\"task\":{\"schema\":\"public-work-task/1\",\"taskId\":\"shopper-test:glossary\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title\":"
+        }
+      ]
+    },
+    {
+      "step": "finish-test-task",
+      "status": "ok",
+      "severity": "none",
+      "expected": "The shopper finishes the test task and receives a receipt id",
+      "observed": "Finish accepted; receipt pwr_dc42778c76ad812ef694aa19265c614ae5d7a85195d45c78c655fa37b3bd93ac issued",
+      "calls": [
+        {
+          "method": "POST",
+          "path": "/api/public-work/tasks/shopper-test%3Aglossary/finish",
+          "status": 200,
+          "ms": 95,
+          "responseSha256": "99b363ef7b7cee0620d1947ec1c842682672f6ab8158aaa434b39705e86e7e19",
+          "excerpt": "{\"action\":\"submitted\",\"task\":{\"schema\":\"public-work-task/1\",\"taskId\":\"shopper-test:glossary\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616cb8a1fc72b95a753267a\",\"repositoryUrl\":\"https://github.com/example/project\",\"repositoryRef\":\"main\",\"title"
+        }
+      ]
+    },
+    {
+      "step": "read-receipt",
+      "status": "ok",
+      "severity": "none",
+      "expected": "The receipt reads back through the public door",
+      "observed": "Receipt reads back publicly with verification: hash_only",
+      "calls": [
+        {
+          "method": "GET",
+          "path": "/api/public-work/receipts/pwr_dc42778c76ad812ef694aa19265c614ae5d7a85195d45c78c655fa37b3bd93ac",
+          "status": 200,
+          "ms": 45.7,
+          "responseSha256": "d09d40e745a8f42d0807b324df68b7e484ce993fdc8c8a8f8dc1383882da4548",
+          "excerpt": "{\"schema\":\"public-work-receipt/1\",\"receiptId\":\"pwr_dc42778c76ad812ef694aa19265c614ae5d7a85195d45c78c655fa37b3bd93ac\",\"taskId\":\"shopper-test:glossary\",\"title\":\"Micro-task: one-line glossary entry\",\"termsVersion\":1,\"namespaceId\":\"public_3ce40ae92007b710cd933729a964248c65d3221e3616c"
+        }
+      ]
+    }
+  ],
+  "friction": [],
+  "totals": {
+    "calls": 8,
+    "ms": 850,
+    "blocking": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "receiptId": "pwr_dc42778c76ad812ef694aa19265c614ae5d7a85195d45c78c655fa37b3bd93ac"
+}
