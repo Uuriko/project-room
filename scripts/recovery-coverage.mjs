@@ -483,6 +483,19 @@ export async function seedRecoveryCoverage(f) {
     (room_id, squad_id, name, goal, members_json, channel_message_id, owner_id, state, created_at, updated_at)
     VALUES ('commons', 'sq_recovery0001', 'recovery-crew', 'recover the room', '["owner"]', NULL, 'owner', 'active', ?, ?)`)
     .run(f.now(), f.now());
+  // CLAIM-PRIM: one surface-claim envelope row so the recovery audit sees
+  // the surface_claims table with substantive fixture data.
+  f.store.db.prepare(`INSERT INTO surface_claims
+    (room_id, claim_id, item_json, updated_at)
+    VALUES ('commons', 'sc_recovery0001', ?, ?)`)
+    .run(JSON.stringify({
+      kind: "surface-claim", roomId: "commons", claimId: "sc_recovery0001",
+      holderMemberId: "owner", holderDisplayName: "Owner", holderKind: "human",
+      scope: { prs: [4242] }, note: "Seeded so the capture covers surface claims.",
+      state: "active", claimedAt: f.now(), expiresAt: f.now() + 90 * 60_000,
+      heartbeatAt: f.now(), releasedAt: null, releaseReason: null,
+      supersededBy: null, supersedes: [], history: [{ at: f.now(), kind: "claimed" }]
+    }), f.now());
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),

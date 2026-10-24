@@ -56,6 +56,7 @@ import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { surfaceClaimEnv, takeSurfaceClaim, listSurfaceClaims, getSurfaceClaim, releaseSurfaceClaim, amendSurfaceClaim } from "./surface-claims.mjs"; // CLAIM-PRIM: surface claims
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -147,6 +148,15 @@ function validRoomArgs(name, args) {
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
     return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  }
+  if (name === "room_claim_surface") return object(args.scope);
+  if (name === "room_list_surface_claims") {
+    return (args.claimId === undefined || typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128)
+      && (args.state === undefined || ["active", "released", "expired", "superseded"].includes(args.state))
+      && (args.mine === undefined || typeof args.mine === "boolean");
+  }
+  if (name === "room_release_surface_claim" || name === "room_amend_surface_claim") {
+    return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
   }
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
@@ -532,6 +542,35 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
   }
   if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
+  if (name === "room_claim_surface") {
+    const auth = store.authenticate(secret, roomId);
+    const input = { scope: args.scope };
+    if (args.note !== undefined) input.note = args.note;
+    if (args.windowMinutes !== undefined) input.windowMinutes = args.windowMinutes;
+    return takeSurfaceClaim(surfaceClaimEnv(store), roomId, auth.member.id, input);
+  }
+  if (name === "room_list_surface_claims") {
+    const auth = store.authenticate(secret, roomId);
+    if (args.claimId !== undefined) return getSurfaceClaim(surfaceClaimEnv(store), roomId, auth.member.id, args.claimId);
+    const filter = {};
+    if (args.state !== undefined) filter.state = args.state;
+    if (args.mine !== undefined) filter.mine = args.mine;
+    return listSurfaceClaims(surfaceClaimEnv(store), roomId, auth.member.id, filter);
+  }
+  if (name === "room_release_surface_claim") {
+    const auth = store.authenticate(secret, roomId);
+    const input = {};
+    if (args.reason !== undefined) input.reason = args.reason;
+    return releaseSurfaceClaim(surfaceClaimEnv(store), roomId, auth.member.id, args.claimId, input);
+  }
+  if (name === "room_amend_surface_claim") {
+    const auth = store.authenticate(secret, roomId);
+    const input = {};
+    if (args.scope !== undefined) input.scope = args.scope;
+    if (args.note !== undefined) input.note = args.note;
+    if (args.windowMinutes !== undefined) input.windowMinutes = args.windowMinutes;
+    return amendSurfaceClaim(surfaceClaimEnv(store), roomId, auth.member.id, args.claimId, input);
+  }
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
