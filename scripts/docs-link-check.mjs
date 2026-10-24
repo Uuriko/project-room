@@ -1,8 +1,11 @@
 // Intra-repo markdown links in the maintained docs, plus the orphan
 // gate: every maintained docs/ file must be reachable from docs/INDEX.md
 // by following resolved links (decision #32), unless it is on the
-// enumerated machine-reachable exception list below. The history
-// archive (archive/docs/history/) is a record and is not checked.
+// enumerated machine-reachable exception list below, or registered in
+// the doc registry (docs/doc-registry.json — the Docs Programme
+// manifest; registration is that programme's reached-by declaration,
+// automation §3.4). The history archive (archive/docs/history/) is a
+// record and is not checked.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, normalize, relative, resolve } from "node:path";
@@ -123,7 +126,108 @@ export const ORPHAN_EXCEPTIONS = {
   "docs/security/pentest-run-2026-10-07.md": "moves to archive/docs/audits/ in PR #3336",
   "docs/security/time-handling-audit.md": "moves to archive/docs/audits/ in PR #3336",
   "docs/security/webhook-security-review.md": "moves to archive/docs/audits/ in PR #3336",
+  // The registry's own generated view (the JSON is the record; the view
+  // is reached by its generator and by the docs sweep, not by INDEX):
+  "docs/doc-registry.md": "generated view of docs/doc-registry.json (render-view); consumed by the docs sweep",
+  // Docs Programme bridge (PR #4238, 2026-10-19): pre-registry docs that
+  // were INDEX-linked until the generated INDEX landed. Each is pending
+  // disposition in the W-D1 batches (B1 cuts / B2b eviction / B3-B4
+  // consolidation); remove an entry when its batch lands. (An entry
+  // for a deleted or newly registered file is inert.)
+  "docs/ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ADOPTION.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AGENT-DIGEST.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AGENT-HELP-OFFERS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AGENT-QUICKSTART.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AGENT-SEO.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AGENT-WAKE-SETUP.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ARCHITECTURE-EXECUTION-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/BROWSER-SANDBOX.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/BUILD-TO-COMPLETION-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CODE-DROPS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CODEX-EVIDENCE-CONTRACT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CONNECT-AGENT-QUICKSTART.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CONNECT-WAKE.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CONTINUITY-BUILD-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ENTITY-PROJECTION-CHECKPOINT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/EXECUTION-PORTABILITY-PLAN-20261018.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/FOCUSED-DELIVERY-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/FRONTIER-INFRA-RESEARCH-2026-10-18.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/I18N-HARNESS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/INBOX-QUICKSTART.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/INVITATION-AUDIT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/JOIN-ANY-AGENT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/JOINING.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/LISTINGS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/MACHINES.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/MESSAGE-DOMAIN-CHECKPOINT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/MESSAGE-REPLAY-ISOLATION-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/NORMALIZED-MESSAGE-SLICE.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/OPENAPI-CONTRACT.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/OPERATOR.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/PROJECT-ROOM-TOTAL-BACKLOG.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/PUSH-VAPID-KEYS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/QUALITY-AND-PRODUCTIVITY-SCORECARD.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/RELEASE-ACCEPTANCE-EXECUTION-20261018.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/RELEASE-QUALIFICATION-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ROOM-ASSISTANT-SCRATCH.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ROOM-CUA-DESKTOP.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ROOM-KITS-HARNESS-JEV-ROY.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ROOM-RECEIPT-V1.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/ROOM-SCORER.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/SESSION-API.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/SOAK-TEST.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/SPEC-v0.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/SQUADS.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/SWARM-PLUG-IN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/USER-GUIDE.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WIKI-API.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-AUTHORITY-DECISION.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-CLAIMS-READ.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-CUTOVER-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-INTEGRATION-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-ITEM-SESSION.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORK-LIFECYCLE-BUILD-PLAN.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/WORKITEMS-BOARD-STEP0.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/claim.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/friction-log.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/heartbeat.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/reclaim.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/scorers/efficiency/scorer.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/scorers/people-data-safe/scorer.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/scorers/procedure-compliance/scorer.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/examples/scorers/task-compliance/scorer.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/join.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/lesson-scorer.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
+  "docs/weekly-learnings-cron.md": "Docs Programme bridge (PR #4238): pending W-D1 batch disposition",
 };
+
+// Registry reach (Docs Programme): the manifest that replaces
+// hand-maintained INDEX reachability over time (automation §3.4). A
+// maintained doc registered in docs/doc-registry.json — as a present
+// file row, or as an enumerated member of a family row — is reached by
+// the registry surface (the generated view and the docs sweep both
+// enumerate it). Unregistered docs still orphan. A missing or
+// unreadable registry degrades to the pre-registry behaviour.
+export function registryReached() {
+  const regAbs = join(root, "docs", "doc-registry.json");
+  if (!existsSync(regAbs)) return new Set();
+  try {
+    const reg = JSON.parse(readFileSync(regAbs, "utf8"));
+    const reached = new Set();
+    for (const row of reg.docs ?? []) {
+      if (row.kind === "family") {
+        for (const member of row.members ?? []) reached.add(member);
+      } else if (row.existence === "present") {
+        reached.add(row.path);
+      }
+    }
+    return reached;
+  } catch { return new Set(); }
+}
 
 const LINK_RE = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
@@ -161,7 +265,8 @@ export function orphanedDocs(exceptions = ORPHAN_EXCEPTIONS) {
       }
     }
   }
-  const orphans = subjects.filter(abs => !reached.has(abs) && !(rel(abs) in exceptions));
+  const regReached = registryReached();
+  const orphans = subjects.filter(abs => !reached.has(abs) && !(rel(abs) in exceptions) && !regReached.has(rel(abs)));
   return {
     orphans: orphans.map(rel),
     failures: orphans.map(abs =>

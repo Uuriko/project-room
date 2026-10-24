@@ -180,6 +180,12 @@ export const SAFE_ENTROPY_TOKENS = [
   // joined path token over the entropy threshold.
   "archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt", // DESIGN.md citation
   "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md", // scripts/grok-room-host.mjs pointer string
+  // Repo-relative path in the Docs Programme bridge exceptions
+  // (scripts/docs-link-check.mjs, PR #4238). A file path, not a
+  // credential; the dated filename pushes the token over the
+  // entropy threshold.
+  "docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md", // scripts/docs-link-check.mjs bridge exception key
+  "docs/EXECUTION-PORTABILITY-PLAN-20261018.md", // scripts/docs-link-check.mjs bridge exception key
 ];
 
 // Directories scanned: source code where a real secret could hide.
