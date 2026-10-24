@@ -1455,6 +1455,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_room_caps",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_tasks",
     "key": "room_id",
     "action": "delete",

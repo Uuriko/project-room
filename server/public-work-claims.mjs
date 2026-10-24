@@ -5,7 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
-import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
+import { PublicWorkSettlement, publicWorkRewardMillis, publicWorkExposure, sponsorRoomCapMillisOf } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
@@ -234,10 +234,14 @@ export class PublicWorkClaims {
     // work whose submission window is already closed.
     const deadlinePassed = offer.deadline != null && Number.isFinite(Date.parse(offer.deadline)) && Date.parse(offer.deadline) <= this.store.now();
     const settlement = this.settlementService().viewForOffer(row.offer_id);
+    // COMP-DEEP #23 C2: the credit-exposure line rides the packet for paid
+    // tasks — award, claim bond at risk, and pool fee knowable pre-claim,
+    // on the board surface itself (R2/R3). Display only, additive.
+    const exposure = publicWorkExposure(publicWorkRewardMillis(offer));
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
-      reward: offer.reward, ...(settlement ? { settlement } : {}),
+      reward: offer.reward, ...(settlement ? { settlement } : {}), ...(exposure ? { exposure } : {}),
       claimable: state === 'unclaimed' && !deadlinePassed,
       claim: { state, generation: row.generation,
         identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
@@ -382,7 +386,11 @@ export class PublicWorkClaims {
     return { seeded: true, offerId, round };
   }
   enable(roomId, actorId, offerId, input) {
-    shape(input, ['requestId', 'expectedRevision', 'expectedTermsVersion', 'repositoryRef', 'files']);
+    shape(input, ['requestId', 'expectedRevision', 'expectedTermsVersion', 'repositoryRef', 'files'], ['sponsorRoomCap']);
+    // COMP-DEEP #23 C1: the sponsor room cap is set in the funding act
+    // itself (credits, e.g. sponsorRoomCap: 100), never in settings (R4).
+    const sponsorRoomCapMillis = sponsorRoomCapMillisOf(input.sponsorRoomCap);
+    check(sponsorRoomCapMillis !== undefined, 'sponsorRoomCap must be a positive number of credits');
     check(identifier(offerId) && Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0
       && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0, 'Expected offer revision and terms version required');
     check(typeof input.repositoryRef === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(input.repositoryRef)
@@ -406,7 +414,7 @@ export class PublicWorkClaims {
         // Paid tasks fund their escrow at enable time, inside this same
         // transaction: the posted price locks from the poster's existing
         // payable balance, and a funding failure lists nothing.
-        if (rewardMillis !== null) this.settlementService().fund(roomId, actorId, offer, rewardMillis);
+        if (rewardMillis !== null) this.settlementService().fund(roomId, actorId, offer, rewardMillis, { sponsorRoomCapMillis });
         // Kernel done means submitted delivery here, never independent acceptance.
         const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
