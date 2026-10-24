@@ -2350,6 +2350,30 @@ export class BountyEscrow {
       .map(([id]) => ({ lane: canonicalLane(id), trust_level: "standard" }));
   }
 
+  // #3906: did the poster render the acceptance verdict this bounty
+  // carries? Human mode: the poster is the only possible approver, so an
+  // accepted bounty in that mode carries the poster's verdict by
+  // construction. Agent mode: the approver is the designated verifier —
+  // never the poster. Legacy mode: either could have accepted, so read
+  // the acceptor of record (the acceptance attestation's recordedBy).
+  // Settlement-rail bounties are the exception inside human mode: the
+  // rail records its rota review verdict through acceptWork under the
+  // poster lane (server/public-work-settlement.mjs settleOnVerdict), so
+  // the recorded acceptance is the reviewers' verdict, not the poster's
+  // own — the sponsor's dispute there is the #3703 clawback and stays.
+  _posterRenderedAcceptance(roomId, bounty) {
+    if (bounty.approvalMode === "agent") return false;
+    if (bounty.approvalMode === "legacy")
+      return bounty.attestation?.recordedBy === bounty.poster;
+    const hasRailTable = this.db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_settlements'").get();
+    if (hasRailTable && this.db.prepare(
+      "SELECT 1 FROM public_work_settlements WHERE room_id=? AND bounty_id=?")
+      .get(roomId, bounty.bountyId))
+      return false;
+    return true;
+  }
+
   disputeBounty(roomId, bountyId, { challenger, bond, grounds, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -2377,6 +2401,21 @@ export class BountyEscrow {
           && this.nowMs() >= bounty.challengeEndsMs)
         fail("invalid_state", "the challenge window for this bounty has closed");
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
+      // #3906 (F6): the poster cannot dispute a bounty whose acceptance
+      // verdict is their own. In human approval mode the poster is the
+      // sole approver (_mayApprove), so a poster-raised dispute there
+      // re-decides the poster's own verdict — with settlements (a full
+      // refund on an upheld ruling, a split) that the poster's own
+      // submitted-work reject path cannot reach on accepted work. The
+      // exclusion mirrors the claimant exclusion above and fires before
+      // any bond is checked or locked. Two sponsor-protection shapes are
+      // NOT this defect and stay open, via _posterRenderedAcceptance:
+      // agent-mode bounties, whose acceptance is the verifier's verdict,
+      // and settlement-rail bounties (#3702/#3703), whose acceptance
+      // records a rota review verdict under the poster lane — in both,
+      // the poster is the sponsor at stake, not the approver.
+      check(!(lane === bounty.poster && this._posterRenderedAcceptance(roomId, bounty)), "not_authorized",
+        "the poster cannot dispute their own bounty: the acceptance under challenge is the poster's own verdict");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
