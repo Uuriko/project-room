@@ -255,7 +255,11 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         if (!shape(fields, { required: ["mentionedAgentId"], optional: ["threadId", "context"] })) {
           invalidInput(reject, "{mentionedAgentId, threadId?, context?}");
         }
-        if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(fields.mentionedAgentId)) {
+        // typeof first: RegExp.test coerces its argument, so a numeric,
+        // boolean, null or one-element-array mentionedAgentId used to pass
+        // as its string form ("12345", "true", "null") and route a mention
+        // to a coerced name. Only a real string may be an agent name.
+        if (typeof fields.mentionedAgentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(fields.mentionedAgentId)) {
           return reject(422, "invalid_input", "mentionedAgentId must be a 1..64 character agent name.");
         }
         const { records, mentions } = collab.routeMention(roomId, {
