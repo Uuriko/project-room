@@ -116,6 +116,48 @@ test('same holder conflicts too; unrelated targets, refs and rooms remain indepe
   send(T.CLAIM_ACQUIRED, { workItemId: 'private', expectedRevision: 1, ...f.scope() });
 });
 
+test('a live claim lease is at most 24 hours, rejects a whole-repo **, and the board lists that expiry', t => {
+  const f = fixture(t);
+  f.propose('lease');
+  const day = 24 * 60 * 60 * 1000;
+  assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'lease', f.scope(['**'])), error => {
+    assert.equal(error.status, 422);
+    assert.match(error.message, /\*\*/);
+    return true;
+  });
+  assert.equal(f.item('lease').claim ?? null, null, 'a refused ** claim is not saved');
+  const tooFar = new Date(f.now() + day + 1000).toISOString();
+  assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'lease', { ...f.scope(['src/app.js']), expiresAt: tooFar }), error => {
+    assert.equal(error.status, 422);
+    assert.match(error.message, /24 hours/);
+    return true;
+  });
+  const expiresAt = new Date(f.now() + day).toISOString();
+  f.mutate('a', T.CLAIM_ACQUIRED, 'lease', { ...f.scope(['src/app.js']), expiresAt });
+  assert.equal(f.item('lease').claim.expiresAt, expiresAt);
+  const listed = f.store.workClaims.list('commons').find(row => row.workItemId === 'lease');
+  assert.ok(listed, 'the work-claims list includes the claim');
+  assert.equal(listed.leaseExpiresAt, expiresAt, 'the list shows the real lease, not null');
+  assert.equal(listed.expiresAt, expiresAt, 'the list names the expiry the claim stored');
+  f.advance(1000);
+  f.store.command(f.keys.a, 'commons', command(T.MESSAGE_POSTED, { messageId: 'lease-progress', body: 'Still on src/app.js' }));
+  assert.throws(() => f.mutate('a', T.CLAIM_RENEWED, 'lease', {
+    progressMessageId: 'lease-progress', expiresAt: new Date(f.now() + day + 1000).toISOString(),
+  }), error => {
+    assert.equal(error.status, 422);
+    assert.match(error.message, /24 hours/);
+    return true;
+  });
+  const renewedAt = new Date(f.now() + day).toISOString();
+  f.mutate('a', T.CLAIM_RENEWED, 'lease', { progressMessageId: 'lease-progress', expiresAt: renewedAt });
+  const renewed = f.store.workClaims.list('commons').find(row => row.workItemId === 'lease');
+  assert.equal(renewed.leaseExpiresAt, renewedAt);
+  assert.equal(renewed.expiresAt, renewedAt);
+  f.propose('folder');
+  f.mutate('a', T.CLAIM_ACQUIRED, 'folder', f.scope(['docs/**']));
+  assert.equal(f.item('folder').claim.status, 'active');
+});
+
 test('path matching is segment-aware and only supports explicit paths or trailing subtrees', () => {
   const claim = paths => ({ repository: 'test/repo', ref: 'draft', status: 'active', paths, expiresAt: new Date(2000).toISOString() });
   const conflict = (left, right) => conflictingClaim({ a: { id: 'a', claim: claim(left) } }, { id: 'b', claim: claim(right) }, 1000);

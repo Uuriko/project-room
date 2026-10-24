@@ -17,14 +17,14 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 // (plain JSON, no envelope) still load.
 export const WORK_CLAIM_ROW_KIND = "work-claim";
 const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
-  "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
+  "leaseStartAt", "leaseExpiresAt", "expiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
   "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration", "claimRound"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
-  claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
+  claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, expiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], parentClaimId: null, evidenceRefs: [], premiseFlag: null,
   pullRequest: null, pullRequests: [], updatedAt: null,
@@ -34,6 +34,13 @@ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, hist
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
+  // Rows written before expiresAt existed still carry the lease. Surface
+  // that timestamp under the name the work-item claim uses. A claim with
+  // no lease omits the field rather than reporting null.
+  if (item.expiresAt == null) {
+    if (typeof item.leaseExpiresAt === "string") item.expiresAt = item.leaseExpiresAt;
+    else delete item.expiresAt;
+  }
   // SEC-2 history cap: only claims that dropped history carry the counter.
   if (item.historyOmitted == null) delete item.historyOmitted;
   // plan-pr-autolink: deploy links are sparse; absent means never deployed.
