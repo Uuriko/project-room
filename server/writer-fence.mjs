@@ -566,7 +566,11 @@ const DURABLE_ALARM_ADDITIVE_TABLES = Object.freeze(["durable_alarm_queue"]);
 // server/ is a known optional table. A room file that never ran the
 // watchdog does not have it.
 const WATCHDOG_ADDITIVE_TABLES = Object.freeze(["watchdog_subjects"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DURABLE_ALARM_ADDITIVE_TABLES, ...WATCHDOG_ADDITIVE_TABLES]);
+// room_history_cursor and room_history_census (server/room-history.mjs):
+// counts derived from events, created on the first census wake. A room
+// that has not been counted has neither table. Replay skips both.
+const ROOM_HISTORY_ADDITIVE_TABLES = Object.freeze(["room_history_cursor", "room_history_census"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DURABLE_ALARM_ADDITIVE_TABLES, ...WATCHDOG_ADDITIVE_TABLES, ...ROOM_HISTORY_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

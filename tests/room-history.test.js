@@ -10,10 +10,11 @@ import { DatabaseSync } from "node:sqlite";
 import { JOBS } from "../server/jobs.mjs";
 import { PILOT_LIMITS, RoomStore } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 import { runDurableAlarmTurn } from "../server/durable-alarm-turn.mjs";
 import { recordWatchdogBeat, readWatchdogHealth } from "../server/job-watchdog-store.mjs";
 import {
-  historyCensusSummary, pageRoomHistory, refreshRoomHistoryCensus, sqliteHistoryEnabled
+  ensureRoomHistory, historyCensusSummary, pageRoomHistory, refreshRoomHistoryCensus, sqliteHistoryEnabled
 } from "../server/room-history.mjs";
 
 const NOW = 1_700_000_000_000;
@@ -40,6 +41,8 @@ test("event bytes can pass the projection cap while a page stays small", () => {
   try {
     const version = store.db.prepare("PRAGMA user_version").get().user_version;
     assert.equal(version, STORE_SCHEMA_VERSION);
+    ensureRoomHistory(store.db);
+    assert.equal(auditRecovery(store).schemaVersion, STORE_SCHEMA_VERSION);
     const projection = JSON.stringify({ ok: true });
     const body = JSON.stringify({ type: "message.posted", text: "x".repeat(CAP) });
     assert.ok(Buffer.byteLength(body) > CAP);
