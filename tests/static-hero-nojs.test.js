@@ -56,8 +56,8 @@ test("link-preview metadata is present", () => {
 });
 
 test("the hero keeps its styles and semantics CSP-clean", () => {
-  // CSP is style-src 'self' + no inline scripts: the hero must render from the
-  // external stylesheet and static markup only.
+  // The hero section has no style or script element. First paint uses the
+  // hashed style in the document head; the same rules stay in the stylesheet.
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
   assert.ok(!hero.includes("<style"), "no inline <style> inside the hero");
   assert.ok(!hero.includes("<script"), "no inline <script> inside the hero");

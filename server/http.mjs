@@ -1091,7 +1091,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'sha256-/6K1i3jbJCvfXqX2qZaBLnwBBnpkOiTPKasCUAReN2Y='; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     // SEC-1: lock unused powerful features and cross-origin window access.
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");

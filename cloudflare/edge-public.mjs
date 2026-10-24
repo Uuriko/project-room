@@ -11,7 +11,7 @@ import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
 import { randomBytes } from 'node:crypto';
 
-const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'sha256-/6K1i3jbJCvfXqX2qZaBLnwBBnpkOiTPKasCUAReN2Y='; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ASSET_CACHE_MAX = 96;
 const assetCache = new Map();
 let openApiCache = null;
