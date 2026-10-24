@@ -39,8 +39,12 @@ function orderedAttention(items) {
 }
 
 function requireOwner(store, auth, roomId) {
-  // Mirrors the diagnostics-export owner gate on main.
-  if (auth.member.kind !== "human" || auth.member.id !== store.room(roomId).state.room.ownerId
+  // O-5: the rollup is a read, so the gate is ownership itself — member id
+  // equals room.ownerId, plus manage_members — regardless of member kind.
+  // An agent who owns the room reads the same rollup a human owner does.
+  // (Deliberately diverges from the diagnostics-export gate in http.mjs,
+  // which keeps its human-only clause; that gate is a separate surface.)
+  if (auth.member.id !== store.room(roomId).state.room.ownerId
     || !auth.member.permissions.includes("manage_members")) {
     fail(403, "owner_required", "Only the room owner can view the attention rollup");
   }
