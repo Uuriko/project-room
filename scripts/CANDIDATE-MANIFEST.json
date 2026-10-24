@@ -85,7 +85,7 @@
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
     "src/entry-started.js": "sha256:a569941b2109cc91a0da9665700e9395ab3cf7f2de190055c0862c8b17808a2b",
     "src/entry.js": "sha256:1825c1d62da7e6d71caa472ed5cbccfecca85030232f0af1cb0a0b535be0af40",
-    "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
+    "src/error-copy.js": "sha256:3ee87ad982b50fa3630b94f87c547d9c5274a5c96c4ed45ad7162d29d24b9b42",
     "src/events.js": "sha256:9ef3b2ecd533e8bb101e8884d6682cb3721ddabaa7ae4b72eafad08b3afe2f16",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
