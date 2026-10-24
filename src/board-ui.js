@@ -258,12 +258,14 @@ function advertisedCapabilities(state) {
 export function canWriteClaims(state, session) {
   const id = session?.member?.id;
   if (!id || !state?.members) return false;
-  const ownerId = state.room?.ownerId;
-  const enforced = typeof ownerId === "string" && ownerId.length > 0;
-  if (!enforced) return true;
-  if (id === ownerId) return true;
+  // Mirror mayWriteWorkClaims (work-claim-routes.mjs) exactly (#3909 F13):
+  // the member must exist and be active before any owner shortcut, and a
+  // room with no ownerId gets no shortcut at all — the permission checks
+  // below decide, exactly as the route decides.
   const member = state.members[id];
   if (!member || member.active === false) return false;
+  const ownerId = state.room?.ownerId;
+  if (typeof ownerId === "string" && ownerId.length > 0 && id === ownerId) return true;
   const permissions = new Set(member.permissions ?? []);
   if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
   const holds = (...needed) => needed.every(name => permissions.has(name));
@@ -656,8 +658,11 @@ function reviewLabel(review, item) {
 // verification fact and the history the board read carries — rendered as a
 // disclosure on the card itself, from the same claim object the list
 // already returned. One record model: this is a view of the claim, not a
-// second projection. History arrives newest-first and truncated by the
-// list read; the omitted count is disclosed rather than silently dropped.
+// second projection. History is stored oldest-first (the kernel's
+// claimUpdatedAt treats the last entry as newest) and truncated by
+// the list read to its newest entries; the record renders it
+// newest-first, and the omitted count is disclosed rather than
+// silently dropped (#3909 F14).
 // Composed like claimReviewForm — array pieces, each literal a complete tag
 // or a lone catalog string — so the i18n harness sees no new hardcoded copy.
 function claimRecordHtml(item, members) {
@@ -702,7 +707,7 @@ function claimRecordHtml(item, members) {
   const history = Array.isArray(item.history) ? item.history : [];
   const omitted = Number(item.historyOmitted) || 0;
   if (history.length || omitted > 0) {
-    const rows = history.map(entry => ["<li>", escapeHtml(entry?.action ?? ""),
+    const rows = [...history].reverse().map(entry => ["<li>", escapeHtml(entry?.action ?? ""),
       entry?.agentId ? [" · ", escapeHtml(memberName(members, entry.agentId) || entry.agentId)].join("") : "",
       entry?.note ? [" — ", escapeHtml(entry.note)].join("") : "", "</li>"].join("")).join("");
     const note = omitted > 0
@@ -714,7 +719,7 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, claimCap = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -783,8 +788,19 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
     actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
-  if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
-  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
+  if (item.state === "unclaimed" && !item.owner && !waiting) {
+    // #3909 F12: the claim route refuses at the per-member open-claim
+    // cap (too_many_open_claims); at cap the card shows that refusal
+    // copy as a hint instead of a button the server will always reject.
+    if (claimCap && viewer.id && claimCap.held >= claimCap.limit) {
+      actions.push(`<p class="form-hint claim-cap">${escapeHtml(uiText("error.too_many_open_claims"))}</p>`);
+    } else actions.push(button("claim", "Claim", "primary"));
+  }
+  // Renew mirrors renewWork (#3909 F11): only a live lease can be
+  // renewed — a leaseless claim has nothing to renew and a lapsed lease
+  // must be claimed again, so neither gets a button the kernel refuses.
+  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)
+    && item.leaseExpiresAt && Date.parse(item.leaseExpiresAt) > now) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
   if (!item.workItemId && mine && item.state === "in_progress") {
     // Under a reviewed policy the single-step finish is refused
@@ -896,6 +912,11 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const placed = placeClaims(all, now);
   const columns = Object.fromEntries(Object.entries(placed).map(([id, rows]) => [id, rows.filter(item => visibleIds.has(item.id))]));
   const byId = new Map(all.map(item => [item.id, item]));
+  // The viewer's open claims, counted as the claim route counts them
+  // (owner + an active claim state), for the per-member cap in cardHtml.
+  const viewerHeld = viewer?.id
+    ? all.filter(item => item?.owner === viewer.id && ["claimed", "in_progress", "blocked"].includes(item.state)).length
+    : 0;
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
@@ -905,7 +926,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, { limit: cap ?? 20, held: viewerHeld })).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
