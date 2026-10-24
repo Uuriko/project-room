@@ -104,6 +104,21 @@ test("unit shard plan is complete, deterministic, and balanced on measured runti
   }
 });
 
+test("unit shard files are ordered longest-first within each shard", () => {
+  const plan = unitPlan();
+  const measured = JSON.parse(readFileSync("scripts/unit-ci-durations.json", "utf8")).milliseconds;
+  // Estimate mirrors unit-shards.mjs: measured value, else the planner default.
+  const values = Object.values(measured).filter((ms) => Number.isFinite(ms) && ms > 0).sort((a, b) => a - b);
+  const mid = Math.floor(values.length / 2);
+  const fallback = Math.max(5000, values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2);
+  const estimate = (file) => (Number.isFinite(measured[file]) && measured[file] > 0 ? measured[file] : fallback);
+  for (const shard of plan.shards) {
+    const estimates = shard.files.map(estimate);
+    assert.deepEqual(estimates, [...estimates].sort((a, b) => b - a),
+      `shard ${shard.index} runs its longest files first`);
+  }
+});
+
 test("verifyUnitShards rejects tampered, missing, and cross-run receipts", () => {
   const plan = unitPlan();
   const ident = { matrixResult: "success", revision: "r", runId: "1", runAttempt: "1" };
