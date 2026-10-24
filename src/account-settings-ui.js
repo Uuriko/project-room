@@ -159,9 +159,9 @@ export function organizeRoomSettings(dialog, doc = globalThis.document) {
   if (!dialog || dialog.dataset?.settingsGrouped === "true" || !doc?.createElement) return;
   const groups = [
     ["Room", ["create-room-details", "room-about"], "The room’s name, purpose, and instructions."],
-    ["Agents & connections", ["room-permissions", "room-tools"], "Who can assign agents, and the room’s suggestions."],
+    ["Agents & connections", ["room-permissions"], "Who can assign agents."],
     ["Billing / plan", ["usage-panel", "spend-panel"], "Usage is what agents reported. Spend is this room’s allowance, not a subscription."],
-    ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "Landing, referrals, history, and owner-only health."]
+    ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "History and owner-only health."]
   ];
   const results = dialog.querySelector("#results-panel");
   for (const [label, ids, hint] of groups) {
@@ -261,14 +261,15 @@ function passwordSectionHtml(methods) {
     + `<p class="form-hint">Passwords are 10–256 characters.</p></form>`;
 }
 
-function oauthSectionHtml(providers) {
-  const github = providers?.github?.configured
-    ? `<a class="button" href="/api/auth/github/link/start">Connect GitHub</a><p class="form-hint">Links this GitHub account to your Project Room account.</p>`
-    : `<p class="form-hint">GitHub sign-in isn\u2019t configured on this Room.</p>`;
-  const google = providers?.google?.configured
-    ? `<a class="button" href="/api/auth/google/link/start">Connect Google</a><p class="form-hint">Links this Google account to your Project Room account.</p>`
-    : `<p class="form-hint">Google sign-in isn\u2019t configured on this Room.</p>`;
-  return `<h3>Connected accounts</h3>${github}${google}`;
+function oauthSectionHtml(providers, methods = []) {
+  const rows = ["google", "github"].map(provider => {
+    const name = provider === "google" ? "Google" : "GitHub";
+    const linked = methods.some(method => method.type === "oauth" && method.provider === provider && !method.disabled);
+    if (linked) return `<p class="form-hint">${escapeHtml(uiText("entry.provider.connected", { provider: name }))}</p>`;
+    if (!providers?.[provider]?.configured) return "";
+    return `<a class="button" href="/api/auth/${provider}/link/start">Connect ${name}</a>`;
+  }).join("");
+  return rows ? `<h3>Connected accounts</h3>${rows}` : "";
 }
 
 function passkeySectionHtml() {
@@ -399,7 +400,7 @@ export function settingsHtml({ methods = [], providers = null, emailVerification
     + profileSectionHtml(methods, pendingEmail)
     + section("settings-notifications-title", "Notifications",
       `<p class="form-hint">Browser push preferences live per room in Catch up → Notifications — choose mentions, direct messages, or both. Push delivery turns on from there once the room's push keys are provisioned; until then nothing leaves this tab.</p>`)
-    + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers) + mailSectionHtml(providers))
+    + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers, methods) + mailSectionHtml(providers))
     + section("settings-billing-title", "Billing / plan",
       `<p class="settings-empty">No plan is billed from account settings. A room\u2019s spend allowance is under Settings, in Billing / plan.</p>`)
     + section("settings-advanced-title", "Advanced",
@@ -738,6 +739,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
       container.removeEventListener("keydown", onKeyDown);
     }
     container = next;
+    if (!container.innerHTML) container.textContent = uiText("entry.account.loading");
     container.addEventListener("click", onClick);
     container.addEventListener("submit", onSubmit);
     container.addEventListener("change", onChange);

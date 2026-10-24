@@ -3,9 +3,9 @@
 /* QA5R-UI-1: the sidebar Board entry is a nav row like the channel rows, not a
    browser-default grey button. M-02: the Squads entry in the same Tasks nav
    gets the same treatment (44px touch floor on phones). */
-#tasks-board-open, #squads-open { display: block; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: var(--text-sm); font-weight: 600; text-align: left; cursor: pointer; }
-#tasks-board-open:hover, #squads-open:hover { background: rgb(255 255 255 / 4%); }
-:root[data-theme="light"] #tasks-board-open:hover, :root[data-theme="light"] #squads-open:hover { background: rgb(0 0 0 / 5%); }
+#tasks-board-open { display: block; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: var(--text-sm); font-weight: 600; text-align: left; cursor: pointer; }
+#tasks-board-open:hover { background: rgb(255 255 255 / 4%); }
+:root[data-theme="light"] #tasks-board-open:hover { background: rgb(0 0 0 / 5%); }
 /* The owner-only "Save cap" submit has no .button class (markup in board-ui.js);
    give it the secondary button look instead of the browser default. */
 [data-claim-cap] button { padding: .58rem .85rem; border: 1px solid var(--line); border-radius: .42rem; background: var(--panel-raised); color: var(--text); font-size: var(--text-xs); font-weight: 600; }

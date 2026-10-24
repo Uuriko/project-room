@@ -618,6 +618,7 @@ export function createTimelinePin() {
   const flush = list => list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
   return {
     set(view, list) { pin = { view, top: list.scrollTop }; },
+    tracks(view) { return Boolean(pin && pin.view === view); },
     holds(view, list) { return Boolean(pin && pin.view === view && (list.scrollTop === pin.top || flush(list))); },
     clear() { pin = null; },
   };
