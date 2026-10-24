@@ -2928,7 +2928,13 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       const now = this.nowMs(), at = isoNow(now);
       const pass = this._keeperPass(bounty, now, at);
-      check(pass !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize`);
+      // MONEY-LEGIBILITY step 1: an accepted bounty inside its challenge
+      // window refuses datelessly today, so the worker cannot learn when
+      // they will be paid; name the window's end in the refusal copy.
+      const challengeHint = bounty.state === "accepted" && bounty.challengeEndsMs !== null
+        ? `; challenge window ends ${new Date(bounty.challengeEndsMs).toISOString()}`
+        : "";
+      check(pass !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize${challengeHint}`);
       return { bounty: this._getBounty(roomId, bountyId), action: pass.action,
         receipt: { kind: "finalize", bountyId, action: pass.action, at, actor: RULE_ACTOR, triggeredBy, signed: pass.signed } };
     });

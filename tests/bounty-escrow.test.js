@@ -344,6 +344,21 @@ test("challenge window auto-approves, then the epoch sweep pays 99% + 1% pool fe
   expectConserved(escrow);
 });
 
+test("finalize inside the challenge window refuses WITH the window's end date (MONEY-LEGIBILITY step 1)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 0.5 });
+  assert.equal(bounty.state, "accepted");
+  assert.ok(bounty.challengeEnds, "accepted bounty carries a challenge end");
+  let error = null;
+  try { escrow.finalizeBounty(ROOM, bounty.bountyId, {}); } catch (e) { error = e; }
+  assert.ok(error, "finalize inside the window must refuse");
+  assert.equal(error.code, "invalid_state");
+  assert.ok(error.message.includes("nothing to finalize"), error.message);
+  assert.ok(error.message.includes(`challenge window ends ${bounty.challengeEnds}`),
+    `refusal must name the pay date, got: ${error.message}`);
+  expectConserved(escrow);
+});
+
 test("dispute bond must be exactly 25% of the bounty", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
