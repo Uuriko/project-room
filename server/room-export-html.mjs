@@ -26,6 +26,7 @@
 //     (archive/docs/history/EXPORT-RETENTION-DELETION.md).
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { escapeHtml } from "./html-escape.mjs";
 
 const STYLE = `
 :root { color-scheme: dark; --bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--control-min-target-coarse:2.75rem;--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
@@ -64,9 +65,8 @@ const STYLE_HASH = createHash("sha256").update(STYLE, "utf8").digest("base64");
 export const EXPORT_HTML_DOCUMENT_CSP = `default-src 'none'; style-src 'sha256-${STYLE_HASH}'; base-uri 'none'; form-action 'none'`;
 export const EXPORT_HTML_CSP = `${EXPORT_HTML_DOCUMENT_CSP}; frame-ancestors 'none'; sandbox`;
 
-const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;", "`": "&#96;" };
-export const esc = value => String(value ?? "").replace(/[&<>"'`]/g, c => ESCAPES[c]);
-const attr = esc;
+const esc = escapeHtml;
+const attr = escapeHtml;
 
 // A link is only a link when it is an https: URL without credentials;
 // anything else (javascript:, data:, a relative path, junk) is shown as text.
