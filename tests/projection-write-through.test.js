@@ -158,6 +158,140 @@ test("win 2: sharing-invariance — a mixed sequence gives identical states with
   assert.deepEqual(isolated, chained, "light-clone sharing changed the result of the sequence");
 });
 
+// --- Win 2 / S-2: the light rule extends to every audited event type -------
+// HUNT-SCALE-2 S-2: cloneStateForApply used to deep-clone the whole
+// messages array for every non-message command. The extension rests on a
+// handler-by-handler audit: no handler outside the rewrite set mutates a
+// message element (the message-touching ones read — propose's .some,
+// claim.renew's find, nativeTextEvidence, requirePublicDecisionSource,
+// pin/unpin — and the receipt sweeps range over workItems, which keeps
+// its full structuredClone). These cases pin input immutability on the
+// success path for each newly light family; the canary below pins it on
+// rejection paths for every registered type.
+
+const evAt = (id, type, actorId, data, at = "2026-10-17T00:00:00.000Z") =>
+  event({ id, idempotencyKey: id, roomId: ROOM_ID, type, actorId, at, data });
+const chain = (state, ...makes) => makes.reduce((s, make) => applyEvent(s, make()), state);
+const withProposed = () => chain(baseState(),
+  () => evAt("wp-1", T.WORK_PROPOSED, "potter", { workItemId: "w-battery", title: "Battery item", definitionOfDone: "Done", accountableMemberId: "codex", verifierMemberId: "instinct" }));
+const withAccepted = () => chain(withProposed(),
+  () => evAt("wa-1", T.WORK_ACCEPTED, "codex", { workItemId: "w-battery", expectedRevision: 0 }));
+const withStarted = () => chain(withAccepted(),
+  () => evAt("ws-1", T.WORK_STARTED, "codex", { workItemId: "w-battery", expectedRevision: 1 }));
+const withCompleted = () => chain(withStarted(),
+  () => evAt("wc-1", T.WORK_COMPLETED, "codex", { workItemId: "w-battery", expectedRevision: 2, summary: "done", evidenceVersion: "v-battery", nextAction: "verify" }));
+const withBlocked = () => chain(withStarted(),
+  () => evAt("wb-1", T.WORK_BLOCKED, "codex", { workItemId: "w-battery", expectedRevision: 2, reason: "stuck", nextAction: "unblock" }));
+const withClaim = () => chain(
+  chain(baseState(),
+    () => evAt("wp-2", T.WORK_PROPOSED, "potter", { workItemId: "w-write", title: "Write item", definitionOfDone: "Done", accountableMemberId: "codex", mode: "write" }),
+    () => evAt("wa-2", T.WORK_ACCEPTED, "codex", { workItemId: "w-write", expectedRevision: 0 })),
+  () => evAt("wcl-1", T.CLAIM_ACQUIRED, "codex", { workItemId: "w-write", expectedRevision: 1, repository: "Uuriko/project-room", ref: "battery", paths: ["src/**"], expiresAt: "2026-10-18T00:00:00.000Z" }));
+const withTextReceipt = () => chain(
+  chain(withStarted(),
+    () => evAt("post-ev", T.MESSAGE_POSTED, "codex", { messageId: "ev-msg", body: "result text", workItemId: "w-battery" })),
+  () => evAt("wc-text", T.WORK_COMPLETED, "codex", { workItemId: "w-battery", expectedRevision: 2, evidenceKind: "room_text", summary: "done", evidenceVersion: `sha256:${"a".repeat(64)}`, nextAction: "verify", evidenceMessageId: "ev-msg", evidenceMessageEventId: "post-ev", previousCompletionEventId: null, producerId: "codex" }));
+const withReplyRequest = () => chain(baseState(),
+  () => evAt("post-rq", T.MESSAGE_POSTED, "maya", { messageId: "rq-1", body: "please check", toMemberId: "potter", requestKind: "reply", requestPolicyVersion: 1 }));
+
+test("win 2 / S-2: applyEvent never mutates its input state, for every newly light event type", () => {
+  const cases = [
+    ["room.policy_set", baseState(), () => evAt("c-policy", T.ROOM_POLICY_SET, "potter", { requireIndependentReview: false, requireOwnerDecision: false })],
+    ["room.trust_set", baseState(), () => evAt("c-trust", T.ROOM_TRUST_SET, "potter", { enabled: true })],
+    ["room.public_receipts_set", baseState(), () => evAt("c-receipts", T.ROOM_PUBLIC_RECEIPTS_SET, "potter", { enabled: true })],
+    ["room.public_page_set", baseState(), () => evAt("c-page", T.ROOM_PUBLIC_PAGE_SET, "potter", { enabled: true })],
+    ["room.join_link_set", baseState(), () => evAt("c-join", T.ROOM_JOIN_LINK_SET, "potter", { enabled: true })],
+    ["room.history_visibility_set", baseState(), () => evAt("c-hist", T.ROOM_HISTORY_VISIBILITY_SET, "potter", { historyVisibility: "all" })],
+    ["room.exported", baseState(), () => evAt("c-export", T.ROOM_EXPORTED, "potter", { format: "jsonl" })],
+    ["room.archived", baseState(), () => evAt("c-archive", T.ROOM_ARCHIVED, "potter", { reason: "done" })],
+    ["ownership.transferred", baseState(), () => evAt("c-owner", T.OWNERSHIP_TRANSFERRED, "potter", { toMemberId: "maya" })],
+    ["member.public_name_set", baseState(), () => evAt("c-pubname", T.MEMBER_PUBLIC_NAME_SET, "maya", { enabled: true })],
+    ["member.status_updated", baseState(), () => evAt("c-status", T.MEMBER_STATUS_UPDATED, "maya", { message: "heads down" })],
+    ["member.mute_set", baseState(), () => evAt("c-mute", T.MEMBER_MUTE_SET, "maya", { memberId: "codex", muted: true })],
+    ["notifications.preferences_set", baseState(), () => evAt("c-prefs", T.NOTIFICATION_PREFERENCES_SET, "maya", { preferences: { mentions: "mentions_only" } })],
+    ["member.access_changed", baseState(), () => evAt("c-access", T.MEMBER_ACCESS_CHANGED, "potter", { memberId: "codex", expectedMemberRevision: 0, permissions: ["accept_work", "complete_work", "write_external"], active: true })],
+    ["channel.created", baseState(), () => evAt("c-chan", T.CHANNEL_CREATED, "potter", { name: "battery-room" })],
+    ["channel.renamed", chain(baseState(), () => evAt("c-chan", T.CHANNEL_CREATED, "potter", { name: "battery-room" })), () => evAt("c-rename", T.CHANNEL_RENAMED, "potter", { channelId: "c-chan", name: "battery-two" })],
+    ["channel.archived", chain(baseState(), () => evAt("c-chan", T.CHANNEL_CREATED, "potter", { name: "battery-room" })), () => evAt("c-chanarch", T.CHANNEL_ARCHIVED, "potter", { channelId: "c-chan" })],
+    ["work.proposed", baseState(), () => evAt("c-propose", T.WORK_PROPOSED, "potter", { workItemId: "w-new", title: "New", definitionOfDone: "Done", accountableMemberId: "codex", sourceMessageId: "evt-message-1" })],
+    ["work.accepted", withProposed(), () => evAt("c-accept", T.WORK_ACCEPTED, "codex", { workItemId: "w-battery", expectedRevision: 0 })],
+    ["work.started", withAccepted(), () => evAt("c-start", T.WORK_STARTED, "codex", { workItemId: "w-battery", expectedRevision: 1 })],
+    ["work.blocked", withStarted(), () => evAt("c-block", T.WORK_BLOCKED, "codex", { workItemId: "w-battery", expectedRevision: 2, reason: "stuck", nextAction: "unblock" })],
+    ["work.blocker_resolved", withBlocked(), () => evAt("c-resolve", T.WORK_BLOCKER_RESOLVED, "codex", { workItemId: "w-battery", expectedRevision: 3, resolution: "unstuck" })],
+    ["work.handoff_recorded", withStarted(), () => evAt("c-handoff", T.WORK_HANDOFF_RECORDED, "codex", { workItemId: "w-battery", expectedRevision: 2, doneSummary: "part", nextAction: "rest", limitReason: "time" })],
+    ["work.completed", withStarted(), () => evAt("c-complete", T.WORK_COMPLETED, "codex", { workItemId: "w-battery", expectedRevision: 2, summary: "done", evidenceVersion: "v-battery", nextAction: "verify" })],
+    ["work.superseded", withProposed(), () => evAt("c-supersede", T.WORK_SUPERSEDED, "potter", { workItemId: "w-battery", expectedRevision: 0, supersededByWorkItemId: "work-spec-review", reason: "replaced" })],
+    ["work.public_set", withProposed(), () => evAt("c-pubtask", T.WORK_PUBLIC_SET, "potter", { workItemId: "w-battery", enabled: true })],
+    ["claim.acquired", chain(baseState(),
+      () => evAt("wp-2", T.WORK_PROPOSED, "potter", { workItemId: "w-write", title: "Write item", definitionOfDone: "Done", accountableMemberId: "codex", mode: "write" }),
+      () => evAt("wa-2", T.WORK_ACCEPTED, "codex", { workItemId: "w-write", expectedRevision: 0 })),
+      () => evAt("c-claim", T.CLAIM_ACQUIRED, "codex", { workItemId: "w-write", expectedRevision: 1, repository: "Uuriko/project-room", ref: "battery", paths: ["src/**"], expiresAt: "2026-10-18T00:00:00.000Z" })],
+    ["claim.released", withClaim(), () => evAt("c-release", T.CLAIM_RELEASED, "codex", { workItemId: "w-write", expectedRevision: 2 })],
+    ["claim.renewed", chain(withClaim(),
+      () => evAt("post-prog", T.MESSAGE_POSTED, "codex", { messageId: "prog-1", body: "progress" }, "2026-10-17T01:00:00.000Z")),
+      () => evAt("c-renew", T.CLAIM_RENEWED, "codex", { workItemId: "w-write", expectedRevision: 2, expiresAt: "2026-10-19T00:00:00.000Z", progressMessageId: "prog-1" }, "2026-10-17T02:00:00.000Z")],
+    ["verification.recorded", withCompleted(), () => evAt("c-verify", T.VERIFICATION_RECORDED, "instinct", { workItemId: "w-battery", expectedRevision: 3, result: "pass", completionEventId: "wc-1", evidenceVersion: "v-battery", summary: "checked" })],
+    ["owner.decision_recorded", baseState(), () => evAt("c-decide", T.OWNER_DECISION_RECORDED, "potter", { workItemId: "work-spec-review", decision: "approved", completionEventId: "evt-work-review-completed", evidenceVersion: "58875941ed50d01edacbdc91f1edebe85ba6b53e", reason: "sound", sourceMessageId: "evt-message-1" })],
+    ["decision.recorded", baseState(), () => evAt("c-decision", T.DECISION_RECORDED, "potter", { sourceMessageId: "evt-message-1", statement: "We ship the slice." })],
+    ["message.pinned", withMessage(), () => evAt("c-pin", T.MESSAGE_PINNED, "potter", { messageId: "m" })],
+    ["message.unpinned", chain(withMessage(), () => evAt("c-pin", T.MESSAGE_PINNED, "potter", { messageId: "m" })), () => evAt("c-unpin", T.MESSAGE_UNPINNED, "potter", { messageId: "m" })],
+    ["receipt.evidence_withdrawn", withTextReceipt(), () => evAt("c-withdraw", T.RECEIPT_EVIDENCE_WITHDRAWN, "potter", { messageId: "ev-msg", evidence: "removed" })],
+    ["reply_request.cancelled", withReplyRequest(), () => evAt("c-cancel", T.REPLY_REQUEST_CANCELLED, "maya", { requestMessageId: "rq-1", expectedRequestRevision: 0, reason: "no longer needed" })],
+    ["capabilities.advertised", baseState(), () => evAt("c-caps", T.CAPABILITIES_ADVERTISED, "codex", { capabilities: ["code-review"] })],
+    ["access.requested", baseState(), () => evAt("c-accessreq", T.ACCESS_REQUESTED, "potter", { requestId: "req-1", identityId: "id-req-1", displayName: "Requester", permissions: [] })],
+    ["referral.completed", baseState(), () => evAt("c-referral", T.REFERRAL_COMPLETED, "potter", { referrerMemberId: "potter", refereeMemberId: "maya", via: "invite", completedAt: 1760000000000 })],
+    ["bond.proposed", baseState(), () => evAt("c-bond", T.BOND_PROPOSED, "potter", { bondId: "bond-1", agentAId: "codex", agentBId: "instinct", proposerIdentityId: "potter", scopes: ["read"] })],
+    ["dm.posted", baseState(), () => evAt("c-dm", T.DM_POSTED, "potter", { messageId: "dm-1", threadId: "th-1", bondId: "bond-1", fromIdentityId: "potter", toIdentityId: "codex", body: "hello" })],
+    ["room.starter_seeded", baseState(), () => evAt("c-seed", T.ROOM_STARTER_SEEDED, "potter", { templateSlug: "starter", intentKind: "welcome" })]
+  ];
+  for (const [name, state, make] of cases) {
+    const snapshot = JSON.stringify(state);
+    const next = applyEvent(state, make());
+    assert.equal(JSON.stringify(state), snapshot, `${name} mutated its input state`);
+    assert.notEqual(next, state);
+    // The light path itself: unaddressed message elements are shared with
+    // the input (a full clone here would mean the type silently fell out
+    // of the light set and the S-2 premium is back).
+    if (state.messages.length) {
+      assert.ok(next.messages.some((m, i) => m === state.messages[i]),
+        `${name} did not take the light message path`);
+    }
+  }
+});
+
+test("win 2 / S-2: no event type mutates its input state, even on a rejection path", () => {
+  const state = withMessage();
+  const snapshot = JSON.stringify(state);
+  for (const type of [...Object.values(T), "message.reaction_set"]) {
+    try { applyEvent(state, evAt(`canary-${type}`, type, "potter", {})); } catch { /* rejection is the expected path here */ }
+    assert.equal(JSON.stringify(state), snapshot, `${type} mutated its input state on a rejection path`);
+  }
+});
+
+test("win 2 / S-2: sharing-invariance — a non-message-heavy sequence matches the isolated run", () => {
+  const sequence = [
+    () => evAt("n1", T.ROOM_POLICY_SET, "potter", { requireIndependentReview: false, requireOwnerDecision: false }),
+    () => evAt("n2", T.WORK_PROPOSED, "potter", { workItemId: "w-seq", title: "Sequence item", definitionOfDone: "Done", accountableMemberId: "codex", verifierMemberId: "instinct", sourceMessageId: "evt-message-1" }),
+    () => evAt("n3", T.MESSAGE_POSTED, "maya", { messageId: "seq-m", body: "sequence note" }),
+    () => evAt("n4", T.MESSAGE_PINNED, "potter", { messageId: "seq-m" }),
+    () => evAt("n5", T.WORK_ACCEPTED, "codex", { workItemId: "w-seq", expectedRevision: 0 }),
+    () => evAt("n6", T.CHANNEL_CREATED, "potter", { name: "seq-room" }),
+    () => evAt("n7", T.WORK_STARTED, "codex", { workItemId: "w-seq", expectedRevision: 1 }),
+    () => evAt("n8", T.MEMBER_STATUS_UPDATED, "maya", { message: "reviewing" }),
+    () => evAt("n9", T.WORK_COMPLETED, "codex", { workItemId: "w-seq", expectedRevision: 2, summary: "done", evidenceVersion: "v-seq", nextAction: "verify" }),
+    () => evAt("n10", T.VERIFICATION_RECORDED, "instinct", { workItemId: "w-seq", expectedRevision: 3, result: "pass", completionEventId: "n9", evidenceVersion: "v-seq", summary: "checked" }),
+    () => evAt("n11", T.DECISION_RECORDED, "potter", { sourceMessageId: "seq-m", statement: "Sequence stands." }),
+    () => evAt("n12", T.MESSAGE_UNPINNED, "potter", { messageId: "seq-m" }),
+    () => evAt("n13", T.MESSAGE_EDITED, "maya", { messageId: "seq-m", body: "sequence note (edited)", expectedMessageRevision: 0 }),
+    () => evAt("n14", T.MESSAGE_DELETED, "maya", { messageId: "seq-m", expectedMessageRevision: 1, reason: "done" })
+  ];
+  let chained = baseState();
+  for (const make of sequence) chained = applyEvent(chained, make());
+  let isolated = baseState();
+  for (const make of sequence) isolated = applyEvent(structuredClone(isolated), make());
+  assert.deepEqual(isolated, chained, "light-clone sharing changed the result of the non-message sequence");
+});
+
 // --- Wins 3+4: serializer-side body release and hydration trust -----------
 
 test("win 4: the json_each release trigger is gone; the room_gone trigger remains", t => {

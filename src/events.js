@@ -563,20 +563,111 @@ export function replay(events) {
 //     elements, so an in-place rewrite can never reach the input state's
 //     objects.
 // Every other branch (members, channels, workItems, replyRequests, ...)
-// keeps the full structuredClone, and every other event type keeps the
-// full messages clone: handlers that range over messages (redact's
-// receipt sweep reads workItems, which stays cloned) stay safe by
-// construction. Sharing unaddressed elements is safe because no handler
-// in the light set mutates them, and any later event that does address
-// one clones it first under the same rule. The projection-write-through
-// equivalence battery pins input-state immutability for the light set.
+// keeps the full structuredClone. Sharing unaddressed elements is safe
+// because no handler in the light set mutates them, and any later event
+// that does address one clones it first under the same rule. The
+// projection-write-through equivalence battery pins input-state
+// immutability for the light set.
+//
+// S-2 (HUNT-SCALE-2): the light rule extends to every remaining event
+// type, after a handler-by-handler audit of the whole map (events.js,
+// message-reducers.js, work-reducers.js, reply-requests.js,
+// work-item-session.js, work-packet.js). No other handler mutates a
+// message element — the audit found reads only:
+//   - work.proposed: state.messages.some(sourceMessageId exists);
+//   - claim.renewed: find(progressMessageId) field checks;
+//   - work.completed (room_text): nativeTextEvidence reads body/author
+//     and structuredClones message.proposal into the receipt;
+//   - owner.decision_recorded / decision.recorded:
+//     requirePublicDecisionSource find + field checks;
+//   - message.pinned / message.unpinned: find + field checks; the write
+//     lands on state.pins, which keeps its own structuredClone;
+//   - receipt.evidence_withdrawn: ranges over workItems receipts, never
+//     writes a message (workItems keeps its full structuredClone, so
+//     redact's and delete's receipt sweeps stay safe by construction).
+// Every other handler never references state.messages at all. Handlers
+// that range over messages READ-only (replyContextOwners during
+// message.posted, the .some/.find scans above) pay a linear scan, not a
+// clone; S-8 tracks that separately. The default stays the full clone:
+// a type joins LIGHT_MESSAGE_TYPES only by being listed here, so a
+// future event type is fully cloned until its handler is audited, and
+// the rewrite types fall back to the full clone when the event carries
+// no usable messageId.
 const MESSAGE_REWRITE_TYPES = new Set([
   EVENT_TYPES.MESSAGE_EDITED, EVENT_TYPES.MESSAGE_DELETED,
   EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
 ]);
+const LIGHT_MESSAGE_TYPES = new Set([
+  EVENT_TYPES.MESSAGE_POSTED,
+  ...MESSAGE_REWRITE_TYPES,
+  EVENT_TYPES.ROOM_CREATED,
+  EVENT_TYPES.ROOM_CHARTER_UPDATED,
+  EVENT_TYPES.ROOM_POLICY_SET,
+  EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET,
+  EVENT_TYPES.ROOM_SPEND_PRICING_SET,
+  EVENT_TYPES.ROOM_TRUST_SET,
+  EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET,
+  EVENT_TYPES.ROOM_PUBLIC_PAGE_SET,
+  EVENT_TYPES.ROOM_JOIN_LINK_SET,
+  EVENT_TYPES.MEMBER_PUBLIC_NAME_SET,
+  EVENT_TYPES.WORK_PUBLIC_SET,
+  EVENT_TYPES.ROOM_ARCHIVED,
+  EVENT_TYPES.OWNERSHIP_TRANSFERRED,
+  EVENT_TYPES.MEMBER_ADDED,
+  EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION,
+  EVENT_TYPES.MEMBER_ACCESS_CHANGED,
+  EVENT_TYPES.MEMBER_STATUS_UPDATED,
+  EVENT_TYPES.NOTIFICATION_PREFERENCES_SET,
+  EVENT_TYPES.MEMBER_MUTE_SET,
+  EVENT_TYPES.MESSAGE_PINNED,
+  EVENT_TYPES.MESSAGE_UNPINNED,
+  EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN,
+  EVENT_TYPES.ROOM_HISTORY_VISIBILITY_SET,
+  EVENT_TYPES.ROOM_EXPORTED,
+  EVENT_TYPES.REPLY_REQUEST_CANCELLED,
+  // Legacy reaction events replay as a no-op handler.
+  "message.reaction_set",
+  EVENT_TYPES.CHANNEL_CREATED,
+  EVENT_TYPES.CHANNEL_RENAMED,
+  EVENT_TYPES.CHANNEL_ARCHIVED,
+  EVENT_TYPES.WORK_PROPOSED,
+  EVENT_TYPES.WORK_HELP_UPDATED,
+  EVENT_TYPES.HELP_OFFER_OPENED,
+  EVENT_TYPES.HELP_OFFER_UPDATED,
+  EVENT_TYPES.WORK_ACCEPTED,
+  EVENT_TYPES.WORK_STARTED,
+  EVENT_TYPES.WORK_HANDOFF_RECORDED,
+  EVENT_TYPES.WORK_HALT_CLEARED,
+  EVENT_TYPES.WORK_BLOCKED,
+  EVENT_TYPES.WORK_BLOCKER_RESOLVED,
+  EVENT_TYPES.WORK_COMPLETED,
+  EVENT_TYPES.WORK_SUPERSEDED,
+  EVENT_TYPES.CLAIM_ACQUIRED,
+  EVENT_TYPES.CLAIM_RELEASED,
+  EVENT_TYPES.CLAIM_RENEWED,
+  EVENT_TYPES.VERIFICATION_RECORDED,
+  EVENT_TYPES.OWNER_DECISION_RECORDED,
+  EVENT_TYPES.DECISION_RECORDED,
+  EVENT_TYPES.SESSION_STARTED,
+  EVENT_TYPES.SESSION_STATUS_CHANGED,
+  EVENT_TYPES.SESSION_STOP_REQUESTED,
+  EVENT_TYPES.SESSION_STOPPED,
+  EVENT_TYPES.CAPABILITIES_ADVERTISED,
+  EVENT_TYPES.ACCESS_REQUESTED,
+  EVENT_TYPES.REFERRAL_COMPLETED,
+  EVENT_TYPES.BOND_PROPOSED,
+  EVENT_TYPES.BOND_ACTIVATED,
+  EVENT_TYPES.BOND_REVOKED,
+  EVENT_TYPES.DM_POSTED,
+  EVENT_TYPES.DM_CONSENT_CHANGED,
+  EVENT_TYPES.LAND_UPDATED,
+  EVENT_TYPES.WORK_CLAIM_UPDATED,
+  EVENT_TYPES.ROOM_STARTER_SEEDED
+]);
 function lightMessageCloneIds(incoming) {
-  if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
-  if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return null;
+  if (!LIGHT_MESSAGE_TYPES.has(incoming?.type)) return null;
+  if (incoming.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
+  if (!MESSAGE_REWRITE_TYPES.has(incoming.type)) return new Set();
   const messageId = incoming.data?.messageId;
   if (typeof messageId !== "string" || !messageId) return null;
   return new Set([messageId, `${messageId}:channel`]);
