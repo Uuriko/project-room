@@ -8949,9 +8949,10 @@ paths:
       x-worker-only: true
       description: >-
         Operator only. Answered by the Durable Object. Requires
-        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters)
+        Authorization: Bearer with ROOM_EXPORT_TOKEN (at least 16 characters)
         set on the Worker that owns the object. A missing or short token is
-        404. A wrong token is 401. The body is NDJSON: one watermark line,
+        404. A wrong token is 401. This credential opens the export door
+        only; it cannot restore (TM-2 split). The body is NDJSON: one watermark line,
         then one {table, row} line per stored row. Secret and token columns
         are sha256 hex. Already-hashed columns are kept. auth_epoch stays a
         number. No room credential is accepted.
@@ -8979,8 +8980,9 @@ paths:
       x-room-permission: operator
       description: >-
         Operator only. Answered by the Durable Object. Requires
-        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters),
-        the same token as GET /api/operator/export. A missing or short token
+        Authorization: Bearer with ROOM_RESTORE_TOKEN (at least 16 characters),
+        a dedicated restore credential that stays unset outside a restore
+        incident (TM-2 split); the export token is refused here. A missing or short token
         is 404. A wrong token is 401. The body is the NDJSON an export
         produced (watermark line, {table, row} lines, optional trailer).
         Binary cells are decoded and proved against their byte_length and
@@ -9013,7 +9015,8 @@ paths:
       description: >-
         Operator only. Answered by the Durable Object. Requires
         Authorization: <redacted>
-        the same token as GET /api/operator/export. A missing or short token
+        the ROOM_RESTORE_TOKEN restore credential (at least 16 characters;
+        the export token is refused here). A missing or short token
         is 404. A wrong token is 401. Restores the daily backup already
         stored in the ROOM_BACKUPS_KV namespace, so no export crosses the
         request body and the 64 MiB cap of /api/operator/restore does not
