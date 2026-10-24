@@ -35,6 +35,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm # CI-DIET C5
       - run: npm ci
       - name: Authz, content trust, SSE, and public scan
         run: |
@@ -58,6 +59,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm # CI-DIET C5
       - run: npm ci
       - name: Board growth budget
         run: node scripts/qa3/board-growth.mjs

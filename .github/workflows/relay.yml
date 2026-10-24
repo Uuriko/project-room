@@ -28,6 +28,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm # CI-DIET C5
+          cache-dependency-path: relay/package-lock.json
       - run: npm ci --prefix relay
       - name: Relay workerd tests
         working-directory: relay

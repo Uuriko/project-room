@@ -218,6 +218,11 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+          # CI-DIET C5: same-version fallback so a new branch's first push
+          # restores the nearest cache instead of paying a full Chromium
+          # download + install in every browser job.
+          restore-keys: |
+            playwright-${{ runner.os }}-
       - name: Install Playwright Chromium (binary cached) and its OS deps
         run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
@@ -296,6 +301,8 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+          restore-keys: |
+            playwright-${{ runner.os }}-
       - name: Install Playwright Chromium (binary cached) and its OS deps
         id: pwinstall
         background: true
