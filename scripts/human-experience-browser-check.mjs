@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium, webkit } from 'playwright';
 const browserEngine = process.env.ROOM_BROWSER_ENGINE ?? 'chromium';
 if (!['chromium', 'webkit'].includes(browserEngine)) throw new Error('ROOM_BROWSER_ENGINE must be chromium or webkit');
@@ -947,7 +949,8 @@ for (const width of [1280, 390]) {
     assert.equal(stops[1].expectedAttemptId, 'race-host', 'Review rebinds Stop to the attempt it just showed, still as an exact id');
     const run = (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === 'race-run');
     assert.equal(run.status, 'cancel_requested');
-    await page.screenshot({ path: `/tmp/probe/race-${width}.png` });
+    mkdirSync(join(tmpdir(), 'probe'), { recursive: true });
+    await page.screenshot({ path: join(tmpdir(), 'probe', `race-${width}.png`) });
   });
 }
 
