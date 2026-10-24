@@ -70,10 +70,11 @@
     "src/agent-signin-ui.js": "sha256:bdaab08f6a4e92e1c6937a94ca48b29b6130621d9a435f73468aac22d6dd6e66",
     "src/app.js": "sha256:f38d44813fe58c41a1505a7879f12caaf94f9d756f17dd298b2d8b9630c7212b",
     "src/auth-signin-ui.js": "sha256:952dbdc3ebdf238a469a169ca23fb936d41b111c01c7f1fac3e0a2461719e485",
+    "src/board-fixed-view.js": "sha256:4f972cd66dfd98625646b51236103022ca7d8db593cd0078125155575f2f6938",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:9e106107c532c8195328acb22ef08f3057b3226c768eb620e78c6d6c5359f3be",
-    "src/board.css": "sha256:552972a44f5411ff254a0e8032de11382c07385c17ad8de42b50cd6d751f2c6a",
+    "src/board-ui.js": "sha256:4c0c72dcb20dcb3445709565f95dbbbdc5d06ad401ce4a13e2d9875e14026e41",
+    "src/board.css": "sha256:722cdd82673d04066310a3310e1c51d5b77c7a582247951ae0e52e89e056caa6",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",
@@ -151,8 +152,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ed50070e82de9b7bd313da460fdf67da4ef540e12675c57f2a7bf827fd5fa097",
-    "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
+    "strings/en.js": "sha256:784bdfa3e80b598659fee449cbaf6e03973ff8cc84f7a4f32073ee1b5152ee54",
+    "strings/en.json": "sha256:7285c2e6dd90702c6498a09864319b78a208139c2e69f427a9c62c0f9a6a1acd"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ea6161b091a3d0f8bab5b5f921534039fc784a339d650d38b11f487287b77c12",
