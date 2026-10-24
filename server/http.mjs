@@ -15,6 +15,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
+import { rateAddressKey, rateAddressPart } from "./rate-address.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
@@ -745,6 +746,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
   function rate(id, maximum) {
+    id = rateAddressKey(id); // IPv6 callers share one budget per /64 (research r175)
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
@@ -2471,7 +2473,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (req.method === "POST") {
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
-          rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
+          rate(`account-login:${rateAddressPart(remoteAddress)}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
           // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: rotate the slot
           // atomically with the login (same store transaction). The pre-login
