@@ -14,7 +14,10 @@ import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-const expiresAt = "2027-01-01T00:00:00.000Z";
+// Derived from the runtime clock (issue #3318): a hardcoded calendar
+// date is a time bomb — the suite would fail deterministically the day
+// the wall clock passed it.
+const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
 const scopeA = { repository: "test/repo", ref: "main", paths: ["src/a.js"], expiresAt };
 const scopeB = { repository: "test/repo", ref: "main", paths: ["src/b.js"], expiresAt };
 
