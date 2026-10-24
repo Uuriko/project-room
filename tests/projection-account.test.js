@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { accountProjection, accountStoredRoom } from "../server/projection-account.mjs";
+import { operatorStatus } from "../server/operator-status.mjs";
 import { compactRoomProjection } from "../server/projection-compact.mjs";
 import { readConversation } from "../server/conversation-sync.mjs";
 
@@ -102,6 +103,11 @@ test("a room with no messages rows still compacts, and one stale row does not bl
   const before = accountStoredRoom(store.db, "commons");
   assert.equal(before.components.reduce((sum, component) => sum + component.bytes, 0), before.projectionBytes);
   assert.equal(JSON.stringify(before).includes(token), false);
+  const reported = operatorStatus(store).largestProjection;
+  assert.equal(reported.projectionBytes, before.projectionBytes);
+  assert.equal(reported.components.reduce((sum, component) => sum + component.bytes, 0), reported.projectionBytes);
+  assert.equal(Object.hasOwn(reported, "roomId"), false);
+  assert.equal(JSON.stringify(reported).includes(token), false);
   assert.ok(before.outsideProjection.messageRows > 0);
   assert.ok(before.outsideProjection.projectionBodiesBytes > before.messages.inlineBodyBytes);
   store.db.prepare("UPDATE messages SET body=?, record_json=? WHERE message_id=?").run(

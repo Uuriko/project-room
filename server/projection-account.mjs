@@ -194,3 +194,14 @@ export function accountStoredRoom(db, roomId) {
   };
   return account;
 }
+
+// Sizes for the room with the longest stored projection. The room id stays
+// in this function; the result is the same numbers accountStoredRoom returns.
+export function largestProjectionAccount(db) {
+  let row;
+  try {
+    row = db.prepare("SELECT id FROM rooms ORDER BY length(CAST(projection AS BLOB)) DESC LIMIT 1").get();
+  } catch { return null; }
+  if (typeof row?.id !== "string") return null;
+  return accountStoredRoom(db, row.id);
+}

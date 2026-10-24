@@ -355,6 +355,7 @@ optional.push("server/usage-summary.mjs");
 optional.push("server/operator-archive.mjs"); // operator archive door for the projection cap (imported by server/operator-routes.mjs)
 optional.push("server/store-relief.mjs"); // store-growth automatic projection relief (imported by server/jobs.mjs)
 optional.push("server/projection-compact.mjs"); // hot-window compaction for parked rooms (imported by server.mjs, cloudflare/room.mjs, server/store.mjs, server/store-relief.mjs)
+optional.push("server/projection-account.mjs"); // sizes-only projection breakdown (imported by server/operator-status.mjs)
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
 optional.push("server/receipt-share.mjs"); // EXP-5: receipt verdict line, JSON-LD, share text, OG fields (imported by server/http.mjs, server/receipts-page.mjs, server/proof-page.mjs)
