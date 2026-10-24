@@ -1,0 +1,51 @@
+// HUNT-RACE repro R-2: #3711 wb_ oscillation at main 3fc3a1458.
+// A work item in state "working" whose item claim lease has expired maps to
+// a board row in_progress carrying the EXPIRED leaseExpiresAt. The board's
+// own lease sweep releases that row (unclaimed + lease_expired stamp); the
+// next board sync/backfill re-maps it to in_progress (a swept row is not
+// "diverged" per isDiverged), and the sweep releases it again — forever.
+// Pure-function harness over the real modules. Run: node repro-wb-oscillation.mjs
+import { boardClaimForWorkItem, planWorkItemBoardBackfill, boardClaimId } from "__R1ROOT__/server/work-item-board.mjs";
+import { releaseExpired } from "__R1ROOT__/server/work-claims.mjs";
+
+const T = Date.parse("2026-10-18T12:00:00.000Z");
+const H = 3600 * 1000;
+const iso = ms => new Date(ms).toISOString();
+let failures = 0;
+const expect = (cond, label) => { console.log(`${cond ? "PASS" : "FAIL"}  ${label}`); if (!cond) failures += 1; };
+
+// Work item: working, claim acquired 3h ago, lease expired 1h ago.
+// The item layer has no expiry transition of its own — it stays "working".
+const item = {
+  id: "wi-1", title: "Projected task", state: "working",
+  accountableMemberId: "agent-a",
+  claim: { status: "active", holderId: "agent-a", acquiredAt: iso(T - 3 * H), expiresAt: iso(T - H) },
+  labels: [], updatedAt: iso(T - H),
+};
+
+// Step 1: projection maps the row.
+const mapped = boardClaimForWorkItem(item, null, { nowMs: T });
+console.log(`      mapped row: state=${mapped.state} owner=${mapped.owner} leaseExpiresAt=${mapped.leaseExpiresAt}`);
+expect(mapped.state === "in_progress", "projection: working item with expired claim lease maps to in_progress");
+expect(mapped.leaseExpiresAt === iso(T - H), "projection: row carries the EXPIRED lease timestamp");
+
+// Step 2: the board lease sweep (sweepRoom / sweepExpiredClaimLeases both
+// feed stored rows through releaseExpired) releases the projected row.
+const [swept] = releaseExpired([mapped], T);
+console.log(`      after sweep: state=${swept.state} owner=${swept.owner} last stamp=${swept.history.at(-1)?.action}`);
+expect(swept.state === "unclaimed" && swept.owner === null, "sweep: projected row released to unclaimed");
+expect(swept.history.some(entry => entry.action === "lease_expired"), "sweep: lease_expired stamp appended (wakes/flake fire in the real paths)");
+
+// Step 3: the next sync/backfill re-plans with the swept row as existing.
+const plan = planWorkItemBoardBackfill({ items: [item], events: [], existing: new Map([[mapped.id, swept]]), nowMs: T });
+const remapped = plan.rows.get(boardClaimId("wi-1"));
+console.log(`      re-plan: diverged=${JSON.stringify(plan.diverged)} remapped state=${remapped?.state}`);
+expect(plan.diverged.length === 0, "re-plan: swept row is NOT classified diverged (isDiverged only flags foreign-owned active / terminal rows)");
+expect(remapped && remapped.state === "in_progress", "re-plan: row restored to in_progress — oscillation loop closed");
+
+// Step 4: second sweep releases it again — the loop is stable, not one-off.
+const [swept2] = releaseExpired([remapped], T);
+expect(swept2.state === "unclaimed", "cycle 2: sweep releases the restored row again");
+
+console.log(failures ? `\nRESULT: ${failures} expectation(s) failed` : "\nRESULT: oscillation reproduced — sweep and projection disagree forever about wb_ rows with expired item leases");
+process.exit(failures ? 1 : 0);

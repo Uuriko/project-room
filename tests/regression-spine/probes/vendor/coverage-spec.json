@@ -1,0 +1,8 @@
+[
+ {"id":"R01","root":"tree","area":"x","cls":"x","desc":"red M01","file":"server/bounty-epoch-keeper.mjs","old":"('submitted','funded','claimed')","new":"('submitted','funded')","suites":["tests/hunt-coverage-keeper.test.js"]},
+ {"id":"R02","root":"tree","area":"x","cls":"x","desc":"red M02","file":"server/bounty-epoch-keeper.mjs","old":"(b.state IN ('submitted','funded','claimed') AND b.deadline_ms <= ?)","new":"(b.state IN ('submitted','funded','claimed') AND b.deadline_ms < ?)","suites":["tests/hunt-coverage-keeper.test.js"]},
+ {"id":"R10","root":"tree","area":"x","cls":"x","desc":"red M10","file":"server/claim-coordination.mjs","old":"return links.length > 0 && links.every(pull => pull.outcome === \"merged\" || pull.outcome === \"closed\");","new":"return links.every(pull => pull.outcome === \"merged\" || pull.outcome === \"closed\");","suites":["tests/hunt-coverage-claims.test.js"]},
+ {"id":"R11","root":"tree","area":"x","cls":"x","desc":"red M11","file":"server/patrol.mjs","old":"WHERE b.room_id = r.id AND b.head_seq = r.sequence","new":"WHERE b.room_id = r.id","suites":["tests/hunt-coverage-patrol.test.js"]},
+ {"id":"R12","root":"tree","area":"x","cls":"x","desc":"red M12","file":"server/patrol.mjs","old":"\"sequence\", \"messages_parity\", \"claim_legality\", \"receipt_linkage\"","new":"\"sequence\", \"messages_parity\", \"claim_legality\"","suites":["tests/hunt-coverage-patrol.test.js"]},
+ {"id":"R14","root":"tree","area":"x","cls":"x","desc":"red M14","file":"server/agent-connections.mjs","old":"operation.generation !== index + 1 || ","new":"","suites":["tests/hunt-coverage-integrity.test.js"]}
+]

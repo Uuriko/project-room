@@ -1,0 +1,52 @@
+// HUNT-ADVERSARY repro R1: owner links an arbitrary identity with NO holder proof.
+// Victim mints an identity and keeps the secret. A room owner who knows only
+// the victim's PUBLIC identityId links it into their room. Expected-secure
+// behaviour: link refused without a holder-minted link code (the primitive
+// exists: mintLinkCode/consumeLinkCode). Observed: 201, membership created,
+// victim secret now authenticates in a room the holder never asked to join.
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { RoomStore } from "__R1ROOT__/server/store.mjs";
+import { createRoomServer } from "__R1ROOT__/server/http.mjs";
+import { initialRoom } from "__R1ROOT__/server/bootstrap.mjs";
+
+const dir = mkdtempSync(join(process.env.TMPDIR, "hunt-adv-r1-"));
+const store = new RoomStore(join(dir, "room.sqlite"));
+store.initialize(initialRoom("commons"));
+store.initialize(initialRoom("lab"));
+const ownerLab = store.issueAccessKey("lab", "owner");
+const server = createRoomServer({ store });
+await new Promise(r => server.listen(0, "127.0.0.1", r));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const H = { "Content-Type": "application/json", Origin: origin };
+
+// 1. Victim mints an identity (public join door, no auth).
+const created = await fetch(`${origin}/api/agent-identities`, { method: "POST", headers: H, body: JSON.stringify({ displayName: "Victim Bot" }) });
+const { identityId, secret } = await created.json();
+console.log("victim identity:", identityId, "secret held only by victim");
+
+// 2. Attacker (owner of 'lab', knows ONLY the public identityId) links it.
+//    Body carries no linkCode — the route's key whitelist forbids one.
+const link = await fetch(`${origin}/api/rooms/lab/identity-links`, {
+  method: "POST", headers: { ...H, Authorization: `Bearer ${ownerLab}` },
+  body: JSON.stringify({ identityId, permissions: ["accept_work", "complete_work"] }),
+});
+console.log("link by non-holder owner ->", link.status, JSON.stringify(await link.json()));
+
+// 3. Did the victim file an access request for 'lab' first? No. Check the
+//    victim's secret now resolves as a member of 'lab' anyway.
+const rooms = store.identities.roomsForSecret ? "(n/a)" : "";
+const member = store.roomAuthority("lab").members[identityId];
+console.log("member record in lab:", JSON.stringify(member && { id: member.id, kind: member.kind, active: member.active, permissions: member.permissions }));
+
+const auth = (() => { try { return store.identities.authenticateRoomSecret?.(secret, "lab") ?? null; } catch { return null; } })();
+console.log("direct resolve attempt:", auth ? "resolved" : "(method name differs — see HTTP check)");
+
+// 4. HTTP check: victim secret reads the room's identity-links? (needs
+//    manage_members — expect 403). Instead prove membership via the room
+//    snapshot the member can read with their secret.
+const snap = await fetch(`${origin}/api/rooms/lab`, { headers: { Authorization: `Bearer ${secret}` } });
+console.log("victim secret GET /api/rooms/lab ->", snap.status);
+
+server.closeAllConnections(); await new Promise(r => server.close(r)); store.close();
+console.log("REPRO DONE");

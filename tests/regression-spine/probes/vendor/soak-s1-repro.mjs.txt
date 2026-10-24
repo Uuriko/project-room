@@ -1,0 +1,25 @@
+// Micro-repro: how does the drain actually behave over ticks against a
+// failing endpoint? 100 seeded rows, 20 ticks of +60s.
+import { createAcceptanceFixture } from "__R1ROOT__/scripts/acceptance-fixture.mjs";
+const T0 = 1_700_000_000_000;
+const publicDns = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
+const f = createAcceptanceFixture();
+const plugin = f.store.agentPlugin;
+const { subscription } = plugin.subscribeWebhook({ identityId: "micro_agent", url: "https://hooks.example.test/agent",
+  events: ["message.posted"], secret: "whsec_" + "x".repeat(24) });
+const ins = plugin.db.prepare(`INSERT INTO agent_webhook_deliveries
+  (delivery_id, idempotency_key, subscription_id, agent_id, event_type, payload_json,
+   signature, state, attempts, next_attempt_at, created_at, updated_at)
+  VALUES (?, ?, ?, 'micro_agent', 'message.posted', '{"data":{}}', '', 'pending', 0, ?, ?, ?)`);
+plugin.db.exec("BEGIN");
+for (let i = 0; i < 100; i++) ins.run(`m_${i}`, `idem_m_${i}`, subscription.subscriptionId, T0, T0, T0);
+plugin.db.exec("COMMIT");
+const fail503 = async () => ({ status: 503, headers: { get: () => null }, text: async () => "no" });
+let now = T0;
+for (let tick = 0; tick < 20; tick++) {
+  now += 60_000;
+  const s = await plugin.drainWebhookDeliveries({ fetchImpl: fail503, now, dnsResolvers: publicDns });
+  const census = plugin.db.prepare("SELECT state, attempts, COUNT(*) AS n FROM agent_webhook_deliveries GROUP BY state, attempts ORDER BY state, attempts").all();
+  console.log(`tick ${tick}: processed=${s.processed} retried=${s.retried} dead=${s.deadLettered} census=${JSON.stringify(census)}`);
+}
+f.store.close();

@@ -1,0 +1,1464 @@
+{
+ "baselineNote": "First full run: main @ 3619c289b0c0030f5711593f7de6aa125d1d4876 (2026-10-18). Rows whose fix PRs are merged at the baseline classify FIXED only when the probe observes the fixed behaviour; queued-but-unlanded fixes classify STILL-REPRODUCES.",
+ "rows": [
+  {
+   "expectedFixed": "Keeper settles/refunds a submitted bounty past its deadline without human invocation",
+   "fixPrs": [
+    4103
+   ],
+   "id": "SM-F1",
+   "lane": "state-machine",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/state-machine.md F1"
+  },
+  {
+   "expectedFixed": "Fuzz drain oracle: every submitted bounty past deadline drains via the keeper",
+   "fixPrs": [
+    4103
+   ],
+   "id": "FUZZ-F1",
+   "lane": "fuzz",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/fuzz.md finding 1"
+  },
+  {
+   "expectedFixed": "Every nonterminal (state x field) combo is either due-visible to the keeper or named by a stuck-state census",
+   "fixPrs": [
+    4138
+   ],
+   "id": "SM-F2",
+   "lane": "state-machine",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/state-machine.md F2"
+  },
+  {
+   "expectedFixed": "Keeper census names nonterminal bounties that match no due branch (escrow_unreachable)",
+   "fixPrs": [
+    4138
+   ],
+   "id": "CHAOS-4",
+   "lane": "chaos",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/chaos.md break 4"
+  },
+  {
+   "expectedFixed": "Reciprocal wash cycles are screened (SD-4 reciprocity) or priced so a verified outcome cannot be manufactured at fee-only cost",
+   "fixPrs": [],
+   "id": "ECON-1",
+   "lane": "economics",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 1"
+  },
+  {
+   "expectedFixed": "A poster-named decider cannot reverse an acceptance for the poster's coalition (fund-flow independence, E-4)",
+   "fixPrs": [],
+   "id": "ECON-2",
+   "lane": "economics",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 2"
+  },
+  {
+   "expectedFixed": "Third-party finalize before a submission-anchored review grace (max(deadline, submittedAt+24h)) is refused (E-10)",
+   "fixPrs": [],
+   "id": "ECON-5A",
+   "lane": "economics",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 5a"
+  },
+  {
+   "expectedFixed": "Free-miss harvest leaves a reputation/strike trace and cannot settle unverified inside the review grace (E-10)",
+   "fixPrs": [],
+   "id": "ECON-5B",
+   "lane": "economics",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 5b"
+  },
+  {
+   "expectedFixed": "A minimum fee (1 milli) applies to any released payout, closing the 0% tier (E-2)",
+   "fixPrs": [],
+   "id": "ECON-6",
+   "lane": "economics",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/economics.md shape 6"
+  },
+  {
+   "expectedFixed": "Genesis-funded poster + poster-named decider cannot fund and adjudicate a wash/reversal alone",
+   "fixPrs": [],
+   "id": "TM-7",
+   "lane": "threat-model",
+   "probe": "escrow.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-7"
+  },
+  {
+   "expectedFixed": "Journal hash core encodes fields unambiguously (length-prefixed or canonical), v1 rows still verify",
+   "fixPrs": [
+    4043
+   ],
+   "id": "FUZZ-JH",
+   "lane": "fuzz",
+   "probe": "journal-hash.mjs",
+   "probeKind": "unit",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/fuzz.md finding 2"
+  },
+  {
+   "expectedFixed": "One claim namespace (or a shared fence): the second door's acquire/claim on a held item is refused",
+   "fixPrs": [],
+   "id": "DIFF-D1",
+   "lane": "differential",
+   "probe": "differential.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/differential.md D-1 (fam-board4 z2)",
+   "title": "Event-plane claim and board-plane claim are separate namespaces — dual hold, contradictory reads"
+  },
+  {
+   "expectedFixed": "Identical intent via MCP and /commands converges to the same state, revision and verification outcome",
+   "fixPrs": [],
+   "id": "DIFF-D2",
+   "lane": "differential",
+   "probe": "differential.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/differential.md D-2 (fam-event2 A2/B2)",
+   "title": "Commands-only history reconstructs revision 0 — completion/verification parity fails across doors"
+  },
+  {
+   "expectedFixed": "update->delivered validates the claim fence exactly like release/reassign (refuses stale/absent fence after an interleave)",
+   "fixPrs": [],
+   "id": "DIFF-D3",
+   "lane": "differential",
+   "probe": "differential.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/differential.md D-3 (fam-board2 c1 vs c3)",
+   "title": "Finish door validates the claim fence only when present; release/reassign require it"
+  },
+  {
+   "expectedFixed": "The MCP finish door enforces the same claim fence as REST (refuses after interleaving writes)",
+   "fixPrs": [],
+   "id": "RACE-K1",
+   "lane": "race",
+   "probe": "differential.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/race.md K-1 (#3545)",
+   "title": "MCP room_close_work_claim carries no claim-finish fence for plain finish"
+  },
+  {
+   "expectedFixed": "A standing corrupt room stays parked across head moves (or gains a repair/quarantine path); one park = at most one failing tick",
+   "fixPrs": [
+    4147
+   ],
+   "id": "PATROL-MECH",
+   "lane": "patrol-diagnosis",
+   "probe": "patrol.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/patrol-diagnosis.md mechanism finding",
+   "title": "Patrol parking is head-keyed: every corrupt-room head move manufactures a fresh failing tick, no repair path"
+  },
+  {
+   "expectedFixed": "A job with a current error presents its failure (failing/degraded), not 'disabled', when it also fails the enable gate",
+   "fixPrs": [
+    4148
+   ],
+   "id": "PATROL-GRADE",
+   "lane": "patrol-diagnosis",
+   "probe": "patrol.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/patrol-diagnosis.md grading finding",
+   "title": "jobHealthView precedence presents a currently-erroring patrol job as 'disabled'"
+  },
+  {
+   "expectedFixed": "Same as PATROL-GRADE",
+   "fixPrs": [
+    4148
+   ],
+   "id": "WATCH-P2",
+   "lane": "watcher",
+   "probe": "patrol.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/watcher.md P2",
+   "title": "Same grading mechanism as PATROL-GRADE, from the watcher lens"
+  },
+  {
+   "expectedFixed": "Directory card receipt_count counts only receipts visible on the stranger listing",
+   "fixPrs": [
+    4122
+   ],
+   "id": "ORPH-C1",
+   "lane": "orphans",
+   "probe": "orphans-vendor.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/orphans.md C1",
+   "title": "directoryCounts counts receipts hidden by takedown, room unpublish and the owner receipts-off toggle"
+  },
+  {
+   "expectedFixed": "Ghost rows from a divergent import are never served (the refutation's invariant, kept under regression watch)",
+   "fixPrs": [],
+   "id": "ORPH-C4",
+   "lane": "orphans",
+   "probe": "orphans-vendor.mjs",
+   "probeKind": "dynamic",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/orphans.md C4 (suspect)",
+   "title": "SUSPECT (refuted by ORPHANS-FIX executed repro): import after archiving leaves ghost messages served"
+  },
+  {
+   "expectedFixed": "Deleting the DUE_WHERE accepted-due clauses is caught by a shipped test",
+   "fixPrs": [
+    4130
+   ],
+   "id": "COV-M01",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/coverage.md M01",
+   "title": "Keeper DUE_WHERE mutation (drop accepted-due clauses) survives the shipped suite"
+  },
+  {
+   "expectedFixed": "Flipping the accepted challenge boundary (< for <=) is caught by a shipped test",
+   "fixPrs": [
+    4130
+   ],
+   "id": "COV-M02",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/coverage.md M02",
+   "title": "Keeper deadline boundary mutation (<) survives the shipped suite"
+  },
+  {
+   "expectedFixed": "Vacuous-truth mutation in pullsReadyToSettle is caught by a shipped test",
+   "fixPrs": [
+    4130
+   ],
+   "id": "COV-M10",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/coverage.md M10",
+   "title": "pullsReadyToSettle vacuous-truth mutation survives the shipped suite"
+  },
+  {
+   "expectedFixed": "Dropping the patrol park clause is caught by a shipped test",
+   "fixPrs": [
+    4130
+   ],
+   "id": "COV-M11",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/coverage.md M11",
+   "title": "Patrol mutation R11 survives the shipped suite"
+  },
+  {
+   "expectedFixed": "Shrinking the patrol invariant list is caught by a shipped test",
+   "fixPrs": [
+    4130
+   ],
+   "id": "COV-M12",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/coverage.md M12",
+   "title": "Patrol mutation R12 survives the shipped suite"
+  },
+  {
+   "expectedFixed": "Journal integrity verification is anchored outside the journal itself (keyed hash core / external anchor)",
+   "fixPrs": [
+    4130,
+    4043
+   ],
+   "id": "COV-M14",
+   "lane": "coverage",
+   "probe": "coverage.mjs",
+   "probeKind": "mutation",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/coverage.md M14",
+   "title": "Complete journal rewrite verifies (journal integrity is self-referential, no external anchor)"
+  },
+  {
+   "expectedFixed": "Attestation requires the attester to own a room where the target is a linked member; self-attestation and unrelated stripping excluded",
+   "fixPrs": [
+    4129
+   ],
+   "id": "ADV-P1",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/adversary.md P1 (repro-r2-verification-bootstrap.mjs)",
+   "title": "Verified tier is self-bootstrapped: any self-made room owner can verify/strip ANY identity"
+  },
+  {
+   "expectedFixed": "Link codes are bound at mint to (identity, room, sponsor/scope) and consume enforces the binding",
+   "fixPrs": [
+    4132
+   ],
+   "id": "ADV-P2",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/adversary.md P2",
+   "title": "Identity link codes are unbound bearer proofs (no room, sponsor or scope binding)"
+  },
+  {
+   "expectedFixed": "link() verifies holder proof (consumes a link code) before any settlement/membership side-effect",
+   "fixPrs": [
+    4140
+   ],
+   "id": "ADV-P3",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/adversary.md P3 (repro-r1-link-no-proof.mjs); defect #942",
+   "title": "link() performs no holder proof at all — owner links any identity knowing only its public id"
+  },
+  {
+   "expectedFixed": "Backup-token doors demand the primary credential class and write a central audit row on use",
+   "fixPrs": [
+    4139
+   ],
+   "id": "ADV-P4",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/adversary.md P4",
+   "title": "Backup-token doors are weak (prefixed-secret bearer) and leave no audit row"
+  },
+  {
+   "expectedFixed": "Sponsored rotation verifies proof of possession of the new key (or binds rotation to the current credential)",
+   "fixPrs": [],
+   "id": "ADV-P5",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/adversary.md P5",
+   "title": "Sponsored credential rotation accepts an owner-chosen public-key hash with no proof of possession"
+  },
+  {
+   "expectedFixed": "The spend-pricing POST runs the same write-defense chain as sibling money routes",
+   "fixPrs": [],
+   "id": "ADV-P6",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/adversary.md P6 (charter 08)",
+   "title": "POST /api/rooms/{roomId}/spend-pricing skips the write-defense chain"
+  },
+  {
+   "expectedFixed": "Operator unpublish demands an operator-class credential and appends a central operator_actions row",
+   "fixPrs": [],
+   "id": "ADV-P7",
+   "lane": "adversary",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/adversary.md P7 (charter 09)",
+   "title": "POST /api/operator/unpublish runs on a session credential and writes no central audit row"
+  },
+  {
+   "expectedFixed": "The verified tier cannot be forged by a ring (anchored attestation: the anchored room must predate, attester independent of target)",
+   "fixPrs": [
+    4129
+   ],
+   "id": "TM-1",
+   "lane": "threat-model",
+   "probe": "adversary.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/threat-model.md TM-1",
+   "title": "Verified tier is ring-forgeable post-C1 (same mechanism as ADV-P1, consumer side)"
+  },
+  {
+   "expectedFixed": "The one-shot link exemption is bound to the specific code/approval, not any approved row",
+   "fixPrs": [],
+   "id": "TM-4",
+   "lane": "threat-model",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-4",
+   "title": "Perpetual one-shot link exemption via approved rows"
+  },
+  {
+   "expectedFixed": "Enrollment checks the consumed code was minted for that sponsor/room (sponsor binding)",
+   "fixPrs": [
+    4132
+   ],
+   "id": "TM-8",
+   "lane": "threat-model",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-8",
+   "title": "Sponsor binding gap on link codes (same mechanism as ADV-P2, enrollment side)"
+  },
+  {
+   "expectedFixed": "Same as ADV-P5 (sponsored credential hashes)",
+   "fixPrs": [],
+   "id": "TM-10",
+   "lane": "threat-model",
+   "probe": "adversary.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-10",
+   "title": "Sponsored credential hashes accepted without possession proof (= ADV-P5)"
+  },
+  {
+   "expectedFixed": "An absent credential answers identity_required (teaching), distinct from a revoked credential's refusal",
+   "fixPrs": [],
+   "id": "STR-S1",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "dynamic",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-1",
+   "title": "Absent credential on the public-work MCP door reads as 'Unknown or revoked identity'"
+  },
+  {
+   "expectedFixed": "A held public-work claim surfaces on needs-me (or another stranger-visible supervision surface) without room membership",
+   "fixPrs": [],
+   "id": "STR-S2",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/stranger.md S-2",
+   "title": "A held public-work claim is invisible on every supervision surface for a roomless identity"
+  },
+  {
+   "expectedFixed": "A post-lapse update refuses (the claim is gone) instead of answering 200 against a released claim",
+   "fixPrs": [],
+   "id": "STR-S3",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/stranger.md S-3 (rides #3753)",
+   "title": "Post-lapse update returns 200 while the claim was released; board, review and needs-me disagree"
+  },
+  {
+   "expectedFixed": "The approve freshness fallback admits only generation === 0",
+   "fixPrs": [],
+   "id": "STR-S4",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/stranger.md S-4",
+   "title": "An approve written at generation 0 verifies the first delivery (freshness fallback <= 1)"
+  },
+  {
+   "expectedFixed": "Public proof surfaces label drill/test traffic as such",
+   "fixPrs": [],
+   "id": "STR-S5",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-5",
+   "title": "The proof wall reads as drill/test pollution — no test-traffic labelling exists"
+  },
+  {
+   "expectedFixed": "claimableCount counts only offers that can actually pay (funded), or states both numbers",
+   "fixPrs": [],
+   "id": "STR-S6",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-6",
+   "title": "claimableCount conflates funded offers with unpaid ones"
+  },
+  {
+   "expectedFixed": "The discovery packet documents the claimed -> in_progress step",
+   "fixPrs": [],
+   "id": "STR-S7",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-7",
+   "title": "The llms.txt packet's work steps omit the claimed -> in_progress transition"
+  },
+  {
+   "expectedFixed": "Publishing an unfunded offer warns or refuses at the publish step",
+   "fixPrs": [],
+   "id": "STR-S8",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "dynamic",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-8",
+   "title": "A zero-balance offer publishes 200 as ledger_only with no warning"
+  },
+  {
+   "expectedFixed": "Room members can list the room's offers",
+   "fixPrs": [],
+   "id": "STR-S9",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "dynamic",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-9",
+   "title": "A room member cannot list the room's own offers (403 owner_only)"
+  },
+  {
+   "expectedFixed": "Public-work 422s teach the fix; a claim create never silently defaults its title to the id",
+   "fixPrs": [],
+   "id": "STR-S10",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/stranger.md S-10",
+   "title": "Three stranger sharp edges: non-teaching 422s, silent title defaulting, URL required only at publish"
+  },
+  {
+   "expectedFixed": "The packet's wake-door instructions match the served routes and branches (a packet-vs-routes conformance check exists)",
+   "fixPrs": [],
+   "id": "STR-S11",
+   "lane": "stranger",
+   "probe": "stranger.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/stranger.md S-11",
+   "title": "Packet wake-door drift: the discovery packet's doors do not match the served branches"
+  },
+  {
+   "expectedFixed": "Truncated/prefix restores fail verification (exporter writes watermark.tables; restore verifies counts and sequences)",
+   "fixPrs": [
+    4149
+   ],
+   "id": "RESTORE-F1",
+   "lane": "restore",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "source",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/restore.md F1",
+   "title": "A truncated/prefix restore grades verified: true — exporter never writes the watermark the checks need"
+  },
+  {
+   "expectedFixed": "Every restore path runs verifyConservation across the swap",
+   "fixPrs": [
+    4149
+   ],
+   "id": "RESTORE-F2",
+   "lane": "restore",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/restore.md F2",
+   "title": "No verifyConservation on any restore path"
+  },
+  {
+   "expectedFixed": "n/a — process/mechanism charter (E-A rejection-set growth), no local product repro exists",
+   "fixPrs": [],
+   "id": "RESTORE-F3",
+   "lane": "restore",
+   "notFiledReason": "process/mechanism charter about evidence-acceptance sets; no executable local repro was filed and none can be derived without the E-A corpus",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/restore.md F3",
+   "title": "E-A rejection-set growth (process charter)"
+  },
+  {
+   "expectedFixed": "File replay and DO replay treat _cf_ rows identically (skip-and-report)",
+   "fixPrs": [],
+   "id": "RESTORE-F4",
+   "lane": "restore",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/restore.md F4",
+   "title": "File replay vs DO replay disagree on _cf_ rows"
+  },
+  {
+   "expectedFixed": "Restore verifies per-room sequences against the backup",
+   "fixPrs": [
+    4149
+   ],
+   "id": "RESTORE-F5",
+   "lane": "restore",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/restore.md F5",
+   "title": "Watermark per-room sequences are never verified on restore"
+  },
+  {
+   "expectedFixed": "n/a — docs charter; legacy restores failing closed on un-seated verifiers is the designed posture",
+   "fixPrs": [],
+   "id": "RESTORE-F6",
+   "lane": "restore",
+   "notFiledReason": "docs/design charter; the filed behaviour (legacy restores un-seat verifiers) is designed fail-closed, not a defect with a repro",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/restore.md F6",
+   "title": "Legacy restores un-seat verifiers (docs charter, designed fail-closed)"
+  },
+  {
+   "expectedFixed": "verifyConservation has a live caller (keeper/job) and payable-flow forgery trips it",
+   "fixPrs": [
+    4135
+   ],
+   "id": "CHAOS-1",
+   "lane": "chaos",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "source",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/chaos.md break 1",
+   "title": "verifyConservation had no live caller and is blind to payable-flow forgery"
+  },
+  {
+   "expectedFixed": "One corrupt room fails alone; healthy rooms boot and serve (per-room isolation + repair path)",
+   "fixPrs": [
+    4136
+   ],
+   "id": "CHAOS-2",
+   "lane": "chaos",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "dynamic",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/chaos.md break 2",
+   "title": "One corrupt room bricks node boot for every room"
+  },
+  {
+   "expectedFixed": "Hollow projections fail with a named corruption error and a repair path exists",
+   "fixPrs": [
+    4137
+   ],
+   "id": "CHAOS-3",
+   "lane": "chaos",
+   "probe": "restore-chaos.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/chaos.md break 3",
+   "title": "Hollow/parseable-but-wrong projections surface raw TypeErrors; no repair path"
+  },
+  {
+   "expectedFixed": "The board repair stamp survives history capping (preservation or re-derivation)",
+   "fixPrs": [
+    4119
+   ],
+   "id": "LOSS-1",
+   "lane": "loss",
+   "probe": "vendor2.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/loss.md LOSS-1 (repro-board-repair-cap.mjs)",
+   "title": "The board history cap destroys divergence-repair stamps"
+  },
+  {
+   "expectedFixed": "pruneMessages runs only against a parity-certified projection",
+   "fixPrs": [
+    4133
+   ],
+   "id": "LOSS-2",
+   "lane": "loss",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/loss.md LOSS-2 (suspect)",
+   "title": "SUSPECT: pruneMessages can prune against a stale/torn projection"
+  },
+  {
+   "expectedFixed": "Parse-skips at the five cited sites surface as a counted signal",
+   "fixPrs": [],
+   "id": "LOSS-3",
+   "lane": "loss",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/loss.md LOSS-3 (suspect; charter 01)",
+   "title": "SUSPECT: #4088-family silent parse-skips at five store sites"
+  },
+  {
+   "expectedFixed": "The reviews/attestations union reports its total or truncation",
+   "fixPrs": [],
+   "id": "LOSS-4",
+   "lane": "loss",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/loss.md LOSS-4 (suspect; charter 10)",
+   "title": "SUSPECT: board reviews union capped at 50 with no counter"
+  },
+  {
+   "expectedFixed": "A budget-state read error fails loudly instead of substituting empty state",
+   "fixPrs": [],
+   "id": "LOSS-5",
+   "lane": "loss",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/loss.md LOSS-5 (suspect, low)",
+   "title": "SUSPECT-low: channel-send-budgets substitutes {} on any read error"
+  },
+  {
+   "expectedFixed": "The purge registry covers public_work_requests; stored outcomes cannot replay after purge",
+   "fixPrs": [
+    4150
+   ],
+   "id": "ORPH-C2",
+   "lane": "orphans",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/orphans.md C2",
+   "title": "public_work_requests is reached by no deletion path; stored outcomes replay after purge"
+  },
+  {
+   "expectedFixed": "Room purge removes the analytics shadow rows with the room",
+   "fixPrs": [
+    4150
+   ],
+   "id": "ORPH-C3",
+   "lane": "orphans",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/orphans.md C3",
+   "title": "Room purge leaves analytics shadows (analytics_events, analytics_room_cursor, claim_bond_shadow)"
+  },
+  {
+   "expectedFixed": "Offer terms.deadline is enforced (claims/settlement refuse past it, or it is removed from the contract)",
+   "fixPrs": [],
+   "id": "SM-F3",
+   "lane": "state-machine",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/state-machine.md F3",
+   "title": "Offer terms.deadline is validated but never enforced"
+  },
+  {
+   "expectedFixed": "A scan/job owns access-request expiry (not lazy-only on read)",
+   "fixPrs": [],
+   "id": "SM-F4",
+   "lane": "state-machine",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/state-machine.md F4",
+   "title": "Access-request expiry is lazy-only; no scan owns it"
+  },
+  {
+   "expectedFixed": "The claim idempotency ledger is round-scoped; stale outcomes cannot replay into a new round",
+   "fixPrs": [
+    4124
+   ],
+   "id": "RACE-R1",
+   "lane": "race",
+   "probe": "docs-suites.mjs",
+   "probeKind": "suite",
+   "severity": "P0",
+   "source": "hunt-2026-10-18/race.md R-1 (repro-request-outcomes.mjs)",
+   "title": "The claim idempotency ledger was not round-scoped — outcomes replayed across claim rounds"
+  },
+  {
+   "expectedFixed": "wb_ board claims and the lease sweep agree (no release/re-plan oscillation)",
+   "fixPrs": [],
+   "id": "RACE-R2",
+   "lane": "race",
+   "probe": "vendor2.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/race.md R-2 (#3711; repro-wb-oscillation.mjs)",
+   "title": "wb_ board claims oscillate under the lease sweep"
+  },
+  {
+   "expectedFixed": "claim-pr-sync fences its write-backs (refuses to overwrite a fresher board revision)",
+   "fixPrs": [],
+   "id": "RACE-S1",
+   "lane": "race",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/race.md S-1 (suspect; charter 07)",
+   "title": "SUSPECT: claim-pr-sync sweeps write back stale snapshots"
+  },
+  {
+   "expectedFixed": "The board read bounds its queries (no 140k-statement materialisation at 20k tasks)",
+   "fixPrs": [
+    4122
+   ],
+   "id": "SCALE-1",
+   "lane": "scale",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/scale.md cliff 1",
+   "title": "Cliff 1: board read runs ~140,003 statements at 20k tasks with limit:1"
+  },
+  {
+   "expectedFixed": "The board read no longer materialises the full claims set (charter C-1)",
+   "fixPrs": [],
+   "id": "SCALE-2",
+   "lane": "scale",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/scale.md cliff 2 (charter C-1)",
+   "title": "Cliff 2: board materialisation cost grows with full room history"
+  },
+  {
+   "expectedFixed": "The front-door read bounds its queries",
+   "fixPrs": [
+    4122
+   ],
+   "id": "SCALE-3",
+   "lane": "scale",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/scale.md cliff 3",
+   "title": "Cliff 3: front door runs ~40,005 statements"
+  },
+  {
+   "expectedFixed": "The proof read bounds its queries",
+   "fixPrs": [
+    4122
+   ],
+   "id": "SCALE-4",
+   "lane": "scale",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/scale.md cliff 4",
+   "title": "Cliff 4: proof page runs ~10,002 statements"
+  },
+  {
+   "expectedFixed": "The sitemap read bounds/clamps its queries",
+   "fixPrs": [
+    4122
+   ],
+   "id": "SCALE-5",
+   "lane": "scale",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/scale.md cliff 5",
+   "title": "Cliff 5: sitemap runs ~10,001 statements"
+  },
+  {
+   "expectedFixed": "The sitemap N+1 is batched and the 1,000-receipt clamp carries a completeness signal (charter C-2)",
+   "fixPrs": [],
+   "id": "SCALE-6",
+   "lane": "scale",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/scale.md cliff 6 (charter C-2)",
+   "title": "Cliff 6: sitemap N+1 plus a silent 1,000-receipt clamp"
+  },
+  {
+   "expectedFixed": "Settled lots are public only on owner opt-in (#3594 decision implemented)",
+   "fixPrs": [
+    4151
+   ],
+   "id": "ZOMBIE-Z1",
+   "lane": "zombie",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/zombie.md Z-1",
+   "title": "Settled-lot receipts are public by default; the #3594 opt-in never shipped"
+  },
+  {
+   "expectedFixed": "The /orient endpoint is retired from dispatch",
+   "fixPrs": [],
+   "id": "ZOMBIE-Z2",
+   "lane": "zombie",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/zombie.md Z-2",
+   "title": "/orient endpoint still fully dispatched"
+  },
+  {
+   "expectedFixed": "The receipts-live shim and triple-prefix discovery serving are sunset (B20/D10)",
+   "fixPrs": [],
+   "id": "ZOMBIE-Z3",
+   "lane": "zombie",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/zombie.md Z-3",
+   "title": "Receipts-live shim + triple-prefix discovery serving still present"
+  },
+  {
+   "expectedFixed": "The Phase-2 §D dispositions are executed (D11 verify-and-report only; D12 delete-only, per Jill's narrowing)",
+   "fixPrs": [],
+   "id": "ZOMBIE-Z4",
+   "lane": "zombie",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/zombie.md Z-4",
+   "title": "Phase-2 §D unexecuted set (five exhibits; SIMPLIFY family queued)"
+  },
+  {
+   "expectedFixed": "The R-2/R-3 zero-risk deletions are observable in the tree",
+   "fixPrs": [
+    4120
+   ],
+   "id": "ZOMBIE-Z5",
+   "lane": "zombie",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/zombie.md Z-5",
+   "title": "R-2/R-3 zero-risk deletions"
+  },
+  {
+   "expectedFixed": "Accept and release are separate, honestly labelled acts",
+   "fixPrs": [
+    4155
+   ],
+   "id": "HUMAN-H1",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/human.md H-1",
+   "title": "'Accept & release escrow' — one button whose copy lies about the two acts"
+  },
+  {
+   "expectedFixed": "The room's main surface carries the money story (not four disclosures deep)",
+   "fixPrs": [],
+   "id": "HUMAN-H2",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/human.md H-2",
+   "title": "The money surface is four disclosures deep; the room's main surface never mentions money"
+  },
+  {
+   "expectedFixed": "The rubric verdict does not pre-select the Pass preset",
+   "fixPrs": [
+    4155
+   ],
+   "id": "HUMAN-H3",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/human.md H-3",
+   "title": "The rubric verdict selects the preset to Pass — the form grades itself"
+  },
+  {
+   "expectedFixed": "Ledger states carry an in-situ explanation where they appear",
+   "fixPrs": [
+    4155
+   ],
+   "id": "HUMAN-H4",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/human.md H-4",
+   "title": "Ledger jargon ('Attributed') unexplained in situ"
+  },
+  {
+   "expectedFixed": "A human worker has a UI for claim/submit",
+   "fixPrs": [],
+   "id": "HUMAN-H5",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/human.md H-5",
+   "title": "A human worker has no UI — claim/submit are API-only"
+  },
+  {
+   "expectedFixed": "The post form explains escrow before commitment",
+   "fixPrs": [],
+   "id": "HUMAN-H6",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/human.md H-6",
+   "title": "The post form teaches nothing before commitment"
+  },
+  {
+   "expectedFixed": "The signed-out page has a <main> landmark around sign-in",
+   "fixPrs": [],
+   "id": "HUMAN-A1",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/human.md A-1",
+   "title": "The sign-in wall has no <main> landmark"
+  },
+  {
+   "expectedFixed": "The composer focus indicator meets the app's 2px outline standard",
+   "fixPrs": [],
+   "id": "HUMAN-A2",
+   "lane": "human",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/human.md A-2",
+   "title": "The composer focus indicator is a 1px border-colour change"
+  },
+  {
+   "expectedFixed": "Board create is idempotent (client request id; retries replay)",
+   "fixPrs": [
+    4142
+   ],
+   "id": "FE-F1",
+   "lane": "frontend",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/frontend.md FE-F1",
+   "title": "Board 'New item' create had no idempotency"
+  },
+  {
+   "expectedFixed": "An expired-lease card renders a distinct, honest state",
+   "fixPrs": [],
+   "id": "FE-F2",
+   "lane": "frontend",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/frontend.md FE-F2",
+   "title": "An expired-lease card contradicts itself"
+  },
+  {
+   "expectedFixed": "Client verify/deliver request ids include the claim round",
+   "fixPrs": [],
+   "id": "FE-F3",
+   "lane": "frontend",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/frontend.md FE-F3",
+   "title": "Verify/deliver requestIds collide across claim rounds (client half of RACE-R-1)"
+  },
+  {
+   "expectedFixed": "DraftRecovery evicts by last write, not first creation",
+   "fixPrs": [
+    4143
+   ],
+   "id": "FE-F4",
+   "lane": "frontend",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/frontend.md FE-F4",
+   "title": "DraftRecovery cap evicts by first creation, not last write"
+  },
+  {
+   "expectedFixed": "DraftRecovery quarantines a corrupt entry instead of destroying all drafts",
+   "fixPrs": [
+    4146
+   ],
+   "id": "FE-F5",
+   "lane": "frontend",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/frontend.md FE-F5",
+   "title": "DraftRecovery's reader destroys all drafts wholesale on a parse failure"
+  },
+  {
+   "expectedFixed": "Both HTTP-emitted codes are in the errors catalogue (both bound copies)",
+   "fixPrs": [
+    4144
+   ],
+   "id": "API-F1",
+   "lane": "api-contract",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/api-contract.md F1",
+   "title": "Two HTTP-emitted codes missing from the errors catalogue (terms_changed, invalid_proof_query)"
+  },
+  {
+   "expectedFixed": "openapi formalism gaps closed; a drift check guards the spec",
+   "fixPrs": [
+    4144
+   ],
+   "id": "API-F2",
+   "lane": "api-contract",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/api-contract.md F2",
+   "title": "openapi.yaml formalism gaps"
+  },
+  {
+   "expectedFixed": "The served spec marks origin-gated doors as such",
+   "fixPrs": [],
+   "id": "API-F3",
+   "lane": "api-contract",
+   "probe": "docs-suites.mjs",
+   "probeKind": "dynamic",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/api-contract.md F3",
+   "title": "The served /openapi.json overclaims for origin-gated doors"
+  },
+  {
+   "expectedFixed": "The spec distinguishes 401 (session) from 422 (validation) per family",
+   "fixPrs": [],
+   "id": "API-F4",
+   "lane": "api-contract",
+   "probe": "docs-suites.mjs",
+   "probeKind": "source",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/api-contract.md F4",
+   "title": "Session-bound ops document both 401 and 422 — which fires is per-family folklore"
+  },
+  {
+   "expectedFixed": "n/a — prospective staleness note; explicitly not drift at the filed base",
+   "fixPrs": [],
+   "id": "API-F5",
+   "lane": "api-contract",
+   "notFiledReason": "the finding itself states it is prospective (it bites the day PR #4139 lands) and is not drift at this base — kept in the pack so the #4139 landing re-checks it",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/api-contract.md F5",
+   "title": "Prospective staleness the day #4139 lands"
+  },
+  {
+   "expectedFixed": "Restore preserves or separately anchors the pre-restore audit trail",
+   "fixPrs": [],
+   "id": "TM-2",
+   "lane": "threat-model",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-2",
+   "title": "Restore erases the pre-restore audit trail (the audit lives inside the replaceable state)"
+  },
+  {
+   "expectedFixed": "n/a — organisational posture (shared admin login + continuous deploy), not locally reproducible",
+   "fixPrs": [],
+   "id": "TM-3",
+   "lane": "threat-model",
+   "notFiledReason": "organisational finding about account sharing and deploy posture; no local product repro exists or can be derived",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/threat-model.md TM-3",
+   "title": "One shared admin login + continuous deploy (organisational)"
+  },
+  {
+   "expectedFixed": "Public receipts are signed / externally anchored",
+   "fixPrs": [],
+   "id": "TM-5",
+   "lane": "threat-model",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-5",
+   "title": "No external anchor anywhere; receipts are unsigned"
+  },
+  {
+   "expectedFixed": "SSRF controls are equivalent across the Workers and Node runtimes",
+   "fixPrs": [],
+   "id": "TM-6",
+   "lane": "threat-model",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/threat-model.md TM-6",
+   "title": "Workers-vs-Node SSRF control divergence"
+  },
+  {
+   "expectedFixed": "The designed controls from the threat model are present in the running tree",
+   "fixPrs": [],
+   "id": "TM-9",
+   "lane": "threat-model",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/threat-model.md TM-9",
+   "title": "Designed posture != running posture"
+  },
+  {
+   "expectedFixed": "The residual knowns (unaudited doors, ownerless workflows) are closed",
+   "fixPrs": [],
+   "id": "TM-11",
+   "lane": "threat-model",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/threat-model.md TM-11",
+   "title": "Residual knowns bundle (spend-pricing, unpublish audit, workflow permissions)"
+  },
+  {
+   "expectedFixed": "The integrity job's success does not hinge on a manual operator execute step (or the dependency is surfaced as the job's state)",
+   "fixPrs": [],
+   "id": "WATCH-P1",
+   "lane": "watcher",
+   "notFiledReason": "the mechanism (integrity lastSuccess frozen since 2026-10-11 pending PR #4111 + an operator execute in the owner's session) is a production-state fact, not reproducible against a local build; the local half (job grading) is covered by PATROL-GRADE",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/watcher.md P1",
+   "title": "Integrity success is hostage to the F5 operator execute step"
+  },
+  {
+   "expectedFixed": "The watcher wrapper publishes a parseable trace even when the verdict publish fails",
+   "fixPrs": [],
+   "id": "WATCH-P3",
+   "lane": "watcher",
+   "notFiledReason": "fleet-side wrapper behaviour (the unledgered-watcher publish path) — no product-tree repro; re-derive against the wrapper in the R2 fleet pass",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P3",
+   "title": "Unledgered-watcher wrapper v1.2: a failed verdict publish leaves no parseable trace"
+  },
+  {
+   "expectedFixed": "watcher-health is invoked by something (a job, a route, a schedule)",
+   "fixPrs": [],
+   "id": "WATCH-P4",
+   "lane": "watcher",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P4",
+   "title": "watcher-health.mjs works but is invoked by nothing"
+  },
+  {
+   "expectedFixed": "The store-growth escalation has a named reader/consumer",
+   "fixPrs": [],
+   "id": "WATCH-P5",
+   "lane": "watcher",
+   "notFiledReason": "fleet-side escalation plumbing (gauge -> escalation -> no reader) — the reader lives outside the product tree; R2 fleet pass owns it",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P5",
+   "title": "Store-growth escalation fires into a void with no reader"
+  },
+  {
+   "expectedFixed": "repo-mirror-refresh failures report somewhere a human/agent reads",
+   "fixPrs": [],
+   "id": "WATCH-P6",
+   "lane": "watcher",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P6",
+   "title": "repo-mirror-refresh failure reports have no destination"
+  },
+  {
+   "expectedFixed": "Scheduled workflows have readers for their outcomes",
+   "fixPrs": [],
+   "id": "WATCH-P7",
+   "lane": "watcher",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P7",
+   "title": "Scheduled workflows, none with a reader"
+  },
+  {
+   "expectedFixed": "One-shot dispatch workflows are removed after use or owned",
+   "fixPrs": [],
+   "id": "WATCH-P8",
+   "lane": "watcher",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P8",
+   "title": "Twelve one-shot apply/assemble/reset dispatch workflows still in tree"
+  },
+  {
+   "expectedFixed": "n/a — Actions-API lifetime fact (0 runs), not a local repro",
+   "fixPrs": [],
+   "id": "WATCH-P9",
+   "lane": "watcher",
+   "notFiledReason": "rollback-prod and stall-probe having zero lifetime runs is a GitHub Actions history fact; a local pack cannot reproduce it — tracked in the watcher's own census",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P9",
+   "title": "rollback-prod + stall-probe have zero lifetime runs"
+  },
+  {
+   "expectedFixed": "agentic-feature-tour has an owner and a delivery destination, or is deleted",
+   "fixPrs": [],
+   "id": "WATCH-P10",
+   "lane": "watcher",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/watcher.md P10",
+   "title": "agentic-feature-tour: ownerless daily cron, no delivery"
+  },
+  {
+   "expectedFixed": "n/a — informational census entries; no defect asserted",
+   "fixPrs": [],
+   "id": "WATCH-P11",
+   "lane": "watcher",
+   "notFiledReason": "the lane itself files P11 as informational (product jobs with readers); no defect to regress",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/watcher.md P11",
+   "title": "Product jobs census (gmail-sync / channel-drain / land-queue) — informational"
+  },
+  {
+   "expectedFixed": "Poison webhook deliveries dead-letter after a bounded number of attempts",
+   "fixPrs": [],
+   "id": "SOAK-S1",
+   "lane": "soak",
+   "probe": "vendor2.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/soak.md S-1 (repro-drain.mjs)",
+   "title": "Webhook drain ceiling: poison deliveries retry forever"
+  },
+  {
+   "expectedFixed": "The job alarm is not re-armed by unrelated traffic (or the scan is bounded/incremental)",
+   "fixPrs": [],
+   "id": "SOAK-S2",
+   "lane": "soak",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/soak.md S-2",
+   "title": "Alarm re-arm tax: every request re-arms the job alarm (5-table scan in a finally)"
+  },
+  {
+   "expectedFixed": "n/a — long-horizon measurement (fat-room write degradation), not a pass/fail repro",
+   "fixPrs": [],
+   "id": "SOAK-S3",
+   "lane": "soak",
+   "notFiledReason": "filed as a measurement curve (write latency vs room size), not a defect with a binary repro; the reduced-scale variant is R2 work",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/soak.md S-3",
+   "title": "Fat-room write degradation (measurement)"
+  },
+  {
+   "expectedFixed": "n/a — long-horizon retention-rate measurement, not a pass/fail repro",
+   "fixPrs": [],
+   "id": "SOAK-S4",
+   "lane": "soak",
+   "notFiledReason": "filed as drain-rate measurements over retention horizons; no binary repro was filed",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/soak.md S-4",
+   "title": "Retention drain rates (measurement)"
+  },
+  {
+   "expectedFixed": "The offer lifetime budget counts live offers (or drafts/withdrawn are excluded/refunded)",
+   "fixPrs": [],
+   "id": "SOAK-S5",
+   "lane": "soak",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt-2026-10-18/soak.md S-5",
+   "title": "Offer lifetime budget burns on drafts and withdrawn offers"
+  },
+  {
+   "expectedFixed": "The public-work write ceiling is per-room/per-offer (or high enough that ordinary volume never hits it)",
+   "fixPrs": [],
+   "id": "SOAK-S6",
+   "lane": "soak",
+   "probe": "vendor2.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/soak.md S-6 (repro-claim429.mjs)",
+   "title": "Public-work write ceiling is per-address: the 61st write is refused"
+  },
+  {
+   "expectedFixed": "The offer cap counts per operator across rooms/surfaces, or is ruled per-room by decision",
+   "fixPrs": [],
+   "id": "ECON-3",
+   "lane": "economics",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 3",
+   "title": "#3608 cap evasion: PROVEN cross-room/cross-surface (REFUTED within project_offers)"
+  },
+  {
+   "expectedFixed": "Board claims must carry a finite lease (null-lease claims refuse or normalise)",
+   "fixPrs": [],
+   "id": "ECON-4",
+   "lane": "economics",
+   "probe": "board.mjs",
+   "probeKind": "dynamic",
+   "severity": "P1",
+   "source": "hunt-2026-10-18/economics.md shape 4b/4c",
+   "title": "Squatting: null-lease board claims never lapse (4b public board, 4c room board PROVEN)"
+  },
+  {
+   "expectedFixed": "n/a — REFUTED by the lane's own simulation (the timeout default protects workers; the bond makes it strictly worse than honest play)",
+   "fixPrs": [],
+   "id": "ECON-5C",
+   "lane": "economics",
+   "notFiledReason": "refuted as filed by HUNT-ECONOMICS' own executed simulation (coalition ends strictly worse); no defect to regress — the row stays so the refutation is on the record",
+   "probe": "none",
+   "probeKind": "none",
+   "severity": "P3",
+   "source": "hunt-2026-10-18/economics.md shape 5c",
+   "title": "Timeout-default harvest by the worker side — REFUTED"
+  },
+  {
+   "expectedFixed": "Detection-only workflows run with read-only permissions",
+   "fixPrs": [],
+   "id": "DEP-1",
+   "lane": "dependency",
+   "probe": "structural.mjs",
+   "probeKind": "source",
+   "severity": "P2",
+   "source": "hunt waves 1-3 dependency review (zero-bug-quarantine permissions)",
+   "title": "Zero-bug-quarantine workflow carries write permissions beyond its detection job"
+  }
+ ],
+ "version": 1
+}

@@ -1,0 +1,36 @@
+// Which limiter fires at claim #31? Print full headers of the first 429.
+import { createRoomServer } from "__R1ROOT__/server/http.mjs";
+import { makeWorld } from "./world.mjs";
+
+const w = makeWorld();
+const { store, clock } = w;
+const server = createRoomServer({ store });
+await new Promise(r => server.listen(0, "127.0.0.1", r));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const raw = async (method, path, { secret, body } = {}) => {
+  const res = await fetch(origin + path, { method,
+    headers: { Origin: origin, "Content-Type": "application/json", ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  return { status: res.status, headers: Object.fromEntries(res.headers.entries()), body: await res.json().catch(() => null) };
+};
+const minted = await raw("POST", "/api/agent-identities", { body: { displayName: "repro-worker" } });
+const secret = minted.body.secret;
+for (let i = 0; i < 40; i++) {
+  const id = `repro-${i}`;
+  store.projectOffers.create("commons", "owner", { requestId: `${id}-c`, offerId: id, reviewerMemberIds: ["owner"],
+    terms: { kind: "task", title: `Repro ${i}`, summary: "s", acceptanceCriteria: ["d"],
+      repositoryUrl: "https://github.com/Example/Project", reward: { kind: "unpaid" }, approvalPolicy: { mode: "human" } } });
+  store.projectOffers.transition("commons", "owner", id, "publish", { requestId: `${id}-p`, expectedRevision: 1 });
+  store.publicWorkClaims.enable("commons", "owner", id, { requestId: `${id}-e`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: "main", files: ["docs/X.md"] });
+  const path = `/api/public-work/tasks/${encodeURIComponent(id)}`;
+  const read = await raw("GET", path);
+  const claim = await raw("POST", path + "/claim", { secret, body: { requestId: `${id}-claim`, expectedTermsVersion: read.body.termsVersion, leaseHours: 1 } });
+  console.log(`cycle ${i}: claim=${claim.status} bucket=${claim.headers["x-ratelimit-bucket"] ?? "-"}`);
+  if (claim.status === 429) { console.log(JSON.stringify(claim.headers, null, 1)); console.log(JSON.stringify(claim.body)); break; }
+  const fin = await raw("POST", path + "/finish", { secret, body: { requestId: `${id}-fin`, expectedTermsVersion: read.body.termsVersion, generation: claim.body.task.claim.generation, artifactText: "x\n", checksReported: ["r"] } });
+  if (fin.status !== 200) { console.log(`cycle ${i}: finish=${fin.status}`, JSON.stringify(fin.body).slice(0, 200)); break; }
+  clock.t += 1000;
+}
+server.closeStreams(); server.closeAllConnections();
+await new Promise(r => server.close(r));
+store.close();
