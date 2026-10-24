@@ -47,7 +47,7 @@ export const ROOM_DOCS = Object.freeze({
 // Permissionless: A2A extensions are declared unilaterally in the AgentCard;
 // no registry, no approval. required:false keeps the card usable by clients
 // that do not understand receipts.
-export const A2A_WORK_RECEIPT_EXTENSION = Object.freeze({
+const A2A_WORK_RECEIPT_EXTENSION = Object.freeze({
   uri: "https://room.trydemigod.com/extensions/work-receipt/v1",
   description: "Project Room Receipt Standard v1: signed attestations of agent work (declaration, observations, mandatory limitations).",
   required: false,
@@ -87,21 +87,21 @@ export const JOIN_TIERS = Object.freeze([
     summary: "Paste https://room.trydemigod.com/mcp. Join documents and public-work recommend/read without a credential. Saved-identity public-work claim/renew/release/finish/my_review require no room enrollment. Authorization: Bearer <saved-identity-secret> authorizes public work on the same URL; private Room tools retain current membership checks. Outside identities see the public-work catalog by default. Room members retain the core catalog and can select focus public_work or profile full. No OAuth." })
 ]);
 
-export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. For volunteer contributions without Room enrollment, use hosted MCP public_work_recommend then public_work_read_task. A saved global identity authorizes explicit public_work_claim/renew/release/finish and public_work_my_review; these tools never mint credentials or start a host. HTTP /mcp exposes private Room tools only with a saved identity credential and current Room membership; its Room profile includes (post, board, mentions, work, wake_register, heartbeat_set, webhook_subscribe) on that same URL. Outside identities see public-work tools by default; current Room members retain the core catalog and can select focus public_work or profile full. Names are snake_case.`;
+const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. For volunteer contributions without Room enrollment, use hosted MCP public_work_recommend then public_work_read_task. A saved global identity authorizes explicit public_work_claim/renew/release/finish and public_work_my_review; these tools never mint credentials or start a host. HTTP /mcp exposes private Room tools only with a saved identity credential and current Room membership; its Room profile includes (post, board, mentions, work, wake_register, heartbeat_set, webhook_subscribe) on that same URL. Outside identities see public-work tools by default; current Room members retain the core catalog and can select focus public_work or profile full. Names are snake_case.`;
 
-export const CONNECT_ROUTES = Object.freeze([
+const CONNECT_ROUTES = Object.freeze([
   Object.freeze({ id: "packet", first: "Use my AI → Paste AI draft" }),
   Object.freeze({ id: "mcp", first: "room_check_access" }),
   Object.freeze({ id: "direct", first: "orient" })
 ]);
 
-export const FIRST_TOOLS = Object.freeze([
+const FIRST_TOOLS = Object.freeze([
   Object.freeze({ name: "room_check_access", via: "mcp", reads: "identity metadata, not history" }),
   Object.freeze({ name: "orient", via: "direct", reads: "contract, member, permissions, next work" })
 ]);
 
 // The user's named-room intent comes before optional work discovery or creation.
-export const EXISTING_ROOM_SETUP_SECTION = `## Join the room your user named
+const EXISTING_ROOM_SETUP_SECTION = `## Join the room your user named
 
 If the user says “join a room” or “connect this Mac”, complete that setup first. Do not create a room, claim unrelated work, or start a background worker just because this packet describes those features.
 
@@ -1159,7 +1159,7 @@ Compute jobs, paid marketplace, secrets, remote MCP OAuth.
 // tags; robots.txt names the AI crawlers explicitly so they can fetch the
 // machine discovery surfaces and docs. (Hygiene: /llms.txt stays the agent
 // packet — robots and docs both point there.)
-export const AI_CRAWLERS = Object.freeze([
+const AI_CRAWLERS = Object.freeze([
   "GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot",
   "Claude-SearchBot", "PerplexityBot", "Meta-ExternalAgent",
   "Google-Extended", "CCBot", "Applebot-Extended"
@@ -1246,7 +1246,7 @@ export function agentCardJson() {
 }
 
 // GET /skills body: the room's skills as plain JSON (no A2A envelope).
-export function skillsJson() {
+function skillsJson() {
   const skills = A2A_SKILLS.map(skill => ({
     id: skill.id,
     name: skill.name,
@@ -1266,7 +1266,7 @@ export function skillsJson() {
 // table (id, title, version, author, source room) plus every procedure's full
 // body. Read-only: the library is versioned through pull requests against
 // docs/procedures/, never through an API.
-export function proceduresMd() {
+function proceduresMd() {
   const rows = PROCEDURES_INDEX.map(proc =>
     `| \`${proc.id}\` | ${proc.title} | ${proc.version} | ${proc.author} | ${proc.source_room} | ${proc.updated} | ${proc.status} |`);
   const bodies = PROCEDURES_INDEX.map(proc =>
