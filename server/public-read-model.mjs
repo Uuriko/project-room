@@ -722,11 +722,66 @@ function saveCursor(store, phase, cursor, done) {
   store.db.prepare("UPDATE public_read_model_backfill SET phase=?, cursor=?, done=? WHERE id=1").run(phase, cursor, done ? 1 : 0);
 }
 
+// The skip channel (#4088). A record the backfill cannot project is
+// skipped and the cursor advances past it — that part is by design, so one
+// corrupt record cannot stall the pass. What was missing is any trace of
+// the skip: the three phases swallowed their per-record failures, so a
+// skipped record was invisible on every surface. Each skip is now recorded
+// on the tick result: `skipped` counts them (a number, so it rides the
+// heartbeat's numeric summary like every other job count), and
+// `skippedRecords` names them ({ phase, id, errorClass }) for the operator
+// surfaces that see the raw result, alongside the log line in finish()
+// below. Record ids never reach the public health view, per the exposure
+// discipline in cloudflare/job-heartbeat.mjs (#3334): compactSummary keeps
+// numbers and booleans only, and the failureDetail's recordId rides the
+// stored job detail operators read, which jobHealthView deliberately does
+// not project.
+// Grading call: any skip fails the tick. The backfill is a one-pass
+// cursor, so a bad record fails exactly one tick and is never revisited;
+// a tick that reported success over a skip would advance lastSuccessAt
+// past silent data loss, and once the pass completes the job disables
+// itself and the evidence scrolls away.
+const SKIP_RECORD_CLASS = { rooms: "room", receipts: "receipt", directory: "directory_card" };
+const SKIP_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const SKIP_DETAIL_LIMIT = 20;
+
+function skipErrorClass(error) {
+  if (error instanceof SyntaxError) return "parse";
+  const message = String(error?.message ?? error ?? "");
+  if (/no such (table|column)|missing schema|\bschema\b/i.test(message)) return "schema";
+  if (/sqlite|database|storage|disk/i.test(message)) return "storage";
+  return "unknown";
+}
+
 // One bounded batch. The worker cron calls this until done is 1.
 export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, deadline = Infinity } = {}) {
   const cap = Number.isInteger(limit) && limit > 0 && limit <= 100 ? limit : PUBLIC_BACKFILL_BATCH;
   const cursor = backfillCursor(store);
-  if (cursor.done) return { done: true, rooms: 0, receipts: 0, cards: 0 };
+  const skips = [];
+  const finish = result => {
+    result.skipped = skips.length;
+    if (!skips.length) return result;
+    const first = skips[0];
+    result.skippedRecords = skips.slice(0, SKIP_DETAIL_LIMIT)
+      .map(skip => ({ phase: skip.phase, id: skip.id, errorClass: skip.errorClass }));
+    result.errors = skips.length;
+    result.scanError = `public-read-model backfill skipped ${skips.length} record(s) in the ${first.phase} phase`;
+    result.failureDetail = {
+      code: "backfill_record_skipped",
+      subcheck: first.phase,
+      errorClass: first.errorClass,
+      recordClass: SKIP_RECORD_CLASS[first.phase] ?? "unknown",
+      ...(SKIP_ID_SHAPE.test(first.id) ? { recordId: first.id } : {}),
+    };
+    // The operator log line carries the skipped ids — the one surface
+    // where naming every record of the tick is proportionate. Ids stay
+    // out of scanError and the summary, which the public view projects.
+    const named = result.skippedRecords.map(skip => `${skip.phase}:${skip.id} (${skip.errorClass})`).join(", ");
+    const more = skips.length > SKIP_DETAIL_LIMIT ? `, +${skips.length - SKIP_DETAIL_LIMIT} more` : "";
+    console.warn(`[public-read-model] backfill skipped ${skips.length} record(s): ${named}${more}`);
+    return result;
+  };
+  if (cursor.done) return finish({ done: true, rooms: 0, receipts: 0, cards: 0 });
   const expired = () => Date.now() >= deadline;
   if (cursor.phase === "rooms") {
     const rows = store.db.prepare("SELECT id, projection FROM rooms WHERE id > ? ORDER BY id LIMIT ?").all(cursor.cursor ?? "", cap);
@@ -735,18 +790,18 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
     for (const row of rows) {
       if (expired()) {
         saveCursor(store, "rooms", last, false);
-        return { done: false, rooms, receipts: 0, cards: 0, budgetExceeded: true };
+        return finish({ done: false, rooms, receipts: 0, cards: 0, budgetExceeded: true });
       }
       last = row.id;
       rooms += 1;
       try {
         const state = hydrateWorkItems(store.db, row.id, JSON.parse(row.projection));
         if (state?.room?.id) syncRoomPublication(store, { roomId: state.room.id, state, previous: null, auth: null });
-      } catch { /* a corrupt projection is not a public page */ }
+      } catch (error) { skips.push({ phase: "rooms", id: row.id, errorClass: skipErrorClass(error) }); }
     }
     if (rows.length < cap) saveCursor(store, "receipts", "", false);
     else saveCursor(store, "rooms", last, false);
-    return { done: false, rooms, receipts: 0, cards: 0 };
+    return finish({ done: false, rooms, receipts: 0, cards: 0 });
   }
   if (cursor.phase === "receipts") {
     const rows = store.db.prepare(`SELECT receipt_id, artifact_sha256, receipt_json FROM public_work_receipts
@@ -756,15 +811,16 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
     for (const row of rows) {
       if (expired()) {
         saveCursor(store, "receipts", last, false);
-        return { done: false, rooms: 0, receipts, cards: 0, budgetExceeded: true };
+        return finish({ done: false, rooms: 0, receipts, cards: 0, budgetExceeded: true });
       }
       last = row.receipt_id;
       receipts += 1;
-      try { projectPublicWorkReceipt(store, JSON.parse(row.receipt_json), row.artifact_sha256); } catch { /* skip a bad receipt */ }
+      try { projectPublicWorkReceipt(store, JSON.parse(row.receipt_json), row.artifact_sha256); }
+      catch (error) { skips.push({ phase: "receipts", id: row.receipt_id, errorClass: skipErrorClass(error) }); }
     }
     if (rows.length < cap) saveCursor(store, "directory", "", false);
     else saveCursor(store, "receipts", last, false);
-    return { done: false, rooms: 0, receipts, cards: 0 };
+    return finish({ done: false, rooms: 0, receipts, cards: 0 });
   }
   const rows = store.db.prepare(`SELECT agent_id FROM agent_directory_cards
     WHERE visibility='public' AND withdrawn=0 AND agent_id > ? ORDER BY agent_id LIMIT ?`).all(cursor.cursor ?? "", cap);
@@ -773,15 +829,16 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
   for (const row of rows) {
     if (expired()) {
       saveCursor(store, "directory", last, false);
-      return { done: false, rooms: 0, receipts: 0, cards, budgetExceeded: true };
+      return finish({ done: false, rooms: 0, receipts: 0, cards, budgetExceeded: true });
     }
     last = row.agent_id;
     cards += 1;
-    try { syncDirectoryCard(store, row.agent_id); } catch { /* skip a bad card */ }
+    try { syncDirectoryCard(store, row.agent_id); }
+    catch (error) { skips.push({ phase: "directory", id: row.agent_id, errorClass: skipErrorClass(error) }); }
   }
   if (rows.length < cap) saveCursor(store, "directory", last, true);
   else saveCursor(store, "directory", last, false);
-  return { done: rows.length < cap, rooms: 0, receipts: 0, cards };
+  return finish({ done: rows.length < cap, rooms: 0, receipts: 0, cards });
 }
 
 // An unpublished room or receipt stays out of listings, detail reads,
