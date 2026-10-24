@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -46,6 +46,15 @@ export function observe() { return { at: Date.now(), cpuSlots: Math.max(0, avail
 export function admission(store, job, observation = observe()) {
   const p = policy(store), manifest = getPackage(store, job.pin).manifest;
   if (p.paused) return { allowed: false, reason: 'paused' };
+  if (manifest.workspaceScope || manifest.capability === 'workspace-inventory') {
+    const scope = manifest.workspaceScope;
+    if (!scope || !Array.isArray(p.workspaces) || !p.workspaces.includes(scope.path)) return { allowed: false, reason: 'workspace_grant_required' };
+    try {
+      const stat = lstatSync(scope.path);
+      if (!stat.isDirectory() || realpathSync(scope.path) !== scope.path || stat.dev !== scope.dev || stat.ino !== scope.ino)
+        return { allowed: false, reason: 'workspace_changed' };
+    } catch { return { allowed: false, reason: 'workspace_unavailable' }; }
+  }
   if (!p.rooms.includes(job.room) || !p.capabilities.includes(manifest.capability)) return { allowed: false, reason: 'job_not_authorized' };
   if (!Number.isSafeInteger(observation.at) || observation.at > Date.now() || Date.now() - observation.at > 30000
     || !Number.isFinite(observation.cpuSlots) || !Number.isFinite(observation.memoryBytes)) return { allowed: false, reason: 'stale_resources' };

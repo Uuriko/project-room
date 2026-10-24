@@ -363,3 +363,36 @@ app mid-job, revoke access, and recover with intact privacy and no duplicate
 execution. Compare one-laptop versus two-laptop completion time on the same
 useful workload and include network/coordination overhead. A local simulation
 or one busy Mac does not qualify the two-device system.
+
+## Native first-job API
+
+`first-job-prepare` accepts `{workspace,room,operation}` from the local app after
+an explicit folder selection. The existing local policy must permit that room,
+include capability `workspace-inventory`, and include the canonical folder path
+in `workspaces: [...]`; it must not be paused. This API never configures policy,
+starts a model, changes a rollout, or grants remote requesters access. It seals
+folder path/device/inode into an immutable package and returns
+`{schema:1,jobId,pin,expectedAttempt,state,next}`. Store this binding durably before
+starting the job. Retrying the same operation returns the same job; changed
+folder/package under that operation is refused. `next` is a UI suggestion, not
+authority. A different sample requires an explicit new operation ID.
+
+Use existing `run` or `watch` to execute. Admission rechecks the folder grant and
+identity before starting; a renamed/replaced/symlink directory is not its old
+grant. This is a cooperative worker, not an OS sandbox. Revoking a folder blocks
+new admission; use existing cancellation/host stop to stop already running work.
+The job enumerates at most 512 immediate entries, skips hidden names, does not
+recurse, does not follow symlinks or read file contents, and writes a small
+`workspace-summary.json`. It requires the packaged Node runtime only, not Git,
+Xcode, a provider executable, a network connection or paid model calls.
+
+`first-job-verify` accepts `{jobId,expectedAttempt,expectedPin}` and verifies a
+completed, passing execution plus the actual bounded artifact bytes against its
+recorded hash. Wrong attempts/pins, missing/changed artifacts and symlink paths
+fail. It can run after app/database restart without executing the job again.
+Success returns `qualified:true,scope:"local_worker_only"`, the compact summary,
+and explicit `roomArtifactQualified:false,twoDeviceQualified:false`. This is
+historical local execution evidence, not current execution authorization or a
+claim of Room upload/peer connectivity. `summary.complete:false` means the entry
+budget was reached, not a complete folder scan. Native UI should display that
+limit and separately qualify Room artifact delivery and the second device.
