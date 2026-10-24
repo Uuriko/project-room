@@ -218,3 +218,15 @@ test("mcpResultText masks a credential wherever it appears, including quoted pro
   assert.equal(mcpResultText(value), JSON.stringify(value));
   assert.equal(mcpResultText(value, [{ secret: undefined, where: "structuredContent.code" }]), JSON.stringify(value));
 });
+
+test("mint with a reserved role name returns the guard's structured 422, not a 500 (issue #3270)", async t => {
+  const origin = await serve(t);
+  const reply = await call(origin, "room_identity_mint", { displayName: "Admin" });
+  const result = unwrapCall(reply, "room_identity_mint (reserved name)");
+  assert.equal(result.isError, true);
+  const failure = result.structuredContent;
+  assert.equal(failure.status, 422);
+  assert.equal(failure.code, "display_name_unavailable");
+  assert.ok(failure.detail?.suggestion,
+    "the guard's suggested name must survive in detail, as on the HTTP door");
+});

@@ -89,6 +89,18 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
         ...(error.detail ? { detail: error.detail } : {})
       }, true);
     }
+    // Decorated plain errors (integer .status + string .code) carry the
+    // same contract the HTTP door honours — e.g. the display-name guard's
+    // 422 display_name_unavailable, whose suggestion rides in detail.
+    // Mapping them here (the failureValue precedent in
+    // server/mcp-room-profile.mjs) keeps a reserved name from surfacing
+    // as an opaque 500 (issue #3270).
+    if (Number.isInteger(error.status) && typeof error.code === 'string') {
+      return result(requestId, {
+        status: error.status, code: error.code, message: error.message,
+        ...(error.detail ? { detail: error.detail } : {})
+      }, true);
+    }
     return result(requestId, { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
   }
   // create() has already committed the identity, and `created` carries the
