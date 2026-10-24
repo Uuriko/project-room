@@ -14,6 +14,7 @@ import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mc
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
+import { classifyMcpCaller, mcpReplyOutcome } from "./analytics/mcp-telemetry.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -126,28 +127,42 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress, telemetry } = {}) {
+  // TD-0 telemetry: this layer counts only the replies it answers itself —
+  // the anonymous join surface and the no-service refusals. Anything
+  // delegated to roomMcp is counted by the hosted profile wrapper, so no
+  // call is counted twice. The sink is metadata-only and failure-proof.
+  const record = event => { try { telemetry?.(event); } catch { /* telemetry never fails a call */ } };
+  const invokedTool = typeof message?.params?.name === "string" ? message.params.name : "";
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
   if (!presented) {
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams });
+      record({ tool: invokedTool, callerClass: "anonymous", outcome: "error" });
       return mcpTransportError(-32603, "Public work requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
     }
     // Anonymous enrollment: a stranger mints its own identity secret without
     // leaving MCP. Store-backed like public work, never the pure join path.
     if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
+      record({ tool: invokedTool, callerClass: "anonymous", outcome: "error" });
       return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
     }
-    return handleMcpJoinRpc(message, { mcpUrl });
+    const reply = handleMcpJoinRpc(message, { mcpUrl });
+    if (reply && message?.method === "tools/call") record({ tool: invokedTool, callerClass: "anonymous", outcome: mcpReplyOutcome(reply) });
+    if (reply && message?.method === "tools/list") record({ kind: "list", profile: "public", callerClass: "anonymous", outcome: mcpReplyOutcome(reply) });
+    return reply;
   }
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;
     const id = object(message) && Object.hasOwn(message, "id")
       && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
       ? requestId : null;
+    const callerClass = classifyMcpCaller({ secret: authorization.replace(/^bearer /i, "") });
+    if (message?.method === "tools/call") record({ tool: invokedTool, callerClass, outcome: "error" });
+    if (message?.method === "tools/list") record({ kind: "list", callerClass, outcome: "error" });
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
   return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
@@ -243,7 +258,8 @@ export async function roomMcpFetchPost(request, options = {}) {
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
       searchParams: url.searchParams,
-      userAgent: request.headers.get("user-agent")
+      userAgent: request.headers.get("user-agent"),
+      telemetry: options.telemetry
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -258,7 +274,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, telemetry } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -305,7 +321,8 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       roomMcp,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
-      remoteAddress
+      remoteAddress,
+      telemetry
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {

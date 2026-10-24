@@ -4,6 +4,7 @@ import { isTransientWakeError, wakeRetryDelayMs } from './wake-retry.mjs';
 import { RoomAgentClient } from './room-agent.mjs';
 import { ConnectionError, connectionDiagnostic } from './agent-connection.mjs';
 import { serveRoomMcp } from './mcp-stdio.mjs';
+import { openMcpTelemetrySink, stdioCallerClass, stdioTelemetryFromEnv } from './mcp-telemetry.mjs';
 
 // Pointer only. Message bodies stay in Room until a tool read.
 export function roomEventPointer(signal, roomId) {
@@ -30,14 +31,17 @@ function reachabilityFor(signalIds, delivered, linked) {
 
 // A native host spawns this adapter; it never starts a model or a session.
 // Notifications have no processing ACK. The existing durable Room queue owns replay.
-export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, input, output, report = () => {}, fetchImpl = fetch }) {
+export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, input, output, report = () => {}, fetchImpl = fetch, telemetryPath }) {
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(hostId ?? '') || !Number.isInteger(cadenceSeconds) || cadenceSeconds < 1 || cadenceSeconds > 3600) throw new ConnectionError('invalid_config');
   const controller = new AbortController(), delivered = new Map(), linked = new Set();
   const scopedFetch = (url, options = {}) => fetchImpl(url, { ...options,
     signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal });
   const wake = new AgentWakeClient({ connection, fetchImpl: scopedFetch });
+  // TD-0: same local telemetry store as the plain stdio adapter.
+  const telemetry = openMcpTelemetrySink(telemetryPath) ?? stdioTelemetryFromEnv();
   const transport = serveRoomMcp({ client: new RoomAgentClient({ ...connection, fetchImpl: scopedFetch }),
     roomId: connection.roomId, memberId: connection.memberId, input, output,
+    telemetry: telemetry?.record, callerClass: stdioCallerClass(connection.token, process.env.ROOM_AGENT_CALLER_CLASS),
     channel: {
       noteRecordedReply(args) {
         for (const key of ['responseToRequestId', 'replyToId']) if (typeof args?.[key] === 'string') linked.add(args[key]);
