@@ -138,7 +138,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
-  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
+  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms the calling identity is a member of (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
       requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
