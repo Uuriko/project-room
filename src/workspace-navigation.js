@@ -17,6 +17,10 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
     url.hash = "#pr-view/room-list";
     if (url.href !== location.href) history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + url.hash);
     onNavigate(); sync(); onRooms();
+    // #4461: opening the Account / Switch-room view is a destination, so
+    // focus lands on the view's heading (the #conversation-title pattern)
+    // instead of staying on <body> or on the control that is now hidden.
+    if (!$("#account-rooms-panel").hidden) $("#account-rooms-title")?.focus?.({ preventScroll: true });
   }
   function showRooms() {
     const wasBrowsing = browsing;

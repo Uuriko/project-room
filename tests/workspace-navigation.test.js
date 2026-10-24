@@ -52,6 +52,38 @@ test("a failed optional setup still creates, and a rejected creation can retry",
   assert.equal(await run(), "ready"); assert.equal(attempts, 2);
 });
 
+test("opening the room list focuses the Rooms heading, not the body (#4461)", async () => {
+  const { installWorkspaceNavigation } = await import("../src/workspace-navigation.js");
+  const originals = Object.fromEntries(["document", "location", "history"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const elements = new Map(); const focused = [];
+  try {
+    globalThis.document = { querySelector(selector) {
+      if (!elements.has(selector)) elements.set(selector, { hidden: false, addEventListener() {},
+        focus() { focused.push(selector); } });
+      return elements.get(selector);
+    } };
+    globalThis.location = { href: "https://example.test/room/?room=current" };
+    globalThis.history = { pushState() {}, replaceState() {} };
+    const ui = installWorkspaceNavigation({ account: { session: { authenticated: true } },
+      getRoom: () => ({ id: "current" }), onRooms() {}, onNavigate() {} });
+    ui.showRoomList();
+    assert.equal(elements.get("#account-rooms-panel").hidden, false);
+    assert.deepEqual(focused, ["#account-rooms-title"], "Account / Switch-room view opens on its heading");
+    // A signed-out list stays hidden, and hidden content is never focused.
+    focused.length = 0;
+    const signedOut = installWorkspaceNavigation({ account: { session: null },
+      getRoom: () => null, onRooms() {}, onNavigate() {} });
+    signedOut.showRoomList();
+    assert.equal(elements.get("#account-rooms-panel").hidden, true);
+    assert.deepEqual(focused, []);
+  } finally {
+    for (const [key, descriptor] of Object.entries(originals)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
+
 test("browsing rooms consumes an old sign-in destination without losing the app base path", async () => {
   const { installWorkspaceNavigation } = await import("../src/workspace-navigation.js");
   const originals = Object.fromEntries(["document", "location", "history"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));

@@ -3308,7 +3308,7 @@ async function restoreWorkOrigin(ticket) {
     const search = origin.searchWorkId ? $(`#search-results [data-open-work="${CSS.escape(origin.searchWorkId)}"]`) : null;
     const messageWork = origin.messageId && origin.messageWorkId
       ? $(`#message-list [data-message-record-id="${CSS.escape(origin.messageId)}"] [data-open-work="${CSS.escape(origin.messageWorkId)}"]`) : null;
-    const fallback = origin.type === "board" ? $("#board-close") : $("#conversation-title");
+    const fallback = origin.type === "board" ? $("#board-title") : $("#conversation-title");
     const target = [origin.focus, keyed, search, messageWork, claim].find(usable) ?? fallback;
     target?.focus({ preventScroll: true });
     if (target === fallback) target?.scrollIntoView({ block: "nearest", behavior: "instant" });
@@ -7903,6 +7903,11 @@ const ready = (async () => {
     }
     $("#board-panel").open = true;
     board.sync();
+    // #4461: showModal() would otherwise leave initial focus on the first
+    // focusable control (#board-close); land on the board's heading so the
+    // board content, not its Close button, is where keyboard users start.
+    // Flows that reveal a specific claim focus that claim after this.
+    $("#board-title")?.focus?.({ preventScroll: true });
   };
   $("#tasks-board-open").addEventListener("click", openBoard);
   // JDOT-COH-NAV begin
