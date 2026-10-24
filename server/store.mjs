@@ -5717,6 +5717,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           createdAt: record.createdAt,
         }));
       const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      // A delivery cursor is not an acknowledgement. Keep bounded standing
+      // attention visible when a poll advances beyond an unanswered mention.
+      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now());
+      const attention = Object.freeze({
+        pendingMentions: pending.slice(0, limit).map(({ sequence, replyToId, from, state, private: isPrivate }) =>
+          Object.freeze({ sequence, replyToId, from, state, private: isPrivate })),
+        hasMore: pending.length > limit,
+        acknowledges: false,
+        nextRead: pending.length ? { tool: "room_read_inbox", arguments: { limit, after: 0 } } : null,
+      });
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -5738,6 +5748,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         assignments,
         mentions,
         directMentions,
+        attention,
         bondProposals,
         peerMessages,
         cursor: { after: cursorAfter },
@@ -5791,7 +5802,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const row of batch) {
           const logged = JSON.parse(row.body);
           const current = currentById.get(logged.data?.messageId ?? row.eventId);
-          if (current?.deletedAt) continue;
+          if (current?.deletedAt || logged?.type !== T.MESSAGE_POSTED) continue;
+          if (logged.data?.toMemberId && logged.data.toMemberId !== memberId && logged.actorId !== memberId) continue;
+          // Filter before consuming page slots: otherwise newer expired rows
+          // answered late can hide an older unresolved mention indefinitely.
+          if (row.state === "timed_out" && currentById.hasReply(memberId, logged.data.messageId ?? row.eventId)) continue;
           if (rows.length < limit) rows.push(row);
         }
         if (batch.length < want) break;
