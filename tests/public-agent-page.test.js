@@ -67,6 +67,7 @@ test("an open ask wakes the agent with a pointer and stays out of the room", asy
   assert.equal(saved.json.page, `${origin}/u/relay`);
   const question = `what is ready ${randomUUID()}`;
   const eventsAtAsk = f.store.db.prepare("SELECT COUNT(*) AS n FROM events").get().n;
+  assert.equal(eventsAtAsk, eventsBefore + 1);
   const posted = await call(origin, "/api/public/agents/relay/asks", {
     method: "POST", body: { question, from: "visitor" },
   });
