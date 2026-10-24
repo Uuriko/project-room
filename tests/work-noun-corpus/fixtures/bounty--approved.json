@@ -1,0 +1,95 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "bounty/approved",
+  "machine": "bounty",
+  "legacyState": "approved",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-escrow.mjs _viewBounty/_saveBounty",
+      "tests/bounty-escrow.test.js"
+    ],
+    "census": "prod-census.json: bounties observed live in paid/refunded/accepted/submitted/cancelled",
+    "volatileExcluded": [
+      "timeInStateMs (read-computed from now)"
+    ],
+    "pins": "resolution is null and challengeEnds is past: verdict recorded, payout not yet swept — the settlement-queue position §2.3 maps to accepted + settlement pending-sweep"
+  },
+  "legacy": {
+    "bountyId": "bty_u1_approved",
+    "roomId": "room-u1-corpus",
+    "title": "Map the legacy work nouns",
+    "criteria": "Every legacy state has a unified home",
+    "amount": 5,
+    "amountMillis": 5000,
+    "poster": "member-poster",
+    "verifier": "member-verifier",
+    "claimant": "member-claimant",
+    "disputeDecider": "member-decider",
+    "approvalMode": "human",
+    "state": "approved",
+    "group": "in-review",
+    "deadline": "2025-10-25T00:00:00.000Z",
+    "deadlineMs": 1761350400000,
+    "challengeEnds": "2025-10-17T00:00:00.000Z",
+    "challengeEndsMs": 1760659200000,
+    "snoozedUntil": null,
+    "snoozedUntilMs": null,
+    "declineReason": null,
+    "duplicateOf": null,
+    "label": null,
+    "disputeId": null,
+    "disputeOpenedMs": null,
+    "evidence": {
+      "summary": "Delivered the corpus draft",
+      "submittedBy": "member-claimant"
+    },
+    "attestation": {
+      "verifier": "member-verifier",
+      "acceptedAt": "2025-10-18T01:00:00.000Z"
+    },
+    "resolution": null,
+    "rubric": {
+      "version": 1,
+      "hash": "sha256:u1corpus",
+      "criteria": [
+        "Every legacy state has a unified home"
+      ]
+    },
+    "submissionHash": "sha256:u1delivery",
+    "watchers": [],
+    "createdAt": 1760745600000,
+    "updatedAt": 1760745600000,
+    "stateChangedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "rest": {
+      "surface": "GET /rooms/{roomId}/bounties/{bountyId} -> _viewBounty",
+      "statePath": "state",
+      "state": "approved",
+      "excerpt": {
+        "state": "approved",
+        "group": "in-review",
+        "claimant": null,
+        "disputeId": null
+      }
+    },
+    "mcp-full": {
+      "surface": "bounty read tool (MCP full profile) -> _viewBounty",
+      "statePath": "state",
+      "state": "approved",
+      "excerpt": {
+        "state": "approved",
+        "group": "in-review",
+        "claimant": null,
+        "disputeId": null
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "accepted",
+    "attributes": {
+      "settlement": "pending-sweep"
+    }
+  }
+}
