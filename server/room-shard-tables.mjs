@@ -229,6 +229,18 @@ export const DIRECTORY_TABLES = Object.freeze([
   "work_item_board_divergence",
 ]);
 
+// Tables a room restore is willing to load. Directory and skipped names are
+// omitted so replay's existing "store does not have this table" check
+// refuses them. The tables stay in the file: room triggers still reference
+// them, and dropping them makes a room-table delete fail.
+export function roomTablesPresent(db) {
+  const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()
+    .map(row => row.name);
+  const kept = new Set();
+  for (const name of names) if (tableHome(name) === "room") kept.add(name);
+  return kept;
+}
+
 const directory = new Set(DIRECTORY_TABLES);
 const skipped = new Set(REPLAY_SKIPPED_TABLES);
 

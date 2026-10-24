@@ -4,7 +4,8 @@
 // does, and only when the caller asks.
 import { createHash } from "node:crypto";
 import { perRoomObjectsEnabled } from "./room-shard-flag.mjs";
-import { ROOM_TABLE_KEYS, roomKeyColumn } from "./room-shard-tables.mjs";
+import { BACKUP_SANITIZE_POLICY, createTableDigests, replayNdjson, sanitizeCell } from "./room-export.mjs";
+import { ROOM_TABLE_KEYS, roomKeyColumn, roomTablesPresent } from "./room-shard-tables.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const FIRST = ["rooms", "events", "commands"];
@@ -97,4 +98,56 @@ export function compareRoomHomes(pilot, shard, roomId) {
     && left.messages === right.messages
     && left.projectionBytes === right.projectionBytes;
   return { same, pilot: left, shard: right };
+}
+
+function sanitizeRow(table, row) {
+  const out = {};
+  for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(table, column, value);
+  return out;
+}
+
+// One room's room-tables as NDJSON. The watermark and trailer count that
+// room's events only, so replayNdjson can load the slice into an empty file.
+export function exportRoomNdjson(storeOrDb, roomId) {
+  assertRoomId(roomId);
+  const db = dbOf(storeOrDb);
+  const room = db.prepare("SELECT id, sequence FROM rooms WHERE id = ?").get(roomId);
+  if (!room) throw new Error("Room is not on the pilot");
+  const lines = [JSON.stringify({
+    kind: "watermark", version: 1, sanitizePolicy: BACKUP_SANITIZE_POLICY,
+    backedUpAt: Date.now(), rooms: [room],
+    events: db.prepare("SELECT count(*) AS n FROM events WHERE room_id = ?").get(roomId).n,
+  }) + "\n"];
+  const digests = createTableDigests();
+  for (const table of roomCopyOrder()) {
+    const key = roomKeyColumn(table);
+    const columns = columnsOf(db, table);
+    const quoted = columns.map(quoteIdent).join(", ");
+    const rows = db.prepare(`SELECT ${quoted} FROM ${quoteIdent(table)} WHERE ${quoteIdent(key)} = ?`).all(roomId);
+    for (const row of rows) {
+      const sanitized = sanitizeRow(table, row);
+      digests.add(table, sanitized);
+      lines.push(JSON.stringify({ table, row: sanitized }) + "\n");
+    }
+  }
+  const hash = createHash("sha256");
+  for (const row of db.prepare("SELECT room_id, sequence, id FROM events WHERE room_id = ? ORDER BY room_id, sequence").all(roomId)) {
+    hash.update(`${sanitizeCell("events", "room_id", row.room_id)}\t${sanitizeCell("events", "sequence", row.sequence)}\t${sanitizeCell("events", "id", row.id)}\n`);
+  }
+  const tables = digests.finish();
+  const trailer = { kind: "trailer", version: 1, events: db.prepare("SELECT count(*) AS n FROM events WHERE room_id = ?").get(roomId).n, eventsHash: hash.digest("hex") };
+  if (Object.keys(tables).length) {
+    trailer.version = 2;
+    trailer.tables = tables;
+  }
+  lines.push(JSON.stringify(trailer) + "\n");
+  return lines.join("");
+}
+
+// Replay a room slice. Directory tables and unknown tables fail with the
+// same error a pilot restore uses for a table the store does not have.
+// The file keeps the full schema so existing triggers still run; directory
+// rows from the export are not loaded.
+export function restoreRoomNdjson(ndjson, filename) {
+  return replayNdjson(ndjson, filename, { audit: "strict", retainTables: roomTablesPresent });
 }
