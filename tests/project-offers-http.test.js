@@ -109,6 +109,7 @@ test('held owner upload cannot create after the actual credential is revoked', {
 
 test('lost committed publish response retries the same intent and preserves one publication', async t => {
   const { call, store } = await fixture(t); const input = offerInput('lost-response');
+  input.terms.reward = { kind: 'work_trade', unit: 'credit', amountMinor: '1000' }; // cash offers are not listed publicly
   await json(await call(privatePath, input), 201);
   const intent = { requestId: 'stable-publish', expectedRevision: 1 };
   await assert.rejects(async () => { const response = await call(`${privatePath}/${input.offerId}/publish`, intent); await json(response); throw new TypeError('Synthetic response lost after real commit'); }, TypeError);

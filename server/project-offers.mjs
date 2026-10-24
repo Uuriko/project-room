@@ -183,9 +183,12 @@ export class ProjectOffers {
     const size = Number(limit);
     check(Number.isInteger(size) && size > 0 && size <= 100, 'limit must be 1 through 100');
     if (after != null) identifier(after);
+    // Cash-reward offers stay off the public list until cash payout is
+    // configured (owner decision 2026-10-20); credit and unpaid offers list.
     // The unpublish predicate sits in the query (the HIDDEN_RECEIPT form used
     // by public-read-model) so a taken-down room's offers never consume a page slot.
     const rows = this.db.prepare(`SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.status='published' AND r.archived_at IS NULL AND o.offer_id>?
+      AND json_extract(o.terms, '$.reward.kind') IS NOT 'cash'
       AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id) ORDER BY o.offer_id LIMIT ?`).all(after ?? '', size + 1);
     return { offers: rows.slice(0, size).map(row => this.record(row)), nextCursor: rows.length > size ? rows[size - 1].offer_id : null };
   }
