@@ -11774,10 +11774,18 @@ paths:
         X-Session-Binding), the same auth funnel as GET /api/account-rooms.
         Fans out over the rooms the account belongs to (50 per page, `after`
         continuation) and merges the per-room #662 attention items plus open
-        bounty disputes into one Decisions queue, sorted oldest/risk first
-        (overdue, then time-to-consequence, then money at stake, then age),
-        each item carrying its roomId, age and a consequence-of-inaction
-        line. Rooms where the viewer is a manage_members admin but not the
+        bounty disputes and the poster-owned bounty money decisions —
+        bounty_review (work submitted, awaiting the poster's accept or
+        reject) and bounty_challenge (accepted work inside its challenge
+        window, carrying consequenceAtMs = the window's end, when the
+        keeper auto-approves and pays) — into one Decisions queue. Sort:
+        items with a deadline first (overdue, then time-to-consequence),
+        then stale-locked items (deadline-less escrow-locked kinds waiting
+        7+ days, flagged staleLocked, oldest first), then fresh
+        deadline-less items; money at stake, then age, breaks ties within
+        a tier. Each item carries its roomId, age, its money at stake in
+        its own currency field (amountCents XOR amountMillis) and a
+        consequence-of-inaction line. Rooms where the viewer is a manage_members admin but not the
         owner contribute only their access_request items. Exceptions carry
         deployment job health, budget stops, stale claims, disputes nearing
         default, lapsed-undecided counts and per-room read failures. A room

@@ -7,6 +7,14 @@
 // pattern, calls the existing per-room readers, and merges Decisions
 // (#662 kinds plus open disputes) and Exceptions into one document.
 //
+// INBOX-MONEY-1 (fig-06 §6): the Decisions queue also carries the two
+// bounty money decisions the poster owns — bounty_review (submitted,
+// awaiting accept/reject) and bounty_challenge (accepted, inside the
+// challenge window the keeper auto-approves at the end of) — read from
+// bounty_records exactly as disputes are, plus the fig-06 §3.3 sort
+// amendment (staleLocked promotion for deadline-less escrow-locked
+// items). Read model only: no new tables, endpoints or write paths.
+//
 // Contract rules carried from the spec:
 // - Partial failure is surfaced, never hidden: a room whose read throws
 //   lands in roomErrors[] and as an Exceptions stub; the response never
@@ -43,6 +51,12 @@ const DISPUTE_NEAR_DEFAULT_MS = 48 * 3600 * 1000;
 // Stale-claim severity ladder (spec §6): warn at claimIdle's 2h, critical
 // at 24h untouched.
 const STALE_CLAIM_CRITICAL_MS = 24 * 3600 * 1000;
+// fig-06 §3.3 staleness promotion: an escrow-locked decision kind with no
+// deadline of its own that has waited this long is promoted above fresh
+// deadline-less items (still below every item whose money moves by
+// itself at a deadline).
+const STALE_LOCKED_MS = 7 * 24 * 3600 * 1000;
+const LOCKED_KINDS = new Set(["verification", "decision", "board_review", "bounty_review", "spend"]);
 const SEVERITY_RANK = Object.freeze({ critical: 3, warn: 2, info: 1 });
 const TERMINAL_CLAIM_STATES = new Set(["done", "closed"]);
 
@@ -62,6 +76,8 @@ const CONSEQUENCE = Object.freeze({
   verification: "Settlement stays locked in escrow and the worker stays unpaid until this is verified",
   decision: "Settlement stays locked in escrow and the worker stays unpaid until you decide",
   spend: "At zero headroom, new session starts are refused",
+  bounty_review: "Escrow stays locked and the claimant stays unpaid until you accept or reject",
+  bounty_challenge: "At the window's end this auto-approves and pays unless disputed",
 });
 
 function reviewBountiesAction(roomId) {
@@ -177,6 +193,7 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     }
 
     collectDisputes(store, roomId, base, nowMs, decisions, exceptions);
+    collectBounties(store, roomId, base, nowMs, decisions);
     collectRoomExceptions(store, roomId, base, state, nowMs, windowStart, exceptions);
     roomsIncluded++;
     ownerRoomsIncluded++;
@@ -237,14 +254,20 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
 // the #662 item plus room provenance and these derived fields.
 function enrichDecision(item, base, facts, nowMs) {
   const createdAtMs = facts.createdAtMs ?? null;
+  const ageMs = createdAtMs === null ? null : Math.max(0, nowMs - createdAtMs);
+  const consequenceAtMs = facts.consequenceAtMs ?? null;
   return Object.freeze({
     ...item,
     ...base,
     createdAtMs,
-    ageMs: createdAtMs === null ? null : Math.max(0, nowMs - createdAtMs),
+    ageMs,
     consequence: facts.consequence ?? null,
-    consequenceAtMs: facts.consequenceAtMs ?? null,
-    timeToConsequenceMs: facts.consequenceAtMs == null ? null : facts.consequenceAtMs - nowMs,
+    consequenceAtMs,
+    timeToConsequenceMs: consequenceAtMs === null ? null : consequenceAtMs - nowMs,
+    // fig-06 §3.3: a deadline-less escrow-locked item waiting 7+ days is
+    // stale-locked; decisionOrder promotes it above fresh peers.
+    staleLocked: consequenceAtMs === null && LOCKED_KINDS.has(item.kind)
+      && ageMs !== null && ageMs >= STALE_LOCKED_MS,
     ...(facts.amountMillis != null ? { amountMillis: facts.amountMillis } : {}),
     ...(facts.amountCents != null ? { amountCents: facts.amountCents } : {}),
     ...(facts.bountyId ? { bountyId: facts.bountyId } : {}),
@@ -280,21 +303,30 @@ function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
   return { createdAtMs: workItem ? ms(workItem.createdAt) : null, consequenceAtMs: null, consequence: null };
 }
 
-// §4.2 ordering: overdue first, then nearest consequence, then money at
-// stake descending, then oldest first. Money comparison reads whichever
-// single currency field the item carries — the fields themselves stay
-// disjoint; only the sort key is shared, exactly as the spec's key 3
-// defines it (dispute millis, then budget cents).
+// §4.2 ordering as amended by fig-06 §3.3 (INBOX-MONEY-1), in tiers:
+// (1) items whose money moves by itself at a deadline — overdue first,
+// then nearest consequence; (2) stale-locked items (deadline-less,
+// escrow-locked, waiting 7+ days) — oldest first; (3) fresh deadline-less
+// items. Money at stake descending, then oldest first, breaks ties
+// within a tier. Money comparison reads whichever single currency field
+// the item carries — the fields themselves stay disjoint; only the sort
+// key is shared, exactly as the spec's key 3 defines it (dispute millis,
+// then budget cents).
+function decisionTier(item) {
+  if (item.consequenceAtMs !== null && item.consequenceAtMs !== undefined) return 0;
+  return item.staleLocked ? 1 : 2;
+}
+
 function decisionOrder(a, b) {
-  const overdueA = a.consequenceAtMs !== null && a.timeToConsequenceMs <= 0 ? 0 : 1;
-  const overdueB = b.consequenceAtMs !== null && b.timeToConsequenceMs <= 0 ? 0 : 1;
-  if (overdueA !== overdueB) return overdueA - overdueB;
-  const ttcA = a.timeToConsequenceMs, ttcB = b.timeToConsequenceMs;
-  if (ttcA !== ttcB) {
-    if (ttcA === null) return 1;
-    if (ttcB === null) return -1;
-    return ttcA - ttcB;
+  const tierA = decisionTier(a), tierB = decisionTier(b);
+  if (tierA !== tierB) return tierA - tierB;
+  if (tierA === 0) {
+    const overdueA = a.timeToConsequenceMs <= 0 ? 0 : 1;
+    const overdueB = b.timeToConsequenceMs <= 0 ? 0 : 1;
+    if (overdueA !== overdueB) return overdueA - overdueB;
+    if (a.timeToConsequenceMs !== b.timeToConsequenceMs) return a.timeToConsequenceMs - b.timeToConsequenceMs;
   }
+  if (tierA === 1 && a.ageMs !== b.ageMs) return (b.ageMs ?? 0) - (a.ageMs ?? 0);
   const moneyA = a.amountMillis ?? a.amountCents ?? 0;
   const moneyB = b.amountMillis ?? b.amountCents ?? 0;
   if (moneyA !== moneyB) return moneyB - moneyA;
@@ -361,6 +393,61 @@ function collectDisputes(store, roomId, base, nowMs, decisions, exceptions) {
         evaluatedThrough: base.evaluatedThrough,
       }));
     }
+  }
+}
+
+// Bounty money decisions (INBOX-MONEY-1, fig-06 §3.1): the two points
+// in the bounty lifecycle where the next move is the poster's and, until
+// this slice, no inbox item existed — work submitted and awaiting the
+// poster's accept/reject, and accepted work inside its challenge window
+// (at challengeEndsMs the keeper auto-approves and pays). Open-rows-only
+// reads, bounded exactly like openDisputes; no write path.
+function openBountyDecisions(store, roomId) {
+  if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounty_records'").get()) {
+    return { reviews: [], challenges: [] };
+  }
+  const reviews = store.db.prepare(
+    "SELECT bounty_id, title, amount_millis, state_changed_ms FROM bounty_records WHERE room_id=? AND state='submitted'"
+  ).all(roomId).map(row => ({
+    bountyId: row.bounty_id, title: row.title,
+    amountMillis: row.amount_millis, changedMs: row.state_changed_ms,
+  }));
+  const challenges = store.db.prepare(
+    "SELECT bounty_id, title, amount_millis, state_changed_ms, challenge_ends_ms FROM bounty_records WHERE room_id=? AND state='accepted' AND challenge_ends_ms IS NOT NULL"
+  ).all(roomId).map(row => ({
+    bountyId: row.bounty_id, title: row.title, amountMillis: row.amount_millis,
+    changedMs: row.state_changed_ms, challengeEndsMs: row.challenge_ends_ms,
+  }));
+  return { reviews, challenges };
+}
+
+function collectBounties(store, roomId, base, nowMs, decisions) {
+  const { reviews, challenges } = openBountyDecisions(store, roomId);
+  for (const bounty of reviews) {
+    decisions.push(enrichDecision(Object.freeze({
+      kind: "bounty_review",
+      id: bounty.bountyId,
+      severity: "action",
+      title: bounty.title,
+      detail: `${bounty.amountMillis} milli-credits in escrow on bounty ${bounty.bountyId} — work is submitted and waiting for your accept or reject`,
+      actions: reviewBountiesAction(roomId),
+    }), base, {
+      createdAtMs: bounty.changedMs, consequenceAtMs: null, consequence: CONSEQUENCE.bounty_review,
+      amountMillis: bounty.amountMillis, bountyId: bounty.bountyId,
+    }, nowMs));
+  }
+  for (const bounty of challenges) {
+    decisions.push(enrichDecision(Object.freeze({
+      kind: "bounty_challenge",
+      id: bounty.bountyId,
+      severity: "action",
+      title: bounty.title,
+      detail: `${bounty.amountMillis} milli-credits on bounty ${bounty.bountyId} — accepted work you can still dispute before the window closes`,
+      actions: reviewBountiesAction(roomId),
+    }), base, {
+      createdAtMs: bounty.changedMs, consequenceAtMs: bounty.challengeEndsMs, consequence: CONSEQUENCE.bounty_challenge,
+      amountMillis: bounty.amountMillis, bountyId: bounty.bountyId,
+    }, nowMs));
   }
 }
 

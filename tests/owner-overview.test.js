@@ -100,6 +100,15 @@ function seedDispute(f, roomId, { bountyId, disputeId, title, amountMillis, open
       evidence: [], decider: null, escalations: [], recordedCost: 0, forfeitedBond: 0, resolution: null, unavailable: null }), nowIso);
 }
 
+function seedBounty(f, roomId, { bountyId, title, amountMillis, state, changedMs, challengeEndsMs = null }) {
+  const nowIso = new Date().toISOString();
+  f.store.db.prepare(`INSERT INTO bounty_records (bounty_id, room_id, title, criteria, amount_millis, poster, state,
+    state_changed_ms, deadline_ms, challenge_ends_ms, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(bountyId, roomId, title, "Ship it", amountMillis, "owner", state, changedMs, changedMs + 30 * DAY,
+      challengeEndsMs, nowIso, nowIso);
+}
+
 async function getOverview(f, headers, query = "") {
   const response = await fetch(`${f.origin}/api/owner/overview${query}`, { headers });
   return { status: response.status, body: await response.json() };
@@ -154,6 +163,8 @@ test("2: non-owner account is refused; a manage_members admin sees only access r
   seedRequest(f, "room-a", { requestId: "ar-a", displayName: "Joiner" });
   seedDispute(f, "room-a", { bountyId: "bnty-a", disputeId: "disp-a", title: "Secret dispute",
     amountMillis: 9000, openedMs: Date.now() - DAY });
+  seedBounty(f, "room-a", { bountyId: "bnty-hidden", title: "Secret submission", amountMillis: 3000,
+    state: "submitted", changedMs: Date.now() - DAY });
   f.send(f.keys.a, "room-a", T.MEMBER_ADDED, { memberId: "member", displayName: "Plain", kind: "human", permissions: [] });
   f.send(f.keys.a, "room-a", T.MEMBER_ADDED, { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] });
   f.store.createAccount("member-account"); f.store.bindHumanAccount("room-a", "member", "member-account");
@@ -303,6 +314,87 @@ test("exceptions: failing jobs grade by consecutive failures; stale claims warn 
   assert.deepEqual(stale, { "claim-warn": "warn", "claim-critical": "critical" });
   // Severity order: criticals lead the feed.
   assert.equal(doc.exceptions.items[0].severity, "critical");
+});
+
+test("INBOX-MONEY-1: submitted + in-window accepted bounties are typed, money-carrying decision items", async t => {
+  const f = await setup(t, { serve: true });
+  const now = Date.now();
+  seedBounty(f, "room-a", { bountyId: "bnty-sub", title: "Submitted build", amountMillis: 4200,
+    state: "submitted", changedMs: now - 2 * DAY });
+  seedBounty(f, "room-a", { bountyId: "bnty-win", title: "Accepted build", amountMillis: 6600,
+    state: "accepted", changedMs: now - 2 * DAY, challengeEndsMs: now + DAY });
+  seedBounty(f, "room-a", { bountyId: "bnty-prop", title: "Unfunded idea", amountMillis: 1000,
+    state: "proposed", changedMs: now - DAY });
+  seedBounty(f, "room-a", { bountyId: "bnty-fund", title: "Funded, unclaimed", amountMillis: 1000,
+    state: "funded", changedMs: now - DAY });
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.decisions.total, 2, "only the two poster-owned states appear");
+  const [challenge, review] = body.decisions.items;
+  // The challenge item has a deadline, so it leads the deadline-less review.
+  assert.equal(challenge.kind, "bounty_challenge");
+  assert.equal(challenge.id, "bnty-win");
+  assert.equal(challenge.bountyId, "bnty-win");
+  assert.equal(challenge.amountMillis, 6600);
+  assert.equal("amountCents" in challenge, false);
+  assert.equal(challenge.consequenceAtMs, now + DAY);
+  assert.ok(Math.abs(challenge.timeToConsequenceMs - DAY) < 60_000);
+  assert.match(challenge.consequence, /auto-approves and pays unless disputed/);
+  assert.equal(challenge.staleLocked, false);
+  assert.equal(challenge.actions[0].path, "/api/rooms/room-a/bounties");
+
+  assert.equal(review.kind, "bounty_review");
+  assert.equal(review.id, "bnty-sub");
+  assert.equal(review.bountyId, "bnty-sub");
+  assert.equal(review.amountMillis, 4200);
+  assert.equal(review.consequenceAtMs, null);
+  assert.equal(review.timeToConsequenceMs, null);
+  assert.match(review.consequence, /stays unpaid until you accept or reject/);
+  assert.ok(Math.abs(review.ageMs - 2 * DAY) < 60_000, "age runs from the submission (state_changed_ms)");
+  assert.equal(review.staleLocked, false);
+  assert.equal(review.actions[0].path, "/api/rooms/room-a/bounties");
+  assert.equal(body.decisions.overdue, 0);
+});
+
+test("INBOX-MONEY-1: a challenge window that has closed un-acted is overdue and leads the queue", async t => {
+  const f = await setup(t, { serve: true });
+  const now = Date.now();
+  seedBounty(f, "room-a", { bountyId: "bnty-late", title: "Window closed", amountMillis: 2000,
+    state: "accepted", changedMs: now - 4 * DAY, challengeEndsMs: now - 3600 * 1000 });
+  seedRequest(f, "room-a", { requestId: "ar-a", displayName: "Joiner" });
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.decisions.items[0].kind, "bounty_challenge");
+  assert.ok(body.decisions.items[0].timeToConsequenceMs < 0);
+  assert.equal(body.decisions.overdue, 1);
+});
+
+test("INBOX-MONEY-1 sort: a stale-locked item is promoted above fresh deadline-less items, below deadline items", async t => {
+  const f = await setup(t, { serve: true });
+  const now = Date.now();
+  seedVerificationWork(f, "room-a");
+  seedBounty(f, "room-a", { bountyId: "bnty-stale", title: "Stale submission", amountMillis: 100,
+    state: "submitted", changedMs: now - 8 * DAY });
+  seedBounty(f, "room-a", { bountyId: "bnty-fresh", title: "Fresh submission", amountMillis: 9000,
+    state: "submitted", changedMs: now - 3600 * 1000 });
+  seedBounty(f, "room-a", { bountyId: "bnty-window", title: "Window closing", amountMillis: 50,
+    state: "accepted", changedMs: now - DAY, challengeEndsMs: now + 2 * 3600 * 1000 });
+
+  const { status, body } = await getOverview(f, f.owner.headers);
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.deepEqual(body.decisions.items.map(item => item.kind), [
+    "bounty_challenge", "bounty_review", "bounty_review", "verification",
+  ]);
+  assert.deepEqual(body.decisions.items.map(item => item.bountyId ?? null), [
+    "bnty-window", "bnty-stale", "bnty-fresh", null,
+  ]);
+  const stale = body.decisions.items.find(item => item.id === "bnty-stale");
+  assert.equal(stale.staleLocked, true);
+  const fresh = body.decisions.items.find(item => item.id === "bnty-fresh");
+  assert.equal(fresh.staleLocked, false, "money alone does not promote a fresh item");
+  const verification = body.decisions.items.find(item => item.kind === "verification");
+  assert.equal(verification.staleLocked, false);
 });
 
 test("window parameter is validated", async t => {
