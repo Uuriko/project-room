@@ -60,6 +60,7 @@ export async function putOwnWantsWork(ctx) {
 
 export function deleteOwnWantsWork(ctx) {
   const { roomId, auth } = context(ctx, true);
+  refuseArchived(ctx, roomId);
   return ctx.json(ctx.res, 200, body(roomId, auth.member.id, clearWantsWork(ctx.store.db, roomId, auth.member.id)));
 }
 

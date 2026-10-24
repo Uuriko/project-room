@@ -10,6 +10,7 @@
 // a light rate limit so heartbeat spam cannot become a cheap presence oracle.
 
 import { recordBeat, typingBeats, TYPING_TTL_MS } from "../typing.mjs";
+import { refuseArchivedWrite } from "../room-lifecycle.mjs";
 
 export async function postTypingBeat(ctx) {
   const roomId = ctx.params.roomId;
@@ -17,6 +18,9 @@ export async function postTypingBeat(ctx) {
   const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
   const auth = ctx.roomAuth(selected, roomId, fence);
   if (!auth?.member?.id) ctx.reject(401, "unauthenticated", "Room membership required");
+  let state = null;
+  try { state = ctx.store?.room?.(roomId)?.state ?? null; } catch { state = null; }
+  refuseArchivedWrite(state);
   // Instinct-3 review of #1545 (muse-room 3509): a typing beat is a room
   // write, so it takes the same write chain as roomContext(ctx, true) in
   // member-permissions.mjs: no bearer account sessions,
