@@ -190,6 +190,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
+  paths.add('server/door-funnel.mjs'); paths.add('server/routes/door-funnel.mjs'); // DOOR-FUNNEL-READ: public door funnel aggregates (imported by server/routes/table.mjs)
   paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
