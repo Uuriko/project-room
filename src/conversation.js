@@ -457,6 +457,41 @@ export class ConversationDrafts {
   hasText() { return [...this.entries.values()].some(draft => draft.body.trim()); }
 }
 
+// A plain send whose response was lost keeps its pending command so an
+// unchanged retry reuses that command id (the server answers with a
+// duplicate receipt). Reconcile only when the author has since changed the
+// draft — body, recipient, reply target, or a file that is not committed to
+// the landed message — and state already contains that message. The changed
+// text stays, the landed pending is detached, and the stale retry error is
+// dropped, so the next send is a new message rather than a near-duplicate
+// of the one already in the room. Unchanged pendings, request-mode pendings
+// (the composer is locked to that exact retry), and pendings with no landed
+// message are left alone. `retain` skips a command whose response or a later
+// confirmation is still in flight, so this cannot take the pending away
+// from that confirmation. Returns one entry per reconciled draft.
+export function reconcileLandedDrafts(drafts, messages, { retain = null } = {}) {
+  const landed = new Map();
+  for (const message of messages ?? []) if (message?.id) landed.set(message.id, message);
+  const reconciled = [];
+  for (const [key, draft] of [...drafts.entries]) {
+    const command = draft.pending?.command;
+    if (!command || command.type !== "message.posted" || draft.mode) continue;
+    if (retain?.(command)) continue;
+    const message = landed.get(command.data?.messageId) ?? landed.get(command.id);
+    if (!message) continue;
+    const files = (draft.files ?? []).filter(file => file.commitMessageId !== message.id);
+    const unchanged = draft.body.trim() === command.data.body
+      && (draft.toMemberId || null) === (command.data.toMemberId || null)
+      && draft.replyToId === command.data.replyToId && !files.length;
+    if (unchanged) continue;
+    drafts.save(key, { pending: null, error: "", files,
+      ...(draft.assistantDraft?.runId === message.id && Number.isSafeInteger(message.revision)
+        ? { assistantDraft: { ...draft.assistantDraft, expectedRevision: message.revision } } : {}) });
+    reconciled.push({ key, command, message, cleared: false });
+  }
+  return reconciled;
+}
+
 // Restore only into the same authenticated account, membership and browser session.
 // Room IDs already identify the pilot's room namespace; there is no separate tenant model.
 export function draftRecoveryScope(identity) {
