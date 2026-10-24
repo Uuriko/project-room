@@ -11,7 +11,6 @@ const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
   // NEW modules here. (agent-key-registry.mjs left the list with IR-1:
   // tests/restore-reconcile-coverage.test.js imports it.)
-  "inbox-collab-routes.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
@@ -21,7 +20,6 @@ const GRANDFATHERED = [
   // the gate and are covered via HTTP-boundary tests; recording them here
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
-  "request-runs.mjs"
 ];
 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
