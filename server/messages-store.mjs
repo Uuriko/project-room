@@ -628,8 +628,11 @@ function clearBlock(store, roomId) {
 // re-diagnosis through the same diagnoseBlock path. A clean replay clears
 // the park and the room rejoins this call's sweep; a still-failing log
 // keeps its park, with only the attempt stamp moving when the diagnosis is
-// unchanged. Periodic attempts honor the caller's deadline; head-moved
-// diagnoses keep their existing unconditional pass.
+// unchanged. Both paths honor the caller's deadline: a diagnosis that
+// would start after it is deferred to a later call instead — a deferred
+// head-moved room still differs from its recorded head on the next call,
+// so the deferral loses nothing. Periodic attempts are additionally
+// capped at BLOCK_REDIAGNOSIS_PER_CALL per call.
 function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity } = {}) {
   const rows = store.db.prepare(
     "SELECT room_id, sequence, event_id, error, head_seq, last_diagnosed_at FROM messages_backfill_blocks ORDER BY room_id"
@@ -639,6 +642,7 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
     if (head !== row.head_seq) {
+      if (Date.now() > deadline) break;
       const block = rediagnoseBlock(store.db, row.room_id, row.sequence);
       if (!block) clearBlock(store, row.room_id);
       else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);

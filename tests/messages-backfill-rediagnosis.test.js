@@ -264,3 +264,83 @@ test("the cadence interval is a bounded, nonzero constant", () => {
   assert.ok(MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS >= 60 * 60 * 1000, "at least an hour: a poisoned room's replay is not cheap");
   assert.ok(MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS <= 24 * 60 * 60 * 1000, "at most a day: a repaired room clears the same day");
 });
+
+// Issue #3904 (residual): the periodic path honored the caller's deadline
+// but head-moved re-diagnoses ran unconditionally — one tick with many
+// head-moved parks could replay every one of them past its budget. The
+// head-moved branch now checks the same deadline before each diagnosis
+// and defers the rest: a deferred room's head still differs from its
+// recorded head on the next call, so nothing is lost by deferring.
+
+// Append events directly to the stored log and move the room's head, the
+// way live writes the backfill has not replayed yet would land.
+function appendRaw(store, roomId, events) {
+  const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+  const insert = store.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+  events.forEach((entry, index) => insert.run(roomId, head + index + 1, entry.id, JSON.stringify(entry)));
+  store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(head + events.length, roomId);
+  return head + 1;
+}
+
+// A parked room whose re-diagnosis is a full-log replay: a long clean log
+// with the poison at the end, parked, with the resume cursor dropped so
+// diagnoseFromCursor has no snapshot and the fallback replay runs. One
+// such replay costs far more than the test deadline below, which is what
+// makes the deadline observable deterministically.
+function longParkedRoom(store, roomId, bulkCount) {
+  store.initialize([
+    ...initialRoom(roomId),
+    messageEvent(roomId, `ev-seed-${roomId}`, T.MESSAGE_POSTED, { messageId: "seed", body: "seed" }, 10)
+  ]);
+  store.backfillMessages({ limit: 1000 });
+  appendRaw(store, roomId, Array.from({ length: bulkCount }, (_, index) =>
+    messageEvent(roomId, `ev-bulk-${roomId}-${index}`, T.MESSAGE_POSTED, { messageId: `bulk-${index}`, body: `bulk ${index}` }, 20 + index)));
+  const poisonSeq = appendRaw(store, roomId, [
+    messageEvent(roomId, `ev-poison-${roomId}`, T.MESSAGE_POSTED, { messageId: "poison", body: "poison" }, 20 + bulkCount),
+    messageEvent(roomId, `ev-tail-${roomId}`, T.MESSAGE_POSTED, { messageId: "tail", body: "tail" }, 21 + bulkCount)
+  ]);
+  const poisonRow = store.db.prepare("SELECT body FROM events WHERE id=?").get(`ev-poison-${roomId}`);
+  const poisonBody = JSON.parse(poisonRow.body);
+  poisonBody.data.messageId = "bad id@x";
+  store.db.prepare("UPDATE events SET body=? WHERE id=?").run(JSON.stringify(poisonBody), `ev-poison-${roomId}`);
+  const parked = store.backfillMessages({ limit: 1000 });
+  assert.equal(parked.blocked.find(block => block.roomId === roomId)?.sequence, poisonSeq,
+    "fixture guard: the long room parks at its poison");
+  store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+  return poisonSeq;
+}
+
+test("head-moved re-diagnoses honor the caller's deadline and defer the rest", t => {
+  const store = open(t);
+  longParkedRoom(store, "aaa", 900);
+  poisonedRoom(store, "bbb", "-b");
+  store.backfillMessages({ limit: 1000 });
+  assert.ok(blockRow(store, "bbb"), "fixture guard: the small room is parked too");
+
+  // Move both heads: each room earns a head-moved re-diagnosis.
+  appendRaw(store, "aaa", [messageEvent("aaa", "ev-extra-a", T.MESSAGE_POSTED, { messageId: "extra-a", body: "extra" }, 5000)]);
+  appendRaw(store, "bbb", [messageEvent("bbb", "ev-extra-b", T.MESSAGE_POSTED, { messageId: "extra-b", body: "extra" }, 5000)]);
+  const aaaParked = blockRow(store, "aaa");
+  const bbbParked = blockRow(store, "bbb");
+  const aaaHead = store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence;
+  const bbbHead = store.db.prepare("SELECT sequence FROM rooms WHERE id='bbb'").get().sequence;
+  assert.ok(aaaHead > aaaParked.head_seq && bbbHead > bbbParked.head_seq,
+    "fixture guard: both heads moved past their recorded heads");
+
+  // aaa's full replay outlasts the deadline on its own, so bbb's
+  // head-moved diagnosis must not start in this call at all.
+  store.backfillMessages({ limit: 1000, deadline: Date.now() + 15 });
+  assert.equal(blockRow(store, "aaa").head_seq, aaaHead,
+    "the first head-moved room was re-diagnosed: its block records the moved head");
+  assert.deepEqual(blockRow(store, "bbb"), bbbParked,
+    "the second head-moved room is deferred untouched once the deadline passes");
+
+  // The deferral loses nothing: the next call with time to spare takes
+  // the deferred room, whose head still differs from its recorded head.
+  store.backfillMessages({ limit: 1000 });
+  assert.equal(blockRow(store, "bbb").head_seq, bbbHead,
+    "the deferred room is re-diagnosed by the next call");
+  assert.deepEqual(
+    store.db.prepare("SELECT room_id FROM messages_backfill_blocks ORDER BY room_id").all().map(row => row.room_id),
+    ["aaa", "bbb"], "both rooms stay parked: their logs are still poisoned");
+});
