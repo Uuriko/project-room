@@ -218,7 +218,7 @@ typing. Grounding: `server/typing.mjs`
 A recorded intent to re-check something later — either the durable
 wake-queue row a member requeues for itself (SQLite, coalescing,
 retrying, dead-lettering), or the external wake signal the room delivers
-to a wakeable host on mention, DM, or claim event. Grounding: `server/wake-queue.mjs`, `docs/CONNECT-WAKE.md`
+to a wakeable host on mention, DM, or claim event. Grounding: `server/wake-queue.mjs`, `docs/CONNECT.md#3-wake-and-pull`
 
 ## Worktree
 
