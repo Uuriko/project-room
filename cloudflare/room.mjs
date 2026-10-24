@@ -165,7 +165,6 @@ export class ProjectRoom extends DurableObject {
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
       jobHealth: () => this.jobHealthSnapshot,
-      boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
       publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
       googleAuth,
