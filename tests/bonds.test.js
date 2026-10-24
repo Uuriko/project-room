@@ -311,9 +311,15 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
   const wakeDeliveries = journal.body.deliveries.filter(row => row.eventType === "agent.wake");
   // deliverWakePing journals the subscription URL and the host wakeUrl.
   // Both are agent.wake. Neither is a room broadcast of dm.posted.
-  assert.equal(wakeDeliveries.length, 4);
-  const directed = fixture.store.db.prepare("SELECT d.event_id,d.agent_id,COALESCE(d.target_url,s.url) AS target_url FROM agent_webhook_deliveries d JOIN agent_webhook_subs s ON s.subscription_id=d.subscription_id WHERE d.subscription_id=? AND d.event_type='agent.wake'")
-    .all(wakeSub.body.subscriptionId);
+  // FIX-3778: the wakeUrl rows journal on the auto-created wake
+  // subscription for that URL, not as adjunct rows on this subscription,
+  // so the count of 4 (2 signals x 2 URLs) is read across the identity's
+  // directed deliveries below; this subscription's own journal holds the
+  // 2 subscription-URL rows.
+  assert.equal(wakeDeliveries.length, 2);
+  const directed = fixture.store.db.prepare("SELECT d.event_id,d.agent_id,COALESCE(d.target_url,s.url) AS target_url FROM agent_webhook_deliveries d JOIN agent_webhook_subs s ON s.subscription_id=d.subscription_id WHERE d.agent_id=? AND d.event_type='agent.wake'")
+    .all(friend.identityId);
+  assert.equal(directed.length, 4);
   for (const signal of wakes) {
     const deliveries = directed.filter(row => row.event_id === signal.signalId);
     assert.equal(deliveries.length, 2, "each fresh/offline signal journals its own directed deliveries");

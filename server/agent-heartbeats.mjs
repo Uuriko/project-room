@@ -565,6 +565,14 @@ export class AgentHeartbeats {
       fail(422, "invalid_heartbeat", "pull-only hosts cannot register a wake URL");
     }
     const at = this.now();
+    // FIX-3778: the host row before this upsert decides the wake
+    // subscription lifecycle below — a wakeUrl counts as (re)registered
+    // only when it differs from what this host last reported, so a
+    // heartbeat that merely re-reports the same wakeUrl never re-enables
+    // an auto subscription the agent has since disabled.
+    const previousHost = this.db.prepare(
+      "SELECT mode, wake_url AS wakeUrl FROM agent_hosts WHERE agent_id=? AND host_id=?")
+      .get(agentId, hostId) ?? null;
     this.db.prepare(`INSERT INTO agent_hosts
       (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -572,6 +580,30 @@ export class AgentHeartbeats {
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
+    // FIX-3778 (ruling on #3778): registering a wakeUrl ensures an
+    // agent.wake webhook subscription at that URL through the plugin
+    // store (the subscription store is reached via the owning store, the
+    // same runtime cross-reference deliverWakePing uses for host reads —
+    // no import cycle; bare heartbeat units without a plugin store skip
+    // this). Removing or changing the wakeUrl, switching to pull-only, or
+    // clearing the host (wake_clear reports pull-only) disables the
+    // auto-created subscription for the old URL when no other wakeable
+    // host of this identity still uses it; agent-created subscriptions
+    // are never disabled (see disableWakeAutoSubscription).
+    const plugin = this.store.agentPlugin;
+    if (plugin && typeof plugin.ensureWakeSubscription === "function") {
+      const newWakeUrl = effectiveMode === "wakeable" ? url : null;
+      if (newWakeUrl !== null && newWakeUrl !== previousHost?.wakeUrl) {
+        plugin.ensureWakeSubscription({ identityId: agentId, url: newWakeUrl });
+      }
+      const oldWakeUrl = previousHost?.mode === "wakeable" ? previousHost.wakeUrl : null;
+      if (oldWakeUrl && oldWakeUrl !== newWakeUrl) {
+        const stillUsed = this.db.prepare(
+          "SELECT 1 FROM agent_hosts WHERE agent_id=? AND host_id!=? AND mode='wakeable' AND wake_url=? LIMIT 1")
+          .get(agentId, hostId, oldWakeUrl);
+        if (!stillUsed) plugin.disableWakeAutoSubscription({ identityId: agentId, url: oldWakeUrl });
+      }
+    }
     // plan-wake-live: heartbeat activity proves the host is listening.
     // CX5-FIX: a room-scoped credential's heartbeat (activityRoomId set by
     // the route) stamps room activity only — never the global stamp.
