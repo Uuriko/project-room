@@ -831,9 +831,16 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     : [];
 
   const reportHeartbeat = translate(async (req, res, { remoteAddress }) => {
-    rate(`agent-heartbeat:${remoteAddress}`, 120);
     const roomKey = isRoomAccessToken(bearer(req));
     let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+    // WAKE-S2: the heartbeat budget is per identity, not per address (the
+    // poll below already budgets per identity). Agents sharing one egress
+    // address — a fleet behind one NAT/VM — must not spend each other's
+    // liveness budget. Sized 300/minute: a host heartbeats at its declared
+    // cadence (the fleet checker ~10/minute), so this admits dozens of
+    // hosts' cadences under one identity, while a sustained >5/second
+    // heartbeat flood from one identity still refuses.
+    rate(`agent-heartbeat:${auth.identityId}`, 300);
     const initialIdentity = auth.identityId;
     const data = await body(req);
     // RC-2026-09-24-203: the body stays backward-compatible — hostId is
@@ -941,7 +948,16 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // host (it is derived); with several hosts it stays required.
   const pollWakes = translate(async (req, res, { url }) => {
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
-    rate(`agent-wake-poll:${auth.identityId}`, 30);
+    // WAKE-S2: dedicated budget sized for the long-poll hold pattern. A
+    // poll the server holds is not request spam, and whenever a signal
+    // sits pending every poll returns instantly, so a healthy checker
+    // cadence is back-to-back short polls. 600/minute gives this read the
+    // same budget as the server's generic per-credential read family
+    // (`read:` in http.mjs) — the class it belongs to. At the old
+    // 30/minute, MIG-WAKE measured 40.0% of live bridge invocations
+    // degrading on wake-poll 429s. A sustained >10 polls/second for a
+    // full minute from one identity still refuses.
+    rate(`agent-wake-poll:${auth.identityId}`, 600);
     const roomId = auth.roomId ?? null;
     // hostId keys the per-host waiter slot below. A supplied hostId is
     // validated exactly as before. An OMITTED hostId is derived when the
