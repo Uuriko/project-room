@@ -21,6 +21,7 @@ const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
 // The member receipt's public twin (#3636): the same deterministic id the
 // projection writes, and the absolute URL a holder can share.
 export const publicWorkClaimReceiptId = (roomId, claimId) => hashId("wcr", roomId, claimId);
+export const publicWorkItemReceiptId = (roomId, itemId) => hashId("wir", roomId, itemId);
 export const publicReceiptUrl = id => `${PUBLIC_ORIGIN}/receipts/${id}`;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -48,6 +49,8 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
     pull_request TEXT,
     merged_at TEXT,
     verification_state TEXT,
+    summary TEXT,
+    checks_json TEXT,
     hashes_json TEXT NOT NULL,
     at TEXT NOT NULL,
     start_href TEXT NOT NULL,
@@ -113,6 +116,18 @@ export function ensurePublicReceiptAgentIdsColumn(db) {
   if (columns.size > 0 && !columns.has("agent_ids_json")) {
     db.exec("ALTER TABLE public_receipts ADD COLUMN agent_ids_json TEXT NOT NULL DEFAULT '[]'");
   }
+}
+
+// Tables created before the share-journey repairs (F-2) carry no summary /
+// claimed-checks columns; the CREATE above only shapes fresh tables. The
+// two fields are the producer-reported deliverable the completion already
+// stored — projecting them widens nothing: rows exist only for receipts
+// the owner already opted in to publishing.
+export function ensurePublicReceiptShareColumns(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(public_receipts)").all().map(column => column.name));
+  if (columns.size === 0) return;
+  if (!columns.has("summary")) db.exec("ALTER TABLE public_receipts ADD COLUMN summary TEXT");
+  if (!columns.has("checks_json")) db.exec("ALTER TABLE public_receipts ADD COLUMN checks_json TEXT");
 }
 
 const httpsUrl = value => {
@@ -196,6 +211,33 @@ function resultVerificationTier(item) {
   return workClaimVerificationTier(item);
 }
 
+// The producer-reported deliverable fields (F-2): the completion's own
+// summary text and the checks its producer claimed. Both are cleaned and
+// capped here, at projection, so no surface downstream re-decides length;
+// both stay labelled producer-reported wherever they render.
+const receiptSummaryOf = value => {
+  const text = cleanText(value, 1000);
+  return text || null;
+};
+const claimedChecksOf = values => {
+  if (!Array.isArray(values)) return [];
+  const checks = [];
+  for (const entry of values) {
+    const raw = typeof entry === "string" ? entry : entry && typeof entry === "object" ? entry.name : null;
+    const name = raw ? cleanText(raw, 200) : "";
+    if (name && !checks.includes(name)) checks.push(name);
+    if (checks.length >= 20) break;
+  }
+  return checks;
+};
+// A claim's summary is the one its member receipt already derives: the
+// done transition's note (server/work-claim-routes.mjs receiptOf).
+const doneNoteOf = item => {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  const stamp = [...history].reverse().find(step => step?.action === "state:done");
+  return typeof stamp?.note === "string" ? stamp.note : null;
+};
+
 function doneAtOf(item) {
   const history = Array.isArray(item?.history) ? item.history : [];
   const stamp = [...history].reverse().find(step => step?.action === "state:done");
@@ -241,6 +283,8 @@ function rowToPublic(row) {
     pullRequest: row.pull_request,
     mergedAt: row.merged_at,
     ...(row.verification_state ? { verification: { state: row.verification_state } } : {}),
+    ...(row.summary ? { summary: row.summary } : {}),
+    ...(parseJson(row.checks_json, []).length ? { checksClaimed: parseJson(row.checks_json, []) } : {}),
     hashes: parseJson(row.hashes_json, []),
     at: row.at,
     startHref: row.start_href,
@@ -249,22 +293,44 @@ function rowToPublic(row) {
 
 const RECEIPT_COLUMNS = `id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, verification_state, hashes_json, at, start_href`;
 
+// The share columns (summary, checks_json) ride OUTSIDE RECEIPT_COLUMNS,
+// like agent_ids_json: read paths over predating or minimal tables (the
+// lot path's hand-built fixtures are the standing specimen) must keep
+// working, so every read appends them only when the table carries them.
+function shareColumnsReadable(db) {
+  try {
+    db.prepare("SELECT summary, checks_json FROM public_receipts LIMIT 0").all();
+    return true;
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return false;
+  }
+}
+const receiptColumns = db => shareColumnsReadable(db) ? `${RECEIPT_COLUMNS}, summary, checks_json` : RECEIPT_COLUMNS;
+
 function insertReceipt(store, row) {
   // agent_ids_json rides outside RECEIPT_COLUMNS (the read list): the
   // credited identity ids are bookkeeping for the directory count, not
-  // page data, and read paths over predating tables keep working.
-  store.db.prepare(`INSERT INTO public_receipts (${RECEIPT_COLUMNS}, agent_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  // page data, and read paths over predating tables keep working. The
+  // share columns ride outside for the same reason and are written only
+  // when the table carries them.
+  const share = shareColumnsReadable(store.db);
+  const shareColumns = share ? ", summary, checks_json" : "";
+  const shareValues = share ? ",?,?" : "";
+  const shareUpdate = share ? " summary=excluded.summary, checks_json=excluded.checks_json," : "";
+  store.db.prepare(`INSERT INTO public_receipts (${RECEIPT_COLUMNS}, agent_ids_json${shareColumns}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${shareValues})
     ON CONFLICT(id) DO UPDATE SET
       title=excluded.title, source=excluded.source, origin_room_id=excluded.origin_room_id,
       room_id=excluded.room_id, room_title=excluded.room_title, agents_json=excluded.agents_json,
       humans_json=excluded.humans_json, pull_request=excluded.pull_request, merged_at=excluded.merged_at,
-      verification_state=excluded.verification_state,
+      verification_state=excluded.verification_state,${shareUpdate}
       hashes_json=excluded.hashes_json, at=excluded.at, start_href=excluded.start_href,
       agent_ids_json=excluded.agent_ids_json`
   ).run(row.id, row.title, row.source, row.originRoomId, row.roomId, row.roomTitle, JSON.stringify(row.agents),
     JSON.stringify(row.humans), row.pullRequest, row.mergedAt, row.verificationState ?? null,
     JSON.stringify(row.hashes), row.at, row.startHref,
-    JSON.stringify(Array.isArray(row.agentIds) ? row.agentIds : []));
+    JSON.stringify(Array.isArray(row.agentIds) ? row.agentIds : []),
+    ...(share ? [row.summary ?? null, JSON.stringify(Array.isArray(row.checksClaimed) ? row.checksClaimed : [])] : []));
 }
 
 function listedRoomFields(state, listed) {
@@ -310,6 +376,8 @@ function optedInRows(store, state) {
         pullRequest: pullRequestUrl(item.pullRequest?.url),
         mergedAt: iso(item.pullRequest?.syncedAt),
         verificationState: null,
+        summary: receiptSummaryOf(doneNoteOf(item)),
+        checksClaimed: claimedChecksOf(item.delivery?.checks),
         hashes: hashList(Array.isArray(item.blobs) ? item.blobs : []),
         at: iso(item.pullRequest?.syncedAt) ?? iso(item.updatedAt) ?? new Date(0).toISOString(),
         startHref: href,
@@ -344,6 +412,8 @@ function optedInRows(store, state) {
       pullRequest: null,
       mergedAt: null,
       verificationState: tier,
+      summary: receiptSummaryOf(doneNoteOf(item)),
+      checksClaimed: claimedChecksOf(item.delivery?.checks),
       hashes: hashList(Array.isArray(item.blobs) ? item.blobs : []),
       at: doneAtOf(item) ?? iso(item.updatedAt) ?? new Date(0).toISOString(),
       startHref: href,
@@ -357,7 +427,7 @@ function optedInRows(store, state) {
     const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
       ? item.receipt.evidenceVersion : null;
     rows.push({
-      id: hashId("wir", roomId, item.id),
+      id: publicWorkItemReceiptId(roomId, item.id),
       title: cleanName(item.title) ?? "Receipt",
       source: "work-item",
       originRoomId: roomId,
@@ -367,6 +437,8 @@ function optedInRows(store, state) {
       pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
       mergedAt: null,
       verificationState: null,
+      summary: receiptSummaryOf(item.receipt.summary),
+      checksClaimed: claimedChecksOf(item.receipt.checksClaimed),
       hashes: hashList(version ? [version] : []),
       at: iso(item.updatedAt) ?? new Date(0).toISOString(),
       startHref: href,
@@ -797,7 +869,14 @@ const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
-  if (room) { clauses.push("room_id=?"); params.push(room); }
+  // The room filter names the receipt's SOURCE room (F-5). room_id carries
+  // the room only when the room is separately listed — an unlisted room's
+  // receipts carry room_id NULL by design (the listing choice withholds
+  // the room's face, not its receipts) — so matching room_id alone made
+  // an opted-in room's own published receipts unfindable by their room.
+  // origin_room_id is the source room for every projected row; matching
+  // it reveals nothing the receipt row itself does not already carry.
+  if (room) { clauses.push("(room_id=? OR origin_room_id=?)"); params.push(room, room); }
   if (needle) { clauses.push("instr(lower(agents_json), ?) > 0"); params.push(needle); }
   return { clauses, params };
 };
@@ -842,7 +921,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
+  const rows = store.db.prepare(`SELECT ${receiptColumns(store.db)} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
     .all(...filter.params, ...afterParams, limit + 1);
   const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
   const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
@@ -853,7 +932,7 @@ export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const visibility = receiptVisibilitySqlFor(store.db);
-  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${visibility}`).get(id);
+  const row = store.db.prepare(`SELECT ${receiptColumns(store.db)} FROM public_receipts WHERE id=? AND ${visibility}`).get(id);
   if (!row) return null;
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
@@ -1126,7 +1205,7 @@ export function publicLotReceiptById(store, id) {
 
 export function collectPublicReceipts(store) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
+  return store.db.prepare(`SELECT ${receiptColumns(store.db)} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
 }
 
@@ -1195,7 +1274,7 @@ export function proofLevelOf(receipt) {
 // public receipt read.
 export function roomProofRows(store, slug) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
+  return store.db.prepare(`SELECT ${receiptColumns(store.db)} FROM public_receipts
     WHERE ${visibility} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
 }
