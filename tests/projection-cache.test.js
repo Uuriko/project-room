@@ -214,6 +214,29 @@ test("debug verification cold-checks every hit and refuses same-sequence storage
   assert.equal(f.store.room("commons").state.room.title, "External rewrite");
 });
 
+test("cache weight is the stored projection, so message text is not counted twice", t => {
+  const { store } = fixture(t);
+  store.initialize(initialRoom("heavy"));
+  const heavy = structuredClone(store.room("heavy").state);
+  const body = "m".repeat(1_500_000);
+  heavy.messages = [{ id: "bulk", authorId: "owner", body, createdAt: "2026-10-02T00:00:00.000Z" }];
+  heavy.workItems = { w1: { id: "w1", title: "Hold the cache", state: "ready", owner: "owner" } };
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(heavy), "heavy");
+  const projectionBytes = Buffer.byteLength(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get("heavy").projection);
+  store.room("heavy");
+  const weight = store._projectionCache.entries.get("heavy").weight;
+  const countedTwice = projectionBytes + Buffer.byteLength(JSON.stringify(heavy.workItems)) + body.length;
+  const budget = 64 * 1024 * 1024;
+  t.diagnostic(`projection ${projectionBytes} bytes, cache weight ${weight}, previous weight ${countedTwice}, rooms in 64MB ${Math.floor(budget / weight)} vs ${Math.floor(budget / countedTwice)}`);
+  assert.equal(weight, projectionBytes);
+  assert.ok(countedTwice > weight * 1.5);
+  assert.ok(Math.floor(budget / weight) > Math.floor(budget / countedTwice));
+  const { store: live, owner } = fixture(t);
+  live.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "posted", body: "posted " + "y".repeat(4000) }));
+  const postedBytes = Buffer.byteLength(live.db.prepare("SELECT projection FROM rooms WHERE id=?").get("commons").projection);
+  assert.equal(live._projectionCache.entries.get("commons").weight, postedBytes);
+});
+
 test("a command after body recovery caches the same restored text as a cold read", t => {
   const f = fixture(t, { bodiesAtRest: true });
   f.store.command(f.owner, "commons", command(T.MESSAGE_POSTED, { messageId: "recover", body: "restore:" + "x".repeat(870) }));
