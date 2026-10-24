@@ -8,6 +8,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { claimWork, createWork } from "../server/work-claims.mjs";
 import { activityOf, harnessLabel, sessionMatches, sessionsEnabled } from "../server/agent-sessions.mjs";
+import { AGENT_SESSION_ROUTES } from "../server/routes/agent-sessions.mjs";
 
 test("harness, activity, and search stay coarse and case-insensitive", () => {
   assert.equal(harnessLabel("claude-code", "raw-ua-should-not-win"), "Claude Code");
@@ -85,6 +86,7 @@ test("room members and agents read sessions only when the flag is on", async t =
   store.command(adaKey, "commons", { id: randomUUID(), type: T.SESSION_STARTED, data: { workItemId, expectedRevision: 1 } });
   const stranger = store.identities.create("Stranger");
 
+  assert.equal(AGENT_SESSION_ROUTES[0].path.replace("{roomId}", "commons"), "/api/rooms/commons/agent-sessions");
   const off = await get("/api/rooms/commons/agent-sessions", ownerKey);
   assert.equal(off.status, 200);
   assert.equal(off.body.enabled, false);
