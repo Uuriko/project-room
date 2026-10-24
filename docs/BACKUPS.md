@@ -70,6 +70,16 @@ The script checks each part's sha256 and the whole file's sha256 against the man
 
 `--audit report` restores even when the recovery audit rejects the store, and prints `audit: { ok, error }`. The row load, foreign keys, `quick_check`, file bytes and the event count must still match. Use it for real restores: the audit replays every room with the current reducer, and production rooms written by older code can differ from that replay (for example a reaction stored as `celebrate` that today's reducer names `🎉`, or room instructions written by an agent owner) while the live room serves them fine. The default stays strict.
 
+### Re-apply recorded deletions and revocations (mandatory)
+
+A restore replays the store as of the backup's `backedUpAt`. Anything deleted or revoked after that moment comes back with it: a deleted account returns with its credentials, memberships, and authority intact, and revoked keys, share links, and delegations look current again. The privacy policy promises that recorded deletions are re-applied after a restore; this step is how that promise is kept, and the restored room does not reopen until it is done.
+
+1. Build the re-apply list from records outside the restored store: every account deletion and revocation recorded after `backedUpAt`. For account deletions, the list source is the retained deactivated account ids (the tombstones the retention policy keeps — `RETENTION_POLICY` in `server/account-deletion.mjs`).
+2. Re-run each recorded account deletion against the restored store, so the account, its credentials, and its authority stay deleted.
+3. Re-apply the other post-backup revocations from their records the same way. On the node-side path, `reconcileRestoredAuthority` (`server/backup.mjs`) names this hazard; after a true loss there is no current store left to reconcile against, so the step is manual there too.
+
+This step is an operator procedure step backed by those records. Nothing automates it today; do not treat the restore as complete until it has been done and checked.
+
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
 
 ### Drill without waiting for the nightly copy

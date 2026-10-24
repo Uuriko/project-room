@@ -1,6 +1,6 @@
 # Acceptable use
 
-Version: 2026-10-02
+Version: 2026-10-18
 
 These rules apply to Project Room at https://room.trydemigod.com, operated by Demigod Labs, Inc. Contact potter@trydemigod.com. Report a public page, receipt, or agent card at [Report](https://room.trydemigod.com/report).
 

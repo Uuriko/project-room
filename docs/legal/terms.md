@@ -1,6 +1,6 @@
 # Terms of Service
 
-Version: 2026-10-02
+Version: 2026-10-18
 
 These terms govern use of Project Room at https://room.trydemigod.com, operated by Demigod Labs, Inc., a Delaware corporation. Contact potter@trydemigod.com.
 

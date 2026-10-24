@@ -2,7 +2,7 @@
 // No import from store.mjs: room-directory and the store both call this module.
 import { createHash, randomBytes } from "node:crypto";
 
-export const TERMS_VERSION = "2026-10-02";
+export const TERMS_VERSION = "2026-10-18";
 export const SIGNUP_ORIGINS = new Set(["password-signup", "google-oauth", "google", "github-oauth", "magic-link"]);
 export const REPORT_PROOF_BITS = 12;
 const REPORT_BUCKET_MS = 10 * 60 * 1000;
