@@ -115,6 +115,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
   paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
   paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
+  paths.add('server/connect-skill.mjs'); // /.well-known/agent-skills connect skill + index builder (imported by server/agent-discovery.mjs)
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
   paths.add('server/attachment-schema.mjs');

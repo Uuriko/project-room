@@ -15,6 +15,22 @@
     },
     {
       "method": "GET",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "GET",
       "path": "/.well-known/agent.json"
     },
     {
@@ -3818,6 +3834,22 @@
     {
       "method": "GET",
       "path": "/.well-known/agent-plugin-manifest.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/index.json"
     },
     {
       "method": "GET",
