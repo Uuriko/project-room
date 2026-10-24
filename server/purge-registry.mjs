@@ -456,6 +456,28 @@ const ROWS = [
     }
   },
   {
+    "table": "analytics_events",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "analytics_room_cursor",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
@@ -572,6 +594,17 @@ const ROWS = [
     "table": "bounty_watchers",
     "key": "room_id",
     "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "claim_bond_shadow",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
     "match": {
       "room": [
         "room_id"
@@ -1392,6 +1425,24 @@ const ROWS = [
       "identity": [
         "identity_id"
       ]
+    }
+  },
+  {
+    "table": "public_work_requests",
+    "key": "offer_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "actor_id"
+      ]
+    },
+    "via": {
+      "room": {
+        "parent": "public_work_tasks",
+        "parentKey": "offer_id",
+        "childKey": "offer_id",
+        "scope": "room_id"
+      }
     }
   },
   {
