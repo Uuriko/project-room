@@ -5,6 +5,7 @@ import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { evaluateArtifactFloors } from './artifact-floors.mjs';
 
 // Private review is a separate fact. Submission bytes, leases and work
 // gates are never changed here. Two deliberate exceptions, both inside
@@ -17,7 +18,10 @@ import { projectPublicWorkReceipt } from './public-read-model.mjs';
 // altered, and the stamp is derived entirely from the review fact
 // recorded here. A verify PASS additionally executes the platform's own
 // artifact-integrity check first: the stored bytes are re-hashed and
-// must match the hash the receipt was issued under. The outcome recorded
+// must match the hash the receipt was issued under. A PASS also runs
+// the mechanical acceptance floors the criteria state (minimum length,
+// named file citation, task id) over the artifact itself, and a floor
+// failure refuses the PASS — see server/artifact-floors.mjs. The outcome recorded
 // here is not private, though: receipt reads compose this record's
 // verdict and decision onto the canonical and public receipt faces
 // (#3733, publicWorkReceiptOutcome in server/public-read-model.mjs);
@@ -265,6 +269,19 @@ export class PublicWorkReviews {
           if (!detail || recomputed !== detail.artifact_sha256 || recomputed !== scope.receipt.artifact.sha256)
             fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
           executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
+          // FIX-VERIFY-GATE: the mechanical floors the acceptance
+          // criteria state (a stated minimum length, a named file
+          // citation, stating the task id) are evaluated over the
+          // artifact itself before a PASS is recorded. EXP-13R measured
+          // PASSes landing on a 64-byte artifact against criteria
+          // stating 200/400-character minimums; a floor failure refuses
+          // the PASS with the failed floors named, so the worker can
+          // re-submit against them. Floors no criterion states are
+          // never invented, and FAIL verdicts are never gated.
+          const floors = evaluateArtifactFloors(scope.offer.acceptanceCriteria, detail.artifact_text, { taskId: receipt.taskId });
+          if (floors.failures.length > 0)
+            fail(409, 'artifact_floor_failed', `A PASS cannot be recorded: the artifact fails stated acceptance floor(s) — ${floors.failures.map(failure => failure.detail).join('; ')}. Re-submit an artifact meeting the stated criteria and verify again`);
+          if (floors.checked > 0) executedChecks.push({ name: 'artifact_floors', result: 'pass', at });
         }
         current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
           ...(executedChecks ? { executedChecks } : {}) };
