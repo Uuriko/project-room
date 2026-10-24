@@ -1,5 +1,6 @@
 // Contract: a push to refs/heads/main must not cancel the in-progress `test`
-// or `schema-gate` run, and every main push must share one concurrency group
+// or `fast-gates` run (the folded schema gate's home), and every main push
+// must share one concurrency group
 // so GitHub keeps only the newest pending run. Pull requests still cancel
 // their own older runs. This is the deploy-on-green starvation guard: after
 // #1371, cancel-in-progress was true for every non-dispatch event, so each
@@ -198,14 +199,14 @@ function assertMainDoesNotCancelInProgress(file) {
   assert.notEqual(group(dispatch), group(otherDispatch), `${file}: manual runs must not cancel each other`);
 }
 
-test("main pushes never cancel an in-progress test or schema-gate run", () => {
+test("main pushes never cancel an in-progress test or fast-gates run", () => {
   // Calibration: the #1371 expression cancels a main push. If this fails, the
   // evaluator no longer detects the regression the assertions below guard.
   const legacy = "${{ github.event_name != 'workflow_dispatch' }}";
   const mainPush = context("test", { event_name: "push", ref: "refs/heads/main", run_id: "9" });
   assert.equal(evaluateGithubExpression(legacy, mainPush), true);
 
-  for (const file of ["test.yml", "schema-gate.yml"]) assertMainDoesNotCancelInProgress(file);
+  for (const file of ["test.yml", "fast-gates.yml"]) assertMainDoesNotCancelInProgress(file);
 });
 
 // Execute the actual workflow shell command with a stand-in npm binary.
