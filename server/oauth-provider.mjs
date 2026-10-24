@@ -90,13 +90,30 @@ const NAME_CONFUSABLES = new Map([
   ["Ρ", "P"], ["Τ", "T"], ["Χ", "X"], ["α", "a"], ["ι", "i"],
   ["κ", "k"], ["μ", "u"], ["ν", "v"], ["ο", "o"], ["ρ", "p"],
   ["χ", "x"],
+  // CURE-4445-LOOKALIKE: Cherokee capitals that read as Latin capitals.
+  ["\u13AA", "A"], ["\u13F4", "B"], ["\u13DF", "C"], ["\u13A0", "D"],
+  ["\u13AC", "E"], ["\u13C0", "G"], ["\u13BB", "H"], ["\u13AB", "J"],
+  ["\u13E6", "K"], ["\u13DE", "L"], ["\u13B7", "M"], ["\u13E2", "P"],
+  ["\u13A1", "R"], ["\u13DA", "S"], ["\u13A2", "T"], ["\u13D9", "V"],
+  ["\u13B3", "W"], ["\u13C3", "Z"],
+  // Latin small capitals (NFKC leaves these alone).
+  ["\u0299", "b"], ["\u1D04", "c"], ["\u1D05", "d"], ["\u1D07", "e"],
+  ["\u0262", "g"], ["\u029C", "h"], ["\u026A", "i"], ["\u1D0A", "j"],
+  ["\u1D0B", "k"], ["\u029F", "l"], ["\u1D0D", "m"], ["\u0274", "n"],
+  ["\u1D0F", "o"], ["\u1D18", "p"], ["\u0280", "r"], ["\uA731", "s"],
+  ["\u1D1B", "t"], ["\u1D1C", "u"], ["\u1D20", "v"], ["\u1D21", "w"],
+  ["\u028F", "y"], ["\u1D22", "z"],
 ]);
+// CURE-4445-LOOKALIKE: combining marks are dropped for the comparison only,
+// so "Cha\u0301tGPT" reads as "chatgpt". Names are still stored as given, and
+// an accented name registers unless it folds onto a provisioned name.
+const NAME_MARKS_PATTERN = /\p{M}/gu;
 const clientNameNormalForm = value => {
   let folded = "";
   for (const ch of value.normalize("NFKC").replace(NAME_IGNORABLE_PATTERN, "")) {
     folded += NAME_CONFUSABLES.get(ch) ?? ch;
   }
-  return folded.trim().toLowerCase();
+  return folded.normalize("NFD").replace(NAME_MARKS_PATTERN, "").trim().toLowerCase();
 };
 
 export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, resolveGrantAgent, isGrantAgentRemoved } = {}) {
