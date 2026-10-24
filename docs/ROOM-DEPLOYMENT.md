@@ -11,7 +11,7 @@ Three Workers run the same code. Only one of them owns production data.
 | Script | Role | How it is reached |
 | --- | --- | --- |
 | `project-room-stage` | Isolated staging. Its own Durable Object. No `script_name` on `ROOM`. | `https://project-room-stage.getdasha.workers.dev` only. No custom domain. |
-| `project-room` | Canonical production. Owns the live Durable Object, the minute cron, and `room.trydemigod.com`. | `wrangler deploy --env production` |
+| `project-room` | Canonical production. Owns the live Durable Object, the every-30-minutes cron (`*/30 * * * *`), and `room.trydemigod.com`. | `wrangler deploy --env production` |
 | `project-room-staging` | Public entry for `getdasha.com/room`. Forwards to the production Durable Object with `script_name: project-room`. | `wrangler deploy` with no `--env` |
 
 The entry script is still named `project-room-staging`. That name is historical. Do not rename the deployed script: the getdasha route and email routing are bound to it. `wrangler.jsonc` cannot carry comments (`JSON.parse` reads it), so this page and `cloudflare/README.md` are where the role is named. The entry's role is entry, not a second room.
@@ -58,9 +58,11 @@ Do not pull, commit, or rebuild from a different tree between staging and produc
 
 ```sh
 cd cloudflare
-pnpm exec wrangler deploy --env production --keep-vars
-pnpm exec wrangler deploy --keep-vars
+pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1
+pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1
 ```
+
+Both commands carry the `--var ROOM_BODIES_AT_REST:1` pin, exactly as `deploy-prod` does; the pin is load-bearing (see [DEPLOY-LANE.md](DEPLOY-LANE.md)) and must not be dropped in the manual path.
 
 Keep `env.production.limits.cpu_ms` at `30000`. A 1000 ms budget on the owning script caused repeated CPU resets and HTTP 500 / 1101 on 25 September 2026. The entry can keep its own 1000 ms forwarding budget. Do not let the top-level limit overwrite production. See [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
 

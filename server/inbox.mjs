@@ -5,7 +5,7 @@ import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/e
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
 import { historyFloor, messageVisibleToViewer } from "./history-visibility.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";

@@ -13,7 +13,8 @@
 // coverage=true|false.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, globSync, readFileSync } from "node:fs";
-import { dirname, resolve, basename, relative } from "node:path";
+import { dirname, resolve, basename, relative, join } from "node:path";
+import { deriveBrowserSuites } from "./browser-suites.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,6 +46,7 @@ const BROWSER_EXACT = new Set([
   "package.json",
   "package-lock.json",
   "scripts/browser-ci.mjs",
+  "scripts/browser-suites.mjs",
   "scripts/browser-shards.mjs",
   "scripts/browser-shards-check.mjs",
   "scripts/browser-ci-durations.json",
@@ -77,8 +79,7 @@ function matchesAny(file, patterns) {
 }
 
 function browserSuitePaths() {
-  const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-  return String(pkg.scripts?.["test:browser"] ?? "").split(/\s+/).filter(path => path.startsWith("scripts/"));
+  return deriveBrowserSuites(join(root, "scripts"));
 }
 
 // The browser checks do not only load the files named in the test:browser

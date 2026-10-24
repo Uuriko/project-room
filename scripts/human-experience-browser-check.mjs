@@ -116,6 +116,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
   for(const page of pages) {
+    assert.equal(await page.locator('[data-message-record-id="public-result"] .message-meta strong').textContent(), f.store.room('commons').state.members.producer.displayName);
     await page.locator('#assistant-face .assistant-face-status').getByText('Result ready',{exact:true}).waitFor();
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Open result',exact:true}).count(), 1, 'the result is one tap from the card face');
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Stop',exact:true}).count(), 0, 'a finished ask has no Stop');
@@ -1021,3 +1022,76 @@ for (const width of [1280, 390]) {
     assert.equal((await read()).status, 'pause_requested');
   });
 }
+
+// These failures leave the server untouched: the browser must retain the exact
+// replacement operation even when an abandoned retry finishes afterwards.
+test('discarded assistant retry cannot erase the replacement pending operation', { timeout: 60000 }, async t => {
+  const { page } = await claimRaceFixture(t, 1280, { run: 'discard-run', ask: 'discard-ask' });
+  const oldCaptured = deferredResultResponse(), replacementCaptured = deferredResultResponse();
+  const releaseOld = deferredResultResponse(), releaseReplacement = deferredResultResponse();
+  t.after(() => { releaseOld.resolve(); releaseReplacement.resolve(); });
+  let calls = 0;
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const call = ++calls;
+    if (call === 2) { oldCaptured.resolve(); await releaseOld.promise; }
+    if (call === 3) { replacementCaptured.resolve(); await releaseReplacement.promise; }
+    await route.fulfill({ status: call === 1 ? 503 : 409, json: { error: {
+      code: call === 1 ? 'service_unavailable' : 'assistant_attempt_changed', message: 'Synthetic interrupted control'
+    } } });
+  });
+  await page.locator('#assistant-face [data-cancel]').click();
+  await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+  await page.locator('#assistant-retry').click(); await oldCaptured.promise;
+  await page.locator('#assistant-discard').click();
+  await page.locator('#assistant-activity').evaluate(node => { node.open = true; });
+  await page.locator('#assistant-runs [data-cancel]').click(); await replacementCaptured.promise;
+  const before = await page.evaluate(() => sessionStorage.getItem('room-assistant-pending:commons:owner'));
+  assert.ok(before, 'the replacement operation is durably pending before the abandoned response');
+  const delivered = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/assistant') && response.status() === 409);
+  releaseOld.resolve(); await (await delivered).finished();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('room-assistant-pending:commons:owner')), before,
+    'a stale rejection must not delete the replacement operation or offer review of the abandoned one');
+  assert.equal(await page.locator('#assistant-review').isVisible(), false);
+});
+
+test('discarding an uncertain assistant control restores the face control accessibility state', { timeout: 60000 }, async t => {
+  const { page } = await claimRaceFixture(t, 1280, { run: 'discard-face-run', ask: 'discard-face-ask' });
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({ status: 503, json: { error: { code: 'service_unavailable', message: 'Synthetic interrupted control' } } });
+  });
+  const stop = page.locator('#assistant-face [data-cancel]');
+  await stop.click(); await page.locator('#assistant-discard').waitFor({ state: 'visible' });
+  await page.locator('#assistant-discard').click();
+  assert.equal(await stop.isEnabled(), true, 'Discard restores the unchanged face control for assistive technology');
+  await stop.click(); await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+});
+
+
+test('human room admin connects assistant without owner identity or redundant steer', {timeout:60000}, async t => {
+  const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const browser=await browserType.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const page=await browser.newPage({viewport:{width:1280,height:900}});
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await signInFixture(page,f.keys.guest);
+  await page.locator('#main').waitFor({state:'visible'});
+  await openSettings(page);
+  assert.equal(await page.locator('#assistant-setup').isVisible(),false,'ordinary membership does not expose administration');
+  await closeSettings(page);
+  const member=f.store.room('commons').state.members.guest;
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.access_changed',data:{memberId:'guest',expectedMemberRevision:member.revision,permissions:['manage_members'],active:true}});
+  await page.reload();await page.locator('#main').waitFor({state:'visible'});
+  await configureAssistant(page);
+  const config=f.store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get('commons');
+  assert.equal(JSON.parse(config.value).coordinatorMemberId,'producer');
+  await page.locator('#message-input').fill('@Room Check the setup documentation.');
+  await page.locator('#message-form button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Check the setup documentation.'));
+  const runs=f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=?').all('commons');
+  assert.equal(runs.length,1);
+  assert.equal(JSON.parse(runs[0].value).initiatorId,'guest');
+});

@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimePackage } from './runtime-package.mjs';
+import { createRuntimePackage, allowed } from './runtime-package.mjs';
 import { publicAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
@@ -10,6 +10,11 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  // The existing runtime allowlist owns candidate membership too. Include new
+  // working files without maintaining a second handwritten deployment list.
+  // Baseline paths remain mandatory below; historical optional paths may be
+  // absent in the current checkout. Only explicitly allowlisted files enter.
+  for (const path of allowed) if (existsSync(join(repository, path))) paths.add(path);
   // These specific browser modules were deliberately retired from v1. A
   // pre-removal HEAD must not resurrect them in the working-tree fixture.
   for (const retired of ['account-setup-ui.js', 'gmail-ui.js', 'inbox-client.js', 'inbox-quarantine-ui.js', 'inbox-send-ui.js', 'inbox-ui.js']) {
@@ -65,6 +70,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+  paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
@@ -217,7 +223,7 @@ export function candidateRuntimeFixture(repository, directory) {
     paths.add(path);
   }
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
-  // No private state, credentials, docs or real checkout Git metadata.
+  // Only allowlisted runtime/public assets; never arbitrary working files or Git metadata.
   for (const path of paths) {
     mkdirSync(join(candidate, path, '..'), { recursive: true });
     cpSync(join(repository, path), join(candidate, path));

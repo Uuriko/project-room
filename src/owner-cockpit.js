@@ -61,12 +61,26 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     </article>`;
   }
 
+  function renderJobs(jobs) {
+    if (!Array.isArray(jobs) || !jobs.length) return "";
+    const alerts = jobs.filter(job => job.alert);
+    const never = uiText("cockpit.jobNever");
+    const rows = jobs.map(job => uiText("cockpit.jobRowHtml", {
+      name: esc(job.name), result: esc(job.result), alert: job.alert ? "true" : "false",
+      label: esc(uiText(`cockpit.jobResult.${job.result}`)),
+      failures: job.consecutiveFailures ? esc(uiText("cockpit.jobFailedInRow", { count: job.consecutiveFailures })) : "",
+      times: esc(uiText("cockpit.jobTimes", { run: job.lastRunAt ?? never, success: job.lastSuccessAt ?? never }))
+    })).join("");
+    const title = alerts.length ? uiText("cockpit.jobsAttention", { count: alerts.length }) : uiText("cockpit.jobsTitle");
+    return uiText("cockpit.jobsHtml", { open: alerts.length ? "open" : "", title: esc(title), rows });
+  }
+
   function render(doc) {
     const { decisions, exceptions, rooms } = doc;
     const notesOpen = exceptionsBox.querySelector("details")?.open;
     const notices = exceptions.items.filter(item => item.severity === "info");
     const actionable = exceptions.items.filter(item => item.severity !== "info");
-    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length);
+    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length) && !(doc.jobs?.length);
     const heading = section.querySelector("h3");
     if (heading) heading.hidden = !decisions.total && !actionable.length && !doc.roomErrors?.length;
     section.setAttribute("aria-labelledby", heading?.hidden ? "cockpit-notes-title" : "owner-cockpit-title");
@@ -78,10 +92,11 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     decisionsBox.innerHTML = decisions.total === 0
       ? ""
       : decisions.items.map(renderItem).join("");
-    exceptionsBox.innerHTML = exceptions.total === 0
+    exceptionsBox.innerHTML = (exceptions.total === 0
       ? ""
       : (actionable.length ? `<h4>Exceptions</h4>` + actionable.map(renderException).join("") : "")
-        + (notices.length ? uiText("human.roomNotesHtml", { open: notesOpen ? "open" : "", content: notices.map(renderException).join("") }) : "");
+        + (notices.length ? uiText("human.roomNotesHtml", { open: notesOpen ? "open" : "", content: notices.map(renderException).join("") }) : ""))
+      + renderJobs(doc.jobs);
     stubsBox.innerHTML = (doc.roomErrors ?? []).map(stub =>
       `<p class="form-hint">Couldn't read room ${esc(stub.roomId)} (${esc(stub.error)}) — it is excluded from these totals.</p>`).join("");
     for (const button of decisionsBox.querySelectorAll("[data-cockpit-decide]")) {
