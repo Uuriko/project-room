@@ -109,8 +109,9 @@ from the receipt record and the room's review record: `state` (the
 record's own state — `submitted` until the designated reviewer's
 acceptance stamps it `verified`; a rejection or revision request, which
 never stamps the record, reads as `rejected` or `revision_requested`),
-`verification` (the tier the record carries, `hash_only` or
-`system_checked`), `checksReported` (the checks the worker reported),
+`verification` (the tier the record carries, carried as
+`verification.state` — `hash_only` or `system_checked` for a
+public-work receipt), `checksReported` (the checks the worker reported),
 `executedChecks` when the record carries platform-executed checks, and —
 once a review is recorded — a `review` summary (review state, the
 reviewer's verdict and kind, and the verdict/decision times). The
@@ -125,10 +126,16 @@ Every detail page carries a verification block. Unverified, it says so —
 on the HTML or `.json` URL). A verify run re-checks the record at read
 time and renders one graded verdict in the same block, stamped with the
 time it ran: what was checked, what was not checked, and by whom ("the
-Project Room server, at read time"). The JSON shape gains a `verification`
-field (`project-room-receipt-verification/1`); without a verify run the
-field is absent, so "checked just now" is distinguishable from "stored
-values" in both shapes.
+Project Room server, at read time"). The JSON shape always carries a
+`verification` object whose `state` names the tier the record carries
+(one canonical enum: `server_verified_merge`, `verified`,
+`self_attested`, `hash_only`, `system_checked`, `ledger_recorded`,
+`recorded`). A verify run merges its re-derivation
+(`project-room-receipt-verification/1` — verdict, checkedAt, per-check
+results, scope) into that same object next to the state, so "checked
+just now" (the run's fields are present) stays distinguishable from
+"stored values" (only the state) in both shapes, and the fresh verdict
+never replaces the tier it checked.
 
 The checks (server/receipt-verify.mjs): the record is re-derived from its
 current source and compared field by field; a public-work artifact is

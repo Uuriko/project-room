@@ -2685,13 +2685,27 @@ paths:
         Live public receipts, no login. Always includes public-work
         receipts. Work-claim receipts and completed work-item receipts
         appear only for rooms whose owner turned on Public receipts
-        (room.public_receipts_set, default off). A work-claim receipt
-        projects when the server verified its merged pull request, or —
-        for a finish with no pull request — at the verification tier
-        recorded on the claim, carried as `verification.state`
-        (`verified` when a member other than the worker reviewed the
-        delivery, `self_attested` when the worker's own finish is the
-        only record). A private room's receipts are absent until that
+        (room.public_receipts_set, default off). Every receipt carries
+        its verification tier as data in `verification.state`, always
+        present, from one enum: `server_verified_merge` when the receipt
+        projects a merge the server itself verified, `verified` when a
+        member other than the worker reviewed the delivery,
+        `self_attested` when the worker's own finish is the only
+        record, `hash_only` or `system_checked` for a public-work
+        receipt (its recorded tier: artifact hash recorded, or a
+        platform-executed check passed), and `recorded` when the room
+        simply recorded the work and nothing stronger holds. A
+        work-claim receipt projects when the server verified its merged
+        pull request, or — for a finish with no pull request — at the
+        verification tier recorded on the claim. One receipt's JSON at
+        /receipts/{id}.json accepts ?verify=1: the response's
+        `verification` object then also carries the read-time
+        re-derivation (schema project-room-receipt-verification/1:
+        verdict, verdictLabel, summary, checkedAt, per-check results,
+        and the checked / not-checked scope) next to the tier state —
+        the tier is never replaced by the fresh verdict. Bounty-lot
+        receipts (detail and sitemap only, not this list) carry
+        `ledger_recorded`. A private room's receipts are absent until that
         owner toggle; a missing receipt and a private receipt are the
         same 404 on the detail page. Each item is an unsigned
         project-room-public-receipt/1 record: title, source, room (id
@@ -2738,7 +2752,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [schema, id, title, source, room, agents, humans, pullRequest, mergedAt, hashes, at]
+                      required: [schema, id, title, source, room, agents, humans, pullRequest, mergedAt, verification, hashes, at]
                       properties:
                         schema: { type: string, enum: ['project-room-public-receipt/1'] }
                         id: { type: string }
@@ -2755,9 +2769,10 @@ paths:
                         mergedAt: { type: [string, 'null'] }
                         verification:
                           type: object
-                          description: Present only on result-mode work-claim receipts; the verification tier recorded on the claim
+                          description: Always present; the receipt's verification tier. On a ?verify=1 detail read the same object also carries the re-derivation fields (verdict, checkedAt, checks, scope) next to state
+                          required: [state]
                           properties:
-                            state: { type: string, enum: [verified, self_attested] }
+                            state: { type: string, enum: [server_verified_merge, verified, self_attested, hash_only, system_checked, ledger_recorded, recorded] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
         '422':

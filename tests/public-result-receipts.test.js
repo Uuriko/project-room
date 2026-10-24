@@ -158,10 +158,12 @@ test("result-mode finishes project at their true tier and resolve anonymously", 
   assert.equal(selfAttested.pullRequest, null);
   assert.equal(selfAttested.mergedAt, null);
 
-  // The merge-verified path is unchanged: same fields, no verification key.
+  // The merge-verified path carries the tier as data too (U-08: the
+  // field is unconditional, so absence can no longer be mistaken for a
+  // tier): the server-settled merge is its own state in the enum.
   const merged = byTitle.get("Merged work");
   assert.ok(merged, "the server-verified merge still projects");
-  assert.equal("verification" in merged, false);
+  assert.deepEqual(merged.verification, { state: "server_verified_merge" });
   assert.equal(merged.pullRequest, "https://github.com/Uuriko/project-room/pull/21");
   assert.equal(merged.mergedAt, "2026-10-02T08:05:00.000Z");
 

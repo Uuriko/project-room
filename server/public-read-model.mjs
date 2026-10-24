@@ -229,6 +229,41 @@ function isListed(store, roomId) {
   return Boolean(store.db.prepare("SELECT 1 FROM room_public_settings WHERE room_id=? AND enabled=1").get(roomId));
 }
 
+// The one canonical tier enum for public receipts (U-08): the recorded
+// verification fact, named at the tier the record actually carries. The
+// first four values are facts recorded on the work itself — verified /
+// self_attested on a result-mode claim (#3636), hash_only /
+// system_checked on a public-work record. The rest are derived at read
+// time from the receipt's own fields, for receipts whose record carries
+// no verification fact: a merge the server itself settled
+// (server_verified_merge), a bounty lot's ledger movement
+// (ledger_recorded), and anything else the room simply recorded
+// (recorded). Every public receipt carries verification: { state } with
+// a state from this list — always present, always an object — so a
+// machine consumer can price a citation without scraping prose, and can
+// tell "recorded, nothing stronger" apart from a missing field. The page and
+// badge wording derives from the same facts through proofLevelOf and
+// PROOF_LEVELS (server/receipt-share.mjs); no tier semantics change.
+export const RECEIPT_TIER_STATES = Object.freeze([
+  "server_verified_merge", "verified", "self_attested",
+  "hash_only", "system_checked", "ledger_recorded", "recorded",
+]);
+
+// The tier state of one receipt-shaped object. The recorded fact wins
+// when it is one of the enum's values (it arrives as a bare word from a
+// stored row or a public-work record, or as verification.state on a
+// composed receipt); otherwise the state is derived from the receipt's
+// own source and merge fields, as proofLevelOf has always derived its
+// levels — this function is that derivation, named as data.
+export function receiptTierState(receipt) {
+  const recorded = typeof receipt?.verification === "string"
+    ? receipt.verification : receipt?.verification?.state;
+  if (RECEIPT_TIER_STATES.includes(recorded)) return recorded;
+  if (receipt?.source === "bounty-lot") return "ledger_recorded";
+  if (receipt?.source === "work-claim" && receipt?.mergedAt && receipt?.pullRequest) return "server_verified_merge";
+  return "recorded";
+}
+
 function rowToPublic(row) {
   return {
     schema: "project-room-public-receipt/1",
@@ -240,7 +275,12 @@ function rowToPublic(row) {
     humans: parseJson(row.humans_json, []),
     pullRequest: row.pull_request,
     mergedAt: row.merged_at,
-    ...(row.verification_state ? { verification: { state: row.verification_state } } : {}),
+    verification: { state: receiptTierState({
+      source: row.source,
+      verification: row.verification_state,
+      mergedAt: row.merged_at,
+      pullRequest: row.pull_request,
+    }) },
     hashes: parseJson(row.hashes_json, []),
     at: row.at,
     startHref: row.start_href,
@@ -948,8 +988,14 @@ function receiptWithOutcome(store, row) {
   if (row.source !== "public-work") return out;
   const outcome = publicWorkReceiptOutcome(store, row.id);
   if (!outcome) return out;
-  const { review, ...fields } = outcome;
-  return { ...out, ...fields, ...(review ? { review } : {}) };
+  const { review, verification, ...fields } = outcome;
+  // The outcome's verification word is the record's own fact (hash_only,
+  // or system_checked when a platform-executed check passed); it rides
+  // the same { state } object every other receipt carries, never the
+  // bare string the record stores.
+  return { ...out, ...fields,
+    verification: { state: receiptTierState({ source: row.source, verification }) },
+    ...(review ? { review } : {}) };
 }
 
 // Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
@@ -1075,6 +1121,7 @@ export function publicLotReceiptById(store, id) {
     humans: [],
     pullRequest: null,
     mergedAt: null,
+    verification: { state: "ledger_recorded" },
     hashes: hashList(entries.map(entry => HEX64.test(entry.hash ?? "") ? `sha256:${entry.hash}` : null).filter(Boolean)),
     at: iso(first.at) ?? new Date(0).toISOString(),
     startHref: startHref(null),
@@ -1178,6 +1225,17 @@ export function listPublicRoomSitemap(store) {
 // work-item receipt is the room's own record of a completion. A
 // public-work receipt records an artifact hash; its checks are
 // worker-reported (verification: "hash_only").
+// The proof level a recorded tier state names on its own, for the two
+// result-mode states whose level depends on nothing else the receipt
+// carries — the state-only slice of proofLevelOf below, single-sourced
+// so a surface that keys off the state (the receipts list, the detail
+// page's tier row) speaks the same words as the badge and verdict line.
+export function proofLevelForTierState(state) {
+  if (state === "verified") return "member-verified-completion";
+  if (state === "self_attested") return "self-attested-completion";
+  return null;
+}
+
 export function proofLevelOf(receipt) {
   if (receipt?.source === "work-claim" && receipt.mergedAt && receipt.pullRequest) return "server-verified-merge";
   if (receipt?.source === "work-claim" && receipt.verification?.state === "verified") return "member-verified-completion";
