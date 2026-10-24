@@ -561,7 +561,12 @@ const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotatio
 // work has no table, so recovery allows it and does not require it. Replay
 // skips it; the cron fills it again.
 const DURABLE_ALARM_ADDITIVE_TABLES = Object.freeze(["durable_alarm_queue"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DURABLE_ALARM_ADDITIVE_TABLES]);
+// watchdog_subjects (server/job-watchdog-store.mjs): lives in the JobWatchdog
+// object's own database, not the room store. Listed so a CREATE TABLE in
+// server/ is a known optional table. A room file that never ran the
+// watchdog does not have it.
+const WATCHDOG_ADDITIVE_TABLES = Object.freeze(["watchdog_subjects"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DURABLE_ALARM_ADDITIVE_TABLES, ...WATCHDOG_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

@@ -24,6 +24,8 @@ The event log, projections, work items, inbox connection records
 (`pending_channel_updates`) all live in that same SQLite database
 (`docs/UNIFIED-INBOX.md` "Connection record"; `docs/EMAIL-ROUTING.md` "Worker email() handler").
 
+A second SQLite Durable Object, class `JobWatchdog`, binding `JOB_WATCHDOG`, object name `job-watchdog`, migration `job-watchdog-v1`, is declared beside `ProjectRoom` (`cloudflare/wrangler.jsonc` `durable_objects` and `migrations`). Its table `watchdog_subjects` holds a copy of the public job-health snapshot, the last progress time, and short job receipts (`server/job-watchdog-store.mjs`, `cloudflare/job-watchdog.mjs`). `cloudflare/room.mjs` reads that object only when `ROOM_JOB_WATCHDOG` is exactly `1`. The checked-in `vars` do not set that flag, so this config leaves the object unused. The event log stays in `ProjectRoom`.
+
 Message reports (`message_reports`, `server/moderation.mjs`) live in the same
 database but outside the room event log. A report contains the reported
 message id, the reporting member's id, a reason of at most 280 characters of

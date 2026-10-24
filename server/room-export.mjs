@@ -496,7 +496,10 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   // state, created only when ROOM_DURABLE_ALARM_QUEUE is on. A restored
   // object enqueues again from the cron; replaying the rows would revive
   // a slot that already ran.
-  "durable_alarm_queue"
+  "durable_alarm_queue",
+  // Job watchdog progress (server/job-watchdog-store.mjs). This table is
+  // not in the room database. A room restore must not invent it.
+  "watchdog_subjects"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
