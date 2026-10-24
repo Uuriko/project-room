@@ -1,3 +1,4 @@
+import { RESTORE_RUNTIME_TABLES } from "../server/restore-schema.mjs";
 // #3409: restore the daily backup from the KV namespace it already lives
 // in. The request-body restore (POST /api/operator/restore) caps at
 // RESTORE_MAX_BYTES because it buffers the whole export; production's
@@ -352,6 +353,10 @@ test("restore-from-backup restores an event-dominated backup above the cap at pr
       // A table on only one side is legitimate only for the replay's own
       // skip list (runtime/idempotency tables are target-native or
       // created lazily); anything else means the restore lost a table.
+      if (!sourceTables.has(table) && targetTables.has(table) && RESTORE_RUNTIME_TABLES.includes(table)) {
+        assert.equal(countOf(target.db, table), 0, `new runtime table ${table} is empty`);
+        continue;
+      }
       assert.ok(REPLAY_SKIPPED_TABLES.includes(table),
         `table ${table} exists on only one side of the restore and is not replay-skipped`);
       continue;

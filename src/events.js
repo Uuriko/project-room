@@ -12,6 +12,10 @@ import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-sess
 // 65,536 characters is far under the 4 MiB room projection and Durable Object
 // SQLite row limits. Worst-case JSON escaping is 6 bytes per character
 // (\uXXXX), about 384 KiB, which fits the 512 KiB message command ceiling.
+// Retired event types are replay-only compatibility, never new command types.
+export const LEGACY_REPLAY_EVENT_TYPES = Object.freeze({ MESSAGE_REACTION_SET: "message.reaction_set" });
+export const isLegacyReplayEventType = type => Object.values(LEGACY_REPLAY_EVENT_TYPES).includes(type);
+
 export const MAX_MESSAGE_BODY_CHARS = 65536;
 export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
 
@@ -680,7 +684,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
     // message.reaction_set; replay skips them.
-    "message.reaction_set": () => {},
+    [LEGACY_REPLAY_EVENT_TYPES.MESSAGE_REACTION_SET]: () => {},
     [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,

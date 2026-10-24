@@ -1,3 +1,4 @@
+import { ensureRestoreSchema } from "./restore-schema.mjs";
 // Whole-store NDJSON restore into an already-open store.
 //
 // Sibling of server/room-export.mjs (which owns the export format). The export
@@ -180,6 +181,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  ensureRestoreSchema(store);
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
@@ -286,6 +288,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   if (!store?.db) throw new Error("Restore needs an open store");
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  ensureRestoreSchema(store);
   const existing = new Set(tableNames(db));
   const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
   const skippedTables = {};
