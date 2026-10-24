@@ -41,7 +41,7 @@ import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
+import { canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, ownMember } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -248,7 +248,7 @@ export class ReferralInvites {
       fail(403, "invite_not_permitted", "Only the room owner, or a member who can invite, can mint a referral invite.");
     }
     refuseArchivedWrite(room.state);
-    if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
+    if (ownMember(room.state.members, auth.member.id)?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
 
     // PRODUCT-200 B3/B11: opt-in client-kept requestId. The jti is derived from
     // (room, inviter, requestId), so a lost-response retry finds the same
@@ -358,7 +358,7 @@ export class ReferralInvites {
     ).get(payload.jti, payload.roomId);
     if (!ledger || ledger.status !== "minted" || ledger.chain_id !== payload.chainId
         || ledger.depth !== payload.depth || ledger.max_depth !== payload.maxDepth
-        || room.state.members[ledger.inviter_member_id]?.active !== true) {
+        || ownMember(room.state.members, ledger.inviter_member_id)?.active !== true) {
       fail(404, "invite_unavailable", "That invite is not available");
     }
     // Read-only public key: preview must never generate key material
@@ -411,7 +411,7 @@ export class ReferralInvites {
     // continues and mints an identity for an inviter who never joined.
     const inviterId = ledger.inviter_member_id;
     const members = preRoom.state.members;
-    const inviter = members && Object.hasOwn(members, inviterId) ? members[inviterId] : undefined;
+    const inviter = ownMember(members, inviterId);
     if (!inviter || inviter.active === false) {
       rejectAndFail(410, "invite_expired", "That invite is no longer valid", "inviter_inactive");
     }
@@ -524,7 +524,7 @@ export class ReferralInvites {
        FROM referral_invites WHERE room_id = ? ORDER BY created_at DESC, jti`
     ).all(roomId);
     const room = this.store.room(roomId);
-    const displayNameOf = memberId => room.state.members[memberId]?.displayName ?? null;
+    const displayNameOf = memberId => ownMember(room.state.members, memberId)?.displayName ?? null;
     return {
       roomId,
       invites: rows.map(row => ({
