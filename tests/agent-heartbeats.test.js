@@ -574,3 +574,55 @@ test("cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely
  advance(604800 * 1500 + 1);
  assert.equal(hb.statusOf("ai_testagent").status, "offline", "the longest window still ends");
 });
+
+// #3910 F3: acked wake signals past the retention window, beyond the
+// per-agent keep, are pruned with their claim rows; pending signals and
+// in-window history survive.
+test("pruneWakeSignals retires acked signals past retention beyond the keep, with their claim rows", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat(wakeable());
+  const acked = [];
+  for (const messageId of ["old-1", "old-2", "old-3"]) {
+    acked.push(hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId }).signal.signalId);
+    advance(1);
+  }
+  const pending = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "still-pending" }).signal;
+  hb.ackWakes({ agentId: "ai_testagent", signalIds: acked });
+  hb.ensureListenerSchema();
+  const claim = hb.db.prepare("INSERT INTO agent_wake_signal_claims (signal_id, agent_id, claimed_by, claimed_at, redelivered) VALUES (?, 'ai_testagent', 'tok', ?, 0)");
+  claim.run(acked[0], 1);
+  claim.run(pending.signalId, 1);
+  const count = sql => hb.db.prepare(sql).get().n;
+  assert.equal(count("SELECT COUNT(*) AS n FROM agent_wake_signals"), 4);
+  // Inside the window nothing is pruned, even beyond the keep bound.
+  assert.equal(hb.pruneWakeSignals({ keep: 1, retentionMs: 60_000 }).deleted, 0);
+  advance(120_000);
+  const pruned = hb.pruneWakeSignals({ keep: 1, retentionMs: 60_000 });
+  assert.equal(pruned.deleted, 2, "acked signals beyond the newest keep and past the window are pruned");
+  assert.equal(pruned.claimsDeleted, 1, "claim rows of pruned signals go with them");
+  assert.equal(count("SELECT COUNT(*) AS n FROM agent_wake_signals"), 2, "newest acked + the pending signal survive");
+  assert.equal(count("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE delivered_at IS NULL"), 1, "pending signals are never pruned");
+  assert.equal(count("SELECT COUNT(*) AS n FROM agent_wake_signal_claims"), 1, "the pending signal's claim row survives");
+  assert.equal(hb.pendingWakes("ai_testagent").length, 1);
+});
+
+// #3910 F4: the DM fan-out must not ring the push doorbell when the wake
+// coalesced onto an existing signal - the first post already rang it.
+test("DM fan-out rings the push doorbell once per message: a coalesced wake does not re-ring", t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const sender = f.store.identities.create("dm-sender");
+  const recipient = f.store.identities.create("dm-recipient");
+  f.store.agentHeartbeats.heartbeat({ agentId: recipient.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: "https://host.example.test/wake" });
+  let rings = 0;
+  f.store.agentHeartbeats.pushNotify = () => { rings++; };
+  const post = () => f.store.command(ownerKey, "commons", { id: randomUUID(), type: "dm.posted",
+    data: { messageId: "dm-doorbell-1", threadId: "thread-1", bondId: "bond-1",
+      fromIdentityId: sender.identityId, toIdentityId: recipient.identityId, body: "hello" } });
+  post();
+  assert.equal(rings, 1, "the first DM rings the doorbell");
+  post();
+  assert.equal(rings, 1, "a coalesced DM wake (same message) must not ring again");
+  assert.equal(f.store.agentHeartbeats.pendingWakes(recipient.identityId).length, 1, "the two posts coalesce to one durable signal");
+});

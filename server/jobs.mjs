@@ -232,14 +232,16 @@ async function runNodeRetention(store, ctx) {
   });
   ctx.retentionIndex = (tableIndex + 1) % RETENTION_TABLES.length;
   let webhookDeliveries = { deleted: 0 };
+  let wakeSignals = { deleted: 0 };
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
   try {
     webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
+    wakeSignals = store.agentHeartbeats.pruneWakeSignals();
     oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
     abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
   } catch { /* a room that has never stored these caches has no table */ }
-  return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  return { ...receipt, webhookDeliveries, wakeSignals, oauthProvider, abuseRateBuckets };
 }
 
 function defineJob(job) {
