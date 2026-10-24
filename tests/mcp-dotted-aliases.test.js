@@ -80,6 +80,7 @@ const EXPECTED_ALIASES = Object.freeze({
   "heartbeat.set": "heartbeat_set",
   "heartbeat.get": "heartbeat_get",
   "heartbeat.ack": "heartbeat_ack",
+  "room.wait": "room_wait",
   "wake.pause": "wake_pause",
   "wake.resume": "wake_resume",
   "webhook.subscribe": "webhook_subscribe",

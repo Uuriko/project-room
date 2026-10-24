@@ -81,6 +81,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "heartbeat_set",
   "heartbeat_get",
   "heartbeat_ack",
+  "room_wait",
   "wake_pause",
   "wake_resume",
   "webhook_subscribe",

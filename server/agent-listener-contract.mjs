@@ -8,6 +8,42 @@ export function validListenerLease(value) {
   return value === undefined || value === true || Boolean(value && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).length === 1 && typeof value.roomId === "string" && value.roomId.length > 0);
 }
+// The room scope a listener lease covers for this credential: a room-scoped
+// credential leases only its bound room; an identity credential leasing a
+// named room must re-prove live membership (links survive access suspension,
+// so the live member record decides); no named room leases the roomless
+// identity queue (room key ""). Shared by heartbeatWithListener and the MCP
+// room_wait tool so both doors resolve the scope identically.
+export function resolveListenerLeaseRoom(store, auth, requestedRoom) {
+  if (auth.roomId) {
+    if (requestedRoom !== null && requestedRoom !== undefined && requestedRoom !== auth.roomId)
+      reject(403, "room_mismatch", "A room-scoped credential leases only its bound room");
+    return auth.roomId;
+  }
+  if (requestedRoom !== null && requestedRoom !== undefined) {
+    const link = store.db.prepare(
+      "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, auth.identityId);
+    // Links survive access suspension (see scopedKeyRoomBinding):
+    // recheck the live room member, not just the identity mapping,
+    // before an identity-level credential may hold the room's lease.
+    const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
+    if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
+      reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
+    return requestedRoom;
+  }
+  return null;
+}
+// A scoped caller reads listener ids in its own host namespace (its
+// registrations are prefix-namespaced server-side).
+export function presentListenerId(auth, id) {
+  return (auth.hostPrefix && typeof id === "string" && id.startsWith(auth.hostPrefix))
+    ? id.slice(auth.hostPrefix.length) : id;
+}
+export function listenerLeaseView(auth, lease) {
+  return lease.acquired
+    ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
+    : { acquired: false, activeListenerId: presentListenerId(auth, lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
+}
 export function heartbeatWithListener(store, auth, data, { roomKey = false, door = "heartbeat" } = {}) {
   let hostId = data.hostId;
   if (roomKey) {
@@ -47,31 +83,10 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   let listener = null;
   if (data.listenerLease !== undefined) {
     const requestedRoom = data.listenerLease === true ? null : data.listenerLease.roomId;
-    let leaseRoomId;
-    if (auth.roomId) {
-      if (requestedRoom !== null && requestedRoom !== auth.roomId)
-        reject(403, "room_mismatch", "A room-scoped credential leases only its bound room");
-      leaseRoomId = auth.roomId;
-    } else if (requestedRoom !== null) {
-      const link = store.db.prepare(
-        "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, auth.identityId);
-      // Links survive access suspension (see scopedKeyRoomBinding):
-      // recheck the live room member, not just the identity mapping,
-      // before an identity-level credential may hold the room's lease.
-      const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
-      if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
-        reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
-      leaseRoomId = requestedRoom;
-    } else leaseRoomId = null;
+    const leaseRoomId = resolveListenerLeaseRoom(store, auth, requestedRoom);
     const lease = store.agentHeartbeats.acquireListenerLease({
       agentId: auth.identityId, roomId: leaseRoomId, listenerId: hostId });
-    // A scoped caller reads listener ids in its own host namespace
-    // (its registrations are prefix-namespaced server-side).
-    const presentListenerId = id => (auth.hostPrefix && typeof id === "string" && id.startsWith(auth.hostPrefix))
-      ? id.slice(auth.hostPrefix.length) : id;
-    listener = lease.acquired
-      ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
-      : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
+    listener = listenerLeaseView(auth, lease);
   }
   return { ...result, listener };
 }

@@ -32,7 +32,8 @@ export const CORE_REST_TWINS = Object.freeze({
   add_land_item: ["POST /api/rooms/{roomId}/add_land_item"],
   list_land_queue: ["GET /api/rooms/{roomId}/list_land_queue"],
   wake_pause: ["POST /api/rooms/{roomId}/agent-pause"],
-  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"]
+  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"],
+  room_wait: ["GET /api/agent-wakes/poll"]
 });
 
 // Static join documents, served as plain files rather than API routes.

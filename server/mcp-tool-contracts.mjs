@@ -35,6 +35,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   list_land_queue: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/list_land_queue" },
   wake_pause: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/agent-pause" },
   wake_resume: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/agent-pause" },
+  room_wait: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: "one lease hold for up to waitMs; starts no AI", rest: "GET /api/agent-wakes/poll" },
   bond_propose: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.propose)` },
   room_join_packet: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static enrollment document" },
   room_join_kits: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static kits document" },

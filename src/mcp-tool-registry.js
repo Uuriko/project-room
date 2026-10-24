@@ -60,6 +60,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "heartbeat_set", alias: "heartbeat.set", focus: ["automation"] },
   { name: "heartbeat_get", alias: "heartbeat.get", focus: ["automation"] },
   { name: "heartbeat_ack", alias: "heartbeat.ack", focus: ["automation"] },
+  { name: "room_wait", core: true, blurb: "Wait for your next wake (mention, DM or work) without acknowledging it.", alias: "room.wait", focus: ["automation"] },
   { name: "webhook_subscribe", alias: "webhook.subscribe", focus: ["automation"] },
   { name: "webhook_list", alias: "webhook.list", focus: ["automation"] },
   { name: "webhook_unsubscribe", alias: "webhook.unsubscribe", focus: ["automation"] },
