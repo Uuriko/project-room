@@ -27,6 +27,12 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   await page.waitForFunction(() => document.querySelector('#room-assistant').hidden);
   assert.equal(await page.locator('#room-assistant').isVisible(), false, 'unconfigured assistant does not occupy ordinary chat');
   assert.equal(await page.locator('#ask-room').count(), 0);
+  await ensureSidebarOpen(page);
+  assert.equal(await page.locator('#tasks-destination').isVisible(), true, 'task navigation is not an advanced agent setting');
+  await page.locator('#new-work-open').click();
+  await page.getByRole('dialog', { name: 'New work', exact: true }).waitFor();
+  await page.locator('#cancel-work-button').click();
+  await ensureSidebarClosed(page);
   await openSettings(page);
   await page.locator('#assistant-setup').waitFor();
   assert.equal(await page.locator('#assistant-setup').isVisible(), true, 'assistant setup is available in settings');

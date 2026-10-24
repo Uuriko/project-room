@@ -46,7 +46,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
-  let boundary = '', projection = null, reading = false, contribution = null, operation = null, rejectedOperation = null, configureOperation = null, error = '', lastRead = 0;
+  let boundary = '', projection = null, reading = false, contribution = null, operation = null, rejectedOperation = null, configureOperation = null, error = '', readError = '', lastRead = 0;
   const key = () => ["", client.generation, ":", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
   const pendingKey = () => ["room-assistant-pending:", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
   function persistOperation() { try { if (operation) sessionStorage.setItem(pendingKey(), JSON.stringify(operation)); else sessionStorage.removeItem(pendingKey()); } catch { /* the current tab still has the exact retry */ } }
@@ -141,8 +141,9 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       return source && (source.channelId ?? 'general') === context.channelId
         && (!context.threadId || context.rootOf(source.id) === context.threadId);
     });
-    const relevant = operation || rejectedOperation || error || contextualRuns.length;
+    const relevant = operation || rejectedOperation || error || readError || contextualRuns.length;
     section.hidden = !human() || !relevant;
+    $('#assistant-error').textContent = error || readError;
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     assistantSettings.querySelector('strong').textContent = uiText('human.assistantLabel', { name: assistant.name || 'Room' });
@@ -225,7 +226,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     const destination = sourceRow || section;
     if (face.parentElement !== destination) destination.append(face);
     faceRequest.hidden = Boolean(sourceRow);
-    section.hidden = !operation && !rejectedOperation && !error && (Boolean(sourceRow) || !current);
+    section.hidden = !operation && !rejectedOperation && !error && !readError && (Boolean(sourceRow) || !current);
     if ($('#assistant-runs')._html !== runsHtml) {
       const panel = $('#assistant-runs'), focused = panel.contains(document.activeElement) ? document.activeElement : null;
       const runId = focused?.closest('[data-assistant-run]')?.dataset.assistantRun, label = focused?.textContent, scroll = panel.scrollTop;
@@ -237,7 +238,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (operation) control.setAttribute('aria-disabled', 'true');
       else control.removeAttribute('aria-disabled');
     }
-    $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
+    $('#assistant-error').textContent = error || readError; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
   }
   function syncContribution() {
     const scoped = getContribution?.();
@@ -252,8 +253,8 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   async function refresh() {
     if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < (projection?.runs?.some(run => run.status === 'working') ? 500 : 3000)) return;
     const stamp = key(); reading = true; lastRead = Date.now();
-    try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
-    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; paint(); } }
+    try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; readError = ''; paint(); if (changed) refreshTranscript(); }
+    catch (failure) { if (stamp === key()) { readError = failure.status === 404 ? uiText("human.copy.014") : failure.message; paint(); } }
     finally { reading = false; }
   }
   async function invoke({ rethrow = false } = {}) {
@@ -262,7 +263,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     try {
       const value = await client.request(path(), { method: 'POST', data: owned });
       if (stamp !== key() || operation !== owned) return value;
-      operation = null; rejectedOperation = null; persistOperation(); contribution = null; error = ''; lastRead = 0;
+      operation = null; rejectedOperation = null; persistOperation(); contribution = null; error = ''; readError = ''; lastRead = 0;
       if (owned.action === 'submit' && value.receipt) onSubmitted?.(owned, value.result);
       // A failed refresh does not undo an accepted send. The stream can catch up.
       if (value.receipt) { try { await client.refresh(value.receipt); } catch { /* durable receipt already received */ } }
@@ -371,12 +372,12 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
-      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; readError = ''; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
         activity.open = false; activity.hidden = true;
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
         resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
-        boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0;
+        boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; readError = ''; lastRead = 0;
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
           if (pending?.action === 'submit' && typeof pending.requestId === 'string' && pending.command?.type === 'message.posted'
