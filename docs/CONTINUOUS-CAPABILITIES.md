@@ -100,6 +100,24 @@ The folder-picker-facing API and CLI are implemented here. Native picker
 wiring, automatic external-service OAuth, background folder ingestion, peer
 transfer and large streaming downloads remain separate integration work.
 
+### Discovering folder inputs
+
+`source-scan` discovers inputs without manually constructing filenames. Pass
+`{sourceId,room,capability,extensions:[".txt",".md"]}` and optionally a relative
+subfolder `path`. It returns `dataInputs` ready for `submit`, with content hashes
+and a stable manifest digest. A subsequent content change fails materialization
+rather than silently processing different evidence. No file contents or absolute
+source roots are returned. This is a local app/CLI operation, not a remote grant.
+
+The scan skips hidden entries, `node_modules`, symlinks and unselected extensions.
+It is bounded to 32 selected files (lower with `maxFiles`), 2,048 visited entries,
+eight directory levels and the configured input byte budgets. Exceeding a bound
+fails explicitly instead of returning a misleading partial input list; choose a
+smaller subfolder. It reads each selected file to hash it and is not a filesystem
+watcher or a persisted incremental index. Consistency is per-file, not an atomic
+snapshot of an entire changing folder. Existing grants are checked during the scan
+and again at materialization. No jobs are submitted implicitly.
+
 ### Whole-system source and result contract
 
 The complete workflow is: select/connect source → discover authorized changes

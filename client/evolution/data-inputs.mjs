@@ -1,4 +1,4 @@
-import { constants, openSync, closeSync, readSync, fstatSync, lstatSync, realpathSync, writeFileSync, readdirSync, unlinkSync, copyFileSync, statfsSync, utimesSync } from 'node:fs';
+import { constants, openSync, closeSync, readSync, fstatSync, lstatSync, realpathSync, writeFileSync, readdirSync, unlinkSync, copyFileSync, statfsSync, utimesSync, opendirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { edgeDoorApiPath } from '../../src/service-origin.js';
 import { canonical, digest, event, privateDir, requireThat } from './store.mjs';
@@ -45,6 +45,47 @@ export function validateDataInputs(inputs) {
       : item.kind === 'room-file' && typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 200 && hash(item.sha256), 'invalid_data_input');
   }
   return inputs;
+}
+
+// A local app/CLI discovery operation, not a remote source-access grant. The
+// complete bounded manifest can be submitted unchanged as job.dataInputs.
+export function scanDataSource(store, { sourceId, room, capability, path = '', extensions, maxFiles = 32 }) {
+  requireThat(name(sourceId) && typeof room === 'string' && typeof capability === 'string'
+    && (path === '' || relative(path)) && Number.isInteger(maxFiles) && maxFiles > 0 && maxFiles <= 32
+    && Array.isArray(extensions) && extensions.length > 0 && extensions.length <= 32
+    && extensions.every(e => typeof e === 'string' && /^\.[a-z0-9]{1,12}$/.test(e)), 'invalid_source_scan');
+  const job = { room, payload: { capability } }, item = { sourceId }, budget = limits(store);
+  const source = folderSource(store, job, item), start = path ? resolve(source.root, path) : source.root;
+  requireThat(start === source.root || start.startsWith(source.root + sep), 'data_path_escape');
+  const files = []; let visited = 0, totalBytes = 0, skipped = 0;
+  function visit(directory, prefix, depth) {
+    requireThat(depth <= 8, 'data_scan_depth_limit');
+    requireThat(realpathSync(directory) === directory && lstatSync(directory).isDirectory(), 'data_symlink');
+    const dir = opendirSync(directory);
+    try {
+      for (let entry; (entry = dir.readSync()) !== null;) {
+        requireThat(++visited <= 2048, 'data_scan_entry_limit');
+        if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.isSymbolicLink()) { skipped++; continue; }
+        const child = join(directory, entry.name), relativePath = prefix ? prefix + '/' + entry.name : entry.name;
+        if (entry.isDirectory()) { visit(child, relativePath, depth + 1); continue; }
+        if (!entry.isFile() || !extensions.some(e => entry.name.toLowerCase().endsWith(e))) { skipped++; continue; }
+        requireThat(files.length < maxFiles, 'data_scan_file_limit');
+        requireThat(canonical(folderSource(store, job, item)) === canonical(source), 'data_source_changed');
+        const bytes = readRegular(child, Math.min(budget.maxFileBytes, budget.maxTotalBytes - totalBytes));
+        totalBytes += bytes.length;
+        const extension = extensions.find(e => entry.name.toLowerCase().endsWith(e));
+        files.push({ path: relativePath, bytes: bytes.length,
+          input: { name: 'input-' + digest(relativePath).slice(0, 24) + extension, kind: 'folder', sourceId, path: relativePath, sha256: digest(bytes) } });
+      }
+    } finally { dir.closeSync(); }
+    requireThat(realpathSync(directory) === directory, 'data_source_changed');
+  }
+  visit(start, path, 0);
+  requireThat(canonical(folderSource(store, job, item)) === canonical(source), 'data_source_changed');
+  files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const dataInputs = validateDataInputs(files.map(file => file.input));
+  return { sourceId, room, capability, observedAt: Date.now(), totalBytes, visited, skipped,
+    dataInputs, manifestDigest: digest(canonical(dataInputs)), consistency: 'individual-file-snapshots' };
 }
 function limits(store) {
   const p = readPolicy(store), value = { maxFileBytes: 16 * 1024 ** 2, maxTotalBytes: 64 * 1024 ** 2, maxCacheBytes: 256 * 1024 ** 2, ...p.dataLimits };
