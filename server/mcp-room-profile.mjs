@@ -545,11 +545,12 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     // B4 agent read-path: same filters as GET /events — type (comma-separated
     // event types), mentions (a member id, or "me"), compact (drop envelope
     // noise). All optional; omitting them keeps the legacy page.
+    const currentMessages = store.redactionMessages(roomId);
     return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50, {
       types: typeof args.type === "string" ? args.type.split(",").map(part => part.trim()).filter(part => part.length > 0) : null,
       mentions: typeof args.mentions === "string" ? args.mentions : null,
       compact: args.compact === true
-    }), store.redactionMessages(roomId)), auth.member.id);
+    }), currentMessages), auth.member.id, currentMessages);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
