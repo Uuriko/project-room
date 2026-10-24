@@ -522,7 +522,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     // B-1 (#3771): a refused submit names its field instead of silence.
     node.addEventListener("invalid", event => {
       const field = event.target;
-      if (field?.name === "password" && passwordMode === "signup") setStatus(uiText("signin.copy.024"), true);
+      // QA 2026-10-20: a new-password field (signup or reset) names the rule.
+      if (field?.type === "password" && (field.minLength > 0 || (field.name === "password" && passwordMode === "signup"))) setStatus(uiText("signin.copy.024"), true);
       else if (field?.name === "email") setStatus(uiText("signin.copy.036"), true);
       else if (field?.name) setStatus(uiText("signin.copy.037"), true);
     }, true);

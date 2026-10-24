@@ -92,3 +92,14 @@ export function syncSidebarSections(state) {
     if (panel) panel.hidden = Boolean(panel.closest("#room-sidebar")) && !show && !panel.open;
   }
 }
+
+// QA 2026-10-20: signed-out, invite-preview and first-connect labels read as
+// an outage to new users. "signed-out" and "pending" are hidden on the
+// sign-in wall; "pending" elsewhere appears only after a short delay (CSS),
+// so a normal connect never flashes "Connecting…". Real faults stay "other".
+const PENDING_STATUS = /^(Connecting to room service…|Opening Room…|Not connected|Not connected · invitation preview|Not connected · open an invitation link to join|Not connected · your invitation to .+ is still open in the address bar)$/;
+export function connectionStatusState(text, connected = false) {
+  if (connected) return "connected";
+  if (/^Not connected · (account )?sign.in required$/.test(text)) return "signed-out";
+  return PENDING_STATUS.test(String(text ?? "")) ? "pending" : "other";
+}
