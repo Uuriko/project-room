@@ -949,7 +949,24 @@ function receiptWithOutcome(store, row) {
   const outcome = publicWorkReceiptOutcome(store, row.id);
   if (!outcome) return out;
   const { review, ...fields } = outcome;
-  return { ...out, ...fields, ...(review ? { review } : {}) };
+  const composed = { ...out, ...fields, ...(review ? { review } : {}) };
+  // P6 (MONEY-LEGIBILITY step 5): an undecided public submission shows its
+  // waiting age. Derived at read time from the row's own submission time
+  // (`at`) and the composed decision state — projection only, no stored
+  // field: a submission nobody has decided carries `wait` so the public
+  // queue and the submitter's own receipt view can render "submitted N
+  // days ago · awaiting decision" instead of a bare date.
+  if (composed.state === "submitted") {
+    const submittedMs = Date.parse(row.at ?? "");
+    if (Number.isFinite(submittedMs)) {
+      composed.wait = {
+        submittedAt: new Date(submittedMs).toISOString(),
+        days: Math.max(0, Math.floor((Date.now() - submittedMs) / 86_400_000)),
+        awaitingDecision: true,
+      };
+    }
+  }
+  return composed;
 }
 
 // Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
