@@ -101,6 +101,8 @@ final class LocalToolsTests {
             LocalHostReadiness.notice(host: base.merging(changes) { _, new in new }, local: state ?? local, connection: connection)
         }
         expectEqual(notice([:]), nil)
+        let unselected = base.merging(["phase": "assistant_not_selected"]) { _, new in new }
+        expectEqual(LocalHostReadiness.conversationNotice(host: unselected), "This Mac’s agent is not selected for its room. Ask a room administrator to select it using Connect in room settings.")
         // Basic conversation remains available with no computer tool grant.
         // The computer diagnostics must still explain the missing capability.
         for mode in ["none", "unknown", "approval_required", "control"] {
