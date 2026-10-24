@@ -1064,6 +1064,26 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_public_pages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_public_asks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "messages_backfill_cursor",
     "key": "room_id",
     "action": "delete",
