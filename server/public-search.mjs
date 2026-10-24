@@ -8,6 +8,7 @@ export const comparisonSlugs = Object.freeze([
   "multi-agent-workspace",
   "ai-agent-coordination",
   "project-room-vs-agent-room",
+  "agent-bounties-alternatives",
 ]);
 const comparePaths = comparisonSlugs.map(slug => `/compare/${slug}`);
 const agentDocRoutes = Object.freeze([
