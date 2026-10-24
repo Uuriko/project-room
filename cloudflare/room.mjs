@@ -770,3 +770,4 @@ export default {
 // invite-only-pilot. This re-export keeps the classification on the worker
 // import graph; it does not open a second Durable Object.
 export { tableHome } from '../server/room-shard.mjs';
+export { RoomShard } from './room-shard.mjs';

@@ -3,3 +3,4 @@
 // their functions here. Nothing in this module reads or writes a room.
 export { assertShardClassification, roomKeyColumn, tableHome } from "./room-shard-tables.mjs";
 export { ensureStorageHomeIfEnabled, perRoomObjectsEnabled, readStorageHome, storageHomeColumnPresent } from "./room-shard-flag.mjs";
+export { resolveRoomHome } from "./room-shard-route.mjs";
