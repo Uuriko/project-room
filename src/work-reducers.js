@@ -449,7 +449,12 @@ function mutableWorkItem(state, incoming, allowedStates) {
   requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["workItemId"]);
   const item = requireWorkItem(state, incoming.data.workItemId);
-  if (!allowedStates.includes(item.state)) throw new Error(`Invalid transition from ${item.state}`);
+  // Name the states this command requires: "Invalid transition from
+  // proposed" alone teaches neither that work.accepted is the missing step
+  // nor that a completed item is terminal (UT-ERRORS row 4).
+  if (!allowedStates.includes(item.state)) throw new Error(typeof incoming.type === "string"
+    ? `Invalid transition from ${item.state}: ${incoming.type} requires the work item to be ${allowedStates.join(", ")}`
+    : `Invalid transition from ${item.state}`);
   // Optional compare-and-swap. Absent means last-writer-wins. Present and
   // stale is still a conflict.
   if (incoming.data.expectedRevision != null && incoming.data.expectedRevision !== item.revision)

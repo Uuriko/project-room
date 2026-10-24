@@ -47,11 +47,25 @@ test("redeem 422 names the unexpected field instead of blaming the caller", { ti
 
 test("redeem 422 names the missing field", { timeout: 30000 }, async t => {
   const { origin } = await serve(t);
-  const res = await post(origin, "/api/agent-invites/redeem", { code: "nope" });
+  // `code` is the one genuinely required field; omitting it still 422s and
+  // names it.
+  const res = await post(origin, "/api/agent-invites/redeem", { displayName: "probe" });
   assert.equal(res.status, 422);
   const body = await res.json();
   assert.equal(body.error?.code, "invalid_invite");
-  assert.match(body.error?.message ?? "", /missing required field: displayName/);
+  assert.match(body.error?.message ?? "", /missing required field: code/);
+});
+
+test("redeem without displayName takes the documented default-name path", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  // ERROR-COPY-1 card 7c: displayName is optional at redeem — absence is the
+  // documented default-name signal (the member renames afterwards), not a
+  // 422. Validation passes, so an unknown code answers the store's 404.
+  // (Pre-fix this pinned 422 "missing required field: displayName".)
+  const res = await post(origin, "/api/agent-invites/redeem", { code: "nope" });
+  assert.equal(res.status, 404);
+  const body = await res.json();
+  assert.equal(body.error?.code, "invite_unavailable");
 });
 
 test("redeem with the documented body shape passes validation to the store", { timeout: 30000 }, async t => {

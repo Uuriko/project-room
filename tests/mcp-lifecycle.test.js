@@ -134,7 +134,14 @@ test("chat-only and wrong-assignee tools cannot widen enrollment; unknown produc
   }
   const proposed = (await chat.mcp.call("room_propose_work", { requestId: "not-steering", workItemId: "new", title: "No grant", definitionOfDone: "Must not exist",
     accountableMemberId: "managed-chat", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false })).result;
-  assert.equal(proposed.structuredContent.code, "command_rejected"); assert.equal(auditRecovery(f.store).dataSha256, before);
+  // ERROR-COPY-1 row 8: the store refusal for "managed-chat lacks steer" moved
+  // from 422 command_rejected to the 403 permission class, so the client
+  // diagnostic reports it through its standard 403 bucket (code access_ended,
+  // reason access_denied, hint: run room_check_access / ask the owner for the
+  // missing permission) — the same surface every genuine 403 already produced.
+  // The refusal itself and the no-write guarantee below are unchanged.
+  assert.equal(proposed.structuredContent.code, "access_ended"); assert.equal(proposed.structuredContent.reason, "access_denied");
+  assert.equal(auditRecovery(f.store).dataSha256, before);
   await recorded(writer.mcp, "room_accept_work", { requestId: "accept", workItemId, expectedRevision: 0 });
   const done = await recorded(writer.mcp, "room_record_completion", { requestId: "unknown-producer", workItemId, expectedRevision: 1,
     summary: "Reported result", evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", nextAction: "Review", signedEvidence: f.signEvidence() });

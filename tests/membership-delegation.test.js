@@ -498,8 +498,12 @@ test("IR-5: delegate passes the unlink gate; the event layer is the remaining fe
   // base today. It is an authority-model question for the IR-3 exit
   // event, which needs the same answer; this test pins the boundary so
   // the layer-2 fix turns it red and it is rewritten to assert success.
+  // ERROR-COPY-1 (UT-ERRORS row 8): the layer-2 boundary itself is
+  // unchanged (same refusal, same rollback), but its status class moved —
+  // command-path permission refusals are 403 access_denied, not 422
+  // command_rejected, matching the route-level permission errors.
   assert.throws(() => store.identities.unlink(agent.secret, "commons", other.identityId),
-    err => err.status === 422 && err.code === "command_rejected" && /lacks manage_members/.test(err.message));
+    err => err.status === 403 && err.code === "access_denied" && /lacks manage_members/.test(err.message));
   // The refused command rolled back: the link row is untouched.
   assert.ok(store.identities.resolveIdentityLink(other.identityId, "commons"));
   // A member holding manage_members itself unlinks through the same gate.

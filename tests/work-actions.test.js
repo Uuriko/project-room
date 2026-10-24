@@ -204,7 +204,8 @@ test("room policy: work recorded before a flip keeps its recorded requirements; 
 test("room policy: only the room owner sets it, and the command shape is strict", t => {
   const f = policyFixture(t);
   const on = { requireIndependentReview: true, requireOwnerDecision: true };
-  assert.throws(() => f.setPolicy("guest", on), { status: 422, code: "command_rejected", message: /Only the Room owner may set room policy/ });
+  // ERROR-COPY-1 row 8: owner-only command refusal -> 403 owner_required (was 422 command_rejected).
+  assert.throws(() => f.setPolicy("guest", on), { status: 403, code: "owner_required", message: /Only the Room owner may set room policy/ });
   assert.throws(() => f.setPolicy("reviewer", on), /Only the Room owner may set room policy/);
   assert.equal(f.state().room.policy, undefined, "a refused policy leaves no trace");
   assert.throws(() => f.setPolicy("owner", { requireIndependentReview: "yes", requireOwnerDecision: true }), { status: 422, code: "invalid_command", message: /Invalid field: requireIndependentReview/ });

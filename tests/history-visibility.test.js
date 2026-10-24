@@ -144,7 +144,8 @@ test("the owner, membership admins and members who joined earlier keep their rea
   const early = await (await f.get("/api/rooms/commons", f.earlyKey)).json();
   assert.ok(early.state.messages.some(message => message.id === "before-root"));
   // Only the owner changes the setting.
-  assert.throws(() => f.cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "all" }, f.lateKey), { code: "command_rejected" });
+  // ERROR-COPY-1 row 8: the non-owner refusal is 403 owner_required (was command_rejected).
+  assert.throws(() => f.cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "all" }, f.lateKey), { code: "owner_required" });
   assert.throws(() => f.cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "everyone" }), { code: "command_rejected" });
   // A membership admin reads everything.
   const late = f.store.room("commons").state.members["late-agent"];

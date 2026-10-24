@@ -56,8 +56,10 @@ test("Room Trust defaults open and only the owner can flip it", t => {
   assert.equal(isCrossOwnerAgentAction(f.state(), "owner", "producer"), false, "owner and their agent are the same owner");
   assert.equal(isCrossOwnerAgentAction(f.state(), "owner", "foreign"), true);
   assert.equal(isCrossOwnerAgentAction(f.state(), "guest", "owner"), false, "two humans are not the agent gate");
+  // ERROR-COPY-1 row 8: an owner-only command refusal is a permission refusal,
+  // so the store catch maps it to 403 owner_required (was 422 command_rejected).
   assert.throws(() => f.send("guest", T.ROOM_TRUST_SET, { enabled: false }), {
-    status: 422, code: "command_rejected", message: /Only the Room owner may set Room Trust/
+    status: 403, code: "owner_required", message: /Only the Room owner may set Room Trust/
   });
   assert.throws(() => f.send("owner", T.ROOM_TRUST_SET, {}), {
     status: 422, code: "command_rejected", message: /enabled as true or false/

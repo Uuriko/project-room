@@ -93,8 +93,11 @@ test("actual agent reuse creates fresh work, preserves source and exact retry, a
     ...definition, workItemId: "new-definition-work", accountableMemberId: "producer", verifierMemberId: "reviewer",
     humanDecisionMakerId: "owner", independentVerificationRequired: true, ownerDecisionRequired: true, mode: "read"
   } };
-  await assert.rejects(f.client("guest").command(command), error => error.status === 422);
-  await assert.rejects(f.client("producer").command(command), error => error.status === 422);
+  // ERROR-COPY-1 row 8 (PR #4347): neither actor holds steer, so the refusal
+  // is "<actor> lacks steer" — a lacks-permission command refusal, which moved
+  // from 422 command_rejected to 403 access_denied.
+  await assert.rejects(f.client("guest").command(command), error => error.status === 403 && error.code === "access_denied");
+  await assert.rejects(f.client("producer").command(command), error => error.status === 403 && error.code === "access_denied");
   assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
   await owner.command({ id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: {
     memberId: "planner", displayName: "Test planner agent", kind: "agent", accountableHumanId: "owner", permissions: ["steer"]

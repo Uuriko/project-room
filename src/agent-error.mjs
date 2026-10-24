@@ -806,13 +806,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+    // The guest-invite wording is only true for invite-shaped refusals;
+    // every other owner_required action (archive, connections, tiers) got
+    // the same hint and it named the wrong recovery (UT-ERRORS row 8).
+    const inviteShaped = /guest invite|Add agent/i.test(String(message || ""));
     return {
       status: "action_required",
       reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
       hint: reasonCode === "owner_required"
-        ? "Only the room owner can mint a guest invite or Add agent."
+        ? (inviteShaped
+          ? "Only the room owner can mint a guest invite or Add agent."
+          : "Only the room owner can do that — the message names the action. Ask the room owner to do it or to delegate the authority.")
         : "This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.",
-      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [tool("room_check_access"), path("/api/session"), command(reasonCode === "owner_required" && !inviteShaped
+        ? "Ask the room owner to perform this action, or to grant you the authority for it"
+        : "Ask the owner to mint a guest invite or Add agent")]
     };
   }
   // (public_work_claim_conflict and stale_public_claim are registry-owned —
@@ -1021,6 +1029,30 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         status: "action_required", reason: "command_rejected",
         hint: "The proposal was refused before the work item was created — nothing was saved. Resend it with a decision-maker.",
         next: [command("Resend work.proposed with humanDecisionMakerId naming a member who holds the decide permission.")]
+      };
+    }
+    // UT-ERRORS rows 4/5: a wrong-state transition and the two revision-token
+    // failures each have a specific recovery; the generic rebase hint below
+    // taught none of them.
+    if (/^Invalid transition from /.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "command_rejected",
+        hint: "The work item is not in a state this command accepts — the message names the states it requires. Advance it with a valid transition first, then resend.",
+        next: [readWork, command("Read the work item's current state, send the transition that moves it into a required state (for example work.accepted from proposed), then resend the refused command")]
+      };
+    }
+    if (/^expectedMessageRevision is required/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "command_rejected",
+        hint: "No expectedMessageRevision was sent — nothing was compared, so the message may not have changed. Resend with the field set to the current revision.",
+        next: [path(roomId ? `/api/rooms/${roomId}` : "/api/session"), command("Re-read the conversation for the message's current revision, then resend with expectedMessageRevision set to it")]
+      };
+    }
+    if (/^Message changed;/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "command_rejected",
+        hint: "The message changed after the revision this edit was based on. Resend with expectedMessageRevision set to the current revision named in the refusal.",
+        next: [path(roomId ? `/api/rooms/${roomId}` : "/api/session"), command("Re-read the conversation, then resend with expectedMessageRevision set to the current revision")]
       };
     }
     return {

@@ -311,6 +311,16 @@ export class AgentInvites {
     const existingIdentity = identitySecret === null ? null : this.store.identities.resolveGlobalIdentitySecret(identitySecret);
     if (identitySecret !== null && !existingIdentity) fail(401, "unauthenticated", "Active identity credential required");
     if (requestId !== null && !validId(requestId)) fail(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
+    // An explicitly supplied displayName follows the same 1-80 rule as
+    // invite create (above) and the length check on the fresh path below:
+    // an empty or whitespace-only name is a supplied name that fails the
+    // rule, not an absent name — it used to silently become the default
+    // while an 81-character name was refused (QA card 7c). An absent name
+    // keeps the documented default.
+    if (displayName !== undefined && displayName !== null
+      && (typeof displayName !== "string" || !displayName.trim() || displayName.trim().length > 80)) {
+      fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+    }
     // Legacy codes never contain I/L/O, so folding the confusables is safe
     // for both formats.
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";

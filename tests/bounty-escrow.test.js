@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow, bountyEscrowSchema, canonicalLane, convergeBountyDeployedSchema, toMillis, normalizeActor } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, bountyEscrowSchema, canonicalLane, convergeBountyDeployedSchema, toMillis, normalizeActor, requiredDisputeBondMillis } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
@@ -352,6 +352,28 @@ test("dispute bond must be exactly 25% of the bounty", () => {
   const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
   assert.equal(dispute.bond, 2.5);
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).group, "in-review");
+  expectConserved(escrow);
+});
+
+test("dispute bond for a 0.01 bounty is the representable 0.003 (25% rounded up to the milli)", () => {
+  // Companion B (UT-ERRORS row 9 note 2, REV-UT-VERDICTS claim 5): the naive
+  // 25% of 0.01 is 0.0025, which the amount parser refuses at 3 decimals —
+  // the prescribed bond must be the representable ceiling, and open must
+  // enforce exactly that amount.
+  assert.equal(requiredDisputeBondMillis(10), 3);
+  assert.equal(requiredDisputeBondMillis(1000), 250);
+  assert.equal(requiredDisputeBondMillis(40), 10);
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 0.01, verifier: INSTINCT });
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.0025, grounds: "bad" }), "invalid_amount");
+  for (const bond of [0.002, 0.004]) {
+    assert.throws(
+      () => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond, grounds: "bad" }),
+      error => error.code === "invalid_bond" && /0\.003/.test(error.message),
+      `bond ${bond} must be refused naming the required 0.003`);
+  }
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.003, grounds: "bad work" });
+  assert.equal(dispute.bond, 0.003);
   expectConserved(escrow);
 });
 

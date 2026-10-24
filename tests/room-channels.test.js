@@ -148,7 +148,10 @@ test("http: channel lifecycle through /commands and per-channel posting", async 
 
   res = await send(f.keys.guest, { id: randomUUID(), type: T.CHANNEL_RENAMED,
     data: { channelId: created.id, name: "ux" } });
-  assert.equal(res.status, 422, "non-owner rename rejected");
+  // ERROR-COPY-1 row 8: the owner-only rename refusal is a permission refusal,
+  // 403 owner_required (was 422 command_rejected).
+  assert.equal(res.status, 403, "non-owner rename rejected");
+  assert.equal((await res.json()).error.code, "owner_required");
   res = await send(f.keys.owner, { id: randomUUID(), type: T.CHANNEL_RENAMED,
     data: { channelId: created.id, name: "ux" } });
   assert.equal(res.status, 201);
