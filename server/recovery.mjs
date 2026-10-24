@@ -9,9 +9,16 @@ import { auditReplyRequests } from "./reply-requests.mjs";
 import { auditWorkHelp } from "./work-help.mjs";
 import { compactReplayLikeArchive, archivedMessageIds } from "./messages-store.mjs";
 
-const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
+// #3483: a sqlite BLOB cell arrives as a Uint8Array; walking it with
+// Object.keys rendered ~1M numeric keys per MiB (~5.3 s vs 46 ms for a
+// text cell). Render bytes as a deterministic byte token instead: the
+// digest stays byte-sensitive (one flipped byte changes the sha256)
+// while non-BLOB canonical output is unchanged, so only BLOB-bearing
+// table digests move.
+export const canonical = value => value instanceof Uint8Array ? `blob:${createHash("sha256").update(value).digest("hex")}`
+  : Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
-const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
+export const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
 const requireState = condition => { if (!condition) throw new Error("Recovery data requires operator reconciliation"); };
 const integer = value => Number.isSafeInteger(value);
 
