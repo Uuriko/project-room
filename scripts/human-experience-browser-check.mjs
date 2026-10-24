@@ -86,7 +86,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
+  assert.equal(await owner.locator('#tasks-destination').isVisible(),true);
   await configureAssistant(owner);
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
@@ -1067,4 +1067,42 @@ test('discarding an uncertain assistant control restores the face control access
   await page.locator('#assistant-discard').click();
   assert.equal(await stop.isEnabled(), true, 'Discard restores the unchanged face control for assistive technology');
   await stop.click(); await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+});
+
+
+test('assistant read recovery clears stale errors without dismissing an uncertain action', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await browserType.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage(); page.setDefaultTimeout(12000);
+  let failRead = true, reads = 0;
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() === 'GET') {
+      reads++;
+      if (failRead) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Temporary assistant outage' }) });
+    }
+    await route.continue();
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await page.locator('#main').waitFor();
+  await page.waitForFunction(() => document.querySelector('#assistant-error').textContent.length > 0);
+  failRead = false;
+  await page.waitForFunction(() => document.querySelector('#assistant-error').textContent === '');
+  assert.ok(reads >= 2, 'a successful later read recovered the status');
+  await configureAssistant(page);
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() === 'POST' && route.request().postDataJSON()?.action === 'submit') return route.abort('connectionfailed');
+    await route.fallback();
+  });
+  await page.locator('#message-input').fill('@Room Review the UI recovery patch');
+  await page.locator('#message-input').press('Enter');
+  await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+  const recoveredRead = page.waitForResponse(response => response.url().endsWith('/api/rooms/commons/assistant') && response.request().method() === 'GET' && response.ok());
+  await page.waitForFunction(() => document.querySelector('#assistant-error').textContent.includes('not confirmed'));
+  await recoveredRead;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.locator('#assistant-retry').isVisible(), true, 'read recovery must not acknowledge a write');
+  assert.match(await page.locator('#assistant-error').textContent(), /not confirmed/);
 });
