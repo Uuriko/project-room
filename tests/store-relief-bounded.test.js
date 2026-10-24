@@ -7,21 +7,21 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { archivedMessageRow } from "../server/messages-store.mjs";
+import { archivedMessageRow, restoreArchivedMessages } from "../server/messages-store.mjs";
 import { operatorArchive } from "../server/operator-archive.mjs";
 import { relieveProjectionsIncrementally } from "../server/store-relief.mjs";
 import { DurableDatabase } from "../cloudflare/storage.mjs";
 
 const recovery = { key: "verified-fixture", target: "kv", ageDays: 0 };
-function fixture(t) {
+function fixture(t, { bodiesAtRest = true, pad = 100 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "bounded-relief-"));
   let clock = Date.now();
-  const store = new RoomStore(join(dir, "room.sqlite"), { now: () => clock, bodiesAtRest: true });
+  const store = new RoomStore(join(dir, "room.sqlite"), { now: () => clock, bodiesAtRest });
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   store.initialize(initialRoom());
   const key = store.issueAccessKey("commons", "owner");
   const send = (type, data) => { clock += 10_000; return store.command(key, "commons", { id: randomUUID(), type, data }); };
-  const post = (from, count) => { for (let i = from; i < from + count; i++) send(T.MESSAGE_POSTED, { messageId: `m-${i}`, body: `bounded ${i}`.padEnd(100, "x") }); };
+  const post = (from, count) => { for (let i = from; i < from + count; i++) send(T.MESSAGE_POSTED, { messageId: `m-${i}`, body: `bounded ${i}`.padEnd(pad, "x") }); };
   const cursor = () => store.db.prepare("SELECT state_seq FROM messages_backfill_cursor WHERE room_id='commons'").get()?.state_seq ?? 0;
   return { store, send, post, cursor };
 }
@@ -99,4 +99,26 @@ test("DurableDatabase iterator streams rows and accounts for early termination",
   assert.equal(db.rowsRead, 1);
   const refused = new DurableDatabase({ sql: { exec: () => { throw new Error("SQLITE_TOOBIG"); } } });
   assert.throws(() => [...refused.prepare("SELECT body").iterate()], error => error.code === "pilot_limit");
+});
+
+test("bounded relief of a 3.5 MB projection preserves pins and restores every message", { timeout: 180_000 }, async t => {
+  const f = fixture(t, { bodiesAtRest: false, pad: 1500 });
+  f.post(0, 900);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* verified prefix */ }
+  f.post(900, 1400);
+  f.send(T.MESSAGE_PINNED, { messageId: "m-0" });
+  const bytes = () => f.store.db.prepare("SELECT length(CAST(projection AS BLOB)) AS n FROM rooms WHERE id='commons'").get().n;
+  const before = bytes();
+  assert.ok(before > 3_500_000);
+  const result = await relieveProjectionsIncrementally(f.store, { limitBytes: 3_500_000, recovery });
+  assert.ok(result.catchUpEvents <= 500);
+  assert.equal(result.relieved, 1, JSON.stringify(result));
+  assert.ok(bytes() < 3_500_000, `${before} -> ${bytes()}`);
+  assert.ok(f.store.room("commons").state.messages.some(m => m.id === "m-0"));
+  assert.ok(archivedMessageRow(f.store.db, "commons", "m-1")?.body);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* finish parity proof after relief */ }
+  assert.equal(f.store.checkMessagesParity({ roomId: "commons" }).ok, true);
+  restoreArchivedMessages(f.store, "commons");
+  const restored = new Set(f.store.room("commons").state.messages.map(m => m.id));
+  for (let i = 0; i < 2300; i++) assert.ok(restored.has(`m-${i}`), `m-${i} restored`);
 });
