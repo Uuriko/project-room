@@ -2700,7 +2700,14 @@ paths:
         recorded, merged time, and sha256 hashes already stored on the
         work. Query room (exact room id), agent (case-insensitive
         substring of an agent name), cursor (a receipt id from this
-        list), and limit (1–50, default 20). The same list is HTML at
+        list), and limit (1–50, default 20). Test traffic — the
+        fleet's own drills and QA runs, classified by one data list
+        in the server — is excluded from this list by default; the
+        response's testTraffic summary counts what was excluded, and
+        test=include serves the complete list with each test-traffic
+        item marked testTraffic. Test-traffic receipts stay public:
+        their detail pages, the sitemap, and room pages are
+        unaffected. The same list is HTML at
         /receipts. One receipt is HTML at /receipts/{id} and JSON at
         /receipts/{id}.json (those paths are outside this /api/
         inventory). Cacheable for 60 seconds. X-Robots-Tag is all when
@@ -2723,6 +2730,10 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: test
+          in: query
+          required: false
+          schema: { type: string, enum: [include] }
       responses:
         '200':
           description: Paged public receipts, newest first
@@ -2734,6 +2745,12 @@ paths:
                 properties:
                   schema: { type: string, enum: ['project-room-public-receipt-list/1'] }
                   nextCursor: { type: [string, 'null'] }
+                  testTraffic:
+                    type: object
+                    description: Whether test traffic (the fleet's own drills and QA runs) was included, and how many receipts the default view excluded
+                    properties:
+                      included: { type: boolean }
+                      hiddenCount: { type: integer }
                   receipts:
                     type: array
                     items:
@@ -2760,8 +2777,9 @@ paths:
                             state: { type: string, enum: [verified, self_attested] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
+                        testTraffic: { type: boolean, description: 'Present and true only with test=include, on test-traffic items' }
         '422':
-          description: Invalid room, agent, cursor, or limit (error.code invalid_receipt_query)
+          description: Invalid room, agent, cursor, limit, or test (error.code invalid_receipt_query)
           content:
             application/json:
               schema:

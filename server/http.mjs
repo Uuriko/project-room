@@ -2165,6 +2165,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           agent: url.searchParams.get("agent"),
           cursor: url.searchParams.get("cursor"),
           limit: limitRaw == null ? 20 : Number(limitRaw),
+          test: url.searchParams.get("test"),
         });
         if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
         res.setHeader("Link", publicPageLinks(url, "/receipts"));
