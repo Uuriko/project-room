@@ -21,6 +21,12 @@ import { BountyEscrow, DISPUTE_TIMEOUT_MS } from "./bounty-escrow.mjs";
 
 const ACTIONABLE_STATES = "('proposed','funded','claimed','submitted','accepted','disputed','approved')";
 
+// The failure detail's recordId shape — the same id alphabet the job
+// heartbeat sanitizers enforce (server/jobs.mjs SAFE_RECORD_ID,
+// cloudflare/job-heartbeat.mjs DETAIL_RECORD_ID). Declared locally:
+// jobs.mjs imports this module, not the other way round.
+const FAILURE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 // A dispute whose machine record is already terminal (resolved/withdrawn)
 // but whose bounty never settled — the finalize handler must have thrown
 // inline — is due for the keeper's retry immediately, not at the timeout.
@@ -96,6 +102,11 @@ export function escrowEpochNextDueAt(store, now) {
 // - failed / errors: per-bounty failures (closeEpoch already isolates
 //            them in its summary; a whole-room throw counts once). errors
 //            mirrors failed so the schedulers mark the tick failed.
+//            When at least one per-bounty failure was isolated, the
+//            summary also carries failureDetail naming the first failed
+//            bounty (recordId) — the stored detail and operator surfaces
+//            only; the public health view never projects it (the RQ-22
+//            naming rule, #3624 discipline).
 export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } = {}) {
   const summary = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
     released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
@@ -107,6 +118,7 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
     [now, now, now, now, now]);
   const instance = escrow
     ?? (store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store));
+  let firstFailedBountyId = null;
   for (const { roomId } of roomRows ?? []) {
     summary.rooms += 1;
     try {
@@ -119,6 +131,16 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
       summary.released += epoch.released?.length ?? 0;
       summary.expired += epoch.expiredUnfunded?.length ?? 0;
       summary.failed += epoch.failed?.length ?? 0;
+      // RQ-22 naming: closeEpoch isolates a poisoned bounty into its
+      // summary with the bounty id structured ({bountyId, code, message},
+      // the #3275 seam), so the first failure's bounty is in scope here —
+      // not buried in an error string. A whole-room throw (the catch
+      // below) names nothing: no bounty is in scope for it.
+      for (const entry of epoch.failed ?? []) {
+        if (firstFailedBountyId == null && typeof entry?.bountyId === "string" && FAILURE_RECORD_ID.test(entry.bountyId)) {
+          firstFailedBountyId = entry.bountyId;
+        }
+      }
     } catch (error) {
       // One room's epoch throwing must not stall the other rooms.
       summary.failed += 1;
@@ -126,6 +148,9 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
     }
   }
   summary.errors = summary.failed;
+  if (firstFailedBountyId != null) {
+    summary.failureDetail = { code: "escrow_epoch_failed", recordId: firstFailedBountyId };
+  }
   summary.overdue = dueCount(store, now, { excludeApproved: true });
   if (summary.rooms > 0) console.info(JSON.stringify({ event: "room.escrow_epochs", ...summary }));
   return summary;
