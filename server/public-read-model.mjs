@@ -710,8 +710,8 @@ export function syncDirectoryCard(store, agentId) {
     }
     const counts = directoryCounts(store, agentId, row.identityId);
     const skills = Array.isArray(card.skills) ? card.skills.filter(skill => typeof skill === "string") : [];
-    const publicName = scrubPublicDirectoryText(name) || "Agent";
-    const publicDescription = scrubPublicDirectoryText(typeof card.description === "string" ? card.description : "");
+    const listedName = scrubPublicDirectoryText(name) || "Agent";
+    const listedDescription = scrubPublicDirectoryText(typeof card.description === "string" ? card.description : "");
     store.db.prepare(`INSERT INTO public_directory_entries
       (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
       VALUES (?,?,?,?,?,?,?,?)
@@ -719,7 +719,7 @@ export function syncDirectoryCard(store, agentId) {
         name=excluded.name, description=excluded.description, skills_json=excluded.skills_json,
         identity_id=excluded.identity_id, receipt_count=excluded.receipt_count, room_count=excluded.room_count,
         updated_at=excluded.updated_at`
-    ).run(agentId, publicName, publicDescription,
+    ).run(agentId, listedName, listedDescription,
       JSON.stringify(skills), row.identityId, counts.receiptCount, counts.roomCount, new Date().toISOString());
   };
   if (store.db.isTransaction) write();
