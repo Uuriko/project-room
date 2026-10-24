@@ -1,7 +1,7 @@
 // Server coverage report (backlog TST-10).
 //
 // Lists every server/ module with its test status:
-// - "direct":     a test file imports or path-references the module
+// - "direct":     a test file directly imports the module
 //                 (same rule as scripts/untested-modules-lint.mjs).
 // - "transitive": no test references it, but a directly tested module
 //                 imports it (static relative imports), so tests load it.
@@ -111,7 +111,7 @@ export function formatMarkdown(report, { revision = "" } = {}) {
     "",
     `Summary: ${t.modules} server modules. ${t.direct} have a direct test reference. ${t.transitive} are loaded only through a tested module. ${t.unreached} are never loaded by any test.`,
     "",
-    "Status rules: \"direct\" means a test file imports or path-references the module. \"transitive\" means only a directly tested module imports it. \"unreached\" means neither.",
+    "Status rules: \"direct\" means a test file directly imports the module. \"transitive\" means only a directly tested module imports it. \"unreached\" means neither.",
     "",
   ].filter((l, i, a) => l !== "" || a[i - 1] !== "");
   const section = (title, status) => {

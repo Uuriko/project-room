@@ -42,7 +42,6 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 
-const ADAPTER_PATH = '../server/session-adapter/herdr-bridge-adapter.mjs';
 
 const TEST_PINS = {
   herdrVersion: 'herdr-0.14.2',
@@ -206,7 +205,7 @@ function makeEnv(mock, { mode = 'on', methods, tenants = ['tenant-a'], masterSec
 }
 
 async function loadAdapter() {
-  return import(ADAPTER_PATH);
+  return import("../server/session-adapter/herdr-bridge-adapter.mjs");
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +403,7 @@ test('D2: bridge 500s every ping → legacy fallback after the retry budget', as
 // ---------------------------------------------------------------------------
 
 async function connectedAdapter(t, mock, opts = {}) {
-  const { readHerdrBridgeConfig, connectSession } = await import(ADAPTER_PATH);
+  const { readHerdrBridgeConfig, connectSession } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
   const env = makeEnv(mock, opts.envOpts);
   const out = await connectSession({
     config: readHerdrBridgeConfig(env), tenantId: 'tenant-a', roomId: 'room-x', env,
@@ -443,7 +442,7 @@ test('E3: 4xx on a write is never retried', async (t) => {
   const mock = await startMockBridge({ forceStatus: { '/v1/send': 400 } });
   try {
     const { adapter } = await connectedAdapter(t, mock);
-    const { ServerError } = await import(ADAPTER_PATH);
+    const { ServerError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     await assert.rejects(adapter.sendText('agent-1', 'x'), (e) => e instanceof ServerError);
     assert.equal(mock.state.requests.filter((r) => r.route === '/v1/send').length, 1);
   } finally { await mock.close(); }
@@ -453,7 +452,7 @@ test('E4: occupant_changed surfaces as OccupantChangedError, single attempt', as
   const mock = await startMockBridge({ errorBody: { '/v1/send': { error: { code: 'occupant_changed', message: 'occupant moved' } } } });
   try {
     const { adapter } = await connectedAdapter(t, mock);
-    const { OccupantChangedError } = await import(ADAPTER_PATH);
+    const { OccupantChangedError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     await assert.rejects(
       adapter.sendText({ id: 'agent-1', paneId: 'pane-1', occupantId: 'occ-stale' }, 'x'),
       (e) => e instanceof OccupantChangedError,
@@ -466,7 +465,7 @@ test('E5: waitForState exceeding its timeout → TimeoutError', async (t) => {
   const mock = await startMockBridge({ waitDelayMs: 2000 });
   try {
     const { adapter } = await connectedAdapter(t, mock);
-    const { TimeoutError } = await import(ADAPTER_PATH);
+    const { TimeoutError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     await assert.rejects(
       adapter.waitForState('agent-1', ['done'], { timeoutMs: 400 }),
       (e) => e instanceof TimeoutError,
@@ -478,7 +477,7 @@ test('E6: calls after disconnect → TransportError(not_connected)', async (t) =
   const mock = await startMockBridge();
   try {
     const { adapter } = await connectedAdapter(t, mock);
-    const { TransportError } = await import(ADAPTER_PATH);
+    const { TransportError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     await adapter.disconnect();
     await adapter.disconnect(); // idempotent
     await assert.rejects(adapter.ping(), (e) => e instanceof TransportError && e.code === 'not_connected');
@@ -492,7 +491,7 @@ test('E6: calls after disconnect → TransportError(not_connected)', async (t) =
 test('F1: 5 consecutive failures open the breaker; new sessions fall back to legacy', async (t) => {
   const mock = await startMockBridge({ failTimes: { '/v1/read': 999, '/v1/ping': 999 } });
   try {
-    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import(ADAPTER_PATH);
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     const breakerStore = new Map();
     const env = makeEnv(mock);
     const config = readHerdrBridgeConfig(env);
@@ -524,7 +523,7 @@ test('F1: 5 consecutive failures open the breaker; new sessions fall back to leg
 test('F2: half-open probe success closes the breaker', async (t) => {
   const mock = await startMockBridge({ failTimes: { '/v1/read': 999 } });
   try {
-    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import(ADAPTER_PATH);
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     const breakerStore = new Map();
     const env = makeEnv(mock);
     const config = readHerdrBridgeConfig(env);
@@ -548,7 +547,7 @@ test('F2: half-open probe success closes the breaker', async (t) => {
 test('F3: half-open recovery works through connectSession (pre-check must not consume the probe)', async (t) => {
   const mock = await startMockBridge({ failTimes: { '/v1/read': 999 } });
   try {
-    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import(ADAPTER_PATH);
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     const breakerStore = new Map();
     const env = makeEnv(mock);
     const config = readHerdrBridgeConfig(env);
@@ -667,7 +666,7 @@ test('G3: unrecoverable stream death surfaces SubscriptionLostError and closes t
     onEvents: async ({ res }) => { res.write(': hi\n\n'); res.destroy(); },
   });
   try {
-    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError, SubscriptionLostError } = await import(ADAPTER_PATH);
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError, SubscriptionLostError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     const breakerStore = new Map();
     const env = makeEnv(mock);
     const config = readHerdrBridgeConfig(env);
@@ -695,7 +694,7 @@ test('H1: method not in the route entry allowlist → MethodUnsupportedError, no
   const mock = await startMockBridge();
   try {
     const { adapter } = await connectedAdapter(t, mock, { envOpts: { methods: ALL_BRIDGE_METHODS.filter((m) => m !== 'keys') } });
-    const { MethodUnsupportedError } = await import(ADAPTER_PATH);
+    const { MethodUnsupportedError } = await import("../server/session-adapter/herdr-bridge-adapter.mjs");
     await assert.rejects(adapter.sendKeys('agent-1', ['Enter']), (e) => e instanceof MethodUnsupportedError);
     assert.equal(mock.state.requests.filter((r) => r.route === '/v1/keys').length, 0);
   } finally { await mock.close(); }
@@ -780,7 +779,7 @@ test('I4: listAgents/getAgent/closePane/readPane map to /v1/list, /v1/close, /v1
 // ---------------------------------------------------------------------------
 
 test('J1: adapter module stays Worker-safe (no node: imports, no require, no process.env)', async () => {
-  const src = readFileSync(new URL(ADAPTER_PATH, import.meta.url), 'utf8');
+  const src = readFileSync(new URL("../server/session-adapter/herdr-bridge-adapter.mjs", import.meta.url), 'utf8');
   assert.ok(!/from\s+['"]node:/.test(src), 'no node: imports');
   assert.ok(!/\brequire\s*\(/.test(src), 'no require()');
   assert.ok(!/process\.env/.test(src), 'no process.env — config is injected');
