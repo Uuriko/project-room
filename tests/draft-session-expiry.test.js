@@ -69,6 +69,30 @@ test("shouldPreserveDrafts: session expiry preserves, intentional leaves clear",
     false, "page unload clears drafts");
 });
 
+test("DraftRecovery cap evicts the least-recently-written draft, not the oldest-created (HUNT-FRONTEND F4)", () => {
+  // write() persists only the last 50 text drafts, in entry order. Entry
+  // order must be last-write order: a user with drafts in 51 threads who
+  // returns to the first thread and edits it has just made THAT draft the
+  // most recent work — insertion-order eviction silently dropped exactly
+  // it. save() now moves the entry it touches to the end.
+  const storage = mapStorage();
+  const recovery = new DraftRecovery(storage, () => 1000);
+  const drafts = new ConversationDrafts();
+  for (let i = 0; i < 51; i++) drafts.save(`thread-${i}`, { body: `draft ${i}`, replyToId: null });
+  drafts.save("thread-0", { body: "thread 0 — edited most recently" });
+  assert.equal(recovery.write(SCOPE, drafts, "thread-0"), true);
+  const saved = JSON.parse(storage.getItem("project-room:drafts:v3"));
+  const ids = saved.entries.map(([id]) => id);
+  assert.equal(ids.length, 50, "the 50-draft cap still holds");
+  assert.ok(ids.includes("thread-0"), "the most recently edited draft survives the cap");
+  assert.equal(ids.at(-1), "thread-0", "the most recently written draft sorts last");
+  assert.ok(!ids.includes("thread-1"), "the least-recently-written draft is the one evicted");
+  // save() re-inserts the same object: the identity app.js guards on holds.
+  const before = drafts.get("thread-7");
+  drafts.save("thread-7", { error: "x" });
+  assert.equal(drafts.entries.get("thread-7"), before, "save keeps entry identity");
+});
+
 test("DraftRecovery mechanism: write survives when clear() is skipped, read is null after clear()", () => {
   // The mechanism the preserve/clear policy gates: skipping clear() leaves
   // the backup readable (session expiry path); calling clear() wipes it
