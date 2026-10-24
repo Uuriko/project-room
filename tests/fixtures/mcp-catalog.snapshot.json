@@ -553,6 +553,15 @@
         "openWorldHint": false
       }
     },
+    "public_work_my_adverse_decision": {
+      "inputSchema": "888fb99a2587b95d",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "public_work_my_review": {
       "inputSchema": "888fb99a2587b95d",
       "annotations": {
@@ -1301,7 +1310,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "0b441cf37fdd2694",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2281,7 +2290,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "0b441cf37fdd2694",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2313,6 +2322,15 @@
       "inputSchema": "8111b4019724c331",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "public_work_my_adverse_decision": {
+      "inputSchema": "888fb99a2587b95d",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false

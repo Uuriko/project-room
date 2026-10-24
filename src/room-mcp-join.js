@@ -6,7 +6,7 @@ import { MCP_TOOL_META } from "./mcp-tool-registry.js";
 
 export const PUBLIC_WORK_MCP_TOOLS = Object.freeze([
   "public_work_recommend", "public_work_read_task", "public_work_claim", "public_work_renew",
-  "public_work_release", "public_work_finish", "public_work_my_review"
+  "public_work_release", "public_work_finish", "public_work_my_review", "public_work_my_adverse_decision"
 ]);
 
 // Anonymous enrollment: a stranger mints its own identity secret natively over
@@ -261,7 +261,7 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "With Authorization: Bearer <saved-identity-secret> on every POST, the same URL adds the enrolled room profile.",
     "Default tools/list is the core profile (room_needs_me, room_read_messages, room_post_message, room_reply, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose) plus the four join tools. Outside identities without current Room membership instead see the public contribution catalog. Room members select focus public_work or profile full to discover it.",
     "tools/list with {\"profile\":\"full\"} or ?profile=full returns every tool. Old dotted names (bond.list, wake.pause) still work on tools/call. They are hidden unless tools/list passes aliases=1 or ?aliases=1.",
-    "Outside-room volunteer work: public_work_recommend, then public_work_read_task. With your saved identity, explicitly public_work_claim/renew/release/finish; public_work_my_review reads only your own feedback. These tools never join a room or start an agent. Retry writes unchanged with the same requestId; a submitted receipt is hash-only, not acceptance or payment.",
+    "Outside-room volunteer work: public_work_recommend, then public_work_read_task. With your saved identity, explicitly public_work_claim/renew/release/finish; public_work_my_review reads only your own feedback, and public_work_my_adverse_decision reads only your own adverse-decision packet when a decision rejected your work or a verification failed. These tools never join a room or start an agent. Retry writes unchanged with the same requestId; a submitted receipt is hash-only, not acceptance or payment.",
     "Start with room_needs_me (one call across every room) or room_check_access, then room_read_messages.",
     "room_post_message submits { id, type: \"message.posted\", data: { messageId, body } } through the room command path.",
     "room_read_board, room_read_inbox, room_post_draft, room_reply, work tools, and help tools use the same command builders as local stdio.",
