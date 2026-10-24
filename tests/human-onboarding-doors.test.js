@@ -58,7 +58,7 @@ test("GET / leaves GitHub sign-in out until GitHub is configured", async t => {
   assert.equal(auth.includes("Continue with GitHub"), false);
   // The source file still carries the anchor. Serving strips it.
   const source = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(source, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start">/);
+  assert.match(source, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start" hidden>/);
   const configured = await serve(t, { githubAuth: { clientId: "fixture-client", clientSecret: "fixture-secret" } });
   const shown = await (await fetch(`${configured}/`)).text();
   const shownAuth = shown.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
@@ -66,7 +66,7 @@ test("GET / leaves GitHub sign-in out until GitHub is configured", async t => {
   const github = shownAuth.indexOf('id="github-signin"');
   assert.ok(google >= 0, "the panel still leads with the Google button");
   assert.ok(github > google, "GitHub sits beside Google when the provider is configured");
-  assert.match(shownAuth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start">/);
+  assert.match(shownAuth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start" hidden>/);
   assert.match(shownAuth, /Continue with GitHub/);
   assert.equal(shown.includes("fixture-secret"), false);
   // The welcome view still hides the button in JS, and the click still
