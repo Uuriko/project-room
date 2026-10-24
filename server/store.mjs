@@ -108,7 +108,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAutho
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
-import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
+import { identityIdForWakeMember, presenceSeatForMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777); PRESENCE-PRIM: provenance-classified seat resolution for the presence reads.
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -5050,19 +5050,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      // PRESENCE-PRIM (MIG-PRESENCE Gap 3): resolution walks every seat
+      // provenance through presenceSeatForMember — identity_links alone
+      // left guest, key, and grant seats reading a silent null.
       // #660: raw host status per member. status is "online"|"offline"|null
-      // (null = no registered host); identityId is the linked agent identity.
+      // (null = no registered host); identityId is the resolved agent
+      // identity; seat names the provenance that bound it (null = none).
       const hostStatusOf = memberId => {
         const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, seat: null, status: null, lastSeenAt: null };
+        const { identityId, seat } = presenceSeatForMember(this.db, roomId, m);
+        if (!identityId) return { identityId: null, seat, status: null, lastSeenAt: null };
+        const status = this.agentHeartbeats.statusOf(identityId);
         // Unregistered (no host) stays null so RC-051 clients keep the
         // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+        if (status.status === "unregistered") return { identityId, seat, status: null, lastSeenAt: null };
+        return { identityId, seat, status: status.status, lastSeenAt: status.lastSeenAt };
       };
       const agentPresence = memberId => {
         const host = hostStatusOf(memberId);
@@ -5081,6 +5084,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             watching: isWatching, workingOn,
             lastSeenAt, statusMessage: m.statusMessage ?? null,
             presence: agentPresence(m.id),
+            // PRESENCE-PRIM: the seat provenance that bound this member
+            // ("link"|"guest"|"sponsored"|"oauth"|"key"), null when no
+            // provenance binds it — so a null presence reads as an
+            // explicit unknown with its reason, never a silent absence.
+            seat: m.kind === "agent" ? host.seat : null,
             // #660: derived working state + owner/scope projection (additive).
             state: presenceState({
               kind: m.kind,
@@ -5127,12 +5135,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      // PRESENCE-PRIM: the same provenance walk as presence() above, so
+      // the capability registry's presence cannot drift from the roster's.
       const agentPresence = m => {
         if (!m || m.kind !== "agent" || m.active === false) return null;
-        const link = identityLinkOf.get(roomId, m.id);
-        if (!link) return null;
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        const { identityId } = presenceSeatForMember(this.db, roomId, m);
+        if (!identityId) return null;
+        const status = this.agentHeartbeats.statusOf(identityId);
         return { status: status.status, lastSeenAt: status.lastSeenAt };
       };
       const listed = Object.values(members)
