@@ -186,19 +186,16 @@ exist; do not hard-code them.
 
 Honesty notes: the v1 undo window is a **pre-dispatch hold** (the room
 write is not issued until the window lapses; the retract covers only
-delivery of the operator's message). The v1 hold is client-held
-(`src/triage-ui.js`); the server-held pending-dispatch queue is the v2
-hardening **(pending)**. Suggestions are draft payloads — they do nothing
-unpicked — and every suggestion carries a one-line reason rendered on the
-card.
+delivery of the operator's message). No triage client is in the tree, and
+the server-held pending-dispatch queue was not added. Suggestions are draft
+payloads — they do nothing unpicked — and every suggestion carries a
+one-line reason rendered on the card.
 
-## UI surface (pending — lane B7)
+## UI surface
 
-`#pr-view/triage` in the room client (lazy-loaded `src/triage-ui.js`;
-J/K/E/1/2/S/U/R/? keyboard map; focus-implies-seen; pre-dispatch hold with
-retract; confirm sheet for confirm-only actions; honesty badges). Renders
-only when `ROOM_HERDR_SESSIONS` is on (global or room-scoped) **and** the
-session's backend is herdr. Flag off = the view does not exist.
+The `#pr-view/triage` client (keyboard map, focus-implies-seen, pre-dispatch
+hold, confirm sheet) was not added. There is no triage view module under
+`src/`.
 
 ## What herdr sessions do NOT change
 

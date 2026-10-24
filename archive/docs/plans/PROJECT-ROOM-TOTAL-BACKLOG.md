@@ -1,6 +1,6 @@
 # Project Room total backlog
 
-Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+Archived 2026-10-24. This capture is evidence, not the execution queue. The live fed queue is [BACKLOG.md](../../../BACKLOG.md). Active scope: [six-outcome delivery plan](../../../docs/FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not a promise to build every entry.
 
 Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 execution/reconciliation tasks, 34 idea experiments, 48 historical native acceptance checks, 208 issue reconciliations, and 195 PR reconciliations. These counts overlap in underlying scope; they are not a count of distinct defects.
 
@@ -1003,10 +1003,10 @@ Each row is a required reconciliation task, not an instruction to implement dupl
 
 ## Machine-readable inventory
 
-- [Canonical task inventory](backlog/project-room-total-backlog.json)
-- [Captured issue metadata](backlog/github-open-issues-2026-10-18.json)
-- [Captured PR metadata](backlog/github-open-prs-2026-10-18.json)
-- [Execution packages](BUILD-TO-COMPLETION-PLAN.md)
-- [Original delivery ledger](DELIVERY-LEDGER.md)
+- [Canonical task inventory](../../../docs/backlog/project-room-total-backlog.json)
+- [Captured issue metadata](../../../docs/backlog/github-open-issues-2026-10-18.json)
+- [Captured PR metadata](../../../docs/backlog/github-open-prs-2026-10-18.json)
+- [Execution packages](../../../docs/BUILD-TO-COMPLETION-PLAN.md)
+- [Original delivery ledger](../../../docs/DELIVERY-LEDGER.md)
 
 No generated checkbox is checked by default. Unknown implementation state remains unknown until reconciled.

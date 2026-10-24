@@ -40,10 +40,11 @@ updated.
 1. **Telemetry is disposable; evidence is not.** Request logs and webhook
    deliveries delete themselves. Security audit rows, room events, and account
    records never auto-delete — they are the record an incident response needs.
-2. **Deletion is explicit.** The retention job plans by default and deletes
-   only when `ROOM_RETENTION_ALLOW_DELETION=1` *and* a deleter is supplied.
-   The scheduled tick never scans the live store and never deletes
-   (`scheduledRetentionTick`).
+2. **Disposable logs delete unless an operator turns them off.**
+   `runLiveStoreRetention` removes expired `web_fetch_log` and
+   `web_research_log` rows unless `ROOM_RETENTION_ALLOW_DELETION` is exactly
+   `0`. `scheduledRetentionTick` is a different path: it plans analytics and
+   audit rows and never deletes, even if a deleter is passed.
 3. **Account deletion is the PII eraser.** `server/account-deletion.mjs`
    `RETENTION_POLICY` names purged vs retained categories; purged: sign-in
    credentials, sessions, login methods, passkeys, memberships, connected
@@ -57,20 +58,12 @@ updated.
 
 ### Routine (automatic)
 
-The cron tick runs `runLiveStoreRetention` one table per tick, bounded by
+The retention job in `server/jobs.mjs` calls `runLiveStoreRetention`
+(`server/retention-run.mjs`) one disposable-log table per tick, bounded by
 `RETENTION_BATCH_LIMIT` (100 rows) and an optional deadline. Each table's
-batch runs in one transaction; a failure rolls that table's batch back. To
-plan without deleting (audit the plan first):
-
-```
-ROOM_RETENTION_ALLOW_DELETION=0 node scripts/retention-plan.mjs --db /path/to/room.sqlite
-```
-
-To apply (operator only):
-
-```
-ROOM_RETENTION_ALLOW_DELETION=1 node scripts/retention-plan.mjs --db /path/to/room.sqlite --apply
-```
+batch runs in one transaction; a failure rolls that table's batch back.
+Expired rows are deleted unless `ROOM_RETENTION_ALLOW_DELETION` is `0`.
+There is no `scripts/retention-plan.mjs` operator CLI.
 
 ### On request (PII / account deletion)
 
@@ -87,25 +80,16 @@ Follow the incident-response runbook (task #161, separate doc): revoke at the
 provider first, then purge the affected credential rows, then verify rejection.
 Deleting a file or rewriting history does not revoke a credential.
 
-## Deletion script
+## Deletion path
 
-`scripts/retention-plan.mjs` (ships in the companion implementation PR) wraps
-`runLiveStoreRetention` as an operator CLI:
+There is no operator CLI. `server/jobs.mjs` calls `runLiveStoreRetention`
+once per retention tick. The call deletes expired rows of one table
+(`web_fetch_log`, then `web_research_log`) up to 100 rows. Set
+`ROOM_RETENTION_ALLOW_DELETION=0` to plan that table and delete nothing.
+Room events, commands, account access events, invitations, unread activity,
+and pending webhook deliveries are excluded.
 
-- `--db <path>` — sqlite file (required).
-- `--table-index <n>` — which disposable-log table (default 0, rotates).
-- `--apply` — actually delete; without it, prints the dry-run plan.
-- `--limit <n>` — batch cap (≤ 100).
-- Prints the receipt JSON: table, cutoff, eligible, deleted, dry-run flag,
-  and the excluded categories.
-
-It refuses to run against a DB whose schema it does not recognize, and it
-never touches the excluded tables (events, commands, account_access_events,
-invitations, activity, webhook deliveries beyond their own 7-day rule).
-
-**Fixture tests** (`tests/retention-plan.test.js`): build a scratch sqlite DB
-with `web_fetch_log` rows older and newer than the 30-day cutoff, run the
-script with and without `--apply`, and assert: dry run deletes nothing and
-reports the eligible count; `--apply` deletes exactly the expired rows and
-keeps the fresh ones; excluded tables are never in the plan. Run via
-`TMPDIR=<worktree>/.tmp node --test tests/retention-plan.test.js`.
+**Fixture tests** (`tests/retention-live-store.test.js`) build a scratch
+store with old and new log rows. A default run deletes only the expired
+rows of the selected table. `ROOM_RETENTION_ALLOW_DELETION=0` deletes
+nothing and still reports the eligible count. Protected tables stay.

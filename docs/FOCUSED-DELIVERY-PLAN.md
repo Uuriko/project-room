@@ -4,7 +4,7 @@ Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md); cur
 
 2026-10-18. This is the revised active planning scope following the request to cut,
 combine and shrink the total backlog. The execution evidence below records actual
-progress; the six outcomes remain acceptance criteria. The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
+progress; the six outcomes remain acceptance criteria. The [773-entry inventory](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md)
 remains the evidence index, not a promise to build 773 things.
 
 The product test: two people and an authorized agent turn a conversation into an

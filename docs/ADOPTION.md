@@ -26,4 +26,4 @@ The report is `adoption-YYYY-MM-DD.json`, uploaded as a workflow artifact of the
 
 `.github/workflows/snippet-adoption.yml` runs Mondays at 13:00 UTC and on demand. Code search needs a user token. The job uses the `ADOPTION_SEARCH_TOKEN` secret when it is set: a fine-grained personal access token limited to public repositories, with no write permission. When that secret is unset, the job tries the workflow `GITHUB_TOKEN`. If that token cannot search public code, the job exits 0 and prints `skipped: ADOPTION_SEARCH_TOKEN not set`.
 
-When `ROOM_OPS_POST_TOKEN` and `ROOM_OPS_ROOM_ID` are set, the summary is posted to that room. When `server/analytics-ingest.mjs` exports `INGEST_PATH` and `ANALYTICS_INGEST_TOKEN` is set, the same totals are posted as an `adoption.snapshot` event. Until that module exists, the snapshot is not sent.
+When `ROOM_OPS_POST_TOKEN` and `ROOM_OPS_ROOM_ID` are set, the summary is posted to that room. `scripts/snippet-adoption.mjs` posts an `adoption.snapshot` event only when `ANALYTICS_INGEST_TOKEN` is set and `server/analytics-ingest.mjs` is present and exports `INGEST_PATH`. That module is not in the tree, so the snapshot is not sent.

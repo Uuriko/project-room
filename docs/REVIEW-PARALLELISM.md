@@ -55,7 +55,7 @@ The scope check reads one HTML comment from the PR body (invisible when
 rendered):
 
 ```html
-<!-- claim-files: server/a.mjs, tests/a.test.js -->
+<!-- claim-files: server/work-claims.mjs, tests/work-claims.test.js -->
 ```
 
 Comma- or newline-separated; several comments merge. A trailing `/` covers

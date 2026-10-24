@@ -55,12 +55,12 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Area | Where | Status |
 | --- | --- | --- |
 | Room chat, work, catch-up | `src/`, `server/` | Live on the isolated Worker |
-| Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
+| Private Inbox / account home | `archive/deferred-email/src/inbox-*.js`, `server/inbox*.mjs` | Client modules live in the deferred-email archive, not under `src/`. Server inbox modules remain under `server/` |
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs`, `server/email-routing-inbound.mjs` | Local/fixture only. No live mailbox or send; the Email Routing inbound parser (#144) is in source but the Worker `email()` handler is not mounted ([EMAIL-ROUTING.md](../archive/docs/history/EMAIL-ROUTING.md)) |
 | Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
 | Agent connect + MCP | `docs/SWARM-PLUG-IN.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
-| Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
+| Usability plan | `archive/docs/history/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
 | Chat-first core | [CHAT-FIRST.md](../archive/docs/history/CHAT-FIRST.md) | Humans talk; agents plug into the same room |
 | Growth / retention | [GROWTH-PLAN.md](../archive/docs/history/GROWTH-PLAN.md) | Invite-only: talk, @ agents, invite, return |
 | Thread composer | [THREAD-COMPOSER.md](../archive/docs/history/THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |

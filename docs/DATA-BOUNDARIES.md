@@ -15,14 +15,14 @@ compliance claim.
 | --- | --- | --- |
 | Hosted staging (live) | One SQLite-backed Durable Object, class `ProjectRoom`, binding `ROOM`, object name `invite-only-pilot`, migration `room-sqlite-v1`. One object holds the whole pilot workspace; it is not sharded by member or room. | `cloudflare/wrangler.jsonc` (`durable_objects`, `migrations`), `cloudflare/room.mjs` (`env.ROOM.getByName('invite-only-pilot')`), `cloudflare/README.md` "Design" |
 | Hosted staging (live) | Static assets served from the `ASSETS` binding (allowlisted HTML, JS, CSS only; no databases, operator files or tests). | `cloudflare/wrangler.jsonc` (`assets`), `cloudflare/README.md` "Design" |
-| Node fallback (prepared, not deployed) | One SQLite file at `ROOM_DB` on the same host as the process; backups written to a private directory on the same disk. | `deploy/pilot.env.example`, `docs/INVITE-ONLY-DEPLOYMENT.md` "Server setup" and "Backup and restore" |
-| Browser | Composer drafts in the tab's session storage (12-hour expiry, at most 50 drafts); presence is ephemeral and not logged. | `docs/EXPORT-RETENTION-DELETION.md` "Privacy-sensitive derivatives" |
+| Node fallback (prepared, not deployed) | One SQLite file at `ROOM_DB` on the same host as the process; backups written to a private directory on the same disk. | `deploy/pilot.env.example`, `archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` "Server setup" and "Backup and restore" |
+| Browser | Composer drafts in the tab's session storage (12-hour expiry, at most 50 drafts); presence is ephemeral and not logged. | `archive/docs/history/EXPORT-RETENTION-DELETION.md` "Privacy-sensitive derivatives" |
 | Operator machines | Owner key and bootstrap metadata in an ignored `.operator/` directory, created with mode 0700/0600. | `cloudflare/prepare-owner.mjs`, `cloudflare/README.md` "Deployment gate and next steps" |
 
 The event log, projections, work items, inbox connection records
 (`private_email_connections`, `data_json`) and journaled webhook updates
 (`pending_channel_updates`) all live in that same SQLite database
-(`docs/UNIFIED-INBOX.md` "Connection record"; `docs/EMAIL-ROUTING.md` "Worker email() handler").
+(`docs/UNIFIED-INBOX.md` "Connection record"; `archive/docs/history/EMAIL-ROUTING.md` "Worker email() handler").
 
 Message reports (`message_reports`, `server/moderation.mjs`) live in the same
 database but outside the room event log. A report contains the reported
@@ -33,7 +33,7 @@ events, stream, snapshot or export routes, so no other member, agent or
 external system receives them or learns who reported. A mute
 (`member.mute_set`) is an ordinary room event on the muter's own member record,
 visible in the shared log like notification preferences, and is a personal
-display preference, not authority (`docs/MODERATION.md`).
+display preference, not authority (`archive/docs/history/MODERATION.md`).
 
 ## 2. What is encrypted where
 
@@ -53,8 +53,8 @@ display preference, not authority (`docs/MODERATION.md`).
 - **Node fallback.** Caddy terminates HTTPS with `Strict-Transport-Security`
   and proxies in plaintext to `127.0.0.1:4173` on the same host; the Node
   listener stays on loopback (`deploy/Caddyfile`, `deploy/pilot.env.example`,
-  `docs/INVITE-ONLY-DEPLOYMENT.md` "Small launch scope"). Caddy manages the
-  certificates (`docs/INVITE-ONLY-DEPLOYMENT.md` step 6).
+  `archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` "Small launch scope"). Caddy manages the
+  certificates (`archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` step 6).
 - **Cookies.** When the origin is `https:`, session cookies carry the
   `__Host-` prefix and `Secure`; they are always `HttpOnly` and
   `SameSite=Strict` (`server/http.mjs`, `scopedCookieName` and the
@@ -93,13 +93,13 @@ display preference, not authority (`docs/MODERATION.md`).
   backup-encryption gate in `docs/SERVICE.md` "Limits, recovery, and honest release gates".
 - Room exports are unencrypted point-in-time JSONL copies of the full history,
   including deleted and edited-away content; whoever downloads one owns its
-  handling (`docs/EXPORT-RETENTION-DELETION.md`).
+  handling (`archive/docs/history/EXPORT-RETENTION-DELETION.md`).
 - Node-fallback backups stay on the same disk, unencrypted; encrypted
   off-host copies are a documented precondition for calling them disaster
-  recovery (`docs/INVITE-ONLY-DEPLOYMENT.md` "Backup and restore",
+  recovery (`archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` "Backup and restore",
   `docs/SERVICE.md` "Limits, recovery, and honest release gates").
 - The support diagnostics export contains whitelisted scalars only: no message
-  bodies, credentials, hashes or member details (`docs/SAFE-DIAGNOSTICS.md`,
+  bodies, credentials, hashes or member details (`archive/docs/history/SAFE-DIAGNOSTICS.md`,
   `tests/support-export.test.js`).
 - Whether the hosting provider encrypts Durable Object storage at rest is a
   provider property that this repository does not configure or verify (see
@@ -109,7 +109,7 @@ display preference, not authority (`docs/MODERATION.md`).
 
 The service processes room content in plaintext: it builds projections, runs
 server-side search, renders previews and assembles exports on the server
-(`docs/EXPORT-RETENTION-DELETION.md` "Privacy-sensitive derivatives";
+(`archive/docs/history/EXPORT-RETENTION-DELETION.md` "Privacy-sensitive derivatives";
 `server/http.mjs`). Anything a member can read, the service can read, and
 any member agent can carry it into whatever runtime it uses. Do not describe
 Project Room as end-to-end encrypted.
@@ -121,12 +121,12 @@ Values are never recorded here or anywhere in the repository.
 | Name | Where it lives | Purpose | Rotation | Cited in |
 | --- | --- | --- | --- | --- |
 | `ROOM_ORIGIN` | Worker `vars`; Node `pilot.env` | Exact HTTPS origin every request must match | Changing it is a redeploy; not a secret | `cloudflare/wrangler.jsonc`, `deploy/pilot.env.example`, `cloudflare/room.mjs` |
-| `ROOM` | Worker Durable Object binding | The one workspace object | Not rotatable; preserve namespace, class, binding and object name across recovery | `cloudflare/wrangler.jsonc`, `docs/V8-RECOVERY-RUNBOOK.md` "Cloudflare gates still requiring separate approval" |
+| `ROOM` | Worker Durable Object binding | The one workspace object | Not rotatable; preserve namespace, class, binding and object name across recovery | `cloudflare/wrangler.jsonc`, `archive/docs/history/V8-RECOVERY-RUNBOOK.md` "Cloudflare gates still requiring separate approval" |
 | `ASSETS` | Worker assets binding | Allowlisted static files | Rebuilt on each deploy | `cloudflare/wrangler.jsonc`, `cloudflare/README.md` |
 | `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT` | One-time Worker configuration | Provision the empty workspace with the owner's hashed key; refused if the hash is malformed or the expiry is past or more than seven days out; never resets an existing room | Set once, removed after the first owner login; the recorded deployment did exactly that | `cloudflare/bootstrap.mjs`, `cloudflare/prepare-owner.mjs`, `cloudflare/README.md` "Deployment gate and next steps" |
-| `ROOM_MAINTENANCE` | Worker configuration or Node environment, outside the database | Literal `0`/`1` pause flag; `1` returns 503 before storage opens | Operator toggles it; ordinary users cannot | `cloudflare/room.mjs`, `docs/V8-RECOVERY-RUNBOOK.md` "Pause and compatible application fallback" |
+| `ROOM_MAINTENANCE` | Worker configuration or Node environment, outside the database | Literal `0`/`1` pause flag; `1` returns 503 before storage opens | Operator toggles it; ordinary users cannot | `cloudflare/room.mjs`, `archive/docs/history/V8-RECOVERY-RUNBOOK.md` "Pause and compatible application fallback" |
 | `ROOM_IDENTITY_HASH_KEY` | Worker secret (`wrangler secret put`) or Node `pilot.env`. Optional | HMAC key for new agent-identity verifiers. Unset uses the built-in fallback, and verification always accepts that fallback, so a deploy without the secret does not lock agents out. Once set, leave it in place; rows written with it also store the fallback verifier | Set a private random string of at least 16 characters. Do not commit it. Removing it still verifies fallback verifiers | `server/identity-secret-hash.mjs`, `deploy/pilot.env.example`, `docs/SELF-HOSTING.md` |
-| `NODE_ENV`, `ROOM_DEPLOYMENT`, `HOST`, `PORT`, `ROOM_DB`, `ROOM_STREAM_INTERVAL_MS` | `/etc/project-room/pilot.env` with private permissions (Node fallback) | Strict production mode, loopback listener, database path, event-stream poll interval (optional, default 250 ms) | Edited by the operator; service restart | `deploy/pilot.env.example`, `docs/INVITE-ONLY-DEPLOYMENT.md` step 4, `docs/SERVICE.md` "Run and provision" |
+| `NODE_ENV`, `ROOM_DEPLOYMENT`, `HOST`, `PORT`, `ROOM_DB`, `ROOM_STREAM_INTERVAL_MS` | `/etc/project-room/pilot.env` with private permissions (Node fallback) | Strict production mode, loopback listener, database path, event-stream poll interval (optional, default 250 ms) | Edited by the operator; service restart | `deploy/pilot.env.example`, `archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` step 4, `docs/SERVICE.md` "Run and provision" |
 | Room access keys and account keys | Printed once by provisioning; stored hashed | Member and account login | Seven-day expiry; reissuing revokes previous keys and their sessions; account-key rotation clears account-session slots; account suspension bumps the authorization epoch | `docs/SERVICE.md` "Run and provision" (keys and account keys), `server/store.mjs` |
 | Sessions | HttpOnly cookies; hashed server side | Browser sessions | At most eight hours; logout, key rotation or suspension advances the slot | `docs/SERVICE.md` "Run and provision", `server/http.mjs` |
 | Agent connection keys | Hashed; owned by the agent connection | Agent API access | `rotate` and `disconnect` actions on the connection | `server/agent-connections.mjs`, `docs/SWARM-PLUG-IN.md` |
@@ -137,7 +137,7 @@ Values are never recorded here or anywhere in the repository.
 
 Not yet existing: a Telegram bot token binding (B21 work, needs a Worker
 secret set by the owner; `docs/UNIFIED-INBOX.md` "Worker mount (proposal for Grok)"). Cloudflare
-Email Routing needs no secret or API token (`docs/EMAIL-ROUTING.md` "What John must do").
+Email Routing needs no secret or API token (`archive/docs/history/EMAIL-ROUTING.md` "What John must do").
 CI never receives operator credentials and never runs the hosted acceptance
 script (`cloudflare/README.md` "Reproduce").
 
@@ -146,9 +146,9 @@ script (`cloudflare/README.md` "Reproduce").
 | Party | Role today | Data it can see | Cited in |
 | --- | --- | --- | --- |
 | Cloudflare (Workers, Durable Objects with SQLite, static assets, TLS, routes on `getdasha.com`) | Hosting and edge for the live staging deployment | All request and response traffic at the edge; all stored room data inside the Durable Object. Workers observability is disabled in the deploy configuration. | `cloudflare/wrangler.jsonc` (`observability.enabled: false`), `cloudflare/README.md` |
-| Cloudflare Email Routing | Planned inbound mail; code and tests only, not enabled | When enabled: every message to the routed addresses passes Cloudflare's SMTP edge into the Worker `email()` handler, and the parsed, capped content is stored in the Durable Object | `docs/EMAIL-ROUTING.md` opening status paragraph, "What John must do", "Caps" |
+| Cloudflare Email Routing | Planned inbound mail; code and tests only, not enabled | When enabled: every message to the routed addresses passes Cloudflare's SMTP edge into the Worker `email()` handler, and the parsed, capped content is stored in the Durable Object | `archive/docs/history/EMAIL-ROUTING.md` opening status paragraph, "What John must do", "Caps" |
 | Telegram Bot API | Fixture-only adapter; no bot token, no network calls, no webhook registration in this tree | None today. When live: Telegram holds the bot's chats and would deliver updates to `POST /api/inbox/webhooks/{connectionId}` | `docs/UNIFIED-INBOX.md` "Status: fixtures only" and "Routes", `server/channel-adapters/index.mjs` |
-| Microsoft Graph | Profile shape only; no Graph calls exist | None | `docs/EMAIL-ROUTING.md` "Modules" (connection record shape), `server/channel-adapters/email.mjs` |
+| Microsoft Graph | Profile shape only; no Graph calls exist | None | `archive/docs/history/EMAIL-ROUTING.md` "Modules" (connection record shape), `server/channel-adapters/email.mjs` |
 | Dasha Compute (`lobby.getdasha.com`) | Reached only by the operator-run `scripts/dasha-bridge.mjs`, never by the hosted service | The text of `[dasha]` work items sent to it (section 6) | `scripts/dasha-bridge.mjs` |
 | GitHub | Source hosting and CI | Source and synthetic test data only; no operator credentials | `cloudflare/README.md` "Reproduce", `.github/workflows/test.yml` |
 
@@ -164,12 +164,12 @@ listed, secret-free, in `server/agent-discovery.mjs` (`ROOM_ORIGIN`,
 `cloudflare/wrangler.jsonc` sets no `locationHint` and no jurisdiction on the
 `ROOM` Durable Object, so the object's location is chosen by Cloudflare, not
 pinned by this repository. Nothing in the repository makes a data-residency
-claim, and `docs/PRODUCTION-PLAN.md` explicitly rules out a multi-region
+claim, and `archive/docs/history/PRODUCTION-PLAN.md` explicitly rules out a multi-region
 database strategy for the SQLite design. For the Node fallback the region is
 wherever the operator places the single Linux host
-(`docs/INVITE-ONLY-DEPLOYMENT.md` "Small launch scope"). Provider
+(`archive/docs/history/INVITE-ONLY-DEPLOYMENT.md` "Small launch scope"). Provider
 point-in-time recovery for the Durable Object is untested
-(`docs/V8-RECOVERY-RUNBOOK.md` "Cloudflare gates still requiring separate approval").
+(`archive/docs/history/V8-RECOVERY-RUNBOOK.md` "Cloudflare gates still requiring separate approval").
 
 ## 6. Plaintext path to an external AI runtime
 
@@ -192,7 +192,7 @@ service:
 The script does not forward the rest of the room to the provider, but the
 snapshot it fetches in step 1 sits in plaintext on the machine running it.
 The agreed Room to Dasha adapter contract keeps real execution behind a
-submission-reconciliation gate (`docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md`
+submission-reconciliation gate (`archive/docs/history/DASHA-ADAPTER-CONTRACT-2026-09-13.md`
 section 3). Any other agent member reads room content through
 `docs/SWARM-PLUG-IN.md` with its own key and takes that content into its own
 runtime; the Room does not control or encrypt that path.
@@ -202,7 +202,7 @@ runtime; the Room does not control or encrypt that path.
 - Every `/api/*` response carries an `X-Operation-Id`; failed room requests are
   logged as one line of operation metadata (id, time, status, code, category,
   templated route, room id) with no bodies, tokens or member details
-  (`docs/SAFE-DIAGNOSTICS.md`, `server/diagnostics.mjs`).
+  (`archive/docs/history/SAFE-DIAGNOSTICS.md`, `server/diagnostics.mjs`).
 - Caddy access logging is off in the fallback configuration
   (`deploy/Caddyfile`); Workers observability is off in the deploy
   configuration (`cloudflare/wrangler.jsonc`).
