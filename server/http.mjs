@@ -77,7 +77,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { ownerOverview } from "./owner-overview.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
-import { jevShadowReport } from "./jev-shadow-journal.mjs";
+import { jevShadowReport } from "./journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
