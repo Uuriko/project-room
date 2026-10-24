@@ -3,6 +3,7 @@ import { loginCommand } from "./commands/login.mjs";
 import { setupCommand } from "./commands/setup.mjs";
 import { tokenCommand } from "./commands/token.mjs";
 import { codeCommand } from "./commands/code.mjs";
+import { proofCommand } from "./commands/proof.mjs";
 
 export const commands = Object.freeze({
   login: loginCommand,
@@ -10,6 +11,7 @@ export const commands = Object.freeze({
   token: tokenCommand,
   doctor: doctorCommand,
   code: codeCommand,
+  proof: proofCommand,
 });
 
 const help = `room — connect a coding agent to Project Room
@@ -19,6 +21,7 @@ const help = `room — connect a coding agent to Project Room
   room token
   room doctor
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
+  room proof <file> [--work <workItemId>] [--note <text>]   (attach a screenshot or log as evidence)
 
 login saves a private connection. It prints no secret.
 setup writes that tool's config and refers to PROJECT_ROOM_SECRET. It does not write the secret into the config.
