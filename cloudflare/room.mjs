@@ -36,6 +36,7 @@ import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResp
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { DURABLE_ALARM_SLICE_GAP_MS } from '../server/durable-alarm-queue.mjs';
 import { durableAlarmQueueEnabled, runDurableAlarmTurn } from '../server/durable-alarm-turn.mjs';
+import { jobWatchdogEnabled, WATCHDOG_NAME } from '../server/job-watchdog-store.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -45,6 +46,7 @@ import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, rea
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
+export { JobWatchdog } from './job-watchdog.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -576,9 +578,43 @@ export class ProjectRoom extends DurableObject {
       if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
       throw error;
     } finally {
-      try { await this.#armDurableQueue(turn, retryDelayMs); }
+      let armed = null;
+      try { armed = await this.#armDurableQueue(turn, retryDelayMs); }
       catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
+      const name = turn?.item?.payload?.name;
+      const receipt = turn?.ran && typeof name === "string"
+        ? { job: name, at: Date.now(), ok: turn.failed !== true, attempt: Number(turn.item.attempt) || 0 }
+        : null;
+      await this.#beatJobWatchdog(armed, receipt);
     }
+  }
+  // Copy progress off this object. A beat that fails must not fail the job:
+  // the watchdog is how a dead object gets its alarm back, not a second
+  // place the job can throw.
+  async #beatJobWatchdog(armed, receipt = null) {
+    if (!jobWatchdogEnabled(this.env)) return;
+    try {
+      let snapshot = {};
+      try { snapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store); }
+      catch { snapshot = {}; }
+      await this.env.JOB_WATCHDOG.getByName(WATCHDOG_NAME).beat({
+        objectName: "invite-only-pilot",
+        progressAt: Date.now(),
+        alarmAt: Number.isSafeInteger(armed?.alarmAt) ? armed.alarmAt : null,
+        snapshot,
+        receipt,
+        history: null
+      });
+    } catch (error) {
+      console.error(`[job-watchdog] beat failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200)}`);
+    }
+  }
+  // Watchdog reboot. Sets the alarm and returns. The alarm handler does the work.
+  async rebootAlarm() {
+    if (this.paused || !this.store) return { rebooted: false, skipped: "paused" };
+    const alarmAt = Date.now() + DURABLE_ALARM_SLICE_GAP_MS;
+    await this.ctx.storage.setAlarm(alarmAt);
+    return { rebooted: true, alarmAt };
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
@@ -593,10 +629,12 @@ export class ProjectRoom extends DurableObject {
         lastRan: lastRanFrom(stored), includeSlow: options?.includeSlow === true, drain: false
       });
       const armed = await this.#armDurableQueue(turn, 0);
+      await this.#beatJobWatchdog(armed);
       return { ...armed, ran: [] };
     }
     const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
+    await this.#beatJobWatchdog(armed);
     const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
     return { ...armed, ran: outcomes.map(outcome => outcome.job) };
@@ -630,8 +668,10 @@ export class ProjectRoom extends DurableObject {
       if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
       throw error;
     } finally {
-      try { await this.#armJobAlarm({ retryDelayMs }); }
+      let armed = null;
+      try { armed = await this.#armJobAlarm({ retryDelayMs }); }
       catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
+      await this.#beatJobWatchdog(armed);
     }
   }
   // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
@@ -722,6 +762,14 @@ export default {
     // job is stale or failing, so a plain status check catches dead crons.
     if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
       const head = request.method === 'HEAD';
+      if (jobWatchdogEnabled(env)) {
+        try {
+          const view = await env.JOB_WATCHDOG.getByName(WATCHDOG_NAME).readHealth();
+          if (view?.status !== 'unavailable') return finish(jobHealthResponse(view, { head }), 'watchdog');
+        } catch (error) {
+          console.error(`[job-watchdog] read failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, ' ').slice(0, 200)}`);
+        }
+      }
       try { return finish(jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }), 'durable-object'); }
       catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return finish(jobHealthUnavailable({ head }), 'durable-object'); }
     }
@@ -820,6 +868,7 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     if (durableAlarmQueueEnabled(env)) {
       await env.ROOM.getByName('invite-only-pilot').ensureJobAlarm({ includeSlow: true });
+      await armJobWatchdog(env);
       return;
     }
     let room = env.ROOM.getByName('invite-only-pilot');
@@ -830,9 +879,20 @@ export default {
       try { await room.runSlowJob(job.name); }
       catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
     }
+    await armJobWatchdog(env);
     if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
+
+// One short RPC so the watchdog's own alarm stays set. Lives outside
+// scheduled() so the flag-off cron still calls only ensureJobAlarm and runSlowJob.
+async function armJobWatchdog(env) {
+  if (!jobWatchdogEnabled(env)) return;
+  try { await env.JOB_WATCHDOG.getByName(WATCHDOG_NAME).ensureArmed(); }
+  catch (error) {
+    console.error(`[job-watchdog] arm failed: ${String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200)}`);
+  }
+}
 
 // Per-room objects stay classified and unwired. Fetch still names
 // invite-only-pilot. This re-export keeps the classification on the worker

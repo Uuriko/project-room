@@ -169,7 +169,7 @@ function installWorkersShim() {
 }
 
 installWorkersShim();
-const { default: worker, ProjectRoom } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
+const { default: worker, ProjectRoom, JobWatchdog } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
 const { DurableObject } = await import("cloudflare:workers");
 
 const workerSource = read(join(root, "cloudflare/room.mjs"));
@@ -183,9 +183,13 @@ test("RPC stub calls target a class that extends DurableObject", () => {
   }
   const methods = [...new Set(calls.map(call => call.method))].sort();
   assert.deepEqual(methods, [
+    "beat",
+    "ensureArmed",
     "ensureJobAlarm",
     "probeStorage",
+    "readHealth",
     "readJobHealth",
+    "rebootAlarm",
     "runSlowJob"
   ]);
   assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
@@ -198,18 +202,32 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     assert.ok(names?.size, `${call.binding} is called over RPC but is not a Durable Object binding`);
     for (const name of names) targeted.add(name);
   }
-  assert.deepEqual([...targeted], ["ProjectRoom"]);
+  assert.deepEqual([...targeted].sort(), ["JobWatchdog", "ProjectRoom"]);
+  const owners = { ProjectRoom, JobWatchdog };
   for (const className of targeted) {
-    assert.match(workerSource, new RegExp(`export\\s+class\\s+${className}\\s+extends\\s+DurableObject\\b`));
-    const start = workerSource.search(new RegExp(`export\\s+class\\s+${className}\\b`));
-    const ctor = workerSource.indexOf("constructor(", start);
-    const body = sliceBalanced(workerSource, workerSource.indexOf("{", ctor));
+    const source = sourceOfClass(className);
+    assert.match(source, new RegExp(`export\\s+class\\s+${className}\\s+extends\\s+DurableObject\\b`));
+    const start = source.search(new RegExp(`export\\s+class\\s+${className}\\b`));
+    const ctor = source.indexOf("constructor(", start);
+    const body = sliceBalanced(source, source.indexOf("{", ctor));
     assert.match(body, /super\s*\(\s*ctx\s*,\s*env\s*\)/);
     assert.match(body, /this\.state\s*=\s*ctx\b/);
     assert.match(body, /this\.env\s*=\s*env\b/);
-    for (const call of calls) assert.equal(typeof ProjectRoom.prototype[call.method], "function", call.method);
+  }
+  for (const call of calls) {
+    const names = [...classes.get(call.binding)];
+    assert.equal(names.length, 1, call.binding);
+    assert.equal(typeof owners[names[0]].prototype[call.method], "function", `${names[0]}.${call.method}`);
   }
 });
+
+function sourceOfClass(className) {
+  for (const path of walk(join(root, "cloudflare"))) {
+    const source = read(path);
+    if (new RegExp(`export\\s+class\\s+${className}\\s+extends\\s+DurableObject\\b`).test(source)) return source;
+  }
+  throw new Error(`missing Durable Object class ${className}`);
+}
 
 test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async () => {
   assert.equal(Object.getPrototypeOf(ProjectRoom.prototype), DurableObject.prototype);
@@ -280,6 +298,89 @@ test("ROOM_DURABLE_ALARM_QUEUE makes scheduled enqueue instead of running slow j
   }, { waitUntil() {} });
   assert.deepEqual(invoked.map(call => call.method), ["ensureJobAlarm"]);
   assert.deepEqual(invoked[0].args, [{ includeSlow: true }]);
+});
+
+function strictStub(prototype, invoked, label) {
+  return new Proxy({}, {
+    get(_target, prop) {
+      if (prop === "then") return undefined;
+      if (typeof prototype[prop] !== "function") {
+        return () => Promise.reject(new TypeError(`${label} has no RPC method ${String(prop)}`));
+      }
+      return (...args) => {
+        invoked.push({ method: String(prop), args });
+        return Promise.resolve({ ok: true, alarmAt: 1 });
+      };
+    }
+  });
+}
+
+test("scheduled arms the watchdog and still runs slow jobs when only the watchdog flag is on", async () => {
+  const room = [];
+  const watchdog = [];
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
+    ROOM_MAINTENANCE: "0",
+    ROOM_JOB_WATCHDOG: "1",
+    ROOM: { getByName: () => strictStub(ProjectRoom.prototype, room, "ProjectRoom") },
+    JOB_WATCHDOG: { getByName: name => { watchdog.push({ name }); return strictStub(JobWatchdog.prototype, watchdog, "JobWatchdog"); } }
+  }, { waitUntil() {} });
+  assert.deepEqual(room.map(call => call.method), ["ensureJobAlarm", "runSlowJob", "runSlowJob", "runSlowJob", "runSlowJob"]);
+  assert.deepEqual(watchdog.filter(call => call.method).map(call => call.method), ["ensureArmed"]);
+  assert.equal(watchdog[0].name, "job-watchdog");
+});
+
+test("rebootAlarm only sets the alarm", async () => {
+  const paused = new ProjectRoom(
+    { get storage() { throw new Error("paused startup must not open storage"); } },
+    { ROOM_ORIGIN: "https://room.example.test", ROOM_MAINTENANCE: "1" }
+  );
+  assert.deepEqual(await paused.rebootAlarm(), { rebooted: false, skipped: "paused" });
+  const alarms = [];
+  const room = Object.create(ProjectRoom.prototype);
+  room.paused = false;
+  room.store = {};
+  room.ctx = { storage: { setAlarm(when) { alarms.push(when); return Promise.resolve(); } } };
+  const before = Date.now();
+  const result = await room.rebootAlarm();
+  assert.equal(result.rebooted, true);
+  assert.equal(alarms.length, 1);
+  assert.ok(alarms[0] >= before);
+  assert.equal(result.alarmAt, alarms[0]);
+});
+
+test("GET /api/health/jobs reads the watchdog and falls through when it has no beat", async () => {
+  const roomCalls = [];
+  const room = {
+    readJobHealth() {
+      roomCalls.push("readJobHealth");
+      return Promise.resolve({ schema: "room.job-health/1", status: "ok", jobs: [] });
+    }
+  };
+  let watchdogName = null;
+  const base = {
+    ROOM_ORIGIN: "https://room.trydemigod.com",
+    ROOM_JOB_WATCHDOG: "1",
+    ROOM: { getByName() { return room; } }
+  };
+  const ready = await worker.fetch(new Request("https://room.trydemigod.com/api/health/jobs"), {
+    ...base,
+    JOB_WATCHDOG: {
+      getByName(name) {
+        watchdogName = name;
+        return { readHealth: async () => ({ schema: "room.job-health/1", status: "ok", jobs: [], source: "watchdog" }) };
+      }
+    }
+  });
+  assert.equal(ready.status, 200);
+  assert.equal(watchdogName, "job-watchdog");
+  assert.deepEqual(roomCalls, []);
+  assert.equal((await ready.json()).source, "watchdog");
+  const missing = await worker.fetch(new Request("https://room.trydemigod.com/api/health/jobs"), {
+    ...base,
+    JOB_WATCHDOG: { getByName() { return { readHealth: async () => ({ schema: "room.job-health/1", status: "unavailable", jobs: [], source: "watchdog" }) }; } }
+  });
+  assert.equal(missing.status, 200);
+  assert.deepEqual(roomCalls, ["readJobHealth"]);
 });
 
 test("inbound mail is rejected while the inbox consumer is not durable", async () => {
