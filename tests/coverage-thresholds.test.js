@@ -28,13 +28,17 @@ import {
   checkThresholds,
   coverableLines,
   coveredLinesForPayload,
+  coveredLinesFromRawDir,
   evaluateModules,
+  evaluateModulesWith,
   groupFunctionsByUrl,
   lineCoverage,
   listModuleFiles,
   loadConfig,
+  latestShardMaps,
   readCoveragePayloads,
   subtractIntervals,
+  unionLineMaps,
 } from "../scripts/coverage-thresholds.mjs";
 
 const scriptUrl = (root, rel) => `file://${root}/${rel}`;
@@ -318,6 +322,62 @@ test("real V8: split-process coverage equals single-process coverage", () => {
     // All six lines of target.mjs are coverable and at least the taken
     // branches are covered in both modes.
     assert.ok(covTogether.size >= 4, `expected >=4 lines, got ${covTogether.size}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CI shard line maps: unioning per-shard maps equals evaluating every payload together", () => {
+  // The unit shards each reduce their raw V8 coverage to covered lines per
+  // file; the coverage job unions those maps. That must give the same module
+  // verdict as one run over all payloads, including a zero-count span in one
+  // shard that must not shadow another shard's coverage.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cov-gate-shards-")));
+  try {
+    mkdirSync(join(root, "mod"), { recursive: true });
+    const src = 'export function a() {\n  return 1;\n}\nexport function b() {\n  return 2;\n}\n';
+    writeFileSync(join(root, "mod", "x.mjs"), src);
+    writeFileSync(join(root, "mod", "untouched.mjs"), "export const z = 1;\n");
+    const url = scriptUrl(root, "mod/x.mjs");
+    const aEnd = src.indexOf("export function b");
+    const p1 = payload(url, [fn("", [range(0, src.length, 1)]), fn("b", [range(aEnd, src.length, 0)])]); // a ran, b did not
+    const p2 = payload(url, [fn("", [range(0, src.length, 1)]), fn("a", [range(0, aEnd, 0)])]); // b ran, a did not
+    const shardDir = name => { const d = join(root, name); mkdirSync(d); return d; };
+    const d1 = shardDir("raw1"), d2 = shardDir("raw2");
+    writeFileSync(join(d1, "coverage-1.json"), JSON.stringify(p1));
+    writeFileSync(join(d2, "coverage-1.json"), JSON.stringify(p2));
+    const config = { modules: { mod: { dir: "mod", threshold: 0 } } };
+    const together = evaluateModules(root, config, groupFunctionsByUrl([p1, p2], root));
+    const m1 = coveredLinesFromRawDir(d1, root), m2 = coveredLinesFromRawDir(d2, root);
+    assert.equal(m1.payloadCount, 1);
+    assert.deepEqual(Object.keys(m1.map.files), ["mod/x.mjs"]);
+    const union = unionLineMaps([JSON.parse(JSON.stringify(m1.map)), JSON.parse(JSON.stringify(m2.map))]);
+    const merged = evaluateModulesWith(root, config, rel => union.get(rel) ?? null);
+    assert.deepEqual(merged, together);
+    assert.ok(merged.mod.covered > Math.max(m1.map.files["mod/x.mjs"].length, m2.map.files["mod/x.mjs"].length), "union beats either shard");
+    assert.deepEqual(merged.mod.zeroCoverageFiles, ["mod/untouched.mjs"]);
+    assert.throws(() => unionLineMaps([{ files: {} }]), /version: 1/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("latestShardMaps keeps the highest attempt per shard", () => {
+  const picked = latestShardMaps(["shard-1-attempt-1.json", "shard-2-attempt-1.json", "nested/shard-2-attempt-3.json", "shard-3-attempt-2.json", "shard-3-attempt-1.json"]);
+  assert.deepEqual(Object.fromEntries(picked), { 1: "shard-1-attempt-1.json", 2: "nested/shard-2-attempt-3.json", 3: "shard-3-attempt-2.json" });
+});
+
+test("--lines-from --expect-shards fails closed when a shard's map is missing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cov-gate-expect-"));
+  try {
+    const map = JSON.stringify({ version: 1, files: {} });
+    writeFileSync(join(dir, "shard-1-attempt-1.json"), map);
+    writeFileSync(join(dir, "shard-3-attempt-1.json"), map);
+    const res = spawnSync(process.execPath, ["scripts/coverage-thresholds.mjs", "--lines-from", dir, "--expect-shards", "3"], { encoding: "utf8" });
+    assert.equal(res.status, 1, res.stdout + res.stderr);
+    assert.match(res.stderr, /expected line maps for shards 1\.\.3, have \[1, 3\]/);
+    const empty = spawnSync(process.execPath, ["scripts/coverage-thresholds.mjs", "--lines-from", join(dir, "nothing")], { encoding: "utf8" });
+    assert.equal(empty.status, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

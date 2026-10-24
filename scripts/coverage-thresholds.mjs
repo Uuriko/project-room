@@ -43,8 +43,9 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -343,6 +344,23 @@ export function listModuleFiles(root, dir, extraExclude = []) {
  */
 export function evaluateModules(root, config, grouped) {
   const rootPrefix = pathToFileURL(root + sep).href;
+  return evaluateModulesWith(root, config, (rel, text) => {
+    const payloads = grouped.get(rootPrefix + rel);
+    if (!payloads) return null;
+    const union = new Set();
+    for (const functions of payloads) {
+      for (const i of coveredLinesForPayload(text, functions)) union.add(i);
+    }
+    return union;
+  });
+}
+
+/**
+ * evaluateModules over any source of covered lines: coveredFor(rel, text)
+ * returns the Set of covered 0-based line indexes for a file, or null when
+ * no coverage data saw the file (reported as zero coverage).
+ */
+export function evaluateModulesWith(root, config, coveredFor) {
   const results = {};
   for (const [name, mod] of Object.entries(config.modules)) {
     const files = listModuleFiles(root, mod.dir, mod.exclude || []);
@@ -354,15 +372,9 @@ export function evaluateModules(root, config, grouped) {
       const text = readFileSync(join(root, rel), "utf8");
       const coverableArr = coverableLines(text);
       const coverableCount = coverableArr.filter(Boolean).length;
-      const payloads = grouped.get(rootPrefix + rel);
-      const union = new Set();
-      if (payloads) {
-        for (const functions of payloads) {
-          for (const i of coveredLinesForPayload(text, functions)) union.add(i);
-        }
-      } else {
-        zeroCoverageFiles.push(rel);
-      }
+      const seen = coveredFor(rel, text);
+      const union = seen ?? new Set();
+      if (!seen) zeroCoverageFiles.push(rel);
       const pct = coverableCount === 0 ? 100 : (100 * union.size) / coverableCount;
       covered += union.size;
       coverable += coverableCount;
@@ -385,6 +397,72 @@ export function evaluateModules(root, config, grouped) {
     };
   }
   return results;
+}
+
+/**
+ * Reduce a raw V8 coverage directory to covered line indexes per repo file:
+ * { version: 1, files: { "server/x.mjs": [0, 3, 4, ...] } }. Each payload's
+ * lines are computed on their own and unioned, exactly as evaluateModules
+ * does, so splitting the suite across CI shards and unioning their line maps
+ * gives the same verdict as one run. Raw coverage for the whole suite is
+ * gigabytes; this is what a shard uploads.
+ */
+export function coveredLinesFromRawDir(coverageDir, root = ROOT) {
+  const rootPrefix = pathToFileURL(root + sep).href;
+  const lines = new Map();
+  const texts = new Map();
+  let payloadCount = 0;
+  for (const payload of readCoveragePayloads(coverageDir)) {
+    payloadCount += 1;
+    for (const [url, list] of groupFunctionsByUrl([payload], root)) {
+      const rel = url.slice(rootPrefix.length);
+      if (!texts.has(rel)) {
+        let text = null;
+        try { text = readFileSync(join(root, rel), "utf8"); } catch { /* a temp script the suite wrote and removed */ }
+        texts.set(rel, text);
+      }
+      const text = texts.get(rel);
+      if (text === null) continue;
+      let union = lines.get(rel);
+      if (!union) { union = new Set(); lines.set(rel, union); }
+      for (const functions of list) for (const i of coveredLinesForPayload(text, functions)) union.add(i);
+    }
+  }
+  const files = {};
+  for (const [rel, union] of [...lines].sort(([a], [b]) => (a < b ? -1 : 1))) files[rel] = [...union].sort((a, b) => a - b);
+  return { payloadCount, map: { version: 1, files } };
+}
+
+/**
+ * Pick one line map per shard from names like shard-2-attempt-3.json, keeping
+ * the highest attempt (a re-run shard uploads under a new attempt number).
+ * Names without that shape are their own shard key.
+ */
+export function latestShardMaps(names) {
+  const best = new Map();
+  for (const name of names) {
+    const base = name.split(/[\\/]/).pop();
+    const m = /^shard-(\d+)-attempt-(\d+)\.json$/.exec(base);
+    const shard = m ? m[1] : base;
+    const attempt = m ? Number(m[2]) : 0;
+    const prev = best.get(shard);
+    if (!prev || attempt > prev.attempt) best.set(shard, { name, attempt });
+  }
+  return new Map([...best].map(([shard, { name }]) => [shard, name]));
+}
+
+/** Union several line maps (one per CI shard) into rel -> Set. */
+export function unionLineMaps(maps) {
+  const union = new Map();
+  for (const map of maps) {
+    if (map?.version !== 1 || typeof map.files !== "object") throw new Error("coverage line map must be { version: 1, files }");
+    for (const [rel, list] of Object.entries(map.files)) {
+      let set = union.get(rel);
+      if (!set) { set = new Set(); union.set(rel, set); }
+      for (const i of list) set.add(i);
+    }
+  }
+  return union;
 }
 
 /** Compare module percentages against thresholds. */
@@ -441,15 +519,21 @@ function parseArgs(argv) {
     coverageDir: null,
     collectOnly: false,
     baseline: false,
+    linesOut: null,
+    linesFrom: null,
+    expectShards: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--config") opts.config = resolve(argv[++i] || "");
     else if (a === "--coverage-dir") opts.coverageDir = resolve(argv[++i] || "");
     else if (a === "--collect-only") opts.collectOnly = true;
+    else if (a === "--lines-out") opts.linesOut = resolve(argv[++i] || "");
+    else if (a === "--lines-from") opts.linesFrom = resolve(argv[++i] || "");
+    else if (a === "--expect-shards") opts.expectShards = Number(argv[++i]);
     else if (a === "--baseline") opts.baseline = true;
     else if (a === "--help" || a === "-h") {
-      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline]");
+      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline] [--coverage-dir <raw> --lines-out <file>] [--lines-from <dir> [--expect-shards N]]");
       process.exit(0);
     } else {
       console.error(`unknown argument: ${a}`);
@@ -472,6 +556,53 @@ if (isMain) {
   } catch (err) {
     console.error(`coverage gate: ${err.message}`);
     process.exit(2);
+  }
+
+  // CI shard: reduce this shard's raw coverage to a small line map.
+  if (opts.linesOut) {
+    if (!opts.coverageDir) {
+      console.error("--lines-out needs --coverage-dir <raw V8 coverage dir>");
+      process.exit(2);
+    }
+    const { payloadCount, map } = coveredLinesFromRawDir(opts.coverageDir, ROOT);
+    if (payloadCount === 0) {
+      console.error(`coverage gate: no coverage data in ${opts.coverageDir}`);
+      process.exit(2);
+    }
+    mkdirSync(dirname(opts.linesOut), { recursive: true });
+    writeFileSync(opts.linesOut, JSON.stringify(map));
+    console.log(`coverage lines: ${payloadCount} payloads, ${Object.keys(map.files).length} files -> ${opts.linesOut}`);
+    process.exit(0);
+  }
+
+  // CI coverage job: union every shard's line map and apply the thresholds.
+  if (opts.linesFrom) {
+    const names = existsSync(opts.linesFrom) ? readdirSync(opts.linesFrom, { recursive: true }).map(String).filter(name => name.endsWith(".json")) : [];
+    if (names.length === 0) {
+      console.error(`coverage gate: no line maps in ${opts.linesFrom}`);
+      process.exit(2);
+    }
+    const picked = latestShardMaps(names);
+    if (opts.expectShards !== null) {
+      const want = Array.from({ length: opts.expectShards }, (_, i) => String(i + 1));
+      const missing = want.filter(shard => !picked.has(shard));
+      if (!Number.isInteger(opts.expectShards) || opts.expectShards < 1 || missing.length || picked.size !== want.length) {
+        console.error(`coverage gate: expected line maps for shards 1..${opts.expectShards}, have [${[...picked.keys()].sort().join(", ")}]`);
+        process.exit(1);
+      }
+    }
+    const union = unionLineMaps([...picked.values()].map(name => JSON.parse(readFileSync(join(opts.linesFrom, name), "utf8"))));
+    console.log(`coverage gate: ${picked.size} shard line maps (${[...picked.values()].sort().join(", ")})`);
+    const results = evaluateModulesWith(ROOT, config, rel => union.get(rel) ?? null);
+    if (opts.baseline) {
+      const out = {};
+      for (const [name, r] of Object.entries(results)) out[name] = Math.floor(r.pct * 10) / 10;
+      console.log(JSON.stringify(out, null, 2));
+      process.exit(0);
+    }
+    const check = checkThresholds(config, results);
+    console.log(formatReport(results, check));
+    process.exit(check.ok ? 0 : 1);
   }
 
   let coverageDir = opts.coverageDir;
