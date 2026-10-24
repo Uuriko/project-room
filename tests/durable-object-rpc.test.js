@@ -190,6 +190,7 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "readHealth",
     "readJobHealth",
     "rebootAlarm",
+    "refreshRoomHistory",
     "runSlowJob"
   ]);
   assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
@@ -327,6 +328,42 @@ test("scheduled arms the watchdog and still runs slow jobs when only the watchdo
   assert.deepEqual(room.map(call => call.method), ["ensureJobAlarm", "runSlowJob", "runSlowJob", "runSlowJob", "runSlowJob"]);
   assert.deepEqual(watchdog.filter(call => call.method).map(call => call.method), ["ensureArmed"]);
   assert.equal(watchdog[0].name, "job-watchdog");
+});
+
+test("ROOM_SQLITE_HISTORY refreshes one room from scheduled and leaves the queue path to the alarm", async () => {
+  const history = [];
+  const room = [];
+  const stub = () => strictStub(ProjectRoom.prototype, room, "ProjectRoom");
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
+    ROOM_MAINTENANCE: "0",
+    ROOM_SQLITE_HISTORY: "1",
+    ROOM: { getByName: () => stub() }
+  }, { waitUntil() {} });
+  assert.deepEqual(room.map(call => call.method), ["ensureJobAlarm", "runSlowJob", "runSlowJob", "runSlowJob", "runSlowJob", "refreshRoomHistory"]);
+  room.length = 0;
+  await worker.scheduled({ cron: "*/30 * * * *" }, {
+    ROOM_MAINTENANCE: "0",
+    ROOM_SQLITE_HISTORY: "1",
+    ROOM_DURABLE_ALARM_QUEUE: "1",
+    ROOM: {
+      getByName() {
+        return new Proxy({}, {
+          get(_target, prop) {
+            if (prop === "then") return undefined;
+            if (typeof ProjectRoom.prototype[prop] !== "function") {
+              return () => Promise.reject(new TypeError(`ProjectRoom has no RPC method ${String(prop)}`));
+            }
+            return (...args) => {
+              history.push({ method: String(prop), args });
+              return Promise.resolve({ ok: true });
+            };
+          }
+        });
+      }
+    }
+  }, { waitUntil() {} });
+  assert.deepEqual(history.map(call => call.method), ["ensureJobAlarm"]);
+  assert.deepEqual(history[0].args, [{ includeSlow: true }]);
 });
 
 test("rebootAlarm only sets the alarm", async () => {
