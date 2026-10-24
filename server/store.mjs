@@ -2044,6 +2044,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
         this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
       }
+      // Quarantine bookkeeping. Additive, like last_diagnosed_at: existing
+      // parks stay skipped=0 until healBackfillQuarantines reclassifies an
+      // event-level row. anchor_seq -1 means "no replay anchor stashed".
+      // The CREATE TABLE string is already in the schema stamp, so a warm
+      // wake on an older room re-runs this pass and applies the columns.
+      // String literals, not exec(identifier): the stamp scanner treats a
+      // named exec argument as DDL that must be hashed.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='reason'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='component'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='attempts'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='skipped'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='anchor_seq'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1");
+      }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM message_replay_snapshots").run();
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
@@ -2314,8 +2336,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an integrity failure for any other room. Without this the record
       // stood until the room fully caught up, keeping integrity red for days
       // after the cause was fixed. A later failure re-parks and re-records.
-      const parked = this.db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
-      if (!roomExists || !parked || messagesBackfillCaughtUp(this.db, row.recordId)) {
+      const parked = this.db.prepare("SELECT skipped FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      // A quarantine (skipped=1) is one event, not a room failure. A park
+      // that was lifted, a room that is gone, or a room that has caught up
+      // stops being reported.
+      if (!roomExists || !parked || parked.skipped || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
       }
     }

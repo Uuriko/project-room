@@ -20,6 +20,7 @@ import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/
 import { growthCollector } from "../src/growth-emit.js";
 import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { healBackfillQuarantines } from "./messages-store.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -142,10 +143,15 @@ function backupConfigured(env) {
   return Boolean(kv && typeof kv.put === "function" && typeof kv.get === "function");
 }
 
+const PUBLIC_BLOCK_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "deferredSkips"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
+  }
+  for (const key of ["blockReason", "blockComponent"]) {
+    if (typeof integrity?.[key] === "string" && PUBLIC_BLOCK_TOKEN.test(integrity[key])) line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
   return integrity;
@@ -264,6 +270,9 @@ function defineJob(job) {
 // operator must act, not the hard caps: the largest room projection is
 // escalated at 3.5 MB against the 4 MiB application cap, and the
 // database at 8 GB against the 10 GB Durable Object SQLite limit.
+// 3.5 MB stays the escalation in front of the 4 MiB cap. The projection
+// hot window keeps a busy room near 100 KB once it lands; raising this
+// line would page later, closer to the hard cap, both before and after.
 export const STORE_GROWTH_LIMITS = Object.freeze({
   maxProjectionBytes: 3_500_000,
   dbBytes: 8_000_000_000
@@ -466,13 +475,43 @@ export const JOBS = Object.freeze([
       // even on a budget exit, so healthy rooms keep progressing while both
       // runtimes retain an active, safe failure until every block clears.
       try {
-        const blockedRooms = store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get()?.n;
+        // Event-level parks become quarantines before the count, so one
+        // rejected event stops failing the tick. A log gap (skipped=0) still
+        // fails it. Reason and component are tokens; the error text, which
+        // can name the room, stays off this result.
+        try { healBackfillQuarantines(store); } catch { /* the read below reports an unreadable table */ }
+        const observed = store.db.prepare(`SELECT
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0) AS n,
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=1) AS quarantined,
+          (SELECT reason FROM messages_backfill_blocks WHERE skipped=0 AND reason<>'' LIMIT 1) AS blockReason,
+          (SELECT component FROM messages_backfill_blocks WHERE skipped=0 AND component<>'' LIMIT 1) AS blockComponent,
+          (SELECT reason FROM messages_backfill_blocks WHERE reason<>'' ORDER BY skipped LIMIT 1) AS anyReason,
+          (SELECT component FROM messages_backfill_blocks WHERE component<>'' ORDER BY skipped LIMIT 1) AS anyComponent`).get();
+        const blockedRooms = observed?.n;
         if (!Number.isSafeInteger(blockedRooms) || blockedRooms < 0) {
           throw new Error("Invalid database messages backfill block count");
         }
-        integrity = { ...integrity, blockedRooms };
+        const token = value => typeof value === "string" && PUBLIC_BLOCK_TOKEN.test(value);
+        const reason = token(observed.blockReason) ? observed.blockReason : (blockedRooms === 0 && token(observed.anyReason) ? observed.anyReason : null);
+        const component = token(observed.blockComponent) ? observed.blockComponent : (blockedRooms === 0 && token(observed.anyComponent) ? observed.anyComponent : null);
+        const extra = { blockedRooms };
+        if (Number.isSafeInteger(observed.quarantined) && observed.quarantined > 0) extra.quarantinedEvents = observed.quarantined;
+        if (reason) extra.blockReason = reason;
+        if (component) extra.blockComponent = component;
+        integrity = { ...integrity, ...extra };
+        const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
+          || integrity?.failureDetail?.code === "messages_backfill_failed";
         if (blockedRooms > 0 && !summaryFailed(integrity)) {
-          integrity = { ...integrity, ...integrityFailure({ integritySubcheck: "messages_backfill" }) };
+          const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
+          if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
+          if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
+          integrity = { ...integrity, ...failure };
+        } else if (backfillDetail && (token(observed.blockReason) || token(observed.blockComponent))) {
+          integrity = { ...integrity, failureDetail: {
+            ...integrity.failureDetail,
+            ...(token(observed.blockReason) ? { reason: observed.blockReason } : {}),
+            ...(token(observed.blockComponent) ? { component: observed.blockComponent } : {})
+          } };
         }
       } catch (error) {
         // The general read() helper swallows SQL errors; using it here would
@@ -789,6 +828,9 @@ export function startNodeScheduler({
     for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
       if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
     }
+    for (const key of ["reason", "component"]) {
+      if (typeof detail[key] === "string" && PUBLIC_BLOCK_TOKEN.test(detail[key])) out[key] = detail[key];
+    }
     // A room id named by the integrity job (room-record steps only; the
     // job attaches it, this layer only shape-checks it). Ids contain
     // hyphens, which the token pattern above does not allow.
@@ -895,6 +937,8 @@ export function startNodeScheduler({
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,
           lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
+          lastErrorReason: rec.lastFailure?.reason ?? null,
+          lastErrorComponent: rec.lastFailure?.component ?? null,
           lastDurationMs: rec.lastDurationMs ?? null,
           lastSummaryAt: iso(rec.lastSummaryAt),
           lastGrade: rec.lastGrade ?? null,
