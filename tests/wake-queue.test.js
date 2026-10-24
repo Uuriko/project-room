@@ -182,3 +182,31 @@ test("guest-agent members cannot enqueue or requeue wakes, and can pause their o
   assert.equal(f.store.wakeQueue.list(guestKey, "commons").wakes.length, 0);
   assert.equal(f.enqueue().receipt.state, "pending");
 });
+
+// #3910 F2: a leased coalesce discards the new intent - the receipt must
+// say so, instead of returning the same coalesced shape as an absorb.
+test("enqueue into a leased wake reports the dropped intent honestly", t => {
+  const f = fixture(t);
+  const first = f.enqueue({ intent: { recipe: "original" } });
+  assert.equal(first.receipt.absorbed, true, "a fresh enqueue records its intent");
+  assert.equal(first.receipt.dropped, false);
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  const leased = f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", randomUUID());
+  assert.equal(leased.state, "leased");
+  const dropped = f.enqueue({ intent: { recipe: "replacement" } });
+  assert.equal(dropped.receipt.state, "leased");
+  assert.equal(dropped.receipt.coalesced, true, "back-compat: it is still a coalesce");
+  assert.equal(dropped.receipt.absorbed, false, "a leased wake does not absorb the new intent");
+  assert.equal(dropped.receipt.dropped, true, "the dropped intent is named as dropped");
+  assert.deepEqual(f.list()[0].intent, { recipe: "original" }, "the leased row keeps its original intent");
+});
+
+test("enqueue coalescing a pending wake reports the absorbed intent", t => {
+  const f = fixture(t);
+  f.enqueue({ intent: { recipe: "original" } });
+  const again = f.enqueue({ intent: { recipe: "replacement" } });
+  assert.equal(again.receipt.coalesced, true);
+  assert.equal(again.receipt.absorbed, true, "a pending coalesce absorbs the new intent");
+  assert.equal(again.receipt.dropped, false);
+  assert.deepEqual(f.list()[0].intent, { recipe: "replacement" }, "pending coalesce keeps the newest intent");
+});
