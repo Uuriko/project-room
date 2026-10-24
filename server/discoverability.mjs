@@ -129,6 +129,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/mcp", ["GET"], "none", "Hosted MCP server card (alias).", "getMcpWellKnown"),
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
+  route("/.well-known/agent-skills/index.json", ["GET"], "none", "Agent Skills discovery index (v0.2.0): the skills this origin publishes, each with the SHA-256 of its SKILL.md bytes.", "getAgentSkillsIndex"),
+  route("/.well-known/agent-skills/work-in-project-room/SKILL.md", ["GET"], "none", "The work-in-project-room skill file at its Agent Skills discovery path (same bytes as /SKILL.md).", "getAgentSkillsSkillMd"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   // Onboarding.
