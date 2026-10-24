@@ -41,6 +41,7 @@ export function bindAgentSessions({ client, $ }) {
     const node = panel();
     if (!node) return;
     if (!body?.enabled) { node.hidden = true; return; }
+    if (node.hidden) node.open = true;
     node.hidden = false;
     const sessions = Array.isArray(body.sessions) ? body.sessions : [];
     const count = $("#agent-sessions-count");
