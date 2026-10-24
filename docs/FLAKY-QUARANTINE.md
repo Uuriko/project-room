@@ -28,6 +28,12 @@ A flaky test — one that fails non-deterministically while the product is fine 
    ```
 4. **Repair or re-admit within 14 days.** The owner fixes the root cause (not the assertion — the race, the clock dependency, the shared fixture) and the test re-enters the blocking suite with its entry deleted. A genuinely unfixable test is re-admitted only as a deleted test: remove the entry and delete or permanently disable the test with the reason recorded in the PR, never as an indefinite quarantine.
 
+## Shard proposals (TST-01B)
+
+`scripts/flaky-merge.mjs` reads a directory or JSON file of shard records. Each record is a `flaky-detect` result: `file` plus `flaky` or `tests` rows of `{ name, passes, fails }`. When `tests` is present it is the complete count for that record; otherwise `flaky` is used. Counts for the same file and test name add across shards. A test is proposed only when the total has at least one pass and one fail. `shard-summary.json` is ignored.
+
+The script prints `{"quarantined":[...]}` and does not edit `tests/quarantine.json`. `owner` is the last committer of the test file when git can name one. `repair_by` is 14 days after `--today` (default: the UTC date). Exit 1 means at least one proposal was printed. A person still opens the quarantine PR; the script does not skip the test.
+
 ## The enforcement
 
 The `quarantine-check` job runs `scripts/quarantine-check.mjs` in CI on every PR and every push to `main`. It exits non-zero when any entry violates the contract:
