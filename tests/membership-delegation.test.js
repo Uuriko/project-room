@@ -12,7 +12,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
-import { membershipDelegationJournalSchema } from "../server/membership-delegation-journal.mjs";
+import { membershipDelegationJournalSchema } from "../server/journal.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 // RC-2026-09-18-038: owner-granted membership administration for agent
