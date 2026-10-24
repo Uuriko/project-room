@@ -951,8 +951,25 @@ export class AgentPluginStore {
   // subscription of the identity that listens for wake pings. Deliveries
   // flush fire-and-forget after the request path returns (setDispatchKick),
   // with the cron tick as the restart-safe backstop; the agent sees each
-  // delivery in its journal. No subscription, no delivery — the heartbeat
-  // queue alone carries the wake.
+  // delivery in its journal.
+  //
+  // #3778: a wakeUrl-only identity (registered via POST
+  // /api/agent-heartbeats mode wakeable or the MCP wake_register tool,
+  // whose entire contract is the wakeUrl) used to get NO delivery at
+  // all: the wakeUrl fan-out below ran only as an adjunct to a
+  // subscription delivery, journaled on the first subscription and
+  // signed with that subscription's secret, so with no subscription
+  // there was nothing to journal on. Now, when no subscription delivery
+  // exists but wakeable hosts registered wakeUrls, a dedicated
+  // agent.wake carrier subscription is ensured for the identity (url =
+  // the first wakeUrl; its generated secret signs the deliveries, the
+  // same signing story as every other delivery) and one delivery per
+  // distinct wakeUrl is journaled on it. The carrier listens only for
+  // agent.wake, so it never receives room-event fan-out; it is a normal
+  // subscription the identity can list and unsubscribe, and clearing
+  // the wakeUrl (wake_clear / pull-only heartbeat) stops it being
+  // re-ensured. With no wakeUrl and no subscription the heartbeat queue
+  // alone still carries the wake.
   deliverWakePing({ identityId, signal }) {
     // R282-1: a revoked identity's secret is dead, so its wake must be too.
     if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
@@ -969,19 +986,42 @@ export class AgentPluginStore {
         deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
           { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null }));
       }
+      const wakeTargets = this.wakeUrlTargets(identityId);
+      // #3778: no subscription delivery but registered wakeUrls — ensure
+      // the wake carrier subscription so the wakeUrl rows have a
+      // subscription (and a signing secret) of their own to journal on.
+      // A wakeUrl that cannot form a subscription is skipped, never
+      // thrown: a bad stored wakeUrl must not break the wake path.
+      if (deliveries.length === 0 && wakeTargets.length > 0) {
+        try {
+          const carrier = this.ensureWakeCarrierSubscription(identityId, wakeTargets[0].wakeUrl);
+          if (carrier) {
+            deliveries.push(this.buildWebhookDelivery(carrier,
+              { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null }));
+          }
+        } catch { /* skip: no carrier, the heartbeat queue carries the wake */ }
+      }
       // Event-push: when the agent registered wakeable hosts with wakeUrls,
       // the same wake ping is also POSTed to each distinct wakeUrl via the
       // same signed sender. The wakeUrl row is journaled on the first
       // matching subscription (target_url override); the idempotency
       // suffix keeps it distinct from the subscription-URL row. A bad
       // stored wakeUrl must never break the wake path, so it is skipped,
-      // not thrown.
+      // not thrown. A wakeUrl that a delivery from this call already
+      // targets — the #3778 carrier's own URL, or a subscription whose
+      // URL is the wakeUrl — is not journaled a second time under the
+      // override suffix: one ping per distinct URL per signal.
       if (deliveries.length > 0) {
-        for (const wake of this.wakeUrlTargets(identityId)) {
+        const deliveredUrls = new Set(deliveries
+          .map(d => d.url ?? this.subs.get(d.subscriptionId)?.url)
+          .filter(url => typeof url === "string"));
+        for (const wake of wakeTargets) {
+          if (deliveredUrls.has(wake.wakeUrl)) continue;
           try {
             deliveries.push(this.buildWebhookDelivery(deliveries[0].subscriptionId,
               { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null,
                 url: wake.wakeUrl, idempotencySuffix: `wake-url:${wake.hostId}` }));
+            deliveredUrls.add(wake.wakeUrl);
           } catch { /* skip invalid wakeUrl; the subscription-URL delivery still stands */ }
         }
       }
@@ -989,6 +1029,25 @@ export class AgentPluginStore {
     });
     if (result.deliveries.length > 0) this.kickDispatch();
     return result;
+  }
+
+  // #3778: the dedicated agent.wake carrier subscription for a
+  // wakeUrl-only identity. Reuses subscribeWebhook, so the carrier is a
+  // normal subscription row (server-generated signing secret, listed by
+  // listWebhooks, disabled on identity revoke, removable by
+  // unsubscribe) whose URL is the registered wakeUrl and whose event
+  // filter is exactly [agent.wake] — room-event fan-out never matches
+  // it, so no room body ever rides the carrier. subscribeWebhook
+  // dedupes on (identity, url, event set): a repeat wake reuses the
+  // carrier, and a carrier the identity disabled is re-enabled, matching
+  // subscribe-retry semantics; the way to stop wakeUrl pushes for good
+  // is clearing the wakeUrl itself. Returns the subscriptionId, or null
+  // when the wakeUrl cannot form a subscription.
+  ensureWakeCarrierSubscription(identityId, wakeUrl) {
+    const { subscription } = this.subscribeWebhook({
+      identityId, url: wakeUrl, events: [WAKE_PING_EVENT]
+    });
+    return subscription?.subscriptionId ?? null;
   }
 
   // Distinct wakeUrls of the identity's wakeable hosts. Never throws — a
