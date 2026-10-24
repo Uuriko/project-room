@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import { RoomAgentClient } from '../room-agent.mjs';
 import { openRequestJournal, runRequestOnce } from '../request-runner.mjs';
+import { buildReplyCommand } from '../reply-actions.mjs';
+import { queueJobArtifacts } from './artifacts.mjs';
 import { canonical, digest, requireThat } from './store.mjs';
 import { policy, submit, runJob, getJob, admission, observe } from './executor.mjs';
 
@@ -26,6 +28,12 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
       && g.member === connection.memberId && g.requesters.includes(context.request.requesterId) && g.capabilities.includes(task.capability)), 'room_grant_required');
   };
   const journal = openRequestJournal(join(store.directory, 'room-requests.sqlite'));
+  const queueEvidence = (result, response) => {
+    if (policy(store).publishArtifacts === true && result.result?.artifacts?.length) {
+      const command = buildReplyCommand(connection, 'room_respond_to_request', { ...response, body: 'Evidence pending' });
+      queueJobArtifacts(store, { connection, jobId: result.id, requestMessageId, roomCreatedEventId: context.roomCreatedEventId, messageId: command.data.messageId });
+    }
+  };
   const resultBody = result => JSON.stringify({ version: 1, jobId: result.id, state: result.state, packageHash: result.pin,
     artifactDigest: result.result?.artifactDigest ?? null, elapsedMs: result.result?.elapsedMs ?? null,
     evidenceLocation: 'executing_laptop', acceptance: result.result?.acceptance ?? 'not_verified',
@@ -43,6 +51,7 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
           && saved.contextEventId === context.current.answerBasis.contextEventId && saved.contextSequence === context.current.answerBasis.contextSequence
           && saved.toMemberId === context.request.requesterId && row.attempt_id === binding.attemptId, 'saved_result_basis_changed');
         requireThat(['completed', 'needs_attention', 'cancelled'].includes(local.state), 'job_requires_reconciliation');
+        queueEvidence(local, saved);
         journal.prepare('UPDATE request_runs SET response=? WHERE id=? AND response IS NULL').run(JSON.stringify({ ...saved, body: resultBody(local) }), binding.requestId);
       }
     }
@@ -67,6 +76,7 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
         if (job.state === 'queued') await runJob(store, job.id, { signal: prepared.signal, observation: observeResources() });
         const result = getJob(store, job.id);
         requireThat(['completed', 'needs_attention', 'cancelled'].includes(result.state), 'job_requires_reconciliation');
+        queueEvidence(result, response);
         return { body: resultBody(result) };
       } });
   } finally { journal.close(); }

@@ -210,3 +210,55 @@ Remaining before an unattended fleet release:
    improvement proposals must use the same evaluated activation path.
 7. Merge only after exact-head required CI and serialize deployment with the
    peer. Native updates and data migrations remain explicit component releases.
+
+### Shared interactions and Room evidence
+
+`client/evolution/interaction-contract.mjs` is a framework-independent contract for questions,
+operation-bound approval conversations, and results. Its snapshot/reducer exports
+work in browser and Node. Scope includes service origin, room creation event,
+viewer and authorization revision. Every item additionally carries operation ID,
+attempt ID and package hash. Partial snapshots cannot replace state; obsolete
+attempts and conflicting source revisions are refused. A validated envelope is
+not permission to execute. Authorization revisions must come from the consuming
+adapter's current authority context, never from untrusted message text.
+
+`client/evolution/interactions.mjs` prepares and persists typed formal reply
+requests before sending. `prepareRoomInteraction(connection, value)` fills the
+deterministic request/source ID; `openRoomInteraction` additionally requires the
+source work request's `sourceRequestMessageId` to check room incarnation.
+Retries keep the same command and body. `readRoomInteraction` requires the current
+scope and attempt, reads complete authenticated context, checks original content,
+responder and expiry, and returns `executionAuthorized:false`. Approval answers
+have exactly `{decision:"approve"|"decline",attemptId,operationDigest}`. Ordinary
+"yes" text is not a machine approval. The CLI exposes `interaction-open` and
+`interaction-read` with a private `connectionDirectory`. Human UI rendering and
+runtime authorization must consume this contract before interactive execution is
+enabled; this adapter does not enable Codex interactive RPCs.
+
+`room-publish` takes `connectionDirectory`, `jobId`, `requestMessageId`,
+`roomCreatedEventId` and `messageId`. It publishes a terminal job's verified
+artifacts onto an existing message authored by that agent. Existing Room file
+limits and spend grants apply (currently 1 MiB per file, at most 32 files and
+8 MiB per publication). Oversized sets are refused, not silently truncated.
+Private message visibility is enforced by the server. The publisher verifies
+local hashes, refuses symlinks/path escapes, uses deterministic attachment IDs,
+reconciles staged/committed records, then verifies downloaded bytes. It never
+runs a job. An interrupted publication may be partial; retry the same binding.
+
+With local policy `publishArtifacts:true`, capability execution saves evidence
+intent before delivering its answer. `room-watch`/`room-host` drain the durable
+outbox even after the original request is answered, publishing and announcing
+verified evidence with stable command IDs. Without that opt-in, execution keeps
+its existing laptop-only evidence behavior. Failed deliveries rotate through a
+bounded batch and retain their intent. The announcement lists at most eight
+files with an explicit continuation; the local receipt records the whole set.
+No new service, blob store, spend grant or background daemon is provisioned.
+
+Qualification includes disposable HTTP server tests for lost upload/commit and
+announcement responses, process-state reopening, private visibility, revoked
+credentials, stale attempts/scopes, mutated bytes, and durable exact-operation
+answers. These are local fault tests, not proof of physical two-Mac failover.
+The remaining release qualification is human UI consumption, runtime-specific
+approval authority validation, and a two-laptop disconnect/restart run against
+the exact candidate revision. Keep interactive execution disabled until those
+checks pass.

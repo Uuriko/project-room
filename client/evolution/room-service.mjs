@@ -1,5 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { RoomAgentClient } from '../room-agent.mjs';
+import { flushJobArtifacts } from './artifacts.mjs';
+import { policy } from './executor.mjs';
 import { canonical, digest, event, requireThat } from './store.mjs';
 import { parseCapabilityTask, runRoomCapability } from './room-bridge.mjs';
 
@@ -40,6 +42,9 @@ export async function watchRoomCapabilities(store, { connection, signal, interva
             emit({ requestMessageId: request.id, state: 'waiting', reason: error.message });
           }
         }
+      }
+      if (policy(store).publishArtifacts === true && !policy(store).paused) {
+        for (const delivery of await flushJobArtifacts(store, { connection, signal })) emit({ artifactDelivery: delivery });
       }
       cursor = Number.isSafeInteger(work.evaluatedThrough) ? work.evaluatedThrough : cursor;
       checkpoint = { after: cursor, lastRequest: checkpoint.lastRequest };
