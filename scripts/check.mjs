@@ -48,6 +48,11 @@ if (spawnSync(process.execPath, ["scripts/server-json-check.mjs"], { stdio: "inh
 // accidentally committed secrets. Fails the build on any finding.
 const secretScan = spawnSync(process.execPath, ["scripts/secret-scan-check.mjs"], { stdio: "inherit" });
 if (secretScan.status !== 0) process.exit(secretScan.status || 1);
+// Empty-test-body gate (#3681): a named test whose body is empty or
+// comment-only passes without checking anything; fail on any such body
+// that is not grandfathered shrink-only in the lint itself.
+const emptyTests = spawnSync(process.execPath, ["scripts/empty-test-bodies-check.mjs"], { stdio: "inherit" });
+if (emptyTests.status !== 0) process.exit(emptyTests.status || 1);
 // Open-route inventory (B48): every `security: []` route in docs/openapi.yaml
 // is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
 const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });
