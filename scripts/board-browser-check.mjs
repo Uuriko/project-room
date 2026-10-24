@@ -1238,7 +1238,7 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
 
 // #3688: closing the board must hand keyboard focus to a stable anchor —
 // the element that opened it when that element survives, otherwise the
-// conversation title — never <body>. The native <dialog> return chain
+// visible Board button or conversation title — never <body>. The native <dialog> return chain
 // bottoms out at <body> when the palette was opened from body focus, and
 // when the recorded opener is removed while the board is open.
 test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
@@ -1284,19 +1284,28 @@ test("board close returns focus to the opener, else the conversation title", { t
   await dialog.waitFor({ state: "hidden" });
   await focusLandsOn("message-input");
 
-  // No opener: the palette was opened from body focus, so the fallback
-  // anchor — the conversation title — takes focus instead of <body>.
+  // No opener: the human-visible Board button is the first fallback.
   await page.evaluate(() => document.activeElement?.blur());
   await openBoard(page);
   await closeWithEscape();
-  await focusLandsOn("conversation-title");
+  await focusLandsOn("tasks-board-open");
 
-  // Opener removed while the board is open: the same fallback applies.
+  // When that fallback is unavailable, use the conversation title.
+  await page.evaluate(() => {
+    document.querySelector("#tasks-board-open").hidden = true;
+    document.activeElement?.blur();
+  });
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+  await page.evaluate(() => { document.querySelector("#tasks-board-open").hidden = false; });
+
+  // Opener removed while the board is open: the Board button takes focus.
   await page.locator("#message-input").click();
   await openBoard(page);
   await page.evaluate(() => document.querySelector("#message-input").remove());
   await closeWithEscape();
-  await focusLandsOn("conversation-title");
+  await focusLandsOn("tasks-board-open");
 });
 
 test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
