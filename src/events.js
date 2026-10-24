@@ -22,6 +22,9 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   // Owner kill-switch for the priced-tool gate. Default enabled when absent.
   ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
+  // Owner-set default spend purse (cents) for agent members holding no
+  // spend grant. Default MEMBER_SPEND_DEFAULT_CENTS when absent.
+  ROOM_SPEND_DEFAULT_SET: "room.spend_default_set",
   // One owner kill-switch for cross-owner assign and wake. Default open.
   ROOM_TRUST_SET: "room.trust_set",
   // Owner opt-in for the public receipts page. Default off when absent.
@@ -406,6 +409,42 @@ function setSpendPricing(state, incoming) {
     setAt: incoming.at
   };
 }
+
+// Member spend default (ruling 29b): agent members holding no spend grant
+// authorize priced tools against a small per-room purse instead of hitting
+// a zero-grant dead-end (room.spend_default_set). Event-sourced and carried
+// on the projection like the spend allowance and the pricing switch. The
+// purse is a lifetime floor per member, denominated in cents; charges are
+// recorded in spend_authorizations exactly like grant charges
+// (server/spend-grants.mjs). Absent state means the built-in default below;
+// an owner-set 0 restores the pre-purse behaviour exactly (grantless
+// members are refused no_spend_grant). Any spend grant edge — live,
+// revoked, or expired — supersedes the purse, so an owner's grant action on
+// a member is never silently undone by the default.
+export const MEMBER_SPEND_DEFAULT_CENTS = 25;
+
+export function memberSpendDefaultCents(state) {
+  const stored = state?.room?.spendDefault;
+  if (!stored || !Number.isSafeInteger(stored.cents) || stored.cents < 0) return MEMBER_SPEND_DEFAULT_CENTS;
+  return stored.cents;
+}
+
+function setSpendDefault(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the member spend default");
+  const { cents } = incoming.data ?? {};
+  if (cents !== null && (!Number.isSafeInteger(cents) || cents < 0 || cents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
+    throw new Error(`cents must be an integer of cents from 0 to ${SPEND_ALLOWANCE_LIMITS.allowanceCents}, or null to restore the built-in default`);
+  }
+  if (Object.keys(incoming.data ?? {}).some(key => key !== "cents")) throw new Error("spend default takes only cents");
+  const previous = state.room.spendDefault ?? null;
+  state.room.spendDefault = {
+    cents: cents ?? null,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
 // Default autonomy for collaborating agents: they can steer, take work,
 // complete it, and verify. Attenuated: no manage_members / decide /
 // write_external / invite_member (those stay owner or explicit identity-link).
@@ -650,6 +689,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
+    [EVENT_TYPES.ROOM_SPEND_DEFAULT_SET]: setSpendDefault,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---

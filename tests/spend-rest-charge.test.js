@@ -20,7 +20,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import {
-  ensureSpendGrantsSchema, issueSpendGrant, spendGrantSummary,
+  ensureSpendGrantsSchema, issueSpendGrant, spendGrantSummary, setSpendDefaultRoute,
 } from "../server/spend-grants.mjs";
 
 const SHA = "a".repeat(40);
@@ -92,6 +92,9 @@ const grantPeer = (f, terms = {}) => issueSpendGrant(f.store.db, f.roomId, f.pee
 
 test("REST priced doors refuse a grant-less agent with 402 payment_required and create nothing", async t => {
   const f = await serve(t);
+  // Ruling 29b: a grant-less agent now holds the room's member spend
+  // default; zero it to pin the refusal contract this test owns.
+  setSpendDefaultRoute(f.store, f.ownerSecret, f.roomId, { cents: 0 });
   const bounty = await post(f.origin, `/api/rooms/${f.roomId}/bounties`, bountyBody(), f.peerSecret);
   assert.equal(bounty.status, 402, `bounty_post twin must refuse without a grant, got ${bounty.status}: ${await bounty.clone().text()}`);
   assert.equal((await bounty.json()).error?.code, "payment_required");

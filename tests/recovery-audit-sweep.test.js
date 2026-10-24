@@ -340,6 +340,9 @@ test("the event surface has not grown without this sweep noticing", () => {
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 66,
+  // room.spend_default_set is exercised on a real RoomStore in
+  // tests/spend-default-allowance.test.js (owner set/clear via
+  // setSpendDefaultRoute, projection read back through the spend gate).
+  assert.equal(Object.values(T).length, 67,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
