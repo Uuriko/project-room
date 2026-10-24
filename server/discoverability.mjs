@@ -710,7 +710,7 @@ export const nextActionsForIdentityMint = () => Object.freeze([
   Object.freeze({ action: "create-room", transport: "http", method: "POST", path: "/api/agent-rooms",
     description: "Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>" }),
   Object.freeze({ action: "list-tools", transport: "mcp", tool: "tools/list", path: "/room/mcp",
-    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp." }),
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\", params: { profile: \"full\" } } to /room/mcp with this identity secret as the Bearer token — profile full lists every tool this identity can call, including room_join and room_create; the default profile is the short core list." }),
 ]);
 
 export const nextActionsForRoomCreate = roomId => {
