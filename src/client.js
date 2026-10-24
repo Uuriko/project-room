@@ -8,6 +8,34 @@ import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
 import { humanErrorMessage } from "./error-copy.js";
 
+// The server's error envelope (agentErrorBody in ./agent-error.mjs) carries
+// recovery guidance — a hint and next steps — alongside { error: {code,
+// message} }. The agent door consumes that guidance; this transport used to
+// keep only the message, so a human hitting any refusal (a held claim, a
+// stale revision) got a bare error with no way forward. Carry the envelope
+// fields on the thrown error (reason/hint/next below) and compose the
+// guidance into the display text: every web error surface renders
+// error.message, so that is where the guidance becomes visible. A next step
+// whose wording mostly restates text already shown is skipped — it adds
+// noise, not guidance; tool/path steps are agent-door addressing and stay
+// available verbatim on error.next without being read out to a person.
+const guidanceWords = text => new Set(String(text).toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2));
+function errorDisplayText({ status, code, message, hint, next } = {}) {
+  let display = humanErrorMessage({ status, code, message });
+  const hintText = typeof hint === "string" ? hint.trim() : "";
+  if (hintText && !display.includes(hintText)) display = `${display} ${hintText}`;
+  const covered = guidanceWords(display);
+  for (const step of Array.isArray(next) ? next : []) {
+    const stepText = typeof step?.command === "string" ? step.command.trim() : "";
+    if (!stepText || display.includes(stepText)) continue;
+    const words = [...guidanceWords(stepText)];
+    if (words.length && words.filter(word => covered.has(word)).length / words.length >= 0.7) continue;
+    display = `${display} ${stepText}`;
+    for (const word of words) covered.add(word);
+  }
+  return display;
+}
+
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
 // anything else is a mismatched response, never a wider or narrower grant.
@@ -159,7 +187,7 @@ export class RoomClient {
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
-      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
+      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(errorDisplayText({ status: response.status, code: serverError.code, message: serverError.message, hint: body?.hint, next: body?.next })); error.status = response.status; error.code = serverError.code; error.reason = typeof body?.reason === "string" ? body.reason : null; error.hint = typeof body?.hint === "string" ? body.hint : null; error.next = Array.isArray(body?.next) ? body.next : null; if (typeof body?.errorId === "string") error.errorId = body.errorId; throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }
