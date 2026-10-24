@@ -457,10 +457,10 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         { state: rest.state ?? null, since: rest.since ?? null }) };
     case "bounty_post": {
       return idem("bounty.post", 201, () => {
-        const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
+        const { bounty, receipt, warnings } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
           criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
           verifierId: rest.verifierId ?? null, approvalMode: rest.approvalMode ?? "human", rubric: rest.rubric ?? null, actor });
-        return { roomId, bounty, receipt };
+        return { roomId, bounty, receipt, warnings };
       });
     }
     case "bounty_fund": {

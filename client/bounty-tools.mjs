@@ -58,7 +58,7 @@ export const bountyTools = [
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
   tool("bounty_post",
-    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
+    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work. A dispute is decided by the decider named at posting — the verifierId seats as decider — and a decider cannot be added later, so a bounty posted with nobody named can never be disputed; the response warns when no decider can be seated for the bounty as posted.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },
              criteria: { type: "string", minLength: 1, maxLength: 4096,
                description: "What done means, concretely enough that a verifier can check it without asking you." },
@@ -100,7 +100,7 @@ export const bountyTools = [
       ["bountyId", "verifierAttestation"]), false),
 
   tool("bounty_dispute",
-    "Dispute a submission or an acceptance. Stakes a bond of 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, an arbiter does.",
+    "Dispute an acceptance. Disputes open only on accepted work — a submission that has not been accepted cannot be disputed. The decider is the dispute decider (or verifier) named when the bounty was posted; if none was named, or the named decider cannot sit independently of you and the worker, the dispute is refused as unavailable before any bond locks. Stakes a bond of 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, the seated decider does.",
     schema({ bountyId: id, bond: amount,
              grounds: { type: "string", minLength: 1, maxLength: 4096,
                description: "Reason code plus the evidence for it, e.g. criterion-unmet, receipt-incomplete, duplicate-work." },

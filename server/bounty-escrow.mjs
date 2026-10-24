@@ -1481,8 +1481,13 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.proposed",
         { bountyId, actor: act, before: null, after: "proposed",
           data: { amount, title, rubricVersion: 1, rubricHash, approvalMode } });
+      // C-5 (Ruling 37): warn at posting time when no decider can be
+      // seated for this bounty — the information belongs here, where a
+      // decider can still be named, not at dispute time.
+      const disputeWarning = this._disputePathWarning(roomId, lane, decider ?? verifier);
       return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "propose", bountyId, at, actor: act, event } };
+        receipt: { kind: "propose", bountyId, at, actor: act, event },
+        warnings: disputeWarning ? [disputeWarning] : [] };
     });
   }
 
@@ -2332,6 +2337,35 @@ export class BountyEscrow {
     if (!this._disputeRecords) return;
     if (snapshot === null || snapshot === undefined) this._disputeRecords.delete(disputeId);
     else this._disputeRecords.set(disputeId, snapshot);
+  }
+
+  // Posting-time dispute-path warning (C-5, Ruling 37): a dispute seats
+  // only the decider named at posting — the dispute decider, else the
+  // verifier — and designation cannot be added later, so a bounty posted
+  // into a room where no decider can be seated carries a dead-end the
+  // poster otherwise discovers only inside the challenge window. Whether
+  // a seat can EVER be filled is decidable at posting from current
+  // membership: seat the named decider through the dispute-time resolver
+  // against every member who could do the work (each agent lane other
+  // than the poster and the designee, with the poster as challenger). If
+  // no composition seats, the post response warns. The warning never
+  // blocks the posting and changes no designation or seating semantics.
+  _disputePathWarning(roomId, posterLane, designated) {
+    if (!designated)
+      return "no dispute decider was named at posting: a dispute needs a dispute decider (or verifier) named at posting and one cannot be added later — as posted, this bounty can never be disputed";
+    const lanes = this._laneCards(roomId);
+    // Mirror disputeBounty's seating inputs: a designated HUMAN decider
+    // is seated from their live membership, not the agent lane cards.
+    if (!lanes.some(card => card.lane === designated)) {
+      const member = this._memberOf(roomId, designated);
+      if (member && member.active !== false)
+        lanes.push({ lane: designated, trust_level: "standard" });
+    }
+    const seatable = lanes.some(card => card.lane !== posterLane && card.lane !== designated &&
+      !this._arbiters.resolveTier1({ verifierId: designated,
+        executor: { lane: card.lane }, challenger: { lane: posterLane }, lanes }).unavailable);
+    return seatable ? null
+      : "the decider named at posting cannot sit for work by the room's current members — a decider must be independent of both the poster and the worker — so as the room stands, this bounty cannot be disputed";
   }
 
   // Arbitrator cards are drawn from CURRENT room membership — never a
