@@ -1,6 +1,7 @@
 // Public agent page: access policy, wake pointer, and the privacy boundary.
-// A question is not a room message. The public card, page, poll, and errors
-// carry the ask and the display name, and nothing from the room log.
+// HTTP coverage for server/routes/public-agent-page.mjs. A question is not a
+// room message. The public card, page, poll, and errors carry the ask and the
+// display name, and nothing from the room log.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
