@@ -32,6 +32,11 @@
 // row, as before. On every database that tracks credentials, no live
 // credential means no resolution.
 //
+// Room mode of GET /api/wake-status also resolves through this module
+// (identityIdsForWakeRoom / isWakeRoomMember below, #3908 F-8): it was
+// identity_links-only, so a guest caller was refused membership in its
+// own room and guest seats never appeared in the wakeable lists.
+//
 // Both lookups are defensive against pre-schema databases (a missing
 // table reads as "no resolution", never a throw), matching the wake
 // legs' existing never-throw posture.
@@ -89,4 +94,37 @@ export function memberIdForWakeIdentity(db, roomId, identityId, now = Date.now()
     roomId, identityId);
   if (!guest?.memberId) return null;
   return guestSeatLive(db, roomId, guest.memberId, now) ? guest.memberId : null;
+}
+
+function allRows(db, sql, roomId) {
+  try {
+    return db.prepare(sql).all(roomId);
+  } catch {
+    return [];
+  }
+}
+
+// Every identity seated in a room, for room-scoped wake surfaces
+// (wake-status room mode): identity_links first, guest_members as the
+// fallback - one entry per identity, the link seat wins where an
+// identity somehow holds both rows in the room (the enumeration rule
+// in server/membership-resolution.mjs).
+export function identityIdsForWakeRoom(db, roomId) {
+  if (!db || !roomId) return [];
+  const ids = [], seen = new Set();
+  for (const row of allRows(db,
+    "SELECT identity_id AS identityId FROM identity_links WHERE room_id=?", roomId)) {
+    if (row.identityId && !seen.has(row.identityId)) { seen.add(row.identityId); ids.push(row.identityId); }
+  }
+  for (const row of allRows(db,
+    "SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=?", roomId)) {
+    if (row.identityId && !seen.has(row.identityId)) { seen.add(row.identityId); ids.push(row.identityId); }
+  }
+  return ids;
+}
+
+// Room membership for a wake surface, resolved through the same
+// guest-aware resolver (identity -> member, above).
+export function isWakeRoomMember(db, roomId, identityId) {
+  return memberIdForWakeIdentity(db, roomId, identityId) !== null;
 }

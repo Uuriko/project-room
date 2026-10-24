@@ -180,7 +180,21 @@ export function identityNamesForRoom(db, roomId) {
       `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
        JOIN agent_identities i ON i.identity_id=l.identity_id
        WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
-    return Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
+    const names = Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
+    // Trial seats (guests) hold no identity_links row: fill their names
+    // from guest_members so @-resolution sees a guest's display name the
+    // same way the wake legs resolve its identity (#3908 F-9). The link
+    // seat wins where a member somehow appears in both tables. A
+    // pre-schema database without guest_members simply has no guest
+    // names - never a throw, matching the posture above.
+    try {
+      const guests = db.prepare(
+        `SELECT g.member_id AS memberId, i.display_name AS displayName FROM guest_members g
+         JOIN agent_identities i ON i.identity_id=g.guest_identity_id
+         WHERE g.room_id=? AND i.revoked_at IS NULL`).all(roomId);
+      for (const row of guests) if (!(row.memberId in names)) names[row.memberId] = row.displayName;
+    } catch { /* no guest table yet: no guest names */ }
+    return names;
   } catch {
     return {};
   }

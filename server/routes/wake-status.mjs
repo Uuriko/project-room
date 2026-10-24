@@ -22,17 +22,20 @@
 // room access token) — no duplicated credential logic.
 
 import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plugin-routes.mjs";
+import { identityIdsForWakeRoom, isWakeRoomMember } from "../wake-identity-resolution.mjs";
 
 const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wakeable });
 
+// Room membership is guest-aware (#3908 F-8): trial seats are seated
+// through guest_members and never receive an identity_links row, so both
+// helpers resolve through the shared wake resolver - a guest caller is
+// a member of its own room and guest seats appear in the room's lists.
 function roomMemberIdentityIds(store, roomId) {
-  return store.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=?")
-    .all(roomId).map(row => row.identityId);
+  return identityIdsForWakeRoom(store.db, roomId);
 }
 
 function isRoomMember(store, roomId, identityId) {
-  return !!store.db.prepare(
-    "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, identityId);
+  return isWakeRoomMember(store.db, roomId, identityId);
 }
 
 export function authenticateWakeStatus(ctx) {
