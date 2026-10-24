@@ -325,6 +325,10 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Set for the duration of the composer send that owns this command, including
+// the gap before an assistant submission is recorded. Snapshot reconciliation
+// must not detach that pending while its confirmation can still arrive.
+let inFlightPlainSendId = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -2836,15 +2840,19 @@ function paintSavedDelivery(messageId) {
   delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
   delivery.hidden = false;
 }
-// A pending send whose message is already in state landed, whatever its
-// response said. Reconcile every such draft; when the composer's own draft
-// reconciled, repaint it the way a confirmed submission does and show the
-// delivery line for the message that is actually in the room. Returns true
-// when the active draft reconciled, so a Send press that triggered this can
-// be consumed instead of minting a second command for the same text.
+// A pending plain send whose message is already in the room, and whose draft
+// the author has changed, is no longer a retry. Detach that command, drop
+// the stale retry error, and when it is the open composer show the delivery
+// line. Unchanged pendings stay so a lost response can retry the exact
+// command. Returns true when the open composer was reconciled, so this Send
+// press can be consumed instead of posting the edit.
 function reconcileLandedComposerDrafts() {
   if (!state) return false;
-  const reconciled = reconcileLandedDrafts(drafts, state.messages);
+  const reconciled = reconcileLandedDrafts(drafts, state.messages, {
+    retain(command) {
+      return command.id === inFlightPlainSendId || humanExperience.hasSubmission(command);
+    }
+  });
   if (!reconciled.length) return false;
   const activeKey = composerKey();
   const active = reconciled.find(entry => entry.key === activeKey);
@@ -4239,10 +4247,10 @@ $("#message-form").addEventListener("submit", e => {
     if (composerFiles.length) { setComposerError(uiText("composer.file.requestMode")); return; }
     submitRequest(e.currentTarget); return;
   }
-  // A Send press for a draft whose message already landed (its response was
-  // lost) is a reconciliation, not a send: consume it, so an edit typed over
-  // the stale "Draft kept" error can never mint a second command here and
-  // post a near-duplicate of an instruction already in the room.
+  // A Send press for a draft the author changed after its message already
+  // landed is a reconciliation, not a second post: detach that command and
+  // keep the edit. An unchanged press falls through and retries the original
+  // command, which the server answers with a duplicate receipt.
   if (reconcileLandedComposerDrafts()) return;
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const askRoom = humanExperience.intent(content);
@@ -4271,6 +4279,7 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+    inFlightPlainSendId = sendingCommand.id;
     try {
       if (sharedRequest) {
         await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
@@ -4280,15 +4289,13 @@ $("#message-form").addEventListener("submit", e => {
       await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      // A lost response is not a failed send when the message has already
-      // landed: a snapshot that beat this rejection here has reconciled (or
-      // now reconciles) the draft and shown the delivery line, so there is
-      // no failure left to paint over it.
-      if (!sharedRequest && state.messages.some(message => message.id === (sendingCommand.data.messageId || sendingCommand.id))) {
-        reconcileLandedComposerDrafts();
-        return;
-      }
+      // A lost response still keeps the draft and the retry error. Clearing
+      // it here because a snapshot already shows the message would drop the
+      // exact command a duplicate receipt needs, and it would unlock a
+      // request that must stay read-only until that retry.
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
+    } finally {
+      if (inFlightPlainSendId === sendingCommand.id) inFlightPlainSendId = null;
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;

@@ -1,11 +1,10 @@
-// Composer reconciliation journeys: a send whose response is lost after
-// the message landed must not leave the draft claiming an unconfirmed send
-// ("Draft kept. Send again to retry.") above the posted message, and an
-// edit typed over that stale error must never become a second instruction.
+// Composer reconciliation journeys: a lost response keeps an unchanged
+// draft so the retry reuses the command id (duplicate receipt, one copy
+// in the room). An edit typed over that stale error must not become a
+// second instruction.
 //
-// 1. Lost response, unchanged draft: the message arrives via stream/refresh,
-//    reconciliation clears the composer and shows the delivery line; the
-//    room holds exactly one copy.
+// 1. Lost response, unchanged draft: the composer keeps the text and the
+//    retry error; sending again posts no second copy.
 // 2. Lost response, edited draft (refresh held back so the edit lands first):
 //    reconciliation keeps the edited text as a plain draft, detaches the
 //    landed pending command, and drops the retry error; the room still
@@ -71,17 +70,19 @@ async function setup(t) {
   return { page, input, send, posted, dropFirstSendResponse, closeStreams };
 }
 
-test("lost response, unchanged draft: refresh reconciles, composer clears, exactly one message lands", { timeout: 60000 }, async t => {
+test("lost response, unchanged draft: the composer keeps the exact retry and the room holds one message", { timeout: 60000 }, async t => {
   const { page, input, send, posted, dropFirstSendResponse } = await setup(t);
   const body = "Deployment summary is ready for review.";
   await dropFirstSendResponse();
   await input.fill(body);
   await send.click();
-  await waitForState(page, "the composer to clear once the landed message arrives", async () => (await input.inputValue()) === "");
-  await waitForState(page, "the delivery line to replace the kept-draft error", async () => await page.locator("#message-delivery").isVisible());
-  assert.match(await page.locator("#message-delivery").textContent(), /Message saved\./);
-  assert.doesNotMatch(await page.locator("#composer-status").textContent(), /Draft kept/);
+  await waitForState(page, "the kept-draft error after the lost response", async () =>
+    (await page.locator("#composer-status").textContent()).includes("Draft kept"));
+  assert.equal(await input.inputValue(), body, "an unchanged lost send stays in the composer for an exact retry");
   assert.equal(posted(body).length, 1, "the room holds exactly one copy of the instruction");
+  await send.click();
+  await waitForState(page, "the exact retry to clear the composer", async () => (await input.inputValue()) === "");
+  assert.equal(posted(body).length, 1, "the retry is a duplicate receipt, not a second instruction");
 });
 
 test("lost response, edited draft: reconciliation detaches the landed send and keeps the edit as a plain draft", { timeout: 120000 }, async t => {
