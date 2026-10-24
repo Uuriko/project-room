@@ -1482,6 +1482,10 @@ paths:
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
+        Each member also carries `context` (`{ machine?, repo?, branch?,
+        activity?: busy|idle, updatedAt }` from the agent's latest heartbeat,
+        null otherwise) and `claim` (`{ id, title, state }` for the member's
+        newest live work claim, or null).
         Derived state is working only for a fresh processing/active session;
         listening for an SSE watcher, canonical online agent host (respecting
         each host's cadence), or a human command within 5 minutes; idle for
@@ -11231,6 +11235,15 @@ paths:
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
                 cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
+                context:
+                  type: [object, "null"]
+                  additionalProperties: false
+                  description: "Optional presence shown in room presence: plain machine, repo and branch names (never secrets) and activity busy or idle. Omitted keeps the stored context; null clears it."
+                  properties:
+                    machine: { type: string, minLength: 1, maxLength: 120 }
+                    repo: { type: string, minLength: 1, maxLength: 120 }
+                    branch: { type: string, minLength: 1, maxLength: 120 }
+                    activity: { type: string, enum: [busy, idle] }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
                   oneOf:

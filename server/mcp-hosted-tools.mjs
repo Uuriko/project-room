@@ -265,7 +265,9 @@ export const hostedWakeTools = [
     workWakes: { type: "boolean", description: "Opt this host into pointer-only work signals on heartbeat reads. Default false; omitted retains the setting. No outbound push or execution permission." },
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
-    pushNotification: pushNotificationField
+    pushNotification: pushNotificationField,
+    context: { type: ["object", "null"], additionalProperties: false, description: "Optional presence shown to room members in room_who: machine, repo, branch (plain names, never secrets) and activity busy or idle. Omitted keeps the last context; null clears it.",
+      properties: { machine: { type: "string", minLength: 1, maxLength: 120 }, repo: { type: "string", minLength: 1, maxLength: 120 }, branch: { type: "string", minLength: 1, maxLength: 120 }, activity: { type: "string", enum: ["busy", "idle"] } } }
   }, ["hostId", "mode"]), false),
   tool("heartbeat_get", "Read this identity's host presence. Same read as GET /api/agent-heartbeats: status online, offline, or unregistered, plus each host's mode, wakeUrl, and last-seen time. No roomId. Does not return push tokens or signing secrets.", schema({})),
   tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again.", schema({

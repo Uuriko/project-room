@@ -5069,6 +5069,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (host.status === null) return null;
         return { status: host.status, lastSeenAt: host.lastSeenAt };
       };
+      // Presence v1: each member's current live claim (newest first) and,
+      // for agents, the host context from the latest heartbeat.
+      const claimOf = new Map();
+      for (const claim of this.workClaims.list(roomId)) {
+        if (!claim?.owner || !["claimed", "in_progress", "blocked"].includes(claim.state)) continue;
+        const prev = claimOf.get(claim.owner);
+        if (!prev || String(claim.claimedAt ?? "") > String(prev.claimedAt ?? "")) claimOf.set(claim.owner, claim);
+      }
+      const claimView = claim => claim ? { id: claim.id, title: claim.title ?? claim.id, state: claim.state } : null;
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
@@ -5081,6 +5090,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             watching: isWatching, workingOn,
             lastSeenAt, statusMessage: m.statusMessage ?? null,
             presence: agentPresence(m.id),
+            context: m.kind === "agent" && host.identityId ? this.agentHeartbeats.contextOf(host.identityId) : null,
+            claim: claimView(claimOf.get(m.id)),
             // #660: derived working state + owner/scope projection (additive).
             state: presenceState({
               kind: m.kind,
