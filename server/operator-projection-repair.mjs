@@ -1,5 +1,6 @@
 // Operator projection repair (guardian census F5, 2026-10-18): the safe
-// rebuild path for a room whose stored projection no longer parses.
+// rebuild path for a room whose stored projection no longer parses — or
+// parses to the wrong shape (#4127: hollow states, foreign room ids).
 //
 // The journal is the source of truth: rooms.projection is a materialization
 // the store can rebuild from the retained checkpoint plus the event tail
@@ -14,11 +15,13 @@
 //             replay throws (torn event body, torn checkpoint, sequence
 //             gap) nothing is written — that room's path is the backup
 //             restore, and this surface says so instead of improvising.
-// Boundaries, deliberately: a projection that PARSES is not repaired here
-// (drift between stored and replayed state is the recovery audit's
-// reconciliation, server/recovery.mjs); archived rooms keep their compacted
-// projection shape and are refused; events and checkpoints are never
-// touched. The torn bytes are identified by SHA-256 in the plan, the
+// Boundaries, deliberately: a projection that parses AND is well-shaped
+// is not repaired here (drift between stored and replayed state is the
+// recovery audit's reconciliation, server/recovery.mjs); a parseable
+// projection with the wrong shape is corruption of the same class as
+// unparseable bytes and IS repaired here. Archived rooms keep their
+// compacted projection shape and are refused; events and checkpoints are
+// never touched. The torn bytes are identified by SHA-256 in the plan, the
 // response, and the append-only operator audit — the daily room-backup
 // export retains the pre-repair store for byte-level recovery.
 // A successful repair also clears the room's patrol park (patrol_blocks):
@@ -30,6 +33,7 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { projectionShapeProblem } from "./projection-at-rest.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -61,12 +65,16 @@ function diagnose(store, roomId) {
   const projection = typeof raw.projection === "string" ? raw.projection : "";
   const digest = sha256(projection);
   let parse = { ok: false, errorClass: null };
+  let parsedState = null;
   try {
-    const state = JSON.parse(projection);
-    parse = { ok: Boolean(state && typeof state === "object"), errorClass: null };
+    parsedState = JSON.parse(projection);
+    parse = { ok: Boolean(parsedState && typeof parsedState === "object"), errorClass: null };
   } catch (error) {
     parse = { ok: false, errorClass: errorClassOf(error) };
   }
+  // #4127: repairability covers shape failures, not only parse failures —
+  // the same shared validator the read path enforces.
+  const shapeProblem = parse.ok ? projectionShapeProblem(parsedState, roomId) : null;
   const events = store.db.prepare("SELECT count(*) AS n FROM events WHERE room_id=?").get(roomId).n;
   let replay = { ok: false, errorClass: null, error: null };
   try {
@@ -93,10 +101,10 @@ function diagnose(store, roomId) {
     sequence: raw.sequence,
     events,
     archived,
-    stored: { bytes: Buffer.byteLength(projection), sha256: digest, parses: parse.ok, parseErrorClass: parse.errorClass },
+    stored: { bytes: Buffer.byteLength(projection), sha256: digest, parses: parse.ok, parseErrorClass: parse.errorClass, shapeProblem },
     replay,
     park: patrolPark(store, roomId),
-    repairable: !parse.ok && !archived && replay.ok,
+    repairable: (!parse.ok || Boolean(shapeProblem)) && !archived && replay.ok,
     executeGuard: { expectedSha256: digest, expectedSequence: raw.sequence }
   };
 }
@@ -146,9 +154,15 @@ export function executeProjectionRepair(store, input = {}, requestId = null) {
       if (digest !== expectedSha256 || raw.sequence !== expectedSequence) {
         fail(409, "plan_changed", "The stored projection or room head moved since the plan; re-plan before repairing");
       }
-      let parses = true;
-      try { JSON.parse(projection); } catch { parses = false; }
-      if (parses) fail(422, "not_corrupt", "The stored projection parses; drift reconciliation belongs to the recovery audit, not this repair");
+      // #4127: "parses" alone is not "sound" — well-formed JSON with the
+      // wrong shape is the same class of corruption. Only a projection
+      // that parses AND is well-shaped is refused here.
+      let shapeProblem = "unparseable";
+      try {
+        const state = JSON.parse(projection);
+        shapeProblem = state && typeof state === "object" ? projectionShapeProblem(state, roomId) : "not_an_object";
+      } catch { /* shapeProblem stays "unparseable" */ }
+      if (!shapeProblem) fail(422, "not_corrupt", "The stored projection parses and is well-shaped; drift reconciliation belongs to the recovery audit, not this repair");
       if (raw.archived_at != null) fail(422, "repair_unsupported", "Archived rooms keep a compacted projection shape; repair runs through the archive path");
       // Replay BEFORE any write, inside the transaction: a throw here
       // aborts with nothing written (the torn-journal case — the backup

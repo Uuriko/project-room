@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, ServiceError } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 // Two rooms: alpha carries three messages and a valid checkpoint; beta is
@@ -67,7 +67,7 @@ test("boot with an invalid-JSON room projection quarantines that room only", t =
   store.command(key, "beta", { id: "cmd-after-boot", type: "message.posted", data: { body: "still serving", messageId: "after-boot" } });
   assert.equal(store.room("beta").state.messages.length, 1);
   // The corrupt room's own reads keep failing loudly — never hollow state.
-  assert.throws(() => store.room("alpha"), SyntaxError);
+  assert.throws(() => store.room("alpha"), error => error instanceof ServiceError && error.status === 500 && error.code === "room_corrupt_projection");
 });
 
 test("boot with a garbage checkpoint falls back to a full-history replay", t => {
@@ -87,7 +87,7 @@ test("boot with both a garbage projection and a garbage checkpoint", t => {
   });
   assert.deepEqual(store.corruptRoomReports().map(report => report.roomId), ["alpha"]);
   assert.equal(store.room("beta").state.room.id, "beta");
-  assert.throws(() => store.room("alpha"), SyntaxError);
+  assert.throws(() => store.room("alpha"), error => error instanceof ServiceError && error.status === 500 && error.code === "room_corrupt_projection");
 });
 
 test("the quarantine record clears once the room's bytes are repaired", t => {
