@@ -448,7 +448,7 @@ export async function postPrWebhook(ctx) {
   ctx.rate(`pr-webhook:${ctx.remoteAddress ?? "unknown"}`, 120);
   const secret = typeof env[PR_WEBHOOK_SECRET_ENV] === "string" ? env[PR_WEBHOOK_SECRET_ENV] : "";
   if (!secret) ctx.reject(503, "webhook_unconfigured", "The PR webhook is enabled but its secret is not configured");
-  const text = await ctx.readText(ctx.req, WEBHOOK_BODY_LIMIT, () => ctx.reject(413, "too_large", "Request is too large"));
+  const text = await ctx.readText(ctx.req, WEBHOOK_BODY_LIMIT, actualBytes => ctx.reject(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${WEBHOOK_BODY_LIMIT} bytes`));
   const check = await verifyWebhook({
     rawBody: text,
     signature256: ctx.req.headers["x-hub-signature-256"],
