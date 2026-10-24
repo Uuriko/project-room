@@ -255,15 +255,18 @@ function advertisedCapabilities(state) {
   return names;
 }
 
+// Mirror of the route's mayWriteWorkClaims, in the route's order (#3909
+// F13): a missing or inactive member is refused first — the owner branch
+// included — then the owner, then the permission profiles, which apply
+// whether or not the room state carries an ownerId. The board used to
+// return true for any signed-in member of an ownerless room and for an
+// inactive owner, painting write controls whose every POST 403s.
 export function canWriteClaims(state, session) {
   const id = session?.member?.id;
   if (!id || !state?.members) return false;
-  const ownerId = state.room?.ownerId;
-  const enforced = typeof ownerId === "string" && ownerId.length > 0;
-  if (!enforced) return true;
-  if (id === ownerId) return true;
   const member = state.members[id];
   if (!member || member.active === false) return false;
+  if (state.room?.ownerId && id === state.room.ownerId) return true;
   const permissions = new Set(member.permissions ?? []);
   if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
   const holds = (...needed) => needed.every(name => permissions.has(name));
@@ -656,8 +659,10 @@ function reviewLabel(review, item) {
 // verification fact and the history the board read carries — rendered as a
 // disclosure on the card itself, from the same claim object the list
 // already returned. One record model: this is a view of the claim, not a
-// second projection. History arrives newest-first and truncated by the
-// list read; the omitted count is disclosed rather than silently dropped.
+// second projection. History arrives chronological (oldest-first) and
+// truncated by the list read — the slice keeps the newest entries and the
+// omitted count is disclosed rather than silently dropped — and renders
+// newest-first below, so the most recent event is read first (#3909 F14).
 // Composed like claimReviewForm — array pieces, each literal a complete tag
 // or a lone catalog string — so the i18n harness sees no new hardcoded copy.
 function claimRecordHtml(item, members) {
@@ -702,7 +707,7 @@ function claimRecordHtml(item, members) {
   const history = Array.isArray(item.history) ? item.history : [];
   const omitted = Number(item.historyOmitted) || 0;
   if (history.length || omitted > 0) {
-    const rows = history.map(entry => ["<li>", escapeHtml(entry?.action ?? ""),
+    const rows = [...history].reverse().map(entry => ["<li>", escapeHtml(entry?.action ?? ""),
       entry?.agentId ? [" · ", escapeHtml(memberName(members, entry.agentId) || entry.agentId)].join("") : "",
       entry?.note ? [" — ", escapeHtml(entry.note)].join("") : "", "</li>"].join("")).join("");
     const note = omitted > 0
@@ -714,7 +719,22 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
+// #3909 F12: the claim route refuses when the caller's active claims reach
+// config.maxMemberOpenClaims ("You already hold N open claims…"). The full
+// claim list is in the same render, so the viewer's own open count — owner
+// in claimed/in_progress/blocked, exactly the route's count — is computable
+// here; the Claim button consults it instead of offering a certain refusal.
+// A cap the caller did not load (null) gates nothing.
+function viewerAtClaimCap(byId, viewer, cap) {
+  if (!viewer?.id || typeof cap !== "number" || !Number.isFinite(cap)) return false;
+  let held = 0;
+  for (const entry of byId.values()) {
+    if (entry?.owner === viewer.id && ["claimed", "in_progress", "blocked"].includes(entry.state)) held += 1;
+  }
+  return held >= cap;
+}
+
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, cap = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -783,8 +803,11 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
     actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
-  if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
-  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
+  if (item.state === "unclaimed" && !item.owner && !waiting && !viewerAtClaimCap(byId, viewer, cap)) actions.push(button("claim", "Claim", "primary"));
+  // #3909 F11: Renew only when a live lease exists to renew — renewWork
+  // refuses a leaseless claim ("has no lease — nothing to renew") and a
+  // lapsed one ("lease already lapsed — claim it again instead").
+  if (mine && ["claimed", "in_progress", "blocked"].includes(item.state) && item.leaseExpiresAt && Date.parse(item.leaseExpiresAt) > now) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
   if (!item.workItemId && mine && item.state === "in_progress") {
     // Under a reviewed policy the single-step finish is refused
@@ -905,7 +928,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, cap)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not

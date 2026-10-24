@@ -275,10 +275,20 @@ test("canWriteClaims refuses anonymous sessions and memberless rooms", () => {
   assert.equal(canWriteClaims({}, session("m1")), false);
 });
 
-test("canWriteClaims lets the owner write and skips enforcement without an ownerId", () => {
+test("canWriteClaims lets the owner write and applies the permission profiles without an ownerId", () => {
   const state = boardState("owner1", { owner1: { kind: "human", permissions: [] } });
   assert.equal(canWriteClaims(state, session("owner1")), true);
-  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: [] } }), session("m1")), true);
+  // #3909 F13: an ownerless room is not unenforced — mayWriteWorkClaims
+  // applies the permission profiles whether or not an owner exists, so a
+  // permissionless member is refused and a permitted one writes by profile.
+  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: [] } }), session("m1")), false);
+  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: ["accept_work"] } }), session("m1")), true);
+});
+
+test("canWriteClaims refuses an inactive owner before the owner branch (#3909 F13)", () => {
+  const state = boardState("owner1", { owner1: { kind: "human", permissions: [], active: false } });
+  assert.equal(canWriteClaims(state, session("owner1")), false);
+  assert.equal(canWriteClaims(boardState("owner1", {}), session("owner1")), false);
 });
 
 test("canWriteClaims gates humans on accept/complete work and rejects the inactive", () => {
