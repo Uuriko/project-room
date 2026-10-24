@@ -947,6 +947,15 @@ export class LandQueue {
         console.warn(`land queue refresh skipped: ${error?.code ?? "github_unavailable"}`);
       }
     }
+    // #3911: a row that could not be polled was not refreshed. When the
+    // GitHub door is unconfigured the queue silently stops moving, so the
+    // tick must not record success: surface the unconfigured rows on the
+    // summary's error channel, which both job schedulers grade as a
+    // failed tick (errors > 0). The rows that did refresh still count.
+    if (summary.unconfigured > 0) {
+      summary.errors = summary.unconfigured;
+      summary.failureDetail = { code: "github_unconfigured" };
+    }
     return summary;
   }
 

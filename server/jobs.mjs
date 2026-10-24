@@ -389,7 +389,17 @@ export const JOBS = Object.freeze([
         return { ...out, autolink: { discovered: found, deployed } };
       } catch (error) {
         console.error("claim autolink follow-up failed:", error?.message ?? error);
-        return out;
+        // #3911: the follow-up failed, so the tick is not a clean success
+        // even though the linked-PR poll above stands. Surface the failure
+        // on the summary's error channel (both schedulers grade errors > 0
+        // as a failed tick) and name the failed sub-result, instead of
+        // returning the poll's untouched summary.
+        return {
+          ...out,
+          errors: (Number(out?.errors) || 0) + 1,
+          failureDetail: out?.failureDetail ?? { code: "claim_autolink_failed" },
+          autolink: { failed: 1 }
+        };
       }
     }
   }),
@@ -551,7 +561,9 @@ export const JOBS = Object.freeze([
     disabledReason: () => "Neither ROOM_BACKUPS (R2) nor ROOM_BACKUPS_KV is configured; no backups are being taken, see docs/BACKUP-DR.md",
     async run(_store, ctx) {
       if (!ctx.room) return { skipped: 1 };
-      try { return await writeDailyBackup(ctx.env, ctx.room); }
+      // #3911: thread the tick's deadline through, as the other jobs do;
+      // the backup checks it cooperatively between its stages.
+      try { return await writeDailyBackup(ctx.env, ctx.room, new Date(), { deadline: ctx.deadline }); }
       catch (error) {
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };

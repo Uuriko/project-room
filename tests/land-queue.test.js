@@ -301,6 +301,32 @@ test("a missing token is 503 github_unconfigured and is not logged", async t => 
   assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
 });
 
+test("refreshDue records an unconfigured tick as errors, not success (#3911)", async t => {
+  const { store, clock } = fixture(t);
+  spyWake(t, store);
+  const github = mockGitHub(() => ({ http: 401, message: "Requires authentication" }));
+  store.landQueue.configure({ fetchImpl: github.fetchImpl });
+  await assert.rejects(
+    () => store.landQueue.add("commons", "owner", { repo: "acme/private", prNumber: 3 }),
+    error => error.code === "github_unconfigured"
+  );
+  const summary = await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000 });
+  assert.equal(summary.unconfigured, 1);
+  // The job schedulers grade a tick by its summary's error channel: an
+  // unconfigured refresh must land there, or health records a success
+  // while the queue silently stops moving.
+  assert.equal(summary.errors, 1);
+  assert.deepEqual(summary.failureDetail, { code: "github_unconfigured" });
+
+  // A tick that actually refreshes carries no error channel at all.
+  const ok = mockGitHub(() => snapshot({ checks: "green" }));
+  store.landQueue.configure({ token: TOKEN, fetchImpl: ok.fetchImpl });
+  const healthy = await store.landQueue.refreshDue({ now: clock.now + 20 * 60 * 1000 });
+  assert.equal(healthy.unconfigured, 0);
+  assert.equal(healthy.errors, undefined);
+  assert.equal(healthy.failureDetail, undefined);
+});
+
 test("a rejected token is github_unconfigured and a missing pull request is pr_not_found", async t => {
   const { store } = fixture(t);
   const wake = spyWake(t, store);

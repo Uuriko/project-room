@@ -198,8 +198,21 @@ function trailerHashTracker() {
   };
 }
 
+// #3911: the backup job runs under the job registry's per-tick deadline
+// (ctx.deadline), like every other job. The deadline is cooperative: it
+// is checked between stages and between chunks, and passing it aborts
+// the run with an error the job records as a failed tick — never a
+// partial backup reported as written. KV parts written before an abort
+// carry no manifest and expire on their own; the R2 writer still
+// verifies the whole export before its single put.
+function checkBackupDeadline(deadline, stage) {
+  if (Number.isFinite(deadline) && Date.now() > deadline) {
+    throw new Error(`room-backup: job deadline exceeded ${stage}`);
+  }
+}
+
 // Streams the export into parts so at most one part sits in memory.
-export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now() } = {}) {
+export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now(), deadline = Infinity } = {}) {
   const whole = createHash("sha256");
   const parts = [];
   let pending = [];
@@ -219,6 +232,7 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     pendingBytes = 0;
   };
   for await (let chunk of byteChunks(body)) {
+    checkBackupDeadline(deadline, "while streaming the export");
     noteHeadTail(chunk);
     whole.update(chunk);
     total += chunk.byteLength;
@@ -238,6 +252,7 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   const hashReason = hashTracker.finish();
   if (hashReason) throw new Error(`room-backup: refusing manifest, export torn (${hashReason})`);
   if (pendingBytes || !parts.length) await flush();
+  checkBackupDeadline(deadline, "before writing the manifest");
   const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
   await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });
   return manifest;
@@ -266,12 +281,13 @@ function verifiedR2Backup(stored) {
 // day's key and the next tick the same day can retry. Holding the bytes is
 // the cost of verifying before the single-object commit; the KV target
 // above remains the streaming path for large exports.
-async function writeR2Backup(bucket, key, body) {
+async function writeR2Backup(bucket, key, body, { deadline = Infinity } = {}) {
   const whole = createHash("sha256");
   const tracker = headTailTracker();
   const chunks = [];
   let total = 0;
   for await (const chunk of byteChunks(body)) {
+    checkBackupDeadline(deadline, "while streaming the export");
     tracker.note(chunk);
     whole.update(chunk);
     total += chunk.byteLength;
@@ -285,6 +301,7 @@ async function writeR2Backup(bucket, key, body) {
   const hashReason = trailerHashReason(bytes);
   if (hashReason) throw new Error(`room-backup: refusing to store export, export torn (${hashReason})`);
   const sha256 = whole.digest("hex");
+  checkBackupDeadline(deadline, "before writing the backup object");
   await bucket.put(key, bytes, {
     httpMetadata: { contentType: "application/x-ndjson" },
     customMetadata: { sha256, bytes: String(total), backupVersion: String(BACKUP_MANIFEST_VERSION) }
@@ -300,20 +317,22 @@ function currentManifest(stored) {
   } catch { return false; }
 }
 
-export async function writeDailyBackup(env, room, now = new Date()) {
+export async function writeDailyBackup(env, room, now = new Date(), { deadline = Infinity } = {}) {
   const bucket = backupBucket(env);
   const kv = bucket ? null : backupKv(env);
   if (!bucket && !kv) return { skipped: "unconfigured" };
   const key = backupObjectKey(now);
   if (bucket) {
     if (verifiedR2Backup(await bucket.head(key))) return { skipped: "exists", key };
+    checkBackupDeadline(deadline, "before exporting the room");
     const body = await room.exportRoomNdjson();
-    await writeR2Backup(bucket, key, body);
+    await writeR2Backup(bucket, key, body, { deadline });
     return { wrote: key };
   }
   if (currentManifest(await kv.get(key))) return { skipped: "exists", key, target: "kv" };
+  checkBackupDeadline(deadline, "before exporting the room");
   const body = await room.exportRoomNdjson();
-  const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
+  const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime(), deadline });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
 }
 
