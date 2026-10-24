@@ -52,7 +52,7 @@ import {
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
-import { stampEvents, stampWorkListing } from "./content-trust.mjs";
+import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
@@ -538,7 +538,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     });
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
-    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
+    return { ...stampRoomContext(context), orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
@@ -586,7 +586,10 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   // Membership administration over MCP: the same store calls as the REST
   // access-requests and agent-invites routes, so UI, REST, and MCP agree.
   if (name === "room_list_access_requests") {
-    return { roomId, requests: new AccessRequests(store).list(secret, roomId, { status: args.status ?? "pending" }) };
+    const auth = store.authenticate(secret, roomId);
+    const identityId = auth.identityId ?? store.bonds?.identityForMember?.(roomId, auth.member.id) ?? null;
+    const viewerIds = [auth.member.id, identityId].filter(id => id != null);
+    return stampAccessRequests({ roomId, requests: new AccessRequests(store).list(secret, roomId, { status: args.status ?? "pending" }) }, viewerIds);
   }
   if (name === "room_decide_access_request") {
     const decision = { decision: args.decision };
@@ -603,7 +606,11 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_agent_invites") return { roomId, invites: store.invites.list(secret, roomId) };
   if (name === "room_revoke_agent_invite") return store.invites.revoke(secret, roomId, args.inviteId);
-  if (name === "room_get_file") return store.roomAttachments.get(secret, roomId, args.id);
+  if (name === "room_get_file") {
+    const result = store.roomAttachments.get(secret, roomId, args.id);
+    const auth = store.authenticate(secret, roomId);
+    return stampAttachmentGet(result, auth.member.id, result.attachment?.uploaderId);
+  }
   if (name === "room_discard_file") return store.roomAttachments.discard(secret, roomId, args.id);
   if (name === "room_commit_file") {
     return store.roomAttachments.commit(secret, roomId, { id: args.id, messageId: args.messageId });
@@ -638,7 +645,7 @@ function callInboxTool(store, identity, name, args) {
     });
   }
   if (name === "inbox_list_attachments") return store.inboxAttachments.list(identityId);
-  if (name === "inbox_get_attachment") return store.inboxAttachments.get(identityId, args.id);
+  if (name === "inbox_get_attachment") return stampAttachmentGet(store.inboxAttachments.get(identityId, args.id), identityId, null);
   if (name === "inbox_discard_attachment") return store.inboxAttachments.discard(identityId, args.id);
   throw new ServiceError(500, "internal", "Request could not be completed");
 }
@@ -651,9 +658,11 @@ function commandReceipt(store, secret, roomId, command, status) {
 function listPeerDms(store, secret, args) {
   const auth = store.authenticate(secret, args.roomId);
   if (args.threadId === undefined) {
-    return { roomId: args.roomId, threads: store.bonds.listThreads(args.roomId, auth.member.id) };
+    // Thread rows already carry their own mark from the bonds read; the
+    // list envelope itself takes the trust string.
+    return withContentTrust({ roomId: args.roomId, threads: store.bonds.listThreads(args.roomId, auth.member.id) });
   }
-  return store.bonds.readThread(args.roomId, auth.member.id, args.threadId);
+  return withContentTrust(store.bonds.readThread(args.roomId, auth.member.id, args.threadId));
 }
 
 function heartbeatReceipt(identityId, result) {
