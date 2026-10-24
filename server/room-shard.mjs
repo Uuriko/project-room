@@ -4,4 +4,4 @@
 export { assertShardClassification, roomKeyColumn, tableHome } from "./room-shard-tables.mjs";
 export { ensureStorageHomeIfEnabled, perRoomObjectsEnabled, readStorageHome, storageHomeColumnPresent } from "./room-shard-flag.mjs";
 export { resolveRoomHome } from "./room-shard-route.mjs";
-export { compareRoomHomes, copyRoomRows, mirrorRoomIfEnabled, roomHomeDigest } from "./room-shard-copy.mjs";
+export { compareRoomHomes, copyRoomRows, exportRoomNdjson, mirrorRoomIfEnabled, restoreRoomNdjson, roomHomeDigest } from "./room-shard-copy.mjs";
