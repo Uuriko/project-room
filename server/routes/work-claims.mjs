@@ -12,7 +12,7 @@
 
 import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
-import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
+import { buildWorkClaimPage, eligibleReviewerIds, handleWorkClaims } from "../work-claim-routes.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -56,8 +56,10 @@ export async function getRetentionDashboard(ctx) {
 export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
+  const authority = ctx.store.roomAuthority(roomId);
   return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now));
+    auth.member.id, ctx.url.searchParams, now,
+    { members: authority.members ?? {}, eligibleReviewers: eligibleReviewerIds(authority) }));
 }
 
 export async function provenanceRoute(ctx) {

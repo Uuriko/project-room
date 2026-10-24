@@ -18,7 +18,7 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
+import { buildWorkClaimPage, eligibleReviewerIds, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
 
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -348,8 +348,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_read_board") {
     const snapshot = store.snapshot(secret, roomId);
     const now = typeof store.now === "function" ? store.now() : Date.now();
+    const boardAuthority = store.roomAuthority(roomId);
     const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
-      auth.member.id, new URLSearchParams(rest), now);
+      auth.member.id, new URLSearchParams(rest), now,
+      { members: boardAuthority.members ?? {}, eligibleReviewers: eligibleReviewerIds(boardAuthority) });
     return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }
