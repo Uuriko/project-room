@@ -816,7 +816,11 @@ export class AgentPluginStore {
     const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
     if (!row) return null;
     const status = heartbeats.statusOf(row.ownerIdentityId);
-    return { status: status.status, lastSeenAt: status.lastSeenAt, hosts: status.hosts.length };
+    // DECLARE (MIG-PRESENCE Gap 1): the public card projects only the
+    // availability STATE — until/note stay on member-gated reads, and an
+    // undeclared seat reads null (unknown), never a fabricated default.
+    return { status: status.status, lastSeenAt: status.lastSeenAt, hosts: status.hosts.length,
+      availability: status.availability?.state ?? null };
   }
 
   // plan-dir-card: host-supplied reach for a directory card. Resolves the

@@ -1,6 +1,7 @@
 // Live hosted MCP tool definitions. tools/list and the server card both
 // read this module. No store, no secrets, no network.
 import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
+import { AVAILABILITY_STATES, EXECUTION_CAPABILITIES, MAX_AVAILABILITY_NOTE_CHARS, MAX_EXECUTION_SCOPE_CHARS } from "./agent-heartbeats.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_BLURBS } from "../src/room-mcp-join.js";
@@ -222,6 +223,28 @@ export const hostedInboxTools = [
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
 const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
 const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). The declaration is sticky, the same as a heartbeat body: omitting cadenceSeconds keeps the stored declaration, a number replaces it, and an explicit null clears it (the host then reads the 180s default window)." };
+// DECLARE (MIG-PRESENCE Gap 1 + 2): the identity-level declarations the
+// heartbeat body carries. Same store path and validation as POST
+// /api/agent-heartbeats — the enums and length caps below are the store's
+// own constants (server/agent-heartbeats.mjs), and heartbeat() refuses a
+// malformed declaration with 422 invalid_heartbeat before storing anything.
+const availabilityField = {
+  type: ["object", "null"], additionalProperties: false, required: ["state"],
+  description: "This identity's declared availability: { state, until?, note? }. Identity-level and sticky like cadenceSeconds: omitting it keeps the stored declaration, an explicit null clears it. Declared availability is a separate fact from heartbeat presence and never overwrites it; heartbeat_get and room presence read it back.",
+  properties: {
+    state: { type: "string", enum: [...AVAILABILITY_STATES] },
+    until: { type: ["number", "null"], exclusiveMinimum: 0, description: "Epoch ms the declared state holds until." },
+    note: { type: ["string", "null"], maxLength: MAX_AVAILABILITY_NOTE_CHARS }
+  }
+};
+const executionField = {
+  type: ["object", "null"], additionalProperties: false, required: ["capabilities"],
+  description: "This identity's declared execution capabilities: { capabilities, scope? }. Same sticky semantics as availability. Route-requests gate routed actions on this declaration and answer exclusions with a typed decline receipt.",
+  properties: {
+    capabilities: { type: "array", items: { type: "string", enum: [...EXECUTION_CAPABILITIES] }, description: "Subset of execute, review, observe; an empty array declares no execution." },
+    scope: { type: ["string", "null"], maxLength: MAX_EXECUTION_SCOPE_CHARS }
+  }
+};
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
   properties: {
@@ -247,25 +270,31 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. availability and execution are optional and declare this identity's availability and execution capabilities with the same sticky semantics. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
-    pushNotification: pushNotificationField
+    pushNotification: pushNotificationField,
+    availability: availabilityField,
+    execution: executionField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored declaration. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored declaration. An existing push subscription row is left in place, and a pull-only host is not a push target. availability and execution are optional and ride this call with the same sticky semantics as heartbeat_set; omitting them leaves the stored declarations in place. This does not delete pending wake signals.", schema({
     hostId: hostIdField,
-    listenerLease: listenerLeaseField
+    listenerLease: listenerLeaseField,
+    availability: availabilityField,
+    execution: executionField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification, workWakes, availability and execution are optional. availability declares this identity's availability ({ state: available|busy|away|offline, until?, note? }) and execution its capabilities ({ capabilities: subset of [execute, review, observe], scope? }): both are identity-level, sticky like cadenceSeconds (omitted keeps the stored declaration, an explicit null clears it), and validated exactly as the REST body — a malformed declaration is refused with invalid_heartbeat and stores nothing. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,
     workWakes: { type: "boolean", description: "Opt this host into pointer-only work signals on heartbeat reads. Default false; omitted retains the setting. No outbound push or execution permission." },
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
-    pushNotification: pushNotificationField
+    pushNotification: pushNotificationField,
+    availability: availabilityField,
+    execution: executionField
   }, ["hostId", "mode"]), false),
   tool("heartbeat_get", "Read this identity's host presence. Same read as GET /api/agent-heartbeats: status online, offline, or unregistered, plus each host's mode, wakeUrl, and last-seen time. No roomId. Does not return push tokens or signing secrets.", schema({})),
   tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again.", schema({

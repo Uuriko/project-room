@@ -844,10 +844,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // the HTTP receiving path can hold exclusive queue ownership with a
     // fencing token (see ackHeartbeats). Scoped credentials (room key, or
     // a rak_ key bound to one room) run the room-scoped listener contract.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease"];
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease", "availability", "execution"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId"))
-      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes and listenerLease are optional");
+      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes, listenerLease, availability and execution are optional");
     // listenerLease: true leases the credential's own scope (the bound
     // room for scoped credentials, the roomless identity queue otherwise);
     // { roomId } names the room queue to lease — the form the standard
@@ -885,7 +885,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // R327-1 (r6): the heartbeat carries the pause state so a machine whose
     // room the owner paused learns it before it asks anything in the room.
     const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
-    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
+    // DECLARE: the heartbeat reads the caller's declarations back — what
+    // you declared is what the room's presence surfaces project.
+    const declaration = store.agentHeartbeats.declarationOf(auth.identityId);
+    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability, declaration,
       ...(listener ? { listener } : {}) });
   });
 

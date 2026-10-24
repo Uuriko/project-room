@@ -275,6 +275,15 @@ function validCadence(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 604800;
 }
 
+// DECLARE: the MCP door admits a declaration structurally (absent, null,
+// or a plain object). The semantic checks live in the shared store path —
+// checkAvailability/checkExecution inside heartbeat() — so a malformed
+// declaration is refused with the same 422 invalid_heartbeat as the HTTP
+// door, from the same code, and stores nothing.
+function validDeclaration(value) {
+  return value === undefined || value === null || object(value);
+}
+
 function validUrlString(value) {
   return typeof value === "string" && value.length >= 1 && value.length <= 2000;
 }
@@ -311,15 +320,18 @@ function validWakeArgs(name, args) {
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
       && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
-      && (args.pushNotification === undefined || validPush(args.pushNotification));
+      && (args.pushNotification === undefined || validPush(args.pushNotification))
+      && validDeclaration(args.availability) && validDeclaration(args.execution);
   }
-  if (name === "wake_clear") return validHostId(args.hostId);
+  if (name === "wake_clear") return validHostId(args.hostId)
+    && validDeclaration(args.availability) && validDeclaration(args.execution);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
       && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
-      && (args.workWakes === undefined || typeof args.workWakes === "boolean");
+      && (args.workWakes === undefined || typeof args.workWakes === "boolean")
+      && validDeclaration(args.availability) && validDeclaration(args.execution);
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
@@ -675,7 +687,11 @@ function heartbeatReceipt(identityId, result) {
     // #3265: the MCP heartbeat door carries the same truncation flag as
     // the HTTP doors — heartbeat() computed it and this receipt dropped it.
     more: result.more === true,
-    next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
+    next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {}),
+    // DECLARE: the HTTP heartbeat response reads the caller's declarations
+    // back in a declaration block; the MCP receipt carries the same block
+    // from the same declarationOf read.
+    ...(result.declaration ? { declaration: result.declaration } : {})
   };
 }
 
@@ -748,7 +764,7 @@ async function callWakeTool(store, secret, identity, name, args) {
         if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
         const result = heartbeatWithListener(store, auth, data, { door: "mcp" });
         if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
-        return heartbeatReceipt(agentId, result);
+        return heartbeatReceipt(agentId, { ...result, declaration: store.agentHeartbeats.declarationOf(agentId) });
       });
     }
   }

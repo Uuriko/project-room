@@ -464,7 +464,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "1cec8109b8f437af",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1256,7 +1256,7 @@
       }
     },
     "wake_clear": {
-      "inputSchema": "d7850eb6972d3488",
+      "inputSchema": "6b3e371c603c22f5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1274,7 +1274,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "cfbd879003bd7093",
+      "inputSchema": "c60715b1b96a54e9",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2110,7 +2110,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "ae83402d9f38b5a4",
+      "inputSchema": "1cec8109b8f437af",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2236,7 +2236,7 @@
       }
     },
     "wake_clear": {
-      "inputSchema": "d7850eb6972d3488",
+      "inputSchema": "6b3e371c603c22f5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2254,7 +2254,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "cfbd879003bd7093",
+      "inputSchema": "c60715b1b96a54e9",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
