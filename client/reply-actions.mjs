@@ -233,12 +233,19 @@ export function validateReplyRead(result, { name, args, roomId }) {
     }
     else {
       const raw = row.message;
-      if (raw?.authorId !== result.viewerId) assert(raw?.untrusted === true);
+      // The stamp keys on the author of the served text: the last editor
+      // when the message was edited (editedBy), failing closed — marked
+      // for everyone — when an edit predates editedBy (editedAt only).
+      const textAuthor = typeof raw?.editedBy === "string" ? raw.editedBy : raw?.editedAt != null ? null : raw?.authorId;
+      if (textAuthor !== result.viewerId) assert(raw?.untrusted === true);
       else assert(raw && !Object.hasOwn(raw, "untrusted"));
       const message = withoutUntrusted(raw);
       const canonical = message === raw ? row : { ...row, message };
       assert(keys(row, [...rowKeys, "message"])
-        && message && keys(message, ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt", ...(message.proposal ? ["proposal"] : [])])
+        && message && keys(message, ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt",
+          ...(message.editedAt !== undefined ? ["editedAt"] : []), ...(message.editedBy !== undefined ? ["editedBy"] : []),
+          ...(message.proposal ? ["proposal"] : [])])
+        && (message.editedAt === undefined || date(message.editedAt)) && (message.editedBy === undefined || validId(message.editedBy))
         && validId(message.id) && !messages.has(message.id) && message.authorId === row.actorId && body(message.body) && message.createdAt === row.at
         && ["workItemId", "replyToId", "toMemberId"].every(key => nullableId(message[key]))
         && (row.kind !== "context" || message.workItemId === null || message.workItemId === row.workItemId)

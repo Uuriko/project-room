@@ -72,11 +72,25 @@ export function annotateOrientation(orientation) {
   };
 }
 
+// The author of the text a message record currently carries. An edited
+// message's body is its last editor's text (the projection records
+// editedBy at edit time, like deletedBy), so the stamp keys on the editor,
+// not the original poster. A message edited before editedBy was recorded
+// (editedAt set, editedBy absent — legacy or archived records) has an
+// unknowable text author: return null so callers fail closed and mark it.
+// Deleted messages serve no text (the tombstone), so the fallback stands.
+export function messageTextAuthorId(message, fallbackId) {
+  if (!message || message.deletedAt) return fallbackId;
+  if (typeof message.editedBy === "string") return message.editedBy;
+  if (message.editedAt != null) return null;
+  return fallbackId;
+}
+
 export function stampSearch(result, viewerId) {
   if (!result || typeof result !== "object") return result;
   return withContentTrust({
     ...result,
-    messages: (result.messages ?? []).map(message => markIfOther(message, viewerId, message.authorId)),
+    messages: (result.messages ?? []).map(message => markIfOther(message, viewerId, messageTextAuthorId(message, message.authorId))),
     workItems: (result.workItems ?? []).map(markAlways)
   });
 }
@@ -91,7 +105,7 @@ export function stampThread(message, viewerId) {
 export function stampReplyRead(value, viewerId) {
   if (!value?.page) return value;
   const items = value.page.items.map(item => {
-    if (item?.message) return { ...item, message: markIfOther(item.message, viewerId, item.message.authorId) };
+    if (item?.message) return { ...item, message: markIfOther(item.message, viewerId, messageTextAuthorId(item.message, item.message.authorId)) };
     if (typeof item?.reason === "string") return markIfOther(item, viewerId, item.actorId);
     return item;
   });
@@ -100,7 +114,7 @@ export function stampReplyRead(value, viewerId) {
     room: { ...value.preparation.room, trust: "owner" },
     previousExchanges: (value.preparation.previousExchanges ?? []).map(exchange => ({
       ...exchange,
-      messages: (exchange.messages ?? []).map(message => markIfOther(message, viewerId, message.authorId))
+      messages: (exchange.messages ?? []).map(message => markIfOther(message, viewerId, messageTextAuthorId(message, message.authorId)))
     })),
     work: value.preparation.work ? markAlways(value.preparation.work) : value.preparation.work
   } : value.preparation;
@@ -120,7 +134,7 @@ export function stampDiscussion(value) {
       ...value.discussion,
       items: value.discussion.items.map(item => ({
         ...item,
-        message: markIfOther(item.message, viewerId, item.message?.authorId)
+        message: markIfOther(item.message, viewerId, messageTextAuthorId(item.message, item.message?.authorId))
       }))
     }
   });

@@ -5303,7 +5303,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
         const start = Math.max(0, stop - limit);
         for (const m of matches.slice(start, stop)) {
-          result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+          result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId,
+            ...(m.editedAt != null ? { editedAt: m.editedAt } : {}), ...(typeof m.editedBy === "string" ? { editedBy: m.editedBy } : {}) });
         }
         if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
       }
