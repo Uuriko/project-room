@@ -337,14 +337,16 @@ test("replay skips Durable Object runtime and retired tables and reports them", 
     { table: "room_writer_permit", row: { singleton: 1, version: 41 } },
     { table: "room_runtime_version", row: { singleton: 1, version: 41 } },
     { table: "emissary_journal", row: { room_id: "commons", id: "j1" } },
-    { table: "abuse_rate_buckets", row: { id: "login:x", family: "login", n: 3, until_ms: 1 } }
+    { table: "abuse_rate_buckets", row: { id: "login:x", family: "login", n: 3, until_ms: 1 } },
+    { table: "durable_alarm_queue", row: { id: 1, dedupe_key: "job:patrol:1", kind: "fast-job", payload: "{}", run_at: 1, status: "queued", attempt: 0, created_at: 1, updated_at: 1 } }
   ].map(line => JSON.stringify(line)).join("\n");
   assert.ok(REPLAY_SKIPPED_TABLES.includes("room_writer_permit"));
   assert.ok(REPLAY_SKIPPED_TABLES.includes("abuse_rate_buckets"));
+  assert.ok(REPLAY_SKIPPED_TABLES.includes("durable_alarm_queue"));
   const ndjson = `${exportNdjsonText(store.db)}${extra}\n`;
   const result = replayNdjson(ndjson, join(directory, "skip", "room.sqlite"));
   assert.equal(result.verified, true);
-  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1 });
+  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1, durable_alarm_queue: 1 });
   const unknown = `${exportNdjsonText(store.db)}${JSON.stringify({ table: "not_a_table", row: { a: 1 } })}\n`;
   assert.throws(() => replayNdjson(unknown, join(directory, "unknown", "room.sqlite")), /does not have/);
 });
