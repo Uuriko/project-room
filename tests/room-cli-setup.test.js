@@ -8,8 +8,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
-import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
-import { nodeSatisfies } from "../cli/commands/doctor.mjs";
+import { codexHomeOf, connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
+import { nodeSatisfies, toolConfigReady } from "../cli/commands/doctor.mjs";
 
 const ORIGIN = "http://127.0.0.1:9";
 const MCP = ORIGIN + "/mcp";
@@ -321,4 +321,21 @@ test("saved connections accept a canonical home alias and reject symlinks escapi
   symlinkSync(outside, escaped, "dir");
   writeFileSync(join(directory, "pointer.json"), JSON.stringify({ version: 1, name: "room-agent", configDirectory: escaped }), { mode: 0o600 });
   assert.throws(() => readPointer("room-agent", env), /outside the connection directory/);
+});
+
+test("setup codex and the doctor follow CODEX_HOME when it is set", async t => {
+  const { root, home, project, cleanup } = layout();
+  t.after(cleanup);
+  const codexHome = join(root, "custom-codex");
+  const env = envFor(home, { CODEX_HOME: codexHome });
+  const result = await run(["setup", "codex", "--project", project], { env, cwd: project, platform: "linux" });
+  assert.equal(result.code, 0);
+  const toml = join(codexHome, "config.toml");
+  assert.match(readFileSync(toml, "utf8"), new RegExp("url = " + JSON.stringify(MCP)));
+  assert.equal(existsSync(join(home, ".codex", "config.toml")), false);
+  assert.match(result.out, new RegExp(toml.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(toolConfigReady({ tool: "codex", project, home, platform: "linux", env }), true);
+  assert.equal(toolConfigReady({ tool: "codex", project, home, platform: "linux", env: { HOME: home } }), false);
+  // A relative CODEX_HOME is ignored, matching ~/.codex.
+  assert.equal(codexHomeOf({ HOME: home, CODEX_HOME: "rel/dir" }), join(home, ".codex"));
 });
