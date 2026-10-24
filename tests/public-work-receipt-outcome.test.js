@@ -261,3 +261,26 @@ test('paid rejection: full feeless refund exactly as the train pins it, faces re
   publicReceiptById(store, id); store.publicWorkClaims.receipt(id);
   assert.equal(f.journalCount(), journalAfter);
 });
+
+test('#3959: a PASS verdict under a rejected outcome is reconciled on the page, in place', t => {
+  const f = unpaidFixture(t, 'agent');
+  const receipt = f.finish('split-task');
+  const id = receipt.receiptId;
+  // The QA Wave C shape: the agent reviewer's check PASSes, every
+  // check green — and the designated decision still rejects.
+  f.reviews.verify('commons', REVIEWER, id, f.input(receipt, 'pass', 0, { verdict: 'PASS' }));
+  f.reviews.decide('commons', REVIEWER, id, f.input(receipt, 'reject', 1, { decision: 'rejected' }));
+  const pub = publicReceiptById(f.store, id);
+  assert.equal(pub.state, 'rejected');
+  assert.equal(pub.review.verificationVerdict, 'PASS');
+  const html = renderReceiptDetailHtml(pub);
+  assert.match(html, /Rejected — the designated reviewer rejected this delivery\./);
+  assert.match(html, /Verdict vs outcome<\/dt><dd>The agent reviewer passed this delivery&#39;s checks; the designated reviewer rejected it anyway\. The verdict is a check — the outcome is the separate decision\./,
+    'the split is explained where the two rows meet, not left for the reader to reconcile');
+  // The agreeing pair (PASS + accepted) carries no such sentence.
+  const agreed = f.finish('agreed-task');
+  f.reviews.verify('commons', REVIEWER, agreed.receiptId, f.input(agreed, 'pass-agreed', 0, { verdict: 'PASS' }));
+  f.reviews.decide('commons', REVIEWER, agreed.receiptId, f.input(agreed, 'accept-agreed', 1, { decision: 'accepted' }));
+  const agreedHtml = renderReceiptDetailHtml(publicReceiptById(f.store, agreed.receiptId));
+  assert.equal(agreedHtml.includes('Verdict vs outcome'), false);
+});
