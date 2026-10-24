@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { EVENT_TYPES as T, event } from '../src/events.js';
+import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
 import { boardClaimId } from '../server/work-item-board.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
@@ -116,16 +116,19 @@ test('same holder conflicts too; unrelated targets, refs and rooms remain indepe
   send(T.CLAIM_ACQUIRED, { workItemId: 'private', expectedRevision: 1, ...f.scope() });
 });
 
-test('a live claim lease is at most 24 hours, rejects a whole-repo **, and the board lists that expiry', t => {
+test('a live claim lease is at most 24 hours, a whole-repo ** needs decide, and the board lists that expiry', t => {
   const f = fixture(t);
   f.propose('lease');
   const day = 24 * 60 * 60 * 1000;
   assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'lease', f.scope(['**'])), error => {
     assert.equal(error.status, 422);
-    assert.match(error.message, /\*\*/);
+    assert.match(error.message, /decide/);
     return true;
   });
   assert.equal(f.item('lease').claim ?? null, null, 'a refused ** claim is not saved');
+  f.propose('repo', 'owner');
+  f.mutate('owner', T.CLAIM_ACQUIRED, 'repo', { ...f.scope(['**']), repository: 'other/repo' });
+  assert.deepEqual(f.item('repo').claim.paths, ['**'], 'decide admits a whole-repo claim');
   const tooFar = new Date(f.now() + day + 1000).toISOString();
   assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'lease', { ...f.scope(['src/app.js']), expiresAt: tooFar }), error => {
     assert.equal(error.status, 422);
@@ -156,6 +159,31 @@ test('a live claim lease is at most 24 hours, rejects a whole-repo **, and the b
   f.propose('folder');
   f.mutate('a', T.CLAIM_ACQUIRED, 'folder', f.scope(['docs/**']));
   assert.equal(f.item('folder').claim.status, 'active');
+  f.propose('ancient');
+  const far = new Date(f.now() + 9999 * 60 * 60 * 1000).toISOString();
+  const replayed = applyEvent(f.store.room('commons').state, event({
+    type: T.CLAIM_ACQUIRED, roomId: 'commons', actorId: 'a', at: new Date(f.now()).toISOString(),
+    data: {
+      workItemId: 'ancient', expectedRevision: f.item('ancient').revision, repository: 'test/repo', ref: 'draft',
+      paths: ['**'], expiresAt: far,
+    },
+  }));
+  assert.deepEqual(replayed.workItems.ancient.claim.paths, ['**']);
+  assert.equal(replayed.workItems.ancient.claim.expiresAt, far, 'an old far-future claim still reduces');
+  process.env.CLAIM_MAX_LEASE_MS = String(60 * 60 * 1000);
+  t.after(() => { delete process.env.CLAIM_MAX_LEASE_MS; });
+  f.propose('short');
+  assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'short', {
+    ...f.scope(['src/short.js']), expiresAt: new Date(f.now() + 2 * 60 * 60 * 1000).toISOString(),
+  }), error => {
+    assert.equal(error.status, 422);
+    assert.match(error.message, /1 hour/);
+    return true;
+  });
+  f.mutate('a', T.CLAIM_ACQUIRED, 'short', {
+    ...f.scope(['src/short.js']), expiresAt: new Date(f.now() + 30 * 60 * 1000).toISOString(),
+  });
+  assert.equal(f.item('short').claim.status, 'active');
 });
 
 test('path matching is segment-aware and only supports explicit paths or trailing subtrees', () => {
