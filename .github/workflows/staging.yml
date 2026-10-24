@@ -98,7 +98,7 @@ jobs:
           ROOM_SMOKE_ORIGIN: https://project-room-stage.getdasha.workers.dev
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs --browser | tee staging-smoke.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.gate.outputs.ready == 'true'
         with:
           name: staging-probe-${{ github.run_id }}
