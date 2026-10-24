@@ -57,7 +57,7 @@
     "pixelmatch": "^8.0.0",
     "playwright": "1.62.1",
     "pngjs": "^7.0.0",
-    "sanitize-html": "2.18.0",
+    "sanitize-html": "2.18.1",
     "yaml": "^2.8.1"
   },
   "license": "Apache-2.0",

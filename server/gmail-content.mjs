@@ -8,7 +8,11 @@ export const safeGmailHtml = value => sanitizeHtml(value, {
   allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'hr', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'span', 'div', 'sub', 'sup'],
   allowedAttributes: { a: ['href', 'title', 'target', 'rel'] }, allowedSchemes: ['https', 'http', 'mailto'], allowProtocolRelative: false,
   transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }) },
-  enforceHtmlBoundary: true
+  enforceHtmlBoundary: true,
+  // Defence in depth against discarded-tag fallback recursion (GHSA-c9rx-x947-fp3h,
+  // fixed in sanitize-html 2.18.1): sender-controlled HTML never needs 100+ levels
+  // of tag nesting; anything deeper is stripped as if disallowed.
+  nestingLimit: 100
 });
 export const gmailHeader = (m, name) => m.payload?.headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 export function gmailParts(payload, result = { text: [], html: [], attachments: [] }, path = '0') {
