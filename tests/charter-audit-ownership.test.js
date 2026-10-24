@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { auditCharters } from "../src/room-charter.js";
 import { auditRecovery } from "../server/recovery.mjs";
+import { exportNdjsonText, replayNdjson } from "../server/room-export.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 // auditCharters modelled a room that never changes hands and is always owned by
@@ -72,22 +73,35 @@ test("a self-serve agent room audits clean", t => {
   assert.doesNotThrow(() => auditRecovery(fixture.store));
 });
 
-test("an agent owner still cannot write room instructions", t => {
-  // The policy is unchanged; it just moved from the owner's membership, where
-  // it condemned the whole room, to the charter event, where it refuses only
-  // that write.
+test("an active agent owner can write instructions and strictly restore them", t => {
   const fixture = room(t);
   const identity = fixture.store.identities.create("Owning Agent");
   new AgentRooms(fixture.store).create(identity.secret, {
-    roomId: "agent-den", title: "Agent Den", purpose: "A room owned by an agent.", kind: "personal", displayName: "Den Keeper"
+    roomId: "agent-den", title: "Agent Den", purpose: "Agent owned.", kind: "personal", displayName: "Den Keeper"
   });
-  const state = fixture.store.room("agent-den").state;
-  const history = fixture.store.db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? ORDER BY sequence").all("agent-den");
-  history.push({ sequence: 99, id: randomUUID(), body: JSON.stringify({
-    id: randomUUID(), type: T.ROOM_CHARTER_UPDATED, actorId: state.room.ownerId, roomId: "agent-den",
-    at: new Date().toISOString(), data: { expectedRevision: 0, purpose: "agent-written", outputs: null, boundaries: null, escalation: null }
-  }) });
-  assert.throws(() => auditCharters(state, history), /Invalid room instructions author/);
+  const data = { expectedRevision: 0, purpose: "Agent instructions", outputs: null, boundaries: null, escalation: null };
+  fixture.store.command(identity.secret, "agent-den", { id: randomUUID(), type: T.ROOM_CHARTER_UPDATED, data });
+  assert.doesNotThrow(() => auditRecovery(fixture.store));
+  const directory = mkdtempSync(join(tmpdir(), "agent-charter-restore-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "restored.sqlite");
+  assert.equal(replayNdjson(exportNdjsonText(fixture.store.db), path).verified, true);
+  const restored = new RoomStore(path, { readOnly: true });
+  try { assert.deepEqual(restored.room("agent-den").state.room.charter, fixture.store.room("agent-den").state.room.charter); }
+  finally { restored.close(); }
+});
+
+for (const fault of ["nonowner", "inactive"]) test(`instructions audit still rejects ${fault} author`, t => {
+  const fixture = room(t);
+  fixture.send("owner", T.ROOM_CHARTER_UPDATED, charter(fixture));
+  const history = fixture.store.db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? ORDER BY sequence").all("commons");
+  const changed = history.flatMap(row => {
+    const e = JSON.parse(row.body);
+    if (e.type !== T.ROOM_CHARTER_UPDATED) return [row];
+    if (fault === "nonowner") return [{ ...row, body: JSON.stringify({ ...e, actorId: "alice" }) }];
+    return [{ sequence: row.sequence, event: { type: "member.access_changed", data: { memberId: "owner", active: false } } }, row];
+  });
+  assert.throws(() => auditCharters(fixture.state(), changed), /Invalid room instructions author/);
 });
 
 test("a forged transfer is still caught", t => {

@@ -1,3 +1,4 @@
+import { ensureRestoreSchema } from "./restore-schema.mjs";
 // Durable Object export. The on-disk server copies its sqlite file
 // (scripts/backup-room.mjs). A Durable Object cannot hand that file out, so
 // this streams the same store as NDJSON and replays it into a fresh file.
@@ -525,6 +526,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (existsSync(filename)) throw new Error("Refusing to replay into an existing store");
   const store = new RoomStore(filename);
   try {
+    ensureRestoreSchema(store, byTable.keys());
     // #3599: sanitized cells resolve to safe substitutes, never the
     // placeholder; legacy streams get the legacy resolutions.
     const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });

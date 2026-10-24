@@ -86,10 +86,8 @@ export function auditCharters(state, history, checkpoint = null) {
   //    owner's member.added used to be checked for kind === "human", so every
   //    self-serve agent room failed this audit the moment it was created.
   //
-  // The rule that only a human owner may write room instructions is unchanged.
-  // It was just being asserted in the wrong place: on the owner's membership,
-  // where it condemns the whole room, instead of on the charter event, where it
-  // refuses only that write. It is still enforced below, at CHARTER_TYPE.
+  // Match updateCharter: the active room owner may write instructions,
+  // including an agent owner. Membership alone does not grant ownership.
   let current = null, atCheckpoint = null, ownerId = null;
   const members = new Map(); // memberId -> { kind, active }, so a new owner is known
   const remember = event => {
@@ -120,7 +118,7 @@ export function auditCharters(state, history, checkpoint = null) {
     }
     if (e.type === CHARTER_TYPE) {
       const owner = members.get(ownerId);
-      check(e.roomId === state.room.id && e.actorId === ownerId && owner?.kind === "human" && owner.active === true, "Invalid room instructions author");
+      check(e.roomId === state.room.id && e.actorId === ownerId && owner?.active === true, "Invalid room instructions author");
       current = charterFromEvent(e, current);
     }
     if (checkpoint && row.sequence <= checkpoint.sequence) atCheckpoint = current;

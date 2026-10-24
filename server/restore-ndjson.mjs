@@ -1,3 +1,4 @@
+import { ensureRestoreSchema } from "./restore-schema.mjs";
 // Whole-store NDJSON restore into an already-open store.
 //
 // Sibling of server/room-export.mjs (which owns the export format). The export
@@ -180,6 +181,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  ensureRestoreSchema(store, byTable.keys());
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
@@ -301,21 +303,30 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   // order matters where the pragma made it not matter on node. Read the FK
   // graph from the target's own schema and flush dependencies before a table
   // ever batches; self-referencing tables get per-row hold-back below.
-  const { deps, selfRef } = foreignKeyShape(db, existing);
-  const topo = topologicalTableOrder(existing, deps);
-  const topoIndex = new Map(topo.map((table, index) => [table, index]));
+  let selfRef, topo;
+  const topoIndex = new Map();
   const ancestors = new Map();
-  for (const table of topo) {
-    const seen = new Set();
-    const stack = [...(deps.get(table) ?? [])];
-    while (stack.length) {
-      const parent = stack.pop();
-      if (seen.has(parent)) continue;
-      seen.add(parent);
-      for (const grand of deps.get(parent) ?? []) if (!seen.has(grand)) stack.push(grand);
+  function refreshTableGraph() {
+    const shape = foreignKeyShape(db, existing);
+    const deps = shape.deps;
+    selfRef = shape.selfRef;
+    topo = topologicalTableOrder(existing, deps);
+    topoIndex.clear();
+    ancestors.clear();
+    topo.forEach((table, index) => topoIndex.set(table, index));
+    for (const table of topo) {
+      const seen = new Set();
+      const stack = [...(deps.get(table) ?? [])];
+      while (stack.length) {
+        const parent = stack.pop();
+        if (seen.has(parent)) continue;
+        seen.add(parent);
+        for (const grand of deps.get(parent) ?? []) if (!seen.has(grand)) stack.push(grand);
+      }
+      ancestors.set(table, seen);
     }
-    ancestors.set(table, seen);
   }
+  refreshTableGraph();
   let watermark = null;
   let trailer = null;
   let carry = "";
@@ -441,7 +452,12 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
       return;
     }
-    if (!existing.has(record.table)) throw new Error("Export names a table this store does not have");
+    if (!existing.has(record.table)) {
+      ensureRestoreSchema(store, [record.table]);
+      for (const table of tableNames(db)) existing.add(table);
+      if (!existing.has(record.table)) throw new Error("Export names a table this store does not have");
+      refreshTableGraph();
+    }
     const keys = Object.keys(record.row);
     if (keys.some(key => !columnsOf(record.table).has(key))) throw new Error("Export row does not match the store schema");
     if (record.table === "events") eventTuples.push({ room_id: record.row.room_id, sequence: record.row.sequence, id: record.row.id });
