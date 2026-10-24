@@ -250,6 +250,9 @@ test("board, settings, and join error have no serious axe findings; pages do not
   assert.deepEqual(sessionProbes, []);
   await page.goto(origin + "/?account=1");
   await signInFixture(page, accountKey);
+  // #4461: the Account / Switch-room view opens with focus on its heading,
+  // not on <body>.
+  await page.waitForFunction(() => document.activeElement?.id === "account-rooms-title");
   await clickChrome(page, "#account-settings-button");
   await page.locator("#account-settings[open]").waitFor();
   await page.locator("[data-action='delete-account']").waitFor();
@@ -260,6 +263,9 @@ test("board, settings, and join error have no serious axe findings; pages do not
   await page.locator("#room-actions-query").fill("board");
   await page.keyboard.press("Enter");
   await page.locator("#board-dialog").waitFor({ state: "visible" });
+  // #4461: the board opens with focus on its heading (board content), not
+  // on #board-close.
+  await page.waitForFunction(() => document.activeElement?.id === "board-title");
   await seriousAxe(page, "#board-dialog");
   await page.locator("#board-close").click();
   await page.goto(origin + "/join?code=x");
