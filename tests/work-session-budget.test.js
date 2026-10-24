@@ -161,3 +161,24 @@ test("maxAttempts is enforced across retries: a finished session restarts until 
   session = await card(workItemId);
   assert.equal(session.attempt_count, 2); assert.equal(session.status, "done");
 });
+
+test("a spend trip's session.stopped event carries the triggering spendCents (#3349)", async t => {
+  const { propose, claim, mutate, card, request, agentKey } = await serve(t);
+  const workItemId = propose("spend trip record");
+  assert.equal((await claim(workItemId, { budget: { maxSpendCents: 100 } })).status, 201);
+  const over = await mutate(workItemId, 1, { status: "active", spendCents: 150 });
+  assert.equal(over.status, 409);
+  assert.equal(over.json?.error?.code, "budget_exceeded");
+  assert.match(over.json?.error?.message ?? "", /maxSpendCents/);
+  const session = await card(workItemId);
+  assert.equal(session.status, "failed");
+  assert.equal(session.spendCents, 150, "the stopped session records the spend that tripped it");
+  const events = await request("/api/rooms/commons/events", { token: agentKey });
+  const stop = (events.json?.events ?? []).map(e => e.event ?? e)
+    .find(e => e.type === "session.stopped" && e.data?.workItemId === workItemId);
+  assert.ok(stop, "a session.stopped event was recorded");
+  assert.equal(stop.data.reason, "budget_exceeded");
+  assert.equal(stop.data.limit, "maxSpendCents");
+  assert.equal(stop.data.budgetEnforced, true);
+  assert.equal(stop.data.spendCents, 150, "the stop event carries the triggering spendCents");
+});
