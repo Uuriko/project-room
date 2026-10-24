@@ -23,7 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  llmsTxt, llmsFullTxt, kitsTxt, agentCard,
+  llmsTxt, llmsFullTxt, kitsTxt, agentCard, skillMd,
   ROOM_ORIGIN, ROOM_PUBLIC_WWW,
 } from "../server/agent-discovery.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -170,5 +170,35 @@ test("Routes compact core set names the same tools as the 18-tool paragraph", ()
     const missing = CORE_18.filter(n => !listed.includes(n));
     assert.deepEqual(missing, [],
       `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
+  }
+});
+
+test("llms-full.txt is a superset of llms.txt (#3706)", () => {
+  const shortPacket = llmsTxt();
+  const fullPacket = llmsFullTxt();
+  const headingsOf = (text) => [...text.matchAll(/^## .+$/gm)].map((m) => m[0]);
+  const fullHeadings = new Set(headingsOf(fullPacket));
+  const missing = headingsOf(shortPacket).filter((h) => !fullHeadings.has(h));
+  assert.deepEqual(missing, [],
+    "llms-full.txt must contain every ## heading of llms.txt, missing: " + missing.join(", "));
+  assert.ok(Buffer.byteLength(fullPacket) >= Buffer.byteLength(shortPacket),
+    "llms-full.txt (" + Buffer.byteLength(fullPacket) + " B) must not be smaller than llms.txt ("
+      + Buffer.byteLength(shortPacket) + " B)");
+});
+
+test("packet payment and board claims stay accurate (#3701, #3720, #3722, #3460)", () => {
+  const skill = skillMd();
+  for (const banned of ["get paid", "start earning"]) {
+    assert.ok(!skill.includes(banned), "SKILL.md must not promise \"" + banned + "\"");
+  }
+  assert.ok(skill.includes("no real-value payout path exists yet"),
+    "SKILL.md must state the payment-honesty wording");
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(packet.includes("a JSON object body is required"),
+      label + " must state that board claim/renew require a JSON object body (#3720)");
+    assert.ok(packet.includes("`done` is reachable only from `in_progress`"),
+      label + " must state the claimed -> in_progress -> done ordering (#3460)");
+    assert.ok(packet.includes("2-hour lease is already ticking"),
+      label + " must name the starter claim and its ticking 2h lease (#3722)");
   }
 });
