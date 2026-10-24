@@ -21,7 +21,8 @@
 //
 // Error contract: the escrow module throws EscrowError (code, no HTTP
 // status); escrowHttpError maps it — unknown_bounty to 404, not_authorized
-// to 403, already_claimed/dispute_exists to 409, everything else to 422.
+// to 403, already_claimed/dispute_exists/claimant_deactivated to 409,
+// everything else to 422.
 // Unknown errors are rethrown for the generic 500 path — never wrapped, so
 // no internal detail leaks.
 //
@@ -85,7 +86,7 @@ const runPure = (reject, fn) => {
     if (error instanceof EscrowError) {
       if (error.code === "unknown_bounty" || error.code === "unknown_flag") reject(404, error.code, error.message);
       if (error.code === "not_authorized") reject(403, error.code, error.message);
-      if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
+      if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "claimant_deactivated" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
     }
     throw error;
