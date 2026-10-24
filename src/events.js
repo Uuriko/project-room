@@ -617,12 +617,15 @@ function lightMessageCloneIds(incoming) {
 //     excluded here and keep the full workItems clone.
 // One ranging writer remains: ensureWorkControlDefaults runs after
 // every handler and backfills round/tool counters, the suspension
-// cause and receipt segments on ALL items. On an item a previous
-// applyEvent already normalised, its writes assign only the values
-// already present; a legacy item that predates the defaults would be
-// rewritten in place, so the light clone also deep-clones any item
-// that is not already in the normalised shape (workItemNeedsDefaults)
-// and the backfill can never reach the input state's objects.
+// cause and receipt segments on ALL items. Its writes are
+// change-conditional (a normalised item receives no assignment at
+// all), a legacy item that predates the defaults would be rewritten
+// in place, so the light clone also deep-clones any item that is not
+// already in the normalised shape (workItemNeedsDefaults), and any
+// item that is frozen — the store returns deep-frozen projections,
+// and an assignment to a frozen object throws even when it would
+// assign the value already present (#3408 cure). The backfill can
+// therefore never reach the input state's objects.
 const WORK_SWEEP_TYPES = new Set([
   EVENT_TYPES.MESSAGE_DELETED, EVENT_TYPES.MESSAGE_REDACTED,
   EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN
@@ -645,7 +648,7 @@ function lightWorkItemsClone(current, incoming) {
   if (!items || typeof items !== "object" || Array.isArray(items)) return null;
   const addressedId = typeof incoming?.data?.workItemId === "string" ? incoming.data.workItemId : null;
   return Object.fromEntries(Object.entries(items).map(([id, item]) => [
-    id, id === addressedId || workItemNeedsDefaults(item) ? structuredClone(item) : item
+    id, id === addressedId || workItemNeedsDefaults(item) || Object.isFrozen(item) ? structuredClone(item) : item
   ]));
 }
 function cloneStateForApply(current, incoming, journal = null) {
