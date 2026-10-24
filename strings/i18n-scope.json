@@ -19,6 +19,7 @@
   "src/agent-invite-ui.js",
   "src/agent-signin-page.js",
   "src/agent-signin-ui.js",
+  "src/agent-sessions.js",
   "src/app.js",
   "src/audit-receipts.mjs",
   "src/auth-signin-ui.js",
