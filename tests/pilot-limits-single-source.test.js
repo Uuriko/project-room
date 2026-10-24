@@ -15,7 +15,10 @@ import { DurableDatabase, isTooBig } from "../cloudflare/storage.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const walk = dir => readdirSync(dir).flatMap(name => {
   const path = join(dir, name);
-  if (name === "node_modules") return [];
+  // cloudflare/public is gitignored build output. A minified bundle is one
+  // long line, so the line scan below false-matches client code. It is not a
+  // capacity write path.
+  if (name === "node_modules" || name === "public") return [];
   return statSync(path).isDirectory() ? walk(path) : /\.(mjs|js)$/.test(name) && !/\.test\./.test(name) ? [path] : [];
 });
 const modules = [...walk(join(root, "server")), ...walk(join(root, "cloudflare"))];
