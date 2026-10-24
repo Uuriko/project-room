@@ -112,8 +112,6 @@
     "src/project-offers-ui.js": "sha256:38d1c285b53ba40dcf2b95452c0fd6830a1832ce5d5696969f6298fb7998bcca",
     "src/project-offers.css": "sha256:a3cc166e2c49fdba3ee938439c1954398ec003ded7b3481cce66ea61f5c0e278",
     "src/public-a11y.css": "sha256:cb8019ac86fd0320936f8f1da5dcaaa5d3532326a843ae35566ce0797a91d980",
-    "src/push-ask.js": "sha256:a81105c001f9043a657b203d642b64933107cc11fbf486386451f2336d417c5a",
-    "src/pwa-install.js": "sha256:791a9565cf007a24505af10e893255b854ba73d6f332612840946238912f9788",
     "src/reminder-time.js": "sha256:fdf4caefab0ccaa0291bdd74e2e97fa169e2ea791c233fef5b2ff002735016b7",
     "src/reminders.js": "sha256:b1a57316743260616b3925384d5e37cbc04ee9dd311fad9198d18e2dc46b6800",
     "src/reply-requests.js": "sha256:5106297da7c2b1b55ba510dbc61b0ca229faeed473eeb8ced16c1393f654f38c",
