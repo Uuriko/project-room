@@ -142,11 +142,15 @@ export async function runJob(store, jobId, { signal, observation } = {}) {
   });
   if (!admitted.claimed) return admitted;
   const job = admitted.job, pack = getPackage(store, job.pin), started = Date.now();
-  const directory = join(store.directory, 'runs', jobId, String(job.attempt)); mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const inputPath = join(directory, 'input.json'), outputPath = join(directory, 'artifacts'); mkdirSync(outputPath, { mode: 0o700 });
-  writeFileSync(inputPath, canonical(job.payload.input), { mode: 0o400, flag: 'wx' });
+  const directory = join(store.directory, 'runs', jobId, String(job.attempt));
+  const inputPath = join(directory, 'input.json'), outputPath = join(directory, 'artifacts');
   const receipts = [];
   try {
+    // Setup errors are known failures: no child exists yet. Record them and
+    // release admission, while process death still leaves unknown ownership.
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    mkdirSync(outputPath, { mode: 0o700 });
+    writeFileSync(inputPath, canonical(job.payload.input), { mode: 0o400, flag: 'wx' });
     for (const [ordinal, step] of pack.manifest.steps.entries()) {
       signal?.throwIfAborted();
       const current = getJob(store, jobId); requireThat(current.state === 'running' && current.owner === owner, 'job_ownership_changed');

@@ -193,3 +193,15 @@ test('timeout stops dependent steps and failures return inspectable evidence', a
   assert.equal(result.job.result.steps[0].reason, 'timeout');
   assert.equal(result.job.result.passed, false);
 });
+
+test('pre-spawn filesystem failure releases admission with a durable error receipt', async t => {
+  const f = fixture(t), failed = f.job('setup-failure');
+  writeFileSync(join(f.store.directory, 'runs'), 'not a directory');
+  const result = await f.run(failed.id);
+  assert.equal(result.job.state, 'needs_attention');
+  assert.equal(result.job.owner, null);
+  assert.match(result.job.result.error, /ENOTDIR/);
+  assert.equal(result.job.result.steps.length, 0);
+  assert.equal(admission(f.store, f.job('next'), f.observation()).allowed, true);
+  assert.equal((await f.run(failed.id)).claimed, false);
+});
