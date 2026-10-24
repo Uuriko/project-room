@@ -141,8 +141,8 @@ test("the queue flag defaults off and a drain runs at most one job", async () =>
   const directory = mkdtempSync(join(tmpdir(), "alarm-turn-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   try {
-    const version = store.db.prepare("SELECT version FROM room_runtime_version WHERE singleton=1").get().version;
-    assert.equal(version, STORE_SCHEMA_VERSION);
+    const versionBefore = store.db.prepare("PRAGMA user_version").get().user_version;
+    assert.equal(versionBefore, STORE_SCHEMA_VERSION);
     const env = { ROOM_DURABLE_ALARM_QUEUE: "1" };
     const base = { db: store.db, env, store, now: NOW, lastRan: {} };
     let calls = 0;
@@ -164,6 +164,8 @@ test("the queue flag defaults off and a drain runs at most one job", async () =>
     });
     assert.ok(calls - before <= 1, "a drain runs at most one job");
     if (enqueued.queued.length > 1) assert.equal(calls - before, 1);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, versionBefore);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM durable_alarm_queue").get().n >= 1, true);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
