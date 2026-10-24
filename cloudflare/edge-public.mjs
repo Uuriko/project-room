@@ -141,7 +141,16 @@ function securityTxtResponse(request, url, contact) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
+// Content-hashed bundles live at /a/<name>-<hash>.js. The www door keeps the
+// /room prefix on the wire, so the same file is also /room/a/<name>.
+const HASHED_ASSET = /^\/(?:room\/)?(a\/[A-Za-z0-9._-]{8,128}\.(?:js|css))$/;
+export function hashedAssetFile(pathname) {
+  const match = HASHED_ASSET.exec(pathname);
+  return match ? match[1] : null;
+}
+
 export function classifyEdgePath(pathname) {
+  if (hashedAssetFile(pathname)) return 'asset';
   if (pathname === '/.well-known/security.txt' || pathname === '/room/.well-known/security.txt') return 'security-txt';
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
@@ -151,7 +160,8 @@ export function classifyEdgePath(pathname) {
 }
 
 const REVALIDATED_ASSET_TYPES = ['text/javascript', 'text/css', 'image/svg+xml', 'application/manifest+json'];
-export function assetCachePolicy(type) {
+export function assetCachePolicy(type, pathname = '') {
+  if (hashedAssetFile(pathname)) return 'public, max-age=31536000, immutable';
   const base = String(type).split(';')[0].trim();
   if ((base.startsWith('image/') && base !== 'image/svg+xml') || base.startsWith('font/')) return 'public, max-age=86400';
   if (REVALIDATED_ASSET_TYPES.includes(base)) return 'no-cache';
@@ -232,7 +242,33 @@ function discoveryResponse(request, url) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
-async function assetResponse(request, env, url) {
+async function hashedAssetResponse(request, env, url, ctx, file) {
+  const headers = baseHeaders(url);
+  const cache = globalThis.caches?.default;
+  if (cache && request.method === 'GET') {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+  }
+  const bytes = await loadCachedAsset(env, file);
+  if (!bytes) {
+    headers.set('X-Robots-Tag', 'noindex, nofollow');
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    const body = 'Not found\n';
+    headers.set('Content-Length', String(body.length));
+    return new Response(request.method === 'HEAD' ? null : body, { status: 404, headers });
+  }
+  const type = file.endsWith('.css') ? 'text/css' : 'text/javascript';
+  headers.set('Content-Type', `${type}; charset=utf-8`);
+  headers.set('Cache-Control', assetCachePolicy(type, url.pathname));
+  headers.set('Content-Length', String(bytes.byteLength));
+  const response = new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+  if (cache && request.method === 'GET' && ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(cache.put(request, response.clone()));
+  return response;
+}
+
+async function assetResponse(request, env, url, ctx) {
+  const hashed = hashedAssetFile(url.pathname);
+  if (hashed) return hashedAssetResponse(request, env, url, ctx, hashed);
   const headers = baseHeaders(url);
   const servedPath = roomMarketingPath(url.pathname) ?? url.pathname;
   const canonical = publicSearchCanonical(servedPath, publicAssetPaths);
@@ -289,7 +325,7 @@ async function assetResponse(request, env, url) {
 
 // Response for a path that must not enter the Durable Object, or null when
 // the request still belongs to the object (health, API, skills members).
-export async function edgePublicResponse(request, env, url) {
+export async function edgePublicResponse(request, env, url, ctx = null) {
   const kind = classifyEdgePath(url.pathname);
   if (!kind) return null;
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
@@ -302,5 +338,5 @@ export async function edgePublicResponse(request, env, url) {
   if (url.pathname === '/' && request.method !== 'GET' && request.method !== 'HEAD')
     return workerErrorResponse({ httpStatus: 404, code: 'not_found', message: 'Not found', headers: baseHeaders(url) });
   if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');
-  return assetResponse(request, env, url);
+  return assetResponse(request, env, url, ctx);
 }
