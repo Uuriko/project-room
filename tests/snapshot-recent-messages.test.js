@@ -1,9 +1,7 @@
-// `GET /api/rooms/{id}?messages=recent`: a room snapshot without the whole
-// message history. A busy room's full snapshot ships every message on each
-// open (muse-room: 5,300+ messages, ~5 MB). The recent view keeps the newest
-// 100 visible messages, never counts hidden DMs, says how many it left out,
-// and the first /conversation page lines up with it so older history pages
-// from there. The default snapshot is unchanged.
+// The default room read is the newest 50 visible messages plus a window
+// cursor. `?messages=recent` stays the browser's 100-message window.
+// `?messages=all` is the explicit unbounded snapshot. Older history pages
+// through /conversation, which lines up with the window.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -35,11 +33,19 @@ test("the recent snapshot carries only the newest 100 visible messages and count
     // A DM between two other members: hidden from the producer, never in its window.
     if (i % 10 === 0) f.post(f.keys.owner, `private ${i}`, { toMemberId: "reviewer" });
   }
-  const full = await (await f.get()).json();
+  const full = await (await f.get("?messages=all")).json();
   const visible = full.state.messages;
-  assert.ok(visible.length > WINDOW + 20, "the full snapshot still carries every visible message");
+  assert.ok(visible.length > WINDOW + 20, "the explicit full snapshot still carries every visible message");
   assert.equal(visible.some(message => message.body.startsWith("private")), false);
-  assert.equal(Object.hasOwn(full, "messagesWindow"), false, "the default snapshot is unchanged");
+  assert.equal(Object.hasOwn(full, "messagesWindow"), false, "messages=all is the unbounded snapshot");
+  const paged = await (await f.get()).json();
+  assert.equal(paged.state.messages.length, 50);
+  assert.deepEqual(paged.state.messages.map(message => message.id), visible.slice(-50).map(message => message.id));
+  assert.equal(paged.messagesWindow.mode, "recent");
+  assert.equal(paged.messagesWindow.limit, 50);
+  assert.equal(paged.messagesWindow.omitted, visible.length - 50);
+  assert.equal(paged.messagesWindow.older, "conversation");
+  assert.equal(paged.sequence, full.sequence);
 
   const response = await f.get("?messages=recent");
   assert.equal(response.status, 200);
@@ -72,7 +78,7 @@ test("a small room's recent snapshot is the whole history with nothing omitted",
 
 test("the recent selector is strict", async t => {
   const f = await fixture(t);
-  for (const query of ["?messages=", "?messages=all", "?messages=recent&messages=recent", "?messages=recent&view=work", "?messages=recent&limit=5"]) {
+  for (const query of ["?messages=", "?messages=page", "?messages=recent&messages=recent", "?messages=recent&view=work", "?messages=recent&limit=5"]) {
     const response = await f.get(query);
     assert.equal(response.status, 422, query);
     assert.equal((await response.json()).error.code, "invalid_snapshot_view", query);
@@ -122,11 +128,11 @@ test("recent and full snapshots preserve visible history, counts and older pins 
  f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'message.pinned',data:{messageId:pinned}});
  for(let i=0;i<115;i++)f.post(f.keys.producer,`Archived public ${i}.`);
  for(let i=0;i<3;i++)f.post(f.keys.owner,'Hidden private message.',{toMemberId:'reviewer'});
- const full=await(await f.get()).json(),recent=await(await f.get('?messages=recent')).json();
+ const full=await(await f.get('?messages=all')).json(),recent=await(await f.get('?messages=recent')).json();
  while(!f.store.backfillMessages({limit:1000}).done){}
  assert.equal(f.store.checkMessagesParity().ok,true);
  assert.equal(f.store.archiveMessages('commons',{keepNewest:2,dryRun:false}).ok,true);
- const after=await(await f.get('?messages=recent')).json(),all=await(await f.get()).json();
+ const after=await(await f.get('?messages=recent')).json(),all=await(await f.get('?messages=all')).json();
  assert.deepEqual(after.state.messages,recent.state.messages);
  assert.deepEqual(after.messagesWindow,recent.messagesWindow);
  assert.deepEqual(after.state.pins,recent.state.pins);

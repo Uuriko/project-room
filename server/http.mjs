@@ -290,6 +290,11 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 const STREAM_DRAIN_GRACE_MS = 5000;
 // Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
 const SNAPSHOT_RECENT_MESSAGES = 100;
+// Default room read. Older messages page through /conversation. `?messages=all`
+// is the explicit unbounded snapshot. #4738 bounds what the hot projection
+// stores; this bound is only the read. repository.recent still sees messages
+// the hot window has archived.
+const SNAPSHOT_PAGE_MESSAGES = 50;
 
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
@@ -4330,15 +4335,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        // `?messages=recent`: the full snapshot with only the newest
-        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
-        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
-        // on every open; older history pages through /conversation.
-        const recentMessages = params.has("messages");
-        if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
+        // Default: the newest SNAPSHOT_PAGE_MESSAGES visible messages and a
+        // window cursor. `?messages=recent` is the browser's 100-message
+        // window. `?messages=all` is the explicit full snapshot.
+        const messageMode = params.has("messages") ? params.get("messages") : "page";
+        if (params.has("messages") && (params.has("view") || !["recent", "all"].includes(messageMode) || params.getAll("messages").length !== 1
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
+        const messageLimit = messageMode === "all" ? null : messageMode === "recent" ? SNAPSHOT_RECENT_MESSAGES : SNAPSHOT_PAGE_MESSAGES;
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -4350,7 +4355,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", messageLimit);
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4362,11 +4367,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const visibleIds = new Set(visibleMessages.map(message => message.id));
           // The recent window trims after DM filtering, so hidden DMs never
           // count toward it; pins still follow every visible message.
-          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
+          const windowed = messageMode === "recent" ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
           const nextState = { ...snapshot.state,
             messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+            pins: messageLimit !== null ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
         }

@@ -22,7 +22,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
-const FULL = "/api/rooms/commons", RECENT = "/api/rooms/commons?messages=recent";
+const FULL = "/api/rooms/commons?messages=all", RECENT = "/api/rooms/commons?messages=recent";
 const response = body => ({ ok: true, status: 200, json: async () => body });
 const owner = { roomId: "commons", cursor: 0, viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human" };
 const identity = () => ({ account: { id: "account-human", authEpoch: 0 }, member: { id: "human" }, roomId: "commons", csrf: "c", sessionBinding: "session-human" });

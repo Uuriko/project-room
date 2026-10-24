@@ -330,7 +330,7 @@ export class RoomClient {
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const auditView = this.auditView;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
+          const read = await this.request(this.path(full ? "?messages=all" : "?messages=recent"), { offerContext: true, auditView });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           this.lastReadAt = Date.now();
