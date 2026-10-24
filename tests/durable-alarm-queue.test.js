@@ -13,6 +13,7 @@ import {
 } from "../server/durable-alarm-queue.mjs";
 import { durableAlarmQueueEnabled, runDurableAlarmTurn } from "../server/durable-alarm-turn.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 
 const NOW = 1_700_000_000_000;
@@ -166,6 +167,7 @@ test("the queue flag defaults off and a drain runs at most one job", async () =>
     if (enqueued.queued.length > 1) assert.equal(calls - before, 1);
     assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, versionBefore);
     assert.equal(store.db.prepare("SELECT count(*) AS n FROM durable_alarm_queue").get().n >= 1, true);
+    assert.equal(auditRecovery(store).schemaVersion, STORE_SCHEMA_VERSION);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
