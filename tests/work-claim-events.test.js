@@ -88,6 +88,12 @@ test('a lapsed lease is swept once, naming the previous owner and the files that
   store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
   await owner.workClaims();
   await owner.workClaims();
+  // RP-1: board reads only present the lapse — the stored release and its
+  // one event materialise at store open or on a write-class op. The sweep
+  // route is the member-triggered convergence; drive it, then confirm a
+  // later read does not emit the expiry again.
+  await owner.sweepWorkClaims();
+  await owner.workClaims();
   const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
   assert.equal(expired.length, 1, 'a later read of the board does not emit the expiry again');
   assert.deepEqual([expired[0].actor, expired[0].claimState, expired[0].ownerId, expired[0].previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
@@ -242,10 +248,14 @@ test('at the pilot event cap open claims can still be released, completed, expir
   assert.equal(closed.state, 'closed');
   // The exits did not reopen growth.
   await assert.rejects(owner.claimWorkItem('open'), capped);
-  // Expiry still fires: backdate the lease and let a board read sweep it.
+  // Expiry still fires: backdate the lease and converge the room with the
+  // member-triggered sweep. RP-1: a board read only presents the lapse —
+  // the stored release and its lease_expired event (an exit, so it lands
+  // at the cap) are write-class materialisations.
   const row = store.workClaims.get('commons', 'lapsed');
   store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
-  await owner.workClaims();
+  assert.equal((await owner.workClaimGet('lapsed')).state, 'unclaimed', 'the read presents the lapse');
+  await owner.sweepWorkClaims();
   assert.equal((await owner.workClaimGet('lapsed')).state, 'unclaimed');
   const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired' && e.workClaim === 'lapsed');
   assert.equal(expired.length, 1);

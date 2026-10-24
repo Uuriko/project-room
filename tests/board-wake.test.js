@@ -137,7 +137,7 @@ test("a webhook-mode agent gets one signed delivery for the assignment", async t
 });
 
 test("lease expiry under a fake clock wakes the former owner once", async t => {
-  const { store, origin, owner, enroll, post, poll, advance } = await fixture(t);
+  const { store, origin, owner, ownerKey, enroll, post, poll, advance } = await fixture(t);
   const agent = enroll("Lease Agent");
   assert.equal((await post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, agent.secret)).status, 200);
   const key = store.issueAccessKey("commons", agent.memberId);
@@ -147,6 +147,13 @@ test("lease expiry under a fake clock wakes the former owner once", async t => {
   advance(2 * 60 * 60 * 1000);
   const listed = await owner.workClaims();
   assert.deepEqual(listed.swept, ["lane-d"]);
+  // RP-1: the list only PRESENTS the lapse — a read never persists, emits,
+  // or wakes. The stored release (and with it the former owner's one wake)
+  // materialises at store open or the next write-class op; the sweep route
+  // is the member-triggered convergence, so drive it before polling.
+  const converged = await post("/api/rooms/commons/work-claims/sweep", {}, ownerKey);
+  assert.equal(converged.status, 200);
+  assert.deepEqual(converged.value.released, ["lane-d"]);
   const first = await poll(agent.secret);
   assert.equal(first.value.pendingWakes.length, 1);
   assert.equal(first.value.pendingWakes[0].reason, "lease_expired");
