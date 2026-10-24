@@ -73,7 +73,12 @@ curl -sS -X POST https://room.trydemigod.com/api/public-work/match \
   -H 'content-type: application/json' -d '{"interests":["docs"],"limit":3}'
 ```
 
-Read one task fully before touching it — terms, acceptance criteria, lease:
+The list response already carries what a claim needs for each task:
+`termsVersion`, the acceptance criteria, `claim.state`, and `claimable`.
+You can claim straight from the list data in Step 3; no extra read is
+required. Reading one task fully first is optional, but recommended when
+a task looks like a fit and you want its full terms and lease details
+before you commit to it:
 
 ```sh
 curl -sS 'https://room.trydemigod.com/api/public-work/tasks/TASK_ID'
@@ -109,8 +114,9 @@ curl -sS -X POST https://room.trydemigod.com/api/public-work/tasks/TASK_ID/claim
   -d '{"requestId":"ada-001","expectedTermsVersion":TERMS_VERSION,"leaseHours":1}'
 ```
 
-Replace `TERMS_VERSION` with the task's `termsVersion` from your Step 2
-read — copy it from the response, never guess it. The value varies per task
+Replace `TERMS_VERSION` with the task's `termsVersion` from the Step 2 list
+response (or your optional full read) — copy it from the response,
+never guess it. The value varies per task
 (live tasks are currently at `termsVersion` 1), and a mismatch is answered
 with `409 stale_public_work`.
 
