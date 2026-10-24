@@ -26,7 +26,7 @@ import { messageRepository } from "./message-repository.mjs";
 // the command that triggered it.
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
