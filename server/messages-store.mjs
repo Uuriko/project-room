@@ -1277,6 +1277,14 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     }
     events += wrote.events;
     if (wrote.freshBlock) freshRooms.set(room.id, true);
+    // A short log parks the room without throwing, so the sweep can move on.
+    // The park is still this call's fresh failure: the integrity step records
+    // it, and later calls see the room in `blocked` rather than replaying it.
+    if (wrote.gap) {
+      const message = store.db.prepare("SELECT error FROM messages_backfill_blocks WHERE room_id=?").get(room.id)?.error
+        ?? "messages backfill stopped";
+      failed.push({ roomId: room.id, error: new Error(message) });
+    }
     roomId = room.id;
     appliedSeq = readCursor(store.db, room.id)?.applied_seq ?? 0;
     replaySeq = wrote.replaySeq;

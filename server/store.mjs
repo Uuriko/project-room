@@ -2047,16 +2047,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Quarantine bookkeeping. Additive, like last_diagnosed_at: existing
       // parks stay skipped=0 until healBackfillQuarantines reclassifies an
       // event-level row. anchor_seq -1 means "no replay anchor stashed".
-      for (const [name, ddl] of [
-        ["reason", "ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''"],
-        ["component", "ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''"],
-        ["attempts", "ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"],
-        ["skipped", "ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0"],
-        ["anchor_seq", "ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1"]
-      ]) {
-        if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name=?").get(name)) {
-          this.db.exec(ddl);
-        }
+      // The CREATE TABLE string is already in the schema stamp, so a warm
+      // wake on an older room re-runs this pass and applies the columns.
+      // String literals, not exec(identifier): the stamp scanner treats a
+      // named exec argument as DDL that must be hashed.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='reason'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='component'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='attempts'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='skipped'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='anchor_seq'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1");
       }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM message_replay_snapshots").run();
