@@ -20,7 +20,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -29,6 +29,60 @@ import { randomUUID } from 'node:crypto';
 import { deriveToken } from '../bridge/lib/auth.mjs';
 import { createBridge } from '../bridge/lib/bridge.mjs';
 import { HerdrSocketClient } from '../bridge/lib/socket-client.mjs';
+
+// Socket fixture dirs (#4459): Unix socket paths are length-capped (104
+// bytes on macOS, 108 on Linux) — a long TMPDIR makes
+// `<dir>/sockets/a.sock` overflow and the fixture fails with
+// `listen EINVAL` before any assertion runs. socketTempDir() keeps the
+// TMPDIR location while the longest socket path fits, otherwise falls
+// back to a short private mkdtemp under /tmp (0700, per-fixture — never a
+// shared fixed path), and throws an actionable preflight error naming
+// the remedy if no base can fit a socket path. Same helper as
+// tests/herdr-bridge.test.js.
+const SOCKET_PATH_MAX = process.platform === 'darwin' ? 104 : 108;
+const LONGEST_SOCKET_SUFFIX = '/sockets/a.sock';
+function socketPathLength(dir) {
+  return Buffer.byteLength(join(dir, LONGEST_SOCKET_SUFFIX)) + 1; // + trailing NUL
+}
+function socketTempDir(prefix) {
+  for (const base of [...new Set([tmpdir(), '/tmp'])]) {
+    // mkdtempSync appends six random characters to the prefix.
+    if (socketPathLength(join(base, `${prefix}XXXXXX`)) <= SOCKET_PATH_MAX) {
+      return mkdtempSync(join(base, prefix));
+    }
+  }
+  const wouldBeDir = join(tmpdir(), `${prefix}XXXXXX`);
+  throw new Error(
+    `test setup: Unix socket path ${join(wouldBeDir, LONGEST_SOCKET_SUFFIX)} would be ` +
+    `${socketPathLength(wouldBeDir)} bytes, over the ${SOCKET_PATH_MAX}-byte limit, and no ` +
+    `shorter base directory fits either — point TMPDIR at a shorter path (or run from a ` +
+    `shorter checkout) and re-run (#4459)`,
+  );
+}
+
+test('socket fixture dir stays within the socket path limit under a long TMPDIR (#4459)', async () => {
+  const prevTmpdir = process.env.TMPDIR;
+  const longTmp = join(tmpdir(), `long-checkout-${'x'.repeat(96)}`, '.tmp');
+  process.env.TMPDIR = longTmp;
+  let d;
+  try {
+    assert.ok(socketPathLength(join(longTmp, 'hbd-XXXXXX')) > SOCKET_PATH_MAX,
+      'precondition: the long TMPDIR really overflows');
+    d = socketTempDir('hbd-');
+    assert.ok(!d.startsWith(longTmp), 'socket fixtures must not inherit the long TMPDIR');
+    assert.ok(socketPathLength(d) <= SOCKET_PATH_MAX, `socket path under ${d} must fit the limit`);
+    mkdirSync(join(d, 'sockets'), { recursive: true });
+    const srv = createServer();
+    await new Promise((resolve, reject) => {
+      srv.on('error', reject);
+      srv.listen(join(d, 'sockets', 'a.sock'), resolve);
+    });
+    await new Promise((resolve) => srv.close(resolve));
+  } finally {
+    if (prevTmpdir === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmpdir;
+    if (d) rmSync(d, { recursive: true, force: true });
+  }
+});
 
 const MASTER = 'test-master-secret-0123456789abcdef';
 const KEY_ID = '2026-10-test';
@@ -94,7 +148,7 @@ function startFakeHerdr(socketPath) {
 }
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'hbd-'));
+  dir = socketTempDir('hbd-');
   mkdirSync(join(dir, 'sockets'), { recursive: true });
   const socketPath = join(dir, 'sockets', 'a.sock');
   const tenantsFile = join(dir, 'tenants.json');
