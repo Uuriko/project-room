@@ -42,9 +42,27 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
   automation: focusMembers("automation")
 });
 
+// The two onboarding verbs a roomless identity can already CALL from the
+// lobby (call-time visibility keeps room_create/room_join reachable with no
+// memberships; see enforceMcpCallVisibility in mcp-room-profile.mjs). They
+// must also be LISTED in the roomless default list: hosts that only call
+// listed tools (e.g. Claude Code) could read the join packet forever and
+// never join. Rendered with their core blurbs, as the core profile shows
+// them. qa-mcp-roomless-join.
+const ROOMLESS_ONBOARDING_TOOLS = Object.freeze(["room_join", "room_create"].map(name => {
+  const def = hostedMcpToolDefs.find(entry => entry.name === name);
+  return Object.freeze({ ...def, description: CORE_MCP_BLURBS[name] ?? def.description });
+}));
+
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
   const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
-  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
+  if (outside) {
+    // Explicit focus=public_work keeps the pure lobby list. The roomless
+    // DEFAULT list (an authenticated identity with no memberships, no
+    // focus asked) adds the onboarding verbs after the join readers.
+    const onboarding = focus === undefined && agent ? ROOMLESS_ONBOARDING_TOOLS : [];
+    return [...MCP_JOIN_TOOLS, ...onboarding, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
+  }
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and
   // room_run_action for the long tail. The meta tools are listed only here;
