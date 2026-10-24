@@ -140,7 +140,7 @@ export function renderMarkdown(summary, { generatedAt = new Date().toISOString()
   ];
   const findings = SEVERITIES.filter((s) => summary.counts[s] > 0);
   if (findings.length === 0) {
-    lines.push("", "No vulnerabilities found. 🎉");
+    lines.push("", "No vulnerabilities found.");
   } else {
     lines.push("", "## Findings", "");
     for (const severity of [...SEVERITIES].reverse()) {

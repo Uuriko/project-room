@@ -251,7 +251,7 @@ export function renderWorkActions(item, member, { now = Date.now(), busy = false
 // (no item fields interpolated).
 export function doneChip(item) {
   if (!item || item.state === "superseded" || item.supersededBy) return "";
-  return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
+  return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">Done</span>` : "";
 }
 
 // F3: derived per-item change list from the item's own revision events.

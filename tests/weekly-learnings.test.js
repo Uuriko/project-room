@@ -434,7 +434,7 @@ describe("renderDigest", () => {
 
   it("renders the expected post format", () => {
     const out = renderDigest(signal);
-    assert.match(out, /^🪔 Weekly learnings — 2026-09-29 → 2026-10-06/);
+    assert.match(out, /^Weekly learnings — 2026-09-29 → 2026-10-06/);
     assert.match(out, /^SHIPPED — 42 merged PRs$/m);
     assert.match(out, /^BROKE & FIXED$/m);
     assert.match(out, /^LEARNED$/m);
