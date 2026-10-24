@@ -15,6 +15,7 @@ export const DARK = Object.freeze({
   "--panel-hover": "#34363f",
   "--line": "#393b45",
   "--line-soft": "#30323a",
+  "--line-control": "#8a8a96",
   "--text": "#eeedf1",
   "--muted": "#aaaab7",
   "--blue": "#a9b9ff",
@@ -53,6 +54,7 @@ export const LIGHT = Object.freeze({
   "--panel-hover": "#dddce6",
   "--line": "#c9c8d4",
   "--line-soft": "#dddce6",
+  "--line-control": "#6e6e7a",
   "--text": "#1c1b22",
   "--muted": "#5c5b6a",
   "--blue": "#33339a",
@@ -111,5 +113,15 @@ export const CONTRAST_PAIRS = Object.freeze([
   ["light muted on raised panel", LIGHT["--muted"], LIGHT["--panel-raised"], 4.5],
   ["light link on background", LIGHT["--blue"], LIGHT["--bg"], 4.5],
   ["light accent label", LIGHT["--on-accent"], LIGHT["--blue-strong"], 4.5],
-  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5]
+  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5],
+  // UI-component boundaries (WCAG 1.4.11, 3:1): the control-border token
+  // against every surface a form control or the composer frame can rest on.
+  ["dark control border on background", DARK["--line-control"], DARK["--bg"], 3],
+  ["dark control border on panel", DARK["--line-control"], DARK["--panel"], 3],
+  ["dark control border on raised panel", DARK["--line-control"], DARK["--panel-raised"], 3],
+  ["dark control border on hover panel", DARK["--line-control"], DARK["--panel-hover"], 3],
+  ["light control border on background", LIGHT["--line-control"], LIGHT["--bg"], 3],
+  ["light control border on panel", LIGHT["--line-control"], LIGHT["--panel"], 3],
+  ["light control border on raised panel", LIGHT["--line-control"], LIGHT["--panel-raised"], 3],
+  ["light control border on hover panel", LIGHT["--line-control"], LIGHT["--panel-hover"], 3]
 ]);
