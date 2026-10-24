@@ -5,8 +5,16 @@
 // The config (ALLOWLIST, SKIP_FILES, ...) is exported so the PR diff gate
 // (scripts/secret-scan-diff.mjs) and its tests reuse the exact same rules.
 // The tree walk below only runs when this file is executed directly.
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+//
+// Base-relative mode (#3682): with --base <ref> (or SECRET_SCAN_BASE_REF,
+// or automatically on pull_request runs via HEAD^1) the verdict counts
+// only findings NEW vs the PR's merge-base tree, scanned with these same
+// rules — main moving under a PR no longer flips a clean PR's verdict.
+// Without a base the scan stays absolute, exactly as before.
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scanText } from "../server/secret-scan.mjs";
 
@@ -198,16 +206,25 @@ function walk(dir, out = []) {
   return out;
 }
 
-const root = new URL("..", import.meta.url).pathname;
+// SECRET_SCAN_ROOT points the scan at another tree (test fixtures run
+// this same gate inside a fixture layout). fileURLToPath decodes
+// %-escapes: the previous `new URL("..", import.meta.url).pathname`
+// kept %20, so from any checkout path containing a space the gate
+// crashed ENOENT and scanned nothing (#3682; found by the #3681 T3
+// canary, whose spaced tree fixture had to be dropped for this bug).
+export const root = process.env.SECRET_SCAN_ROOT
+  ? resolve(process.env.SECRET_SCAN_ROOT)
+  : fileURLToPath(new URL("..", import.meta.url));
 
-function runTreeScan() {
+// Scan one tree; returns its findings plus the number of files scanned.
+export function scanTree(scanRoot) {
   const files = [];
   for (const dir of SCAN_DIRS) {
-    try { files.push(...walk(join(root, dir))); } catch { /* dir may not exist */ }
+    try { files.push(...walk(join(scanRoot, dir))); } catch { /* dir may not exist */ }
   }
   if (SCAN_ROOT_FILES) {
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      if (entry.isFile() && SCAN_EXT.test(entry.name)) files.push(join(root, entry.name));
+    for (const entry of readdirSync(scanRoot, { withFileTypes: true })) {
+      if (entry.isFile() && SCAN_EXT.test(entry.name)) files.push(join(scanRoot, entry.name));
     }
   }
   const filtered = files.filter(f => {
@@ -216,25 +233,128 @@ function runTreeScan() {
     // the ALLOWLIST above handles known-safe matches.
     try { return statSync(f).size <= 2 * 1024 * 1024; } catch { return false; }
   });
-
-  let total = 0;
+  const findings = [];
   for (const file of filtered) {
     let text;
     try { text = readFileSync(file, "utf8"); } catch { continue; }
-    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
-    for (const f of findings) {
-      console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
-      total++;
+    for (const f of scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS })) {
+      findings.push({ rel: relative(scanRoot, file), ...f });
     }
   }
-
-  if (total > 0) {
-    console.error(`\nsecret-scan: FAIL — ${total} finding(s). Remove the secret or add an allowlist entry with justification.`);
-    process.exit(1);
-  }
-  console.log(`secret-scan: ok — ${files.length} files scanned, no findings.`);
+  return { findings, scanned: files.length };
 }
 
+// A finding's identity across trees: same file, same rule, same redacted
+// preview. The line number is excluded — an unrelated edit above a
+// pre-existing finding shifts its line without making it new.
+export function findingKey(f) {
+  return `${f.rel} [${f.rule}] ${f.preview}`;
+}
+
+function gitText(args, cwd) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+// Resolve the base whose findings are grandfathered, or null for an
+// absolute scan. Explicit --base <ref> / SECRET_SCAN_BASE_REF wins and is
+// resolved through `git merge-base HEAD <ref>` when a merge base exists
+// (the secret-scan-diff.mjs / i18n-harness.mjs shape); on a pull_request
+// run the merge commit's first parent is the base tip the PR lands on.
+export function resolveBaseRef(argv) {
+  let explicit = process.env.SECRET_SCAN_BASE_REF || null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--base") explicit = argv[i + 1] ?? "";
+  }
+  if (explicit !== null) {
+    if (!explicit) return { error: "--base needs a ref value" };
+    const mb = gitText(["merge-base", "HEAD", explicit], root);
+    return { ref: mb || explicit, explicit: true };
+  }
+  if (/^pull_request/.test(process.env.GITHUB_EVENT_NAME || "")) {
+    const parent = gitText(["rev-parse", "--verify", "--quiet", "HEAD^1"], root);
+    if (parent) return { ref: parent, explicit: false };
+  }
+  return null;
+}
+
+// Extract the scan scope of `ref` into a temp dir and scan it with this
+// gate's current rules (the i18n-harness base-tree ratchet shape).
+// Returns the base findings, or null when no base tree can be produced.
+export function scanBaseTree(ref) {
+  const scope = SCAN_DIRS.filter(d => gitText(["cat-file", "-e", `${ref}:${d}`], root) !== null);
+  const treeList = gitText(["ls-tree", "--name-only", ref], root);
+  if (treeList) {
+    for (const name of treeList.split("\n")) {
+      if (name && !name.includes("/") && SCAN_EXT.test(name)) scope.push(name);
+    }
+  }
+  if (scope.length === 0) return null;
+  const dir = mkdtempSync(join(tmpdir(), "secret-scan-base-"));
+  try {
+    const archive = spawnSync("git", ["archive", "--format=tar", ref, "--", ...scope], { cwd: root, maxBuffer: 1 << 30 });
+    if (archive.status !== 0) return null;
+    const untar = spawnSync("tar", ["-x", "-C", dir], { input: archive.stdout, maxBuffer: 1 << 30 });
+    if (untar.status !== 0) return null;
+    return scanTree(dir).findings;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function reportFinding(f) {
+  console.error(`secret-scan: ${f.rel}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
+}
+
+function absoluteVerdict(findings, scanned) {
+  for (const f of findings) reportFinding(f);
+  if (findings.length > 0) {
+    console.error(`\nsecret-scan: FAIL — ${findings.length} finding(s). Remove the secret or add an allowlist entry with justification.`);
+    process.exit(1);
+  }
+  console.log(`secret-scan: ok — ${scanned} files scanned, no findings.`);
+}
+
+function runTreeScan() {
+  const { findings, scanned } = scanTree(root);
+  const base = resolveBaseRef(process.argv.slice(2));
+  if (base?.error) {
+    console.error(`secret-scan: ${base.error}.`);
+    process.exit(2);
+  }
+  if (!base) {
+    absoluteVerdict(findings, scanned);
+    return;
+  }
+  // Base-relative verdict (#3682): findings already present at the merge
+  // base are main's, not this PR's — they must not flip a clean PR's
+  // verdict when main moves under it. Only findings new vs base fail.
+  const baseFindings = scanBaseTree(base.ref);
+  if (baseFindings === null) {
+    if (base.explicit) {
+      console.error(`secret-scan: FAIL — could not scan the base tree at ${base.ref} (an explicit --base is fail-closed).`);
+      process.exit(2);
+    }
+    console.error(`secret-scan: warning — could not scan the base tree at ${base.ref}; falling back to an absolute scan.`);
+    absoluteVerdict(findings, scanned);
+    return;
+  }
+  const baseCounts = new Map();
+  for (const f of baseFindings) baseCounts.set(findingKey(f), (baseCounts.get(findingKey(f)) ?? 0) + 1);
+  const fresh = [];
+  for (const f of findings) {
+    const key = findingKey(f);
+    const remaining = baseCounts.get(key) ?? 0;
+    if (remaining > 0) baseCounts.set(key, remaining - 1);
+    else fresh.push(f);
+  }
+  for (const f of fresh) reportFinding(f);
+  if (fresh.length > 0) {
+    console.error(`\nsecret-scan: FAIL — ${fresh.length} new finding(s) vs base ${base.ref} (${baseFindings.length} pre-existing finding(s) at base ignored). Remove the secret or add an allowlist entry with justification.`);
+    process.exit(1);
+  }
+  console.log(`secret-scan: ok — ${scanned} files scanned, no new findings vs base ${base.ref} (${baseFindings.length} pre-existing finding(s) at base ignored).`);
+}
 // Only run the tree scan when executed directly (check.mjs spawns this
 // file); importing it (diff gate, tests) gets the config without side
 // effects.
