@@ -10,6 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { sweepUnreferencedBodies } from "./projection-at-rest.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -540,6 +541,20 @@ export const JOBS = Object.freeze([
         }
       }
       return logIntegrity(integrity);
+    }
+  }),
+  defineJob({
+    name: "projection-body-sweep",
+    cadenceMs: 5 * MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(_env, store) {
+      if (!store?.db?.prepare) return false;
+      try { return Boolean(store.db.prepare("SELECT 1 FROM projection_bodies LIMIT 1").get()); }
+      catch { return false; }
+    },
+    disabledReason: () => "No message bodies are waiting to be released",
+    async run(store, ctx) {
+      return sweepUnreferencedBodies(store.db, { roomLimit: 20, deadline: ctx.deadline ?? Infinity });
     }
   }),
   defineJob({

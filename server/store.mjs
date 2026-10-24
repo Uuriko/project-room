@@ -1367,9 +1367,10 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto", deferBodyRelease = false } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    this.deferBodyRelease = deferBodyRelease === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
@@ -3597,7 +3598,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   storedProjection(roomId, state) {
-    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
+    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest, releaseBodies: !this.deferBodyRelease });
   }
   // A body row can only go missing through a write outside storedProjection.
   // The event log is still the source of truth: replay it and refill.
