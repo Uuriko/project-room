@@ -28,13 +28,23 @@
 // feed candidate #6 names) and an arbiter-confirmed sybil cluster
 // (sybil_confirmed; dismissed flags stay neutral — honest coincidence must
 // be dismissible without lasting harm).
-import { createReputation, bandOf, REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS } from "./reputation.mjs";
+import { createReputation, bandOf, REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS, REPUTATION_DECAY_HALF_LIFE_MS } from "./reputation.mjs";
 
 export { REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS };
 // Probation-band lanes may only claim small bounties. 5 credits keeps the
 // gate meaningful (well above micro-bounties) without being a soft ban.
 export const PROBATION_MAX_CLAIM_CREDITS = 5;
 export const PROBATION_MAX_CLAIM_MILLIS = PROBATION_MAX_CLAIM_CREDITS * 1000;
+// Designation bar for the verifier office (EXP-15R hardening item 2): a
+// verifier whose acceptances were overturned by upheld disputes — the
+// acceptance_overturned signal, decayed with the same 30-day half-life as
+// every other typed signal — at or above this decayed count cannot be
+// designated until decay brings the count back under the bar. 1.5 means a
+// single overturn never bars alone (its decayed weight is at most 1), two
+// recent overturns bar (2.0), and two overturns a half-life old no longer
+// bar (1.0): judged, recent, and always with a way back — the probation
+// pattern, extended from claiming to designation.
+export const VERIFIER_DESIGNATION_OVERTURN_BAR = 1.5;
 
 const laneOf = value => typeof value === "string" && value.length > 0 ? value : null;
 
@@ -187,6 +197,43 @@ export function routingVisibility(escrow, roomId, agentId, { nowMs } = {}) {
     nowMs: summary.nowMs,
     claimable: amountMillis => maxClaimMillis === null || amountMillis <= maxClaimMillis,
   });
+}
+
+// Designation standing for the verifier office: the lane's overturned
+// acceptances (acceptance_overturned signals from upheld disputes),
+// counted raw and decayed to nowMs with the reputation half-life. Pure
+// fold over the same event stream as the projector, with the same
+// membership gate — a lane that is not a current member accrues nothing.
+// barred lifts by decay alone: barredUntilMs is the earliest time the
+// decayed count falls under the bar if no new overturn lands (null when
+// not barred).
+export function verifierDesignationStanding(escrow, roomId, agentId, { nowMs } = {}) {
+  const now = nowMs === undefined ? escrow.nowMs() : nowMs;
+  const memberIds = typeof escrow.memberLaneIds === "function" ? escrow.memberLaneIds(roomId) : null;
+  if (memberIds !== null && !memberIds.has(agentId))
+    return Object.freeze({ agentId, overturned: 0, decayedOverturns: 0, barred: false, barredUntilMs: null, nowMs: now });
+  const overturnAts = [];
+  for (const event of escrow.listEvents(roomId)) {
+    const at = Number.isInteger(Date.parse(event.at)) ? Date.parse(event.at) : now;
+    for (const s of signalsForEvent(event))
+      if (s.agent === agentId && s.type === "acceptance_overturned") overturnAts.push(at);
+  }
+  const decayedAt = t => overturnAts.reduce(
+    (sum, at) => sum + Math.pow(0.5, Math.max(0, t - at) / REPUTATION_DECAY_HALF_LIFE_MS), 0);
+  const decayedOverturns = decayedAt(now);
+  const barred = decayedOverturns >= VERIFIER_DESIGNATION_OVERTURN_BAR;
+  let barredUntilMs = null;
+  if (barred) {
+    // The decayed count decreases monotonically; bisect the lift time.
+    let lo = now, hi = now + 64 * REPUTATION_DECAY_HALF_LIFE_MS;
+    while (hi - lo > 1000) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (decayedAt(mid) >= VERIFIER_DESIGNATION_OVERTURN_BAR) lo = mid; else hi = mid;
+    }
+    barredUntilMs = hi;
+  }
+  return Object.freeze({ agentId, overturned: overturnAts.length, decayedOverturns,
+    barred, barredUntilMs, nowMs: now });
 }
 
 export { bandOf };

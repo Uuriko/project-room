@@ -66,7 +66,7 @@ import { canonicalJson } from "../src/audit-receipts.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
-import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
+import { claimEligibility, reputationSummary, routingVisibility, verifierDesignationStanding, VERIFIER_DESIGNATION_OVERTURN_BAR, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 
@@ -246,6 +246,7 @@ export const bountyEscrowSchema = `
     poster TEXT NOT NULL,
     verifier TEXT,
     dispute_decider TEXT,
+    challenger_of_record TEXT,
     approval_mode TEXT NOT NULL DEFAULT 'legacy' CHECK(approval_mode IN ('legacy','human','agent')),
     claimant TEXT,
     state TEXT NOT NULL,
@@ -1013,6 +1014,7 @@ export class BountyEscrow {
     // genesis/transfer); nothing reads the column yet.
     addCol("bounty_records", "state_changed_ms INTEGER");
     addCol("bounty_records", "dispute_decider TEXT");
+    addCol("bounty_records", "challenger_of_record TEXT");
     addCol("bounty_records", "snoozed_until_ms INTEGER");
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
@@ -1303,6 +1305,7 @@ export class BountyEscrow {
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
       disputeDecider: row.dispute_decider ?? null,
+      challengerOfRecord: row.challenger_of_record ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -1328,11 +1331,13 @@ export class BountyEscrow {
   _saveBounty(bounty) {
     const at = isoNow(this.nowMs());
     this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?, dispute_decider=?,
+      challenger_of_record=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
       evidence_json=?, attestation_json=?, resolution_json=?,
       rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
       .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier, bounty.disputeDecider ?? null,
+        bounty.challengerOfRecord ?? null,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
         bounty.snoozedUntilMs ?? null, bounty.declineReason ?? null, bounty.duplicateOf ?? null, bounty.label ?? null,
@@ -1350,6 +1355,7 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amountMillis: row.amount_millis, poster: row.poster, verifier: row.verifier, claimant: row.claimant,
       disputeDecider: row.dispute_decider ?? null,
+      challengerOfRecord: row.challenger_of_record ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, stateChangedMs: row.state_changed_ms, deadlineMs: row.deadline_ms,
       challengeEndsMs: row.challenge_ends_ms, disputeId: row.dispute_id, disputeOpenedMs: row.dispute_opened_ms,
@@ -1434,6 +1440,16 @@ export class BountyEscrow {
         if (members === null)
           check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
+        // EXP-15R hardening item 2: the overturn gate on designation. A
+        // verifier whose acceptances keep being overturned by upheld
+        // disputes cannot be designated until the decayed overturn count
+        // falls back under the bar (bounty-reputation.mjs) — the
+        // probation pattern extended from claiming to the verifier
+        // office. Judged signals only; decay always offers a way back.
+        const standing = verifierDesignationStanding(this, roomId, verifier);
+        if (standing.barred)
+          fail("verifier_probation",
+            `verifier ${verifier} cannot be designated: ${standing.overturned} acceptances overturned by upheld disputes (decayed ${standing.decayedOverturns.toFixed(2)}, bar ${VERIFIER_DESIGNATION_OVERTURN_BAR}); designation re-opens as the count decays, around ${new Date(standing.barredUntilMs).toISOString()}`);
       }
       let decider = null;
       if (disputeDeciderId !== null && disputeDeciderId !== undefined) {
@@ -2118,6 +2134,36 @@ export class BountyEscrow {
     return false;
   }
 
+  // EXP-15R hardening item 1: staff the challenge window. The challenger-
+  // of-record is drawn at acceptance from the room's current active
+  // members, independent of every party with a stake in the verdict:
+  // poster, claimant, verifier, and the effective dispute decider
+  // (disputeDecider ?? verifier) — the decider is excluded because dispute
+  // seating refuses a challenger-designee, so naming the decider would
+  // strand the very dispute the staffing exists to enable. Agent members
+  // are preferred (they are the wakeable actors); the draw is a
+  // deterministic hash of the bounty id over the sorted eligible lanes,
+  // so it is replay-stable and spreads across bounties. Returns null when
+  // nobody is eligible (small rooms) or no membership source exists —
+  // acceptance never fails for want of a challenger; the record simply
+  // names none.
+  _selectChallengerOfRecord(roomId, bounty) {
+    const memberIds = this.memberLaneIds(roomId);
+    if (memberIds === null) return null;
+    const excluded = new Set([bounty.poster, bounty.claimant, bounty.verifier,
+      bounty.disputeDecider ?? bounty.verifier].filter(value => value !== null && value !== undefined));
+    const eligible = [...memberIds].filter(lane => !excluded.has(lane)).sort();
+    if (eligible.length === 0) return null;
+    const agents = eligible.filter(lane => this._memberOf(roomId, lane)?.kind === "agent");
+    const pool = agents.length > 0 ? agents : eligible;
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bounty.bountyId.length; i++) {
+      hash ^= bounty.bountyId.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return pool[hash % pool.length];
+  }
+
   acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -2144,6 +2190,11 @@ export class BountyEscrow {
       // version that governed the work, so arbiters can re-check against it.
       const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
       const at = isoNow(this.nowMs());
+      // EXP-15R hardening item 1: staff the challenge window this
+      // acceptance opens. The challenger-of-record is named on the
+      // record and on the acceptance event, and seated as a watcher, so
+      // the doors can wake them (publishBountyEvent reads the event).
+      const challengerOfRecord = this._selectChallengerOfRecord(roomId, bounty);
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
       this._acceptanceTransition(bounty, "accepted", { evidence: verifierAttestation });
@@ -2152,7 +2203,8 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.accepted",
         { bountyId, actor: act, before: "submitted", after: "accepted",
           data: { approval: { decision: approval.decision, by: approval.by, at: approval.at },
-            claimant: bounty.claimant, challengeEnds: new Date(this.nowMs() +
+            claimant: bounty.claimant, challengerOfRecord,
+            challengeEnds: new Date(this.nowMs() +
               (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS)).toISOString() } });
       // 2. The escrow release is the explicit consequence of the approval:
       // finality (attribute) requires the terminal acceptance verdict above.
@@ -2165,6 +2217,8 @@ export class BountyEscrow {
       bounty.attestation = Object.freeze({ ...verifierAttestation, citations,
         rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
         recordedBy: lane, recordedAt: at });
+      bounty.challengerOfRecord = challengerOfRecord;
+      if (challengerOfRecord !== null) this._addWatcher(roomId, bountyId, challengerOfRecord, at);
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);

@@ -31,6 +31,7 @@
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { recordWakeEvent } from "./wake-metrics.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -132,13 +133,59 @@ const readPayload = async (reject, readBody, req) => {
 
 // Share lifecycle delivery across HTTP and MCP; retries never publish twice.
 export function publishBountyEvent(store, roomId, event) {
-  if (!event || !store.agentPlugin) return;
+  if (!event) return;
+  wakeChallengerOfRecord(store, roomId, event);
+  if (!store.agentPlugin) return;
   try {
     store.agentPlugin.fanoutRoomEvent({ roomId,
       event: { id: `bounty-event-${event.seq}`, type: event.type,
         data: { ...(event.data ?? {}), bountyId: event.bountyId ?? null,
           actor: event.actor ?? null, before: event.before ?? null, after: event.after ?? null } } });
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
+}
+
+// EXP-15R hardening item 1 (delivery half): an acceptance that named a
+// challenger-of-record wakes them through the durable agent wake queue —
+// kind "assignment", messageId "bounty-challenge:<bountyId>", so a host
+// can tell it from a chat mention and repeats coalesce on the id. The
+// member behind the lane resolves through identity_links only (the
+// work-wake rule: trial/guest seats are not woken for work). A wake
+// failure never fails the bounty call; losses are journaled through
+// wake-metrics with allowlisted reasons, like every other wake path.
+export function wakeChallengerOfRecord(store, roomId, event) {
+  const challengerLane = event?.data?.challengerOfRecord;
+  if (event?.type !== "bounty.accepted" || typeof challengerLane !== "string" || challengerLane.length === 0) return;
+  if (!store?.agentHeartbeats || typeof store.roomAuthority !== "function") return;
+  const at = typeof store.now === "function" ? store.now() : Date.now();
+  let memberId = null;
+  try {
+    const { members } = store.roomAuthority(roomId) ?? {};
+    memberId = members && typeof members === "object"
+      ? Object.keys(members).find(id => canonicalLane(id) === challengerLane) ?? null
+      : null;
+    if (memberId === null) return;
+    let identityId = null;
+    try {
+      identityId = store.db.prepare(
+        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?"
+      ).get(roomId, memberId)?.identityId ?? null;
+    } catch { identityId = null; }
+    if (!identityId) {
+      recordWakeEvent(store.db, { at, roomId, store: "signals",
+        event: "suppressed_no_identity", kind: "assignment", subjectId: memberId, reason: "no_identity_link" });
+      return;
+    }
+    const result = store.agentHeartbeats.enqueueWake({ agentId: identityId, kind: "assignment",
+      roomId, messageId: `bounty-challenge:${event.bountyId}` });
+    if (result?.enqueued && result.signal && store.agentPlugin?.deliverWakePing)
+      store.agentPlugin.deliverWakePing({ identityId, signal: result.signal });
+  } catch (error) {
+    try {
+      recordWakeEvent(store.db, { at, roomId, store: "signals",
+        event: "failed", kind: "assignment", subjectId: memberId, reason: "enqueue_error" });
+    } catch { /* accounting must never throw */ }
+    console.error("bounty challenger wake failed:", error?.message ?? error);
+  }
 }
 
 export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null }) {
