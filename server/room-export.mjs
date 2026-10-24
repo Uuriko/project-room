@@ -499,7 +499,11 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "durable_alarm_queue",
   // Job watchdog progress (server/job-watchdog-store.mjs). This table is
   // not in the room database. A room restore must not invent it.
-  "watchdog_subjects"
+  "watchdog_subjects",
+  // History census (server/room-history.mjs). Counts derived from events.
+  // A restored object walks the rooms again; replaying the cursor would
+  // skip rooms that the backup had already passed.
+  "room_history_cursor", "room_history_census"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
