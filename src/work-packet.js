@@ -42,13 +42,22 @@ export function reportedProducer(data) {
 // before its text was withdrawn still has to reconstruct exactly, and the
 // tombstone keeps everything this needs except the body.
 export function nativeTextEvidence(state, work, data, { allowWithdrawn = false } = {}) {
-  if (data.evidenceKind !== "room_text" || Object.hasOwn(data, "evidenceUrl")
-    || ![data.evidenceMessageId, data.evidenceMessageEventId].every(id)
-    || !Object.hasOwn(data, "previousCompletionEventId")
-    || (data.previousCompletionEventId !== null && !id(data.previousCompletionEventId))
-    || data.previousCompletionEventId !== (work.receipt?.eventId ?? null)
-    || !Object.hasOwn(data, "producerId") || (data.producerId !== null && !id(data.producerId))
-    || !/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion)) invalid("Choose exact text evidence and its current previous result");
+  // Each requirement refuses with its own message: a raw-HTTP caller learns
+  // the contract from the refusal, so a compound message that names none of
+  // them teaches nothing (QA-STRANGER-2 F-2).
+  if (data.evidenceKind !== "room_text" || Object.hasOwn(data, "evidenceUrl"))
+    invalid("Choose room text evidence (evidenceKind \"room_text\", without an evidenceUrl)");
+  if (![data.evidenceMessageId, data.evidenceMessageEventId].every(id))
+    invalid("Name the evidence message and its event id");
+  if (!Object.hasOwn(data, "previousCompletionEventId"))
+    invalid("State the previous completion event id, or null for the first completion");
+  if ((data.previousCompletionEventId !== null && !id(data.previousCompletionEventId))
+    || data.previousCompletionEventId !== (work.receipt?.eventId ?? null))
+    invalid("The previous completion must be the work's current completion");
+  if (!Object.hasOwn(data, "producerId") || (data.producerId !== null && !id(data.producerId)))
+    invalid("State the producer id, or null when the producer is unknown");
+  if (!/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion))
+    invalid("evidenceVersion must be \"sha256:\" followed by the 64-character hex digest of the exact evidence message body");
   const message = state.messages.find(message => message.id === data.evidenceMessageId);
   const withdrawn = allowWithdrawn && Boolean(message?.deletedAt);
   // Replay of a completion sees the posted body already null once the log has

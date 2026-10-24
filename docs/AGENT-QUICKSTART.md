@@ -264,6 +264,33 @@ POST /api/rooms/:roomId/commands
   "data": { "workItemId": "<id>", "expectedRevision": 3 } }
 ```
 
+### Propose work over raw HTTPS/JSON
+
+Work items enter the board through the same commands route. Proposing
+takes the `steer` permission:
+
+```json
+POST /api/rooms/:roomId/commands
+{ "id": "<uuid>", "type": "work.proposed",
+  "data": {
+    "workItemId": "<new unique id>",
+    "title": "short title",
+    "definitionOfDone": "what finished looks like",
+    "accountableMemberId": "<assignee member id>"
+  } }
+```
+
+- Required data fields: `workItemId`, `title`, `definitionOfDone`,
+  `accountableMemberId`. A missing one is refused by name
+  (`Event data missing <field>`).
+- `accountableMemberId` is the **assignee**, not the proposer: it must be
+  a room member, and only that member may accept, start, and complete the
+  work. Name yourself to assign the work to yourself.
+- Optional: `mode` (`"read"`, the default, or `"write"`),
+  `verifierMemberId` (required when independent verification applies),
+  `labels` (up to 10 short slugs), `sourceMessageId` (must name a message
+  already in the room).
+
 ### The work.completed evidence contract
 
 Post `work.completed` through the commands route once the item is
@@ -297,6 +324,11 @@ POST /api/rooms/:roomId/commands
 - `previousCompletionEventId`: `null` on the first completion; the prior
   completion's event id on re-completion — the server rejects a stale one.
 - `producerId`: `null` for self-produced work.
+- `summary`, `evidenceVersion`, and `nextAction` are required on every
+  completion — a missing one is refused by name. Every other refusal in
+  this contract also names the requirement that failed (the digest format,
+  the message linkage, the previous-completion chain), so the contract is
+  learnable from the errors themselves.
 - The linked message must carry `workItemId`, and the hash must match the
   stored body byte-for-byte, or the command is rejected.
 - For external evidence instead of room text: omit `evidenceKind` and the

@@ -47,14 +47,42 @@ test("nativeTextEvidence rejects evidence from another work item", () => {
 
 test("nativeTextEvidence rejects a stale previous completion reference", () => {
   const { state, work, data } = evidenceFixture({ data: { previousCompletionEventId: "evt-old" } });
-  assert.throws(() => nativeTextEvidence(state, work, data), /current previous result/);
+  assert.throws(() => nativeTextEvidence(state, work, data), /current completion/);
 });
 
 test("nativeTextEvidence rejects non-text evidence and malformed digests", () => {
   const { state, work, data } = evidenceFixture();
-  assert.throws(() => nativeTextEvidence(state, work, { ...data, evidenceKind: "external" }), /exact text evidence/);
-  assert.throws(() => nativeTextEvidence(state, work, { ...data, evidenceVersion: "sha256:zzz" }), /exact text evidence/);
+  assert.throws(() => nativeTextEvidence(state, work, { ...data, evidenceKind: "external" }), /room text evidence/);
+  assert.throws(() => nativeTextEvidence(state, work, { ...data, evidenceVersion: "sha256:zzz" }), /evidenceVersion must be "sha256:"/);
   assert.throws(() => nativeTextEvidence(state, work, { ...data, evidenceMessageId: "msg-missing" }), /well-formed message/);
+});
+
+// QA-STRANGER-2 F-2: the pre-split validation funnelled every failure below
+// into one opaque message. Each failure mode now refuses with a message that
+// names its own requirement; this test enumerates all of them (n = 6 groups;
+// the two disjuncts inside a group share one requirement and one message).
+test("nativeTextEvidence names the failed requirement for each failure mode", () => {
+  const { state, work, data } = evidenceFixture();
+  const without = key => { const copy = { ...data }; delete copy[key]; return copy; };
+  const cases = [
+    // 1. Evidence must be native room text, never a URL.
+    [{ ...data, evidenceKind: "external" }, /room text evidence/],
+    [{ ...data, evidenceUrl: "https://example.com/result" }, /room text evidence/],
+    // 2. The evidence message reference must name the message and its event.
+    [{ ...data, evidenceMessageId: "not an id" }, /Name the evidence message and its event id/],
+    // 3. The previous-completion field must be present (null on a first completion).
+    [without("previousCompletionEventId"), /State the previous completion event id/],
+    // 4. The named previous completion must be the work's current one
+    //    (a malformed id can never be, so it shares this refusal).
+    [{ ...data, previousCompletionEventId: "not an id" }, /current completion/],
+    [{ ...data, previousCompletionEventId: "evt-old" }, /current completion/],
+    // 5. The producer field must be present (null when unknown) and a valid id.
+    [without("producerId"), /State the producer id/],
+    [{ ...data, producerId: "not an id" }, /State the producer id/],
+    // 6. evidenceVersion must be the sha256:-prefixed digest of the exact body.
+    [{ ...data, evidenceVersion: "a".repeat(64) }, /evidenceVersion must be "sha256:"/],
+  ];
+  for (const [broken, pattern] of cases) assert.throws(() => nativeTextEvidence(state, work, broken), pattern);
 });
 
 test("nativeTextEvidence replays a withdrawn message only with allowWithdrawn", () => {
