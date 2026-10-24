@@ -18,7 +18,8 @@
 // NOTE: like the detector tests, all example secrets are generated at
 // runtime so this file never contains a literal secret-shaped string
 // (GitHub push protection). Probe repos live under os.tmpdir() (the
-// worktree .tmp/ when run via scripts/test-env.sh) and are destroyed with it.
+// worktree .tmp/ when run via scripts/test-env.sh); every probe dir is
+// removed by a t.after rmSync hook so runs never leak into TMPDIR (#3401).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -29,6 +30,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -179,8 +181,9 @@ test("scanAddedUnits maps findings back to new line numbers", () => {
   assert.match(findings[0], /^a\.txt:11 \[aws-access-key\]/);
 });
 
-test("path allowlist loader requires a reason and matches globs", () => {
+test("path allowlist loader requires a reason and matches globs", (t) => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "secret-scan-diff-allow-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const p = path.join(dir, "allowlist.txt");
   writeFileSync(
     p,
@@ -195,8 +198,9 @@ test("path allowlist loader requires a reason and matches globs", () => {
 
 // --- e2e: the real CLI against a temp git repo -------------------------------
 
-function initTempRepo() {
+function initTempRepo(t) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "secret-scan-diff-repo-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const git = (args, opts = {}) =>
     execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", ...opts });
   git(["init", "-q"]);
@@ -216,8 +220,8 @@ function runGate(args, cwd) {
   });
 }
 
-test("CLI flags all 12 seeded rules on added lines (exit 1)", () => {
-  const { dir, sha } = initTempRepo();
+test("CLI flags all 12 seeded rules on added lines (exit 1)", (t) => {
+  const { dir, sha } = initTempRepo(t);
   const values = SEEDS.map(([, gen]) => gen());
   // Each seed is already a full line (or a bare value); write them
   // unwrapped so every rule sees its natural shape.
@@ -239,8 +243,8 @@ test("CLI flags all 12 seeded rules on added lines (exit 1)", () => {
   }
 });
 
-test("CLI exits 0 for a clean diff and for allowlisted paths", () => {
-  const { dir, sha } = initTempRepo();
+test("CLI exits 0 for a clean diff and for allowlisted paths", (t) => {
+  const { dir, sha } = initTempRepo(t);
 
   // Clean change.
   writeFileSync(path.join(dir, "clean.txt"), 'greeting = "hello world"\n');
@@ -263,8 +267,8 @@ test("CLI exits 0 for a clean diff and for allowlisted paths", () => {
   assert.equal(r.status, 0, `expected exit 0, output: ${r.stdout} ${r.stderr}`);
 });
 
-test("CLI --staged scans staged changes (pre-commit path)", () => {
-  const { dir } = initTempRepo();
+test("CLI --staged scans staged changes (pre-commit path)", (t) => {
+  const { dir } = initTempRepo(t);
   const secret = fakeStripe();
   writeFileSync(path.join(dir, "staged.txt"), `${secret}\n`);
   execFileSync("git", ["-C", dir, "add", "staged.txt"]);
@@ -274,19 +278,20 @@ test("CLI --staged scans staged changes (pre-commit path)", () => {
   assert.ok(!r.stdout.includes(secret));
 });
 
-test("CLI rejects unknown flags (exit 2)", () => {
-  const { dir } = initTempRepo();
+test("CLI rejects unknown flags (exit 2)", (t) => {
+  const { dir } = initTempRepo(t);
   const r = runGate(["--bogus"], dir);
   assert.equal(r.status, 2);
 });
 
 // --- acceptance: zero false positives against current main -------------------
 
-test("zero false positives against the origin/main tree", () => {
+test("zero false positives against the origin/main tree", (t) => {
   // The diff gate reuses the detector + shared line allowlist under the
   // tree scan's scope policy: whatever main contains in scope today must
   // not trip it, or PRs touching those lines would fail the gate.
   const dir = mkdtempSync(path.join(os.tmpdir(), "secret-scan-diff-main-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const archive = execFileSync("git", ["-C", REPO_ROOT, "archive", "origin/main"], {
     maxBuffer: 256 * 1024 * 1024,
   });

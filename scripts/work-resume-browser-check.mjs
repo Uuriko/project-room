@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
@@ -43,9 +45,9 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
     foregrounds: ['summary', 'strong', 'p'].map(selector => getComputedStyle(node.querySelector(selector)).color) }));
   const hex = color => '#' + color.match(/\d+/g).slice(0, 3).map(value => Number(value).toString(16).padStart(2, '0')).join('');
   for (const color of colors.foregrounds) assert.ok(contrastRatio(hex(color), hex(colors.background)) >= 4.5, 'handoff text meets AA in the selected theme');
-  await card.screenshot({ path: `/tmp/project-room-focused-card-${mobile ? 'phone' : 'desktop'}.png` });
+  await card.screenshot({ path: join(tmpdir(), `project-room-focused-card-${mobile ? 'phone' : 'desktop'}.png`) });
   await handoff.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `/tmp/project-room-resume-${mobile ? 'phone' : 'desktop'}.png`, fullPage: true });
+  await page.screenshot({ path: join(tmpdir(), `project-room-resume-${mobile ? 'phone' : 'desktop'}.png`), fullPage: true });
   assert.equal(await handoff.getByText('Session ended.', { exact: false }).isVisible(), false);
   await handoff.getByText('Why work paused', { exact: true }).click();
   assert.equal(await page.evaluate(() => window.handoffExecuted), undefined);
@@ -60,7 +62,7 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   assert.equal((await preview.inputValue()).includes('Parser built'), false);
   await page.locator('#portable-progress').check();
   assert.match(await preview.inputValue(), /Parser built/);
-  await page.screenshot({ path: `/tmp/project-room-resume-prompt-${mobile ? 'phone' : 'desktop'}.png`, fullPage: true });
+  await page.screenshot({ path: join(tmpdir(), `project-room-resume-prompt-${mobile ? 'phone' : 'desktop'}.png`), fullPage: true });
   assert.match(await preview.inputValue(), /Check escaped separators/);
   assert.match(await preview.inputValue(), /does not authorize external changes/);
   assert.equal((await preview.inputValue()).includes('Please prepare an agenda'), false);
