@@ -1,5 +1,5 @@
 import { createWorkReducers } from "./work-reducers.js";
-import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
+import { createMessageReducers, isRedactedBody, PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES, PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -19,6 +19,9 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
+  // #661: per-room anti-shout pacing policy for agent replies. Sibling of
+  // room.policy_set (not one of its boolean fields): it carries a number.
+  ROOM_PACING_POLICY_SET: "room.pacing_policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   // Owner kill-switch for the priced-tool gate. Default enabled when absent.
   ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
@@ -648,6 +651,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
+    [EVENT_TYPES.ROOM_PACING_POLICY_SET]: setPacingPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
@@ -855,6 +859,24 @@ function setRoomPolicy(state, incoming) {
   state.room.policy = {
     requireIndependentReview: incoming.data.requireIndependentReview,
     requireOwnerDecision: incoming.data.requireOwnerDecision,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function setPacingPolicy(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room pacing policy");
+  if (typeof incoming.data.enabled !== "boolean") throw new Error("Room pacing policy requires enabled as true or false");
+  const max = incoming.data.maxUnnamedAgentReplies ?? PACING_DEFAULT_MAX_UNNAMED_AGENT_REPLIES;
+  if (!Number.isSafeInteger(max) || max < 0 || max > PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT) {
+    throw new Error(`Room pacing policy requires maxUnnamedAgentReplies as an integer from 0 to ${PACING_MAX_UNNAMED_AGENT_REPLIES_LIMIT}`);
+  }
+  const previous = state.room.pacingPolicy ?? null;
+  state.room.pacingPolicy = {
+    enabled: incoming.data.enabled,
+    maxUnnamedAgentReplies: max,
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
     setAt: incoming.at
