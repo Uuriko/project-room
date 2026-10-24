@@ -116,6 +116,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
   for(const page of pages) {
+    assert.equal(await page.locator('[data-message-record-id="public-result"] .message-meta strong').textContent(), f.store.room('commons').state.members.producer.displayName);
     await page.locator('#assistant-face .assistant-face-status').getByText('Result ready',{exact:true}).waitFor();
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Open result',exact:true}).count(), 1, 'the result is one tap from the card face');
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Stop',exact:true}).count(), 0, 'a finished ask has no Stop');
