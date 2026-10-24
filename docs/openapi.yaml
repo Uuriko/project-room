@@ -14871,6 +14871,24 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
         '422': { description: invalid_context_version }
+  /api/rooms/{roomId}/agent-connection:
+    get:
+      summary: Fresh compact connection identity metadata
+      description: |
+        One authenticated read transaction returns contractVersion 1, roomId,
+        viewerId, ownerId, and the current member's id, kind, active, revision,
+        permissions and delegatedAdmin. executionGranted is always false.
+        No history, message bodies, queue contents or credentials are returned.
+        Uses room authorization, session binding and API-key rooms:read scope.
+        This observation does not authorize later operations or cache access;
+        each operation authenticates independently. No filters are accepted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Authenticated connection identity metadata }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied or insufficient_scope }
+        '422': { description: invalid_request }
   /api/rooms/{roomId}/agent-work:
     get:
       summary: Bounded authenticated agent pickup observation

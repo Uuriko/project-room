@@ -723,8 +723,9 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
   const snapshot = await otherClient.snapshot();
   assert.equal(snapshot.state.members[other.identityId].delegatedAdmin, true);
   for (const marker of [undefined, false, "true"]) {
-    const payload = structuredClone(snapshot);
-    payload.state.members[other.identityId].delegatedAdmin = marker;
+    const payload = { contractVersion: 1, roomId: "keeper-den", viewerId: other.identityId,
+      member: { ...snapshot.state.members[other.identityId], delegatedAdmin: marker },
+      ownerId: snapshot.state.room.ownerId, executionGranted: false };
     const unmarked = new RoomAgentClient({ origin, roomId: "keeper-den", token: other.secret,
       memberId: other.identityId, fetchImpl: async () => new Response(JSON.stringify(payload),
         { status: 200, headers: { "Content-Type": "application/json" } }) });
