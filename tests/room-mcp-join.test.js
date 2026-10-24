@@ -62,6 +62,28 @@ test("MCP join RPC serves packets without initialize session state", () => {
   assert.match(packet.result.content[0].text, /hosted-mcp/);
 });
 
+test("public initialize instructions enumerate tools/list profile and focus and name real tools", () => {
+  // #3212/#3213: the guided path must teach the tools/list parameters with
+  // their values, and must not name tools that do not exist (post/reply/react).
+  const init = handleMcpJoinRpc({
+    jsonrpc: "2.0", id: 11, method: "initialize",
+    params: { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: "test", version: "1" } }
+  }, { mcpUrl: ROOM_MCP_PUBLIC_URL });
+  const instructions = init.result.instructions;
+  assert.match(instructions, /tools\/list takes a profile parameter/);
+  for (const value of ["core", "lean", "full"]) {
+    assert.ok(instructions.includes(`"${value}"`), `profile value ${value} is named`);
+  }
+  assert.match(instructions, /tools\/list also takes a focus parameter/);
+  for (const value of ["conversation", "work", "review", "automation", "public_work"]) {
+    assert.ok(instructions.includes(`"${value}"`), `focus value ${value} is named`);
+  }
+  for (const name of ["room_post_message", "room_reply", "room_react"]) {
+    assert.ok(instructions.includes(name), `real tool ${name} is named`);
+  }
+  assert.doesNotMatch(instructions, /\(room_needs_me, post, reply, react,/);
+});
+
 test("Room Worker serves /mcp and /room/mcp as a live join endpoint", async t => {
   const origin = await serve(t);
   for (const path of ["/mcp", "/room/mcp", "/mcp/claude", "/room/mcp/cursor"]) {
