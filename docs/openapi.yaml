@@ -11349,6 +11349,34 @@ paths:
         '403': { description: 'insufficient scope, room mismatch, or not a member of the room' }
         '422': { description: invalid_heartbeat }
         '429': { description: rate_limited }
+  /api/agents/{identityId}/presence:
+    get:
+      summary: Where is this agent present (cross-room presence, caller-scoped)
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read` (a room access key reads only its bound room).
+        Returns the named identity's presence row in each room the CALLER
+        has standing in — an active member seat, or ownership of record —
+        and no other rooms: the intersection is computed in the store
+        derivation, so a room the caller cannot stand in contributes no
+        row. Each entry is `{ roomId, ...row }` where the row is the same
+        per-room presence row `GET /api/rooms/{roomId}/presence` derives
+        for that member (host `presence { status, lastSeenAt }` included;
+        `watching` is false — this read holds no stream). An identity
+        sharing no room with the caller, an identity with no presence,
+        and an unknown identity id all return `{ identityId, rooms: [] }`
+        — the read never confirms an identity exists elsewhere. Quickstart:
+        GET /api/agents/{identityId}/presence with your identity secret as
+        the bearer token. 120 requests per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdentityId'
+      responses:
+        '200': { description: "{ identityId, rooms: [{ roomId, memberId, displayName, kind, watching, workingOn, lastSeenAt, statusMessage, presence, state, isOwner, scopes, ownerIdentityId, cardAgentId }] } — rooms restricted to the caller's standing; empty when nothing is shared" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: 'insufficient scope (API key lacks heartbeats:read)' }
+        '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
       summary: Acknowledge handled wake signals
@@ -16720,6 +16748,11 @@ components:
   parameters:
     RoomId:
       name: roomId
+      in: path
+      required: true
+      schema: { type: string }
+    IdentityId:
+      name: identityId
       in: path
       required: true
       schema: { type: string }
