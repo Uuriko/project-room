@@ -16,7 +16,7 @@
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
