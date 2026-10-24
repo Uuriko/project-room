@@ -15,6 +15,10 @@ test("isolated staging owns its Durable Object and does not take production rout
   assert.equal(release.env.production.vars.ROOM_ORIGIN, "https://room.trydemigod.com");
   assert.equal(release.env.production.vars.ROOM_DEPLOYMENT, "production");
   assert.equal(release.env.production.limits.cpu_ms, 30000);
+  // #3911: the top-level entry Worker is deployed without --env by
+  // deploy-prod and serves production traffic, so its CPU limit matches
+  // production's 30s rather than the 1s it carried before.
+  assert.equal(release.limits.cpu_ms, 30000);
   // The top-level Worker is the public entry door (www.getdasha.com/room). It
   // serves production traffic against the production Durable Object, so its
   // own health, ready and version/worker answers must say production too.

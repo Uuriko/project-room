@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
+import { jobByName } from "../server/jobs.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -163,6 +164,59 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   assert.equal(seen[0].text.includes(sha(HOOK)), true);
   assert.equal(seen[0].customMetadata.sha256, sha(seen[0].text));
   assert.equal(seen[0].customMetadata.backupVersion, "2");
+});
+
+test("the daily backup honours the job deadline on both targets (#3911)", async t => {
+  const { store } = openStore(t, 2);
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 2));
+  const key = "room-backups/2026-10-02.ndjson";
+  const past = Date.now() - 1;
+  // R2: an expired deadline aborts before the export is even taken, and
+  // nothing is stored under the day's key.
+  const bucket = fakeR2Bucket();
+  let exports = 0;
+  const countingRoom = { exportRoomNdjson: () => { exports += 1; return exportNdjsonStream(store.db); } };
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, countingRoom, when, { deadline: past }), /deadline exceeded/);
+  assert.equal(exports, 0);
+  assert.equal(bucket.map.has(key), false);
+  // KV: an expired deadline writes neither parts nor a manifest.
+  const kv = fakeKv();
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when, { deadline: past }), /deadline exceeded/);
+  assert.equal(kv.map.size, 0);
+  // The streaming writer checks the deadline itself: no part and no
+  // manifest land when it has already passed.
+  const kvDirect = fakeKv();
+  await assert.rejects(() => writeKvBackup(kvDirect, key, exportNdjsonStream(store.db), { deadline: past }), /deadline exceeded/);
+  assert.equal(kvDirect.map.size, 0);
+  // A live deadline changes nothing: the day's backup is written.
+  const liveBucket = fakeR2Bucket();
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: liveBucket }, room, when, { deadline: Date.now() + 60_000 }), { wrote: key });
+});
+
+test("the room-backup job threads its tick deadline into the backup (#3911)", async t => {
+  const { store } = openStore(t, 2);
+  const job = jobByName("room-backup");
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const bucket = fakeR2Bucket();
+  const env = { ROOM_BACKUPS: bucket };
+  // An already-spent tick budget fails the tick (the job's { errors: 1 }
+  // shape) instead of running a full backup past its budget.
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => { logged.push(args.map(String).join(" ")); };
+  let spent;
+  try {
+    spent = await job.run(null, { env, room, deadline: Date.now() - 1 });
+  } finally {
+    console.error = originalError;
+  }
+  assert.deepEqual(spent, { errors: 1 });
+  assert.match(logged.join("\n"), /deadline exceeded/);
+  assert.equal(bucket.map.size, 0);
+  const wrote = await job.run(null, { env, room, deadline: Date.now() + 60_000 });
+  assert.equal(typeof wrote.wrote, "string");
+  assert.equal(bucket.map.size, 1);
 });
 
 function fakeR2Bucket() {

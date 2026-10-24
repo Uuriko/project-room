@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { BUDGET_EXHAUSTED_NO_PROGRESS, HOUR_MS, JOB_BUDGET_MS, JOBS, budgetExhaustedWithoutProgress, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
+import { BUDGET_EXHAUSTED_NO_PROGRESS, HOUR_MS, JOB_BUDGET_MS, JOBS, budgetExhaustedWithoutProgress, jobByName, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function storeFor(t) {
@@ -116,6 +116,58 @@ test("node scheduler gives a later job a full budget window from its own start",
     "by the time land-queue started, a pass-relative window would already have closed");
   assert.equal(seen.deadline - seen.startedAt, JOB_BUDGET_MS,
     "the later job's deadline is measured from its own start, not the pass start");
+});
+
+test("claim-prs surfaces an autolink follow-up failure on the tick summary (#3911)", async () => {
+  const job = jobByName("claim-prs");
+  // A store the linked-PR poll tolerates (every read comes back empty)
+  // but whose claim-room listing explodes inside the autolink follow-up:
+  // discoverUnlinkedPulls reads the DISTINCT room ids and rethrows, and
+  // only the follow-up performs that read with this exact shape.
+  const store = {
+    db: {
+      prepare(sql) {
+        if (sql === "SELECT DISTINCT room_id AS roomId FROM work_claims") {
+          return { all() { throw new Error("autolink store exploded"); }, get: () => undefined, run: () => ({}) };
+        }
+        return { all: () => [], get: () => undefined, run: () => ({}) };
+      }
+    },
+    workClaims: { list: () => [], get: () => null, transaction: fn => fn(), set: () => {} }
+  };
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => { logged.push(args.map(String).join(" ")); };
+  let result;
+  try {
+    result = await job.run(store, { env: {}, deadline: Infinity });
+  } finally {
+    console.error = originalError;
+  }
+  assert.match(logged.join("\n"), /claim autolink follow-up failed/);
+  // The poll's own counters stand, but the tick is not a clean success:
+  // the failure rides the summary's error channel and names the
+  // sub-result that failed.
+  assert.equal(result.checked, 0);
+  assert.equal(result.updated, 0);
+  assert.deepEqual(result.autolink, { failed: 1 });
+  assert.equal(result.errors, 1);
+  assert.deepEqual(result.failureDetail, { code: "claim_autolink_failed" });
+});
+
+test("claim-prs keeps a clean summary when the autolink follow-up succeeds (#3911)", async () => {
+  const job = jobByName("claim-prs");
+  const store = {
+    db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({}) }) },
+    workClaims: { list: () => [], get: () => null, transaction: fn => fn(), set: () => {} }
+  };
+  const result = await job.run(store, { env: {}, deadline: Infinity });
+  assert.equal(result.errors, undefined);
+  assert.equal(result.failureDetail, undefined);
+  assert.deepEqual(result.autolink, {
+    discovered: { repos: 0, pulls: 0, linked: [] },
+    deployed: { linked: 0, skipped: "unstamped" }
+  });
 });
 
 test("budgetExhaustedWithoutProgress reads the jobs' own summary shapes", () => {
