@@ -276,6 +276,7 @@ response's own `hint`/`next` when it names something more specific.
 | `dm_not_blocked` | 409 | This member is not blocked | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `dm_nothing_to_revoke` | 409 | There is no approved DM consent between these members | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `dm_store_missing` | 500 | DmConsents requires a store with a db handle | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `door_funnel_unavailable` | 500 | Door funnel source is unavailable | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `duplicate_evidence` | internal | evidence ${result.evidenceId} already attests a completion in this room | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `email_account_mismatch` | 500 | This mailbox belongs to another account. | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `email_connection_changed` | 409 | Connection changed. Reconnect before importing. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
