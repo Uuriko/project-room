@@ -17,7 +17,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
-import { HeartbeatError } from "./agent-heartbeats.mjs";
+import { HeartbeatError, validSignalIds } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
@@ -296,11 +296,6 @@ function validPush(value) {
 function validEvents(events) {
   return Array.isArray(events) && events.length > 0 && events.length <= EVENT_CATALOG.length + 1
     && events.every(event => typeof event === "string" && event.length > 0 && event.length <= 128);
-}
-
-function validSignalIds(signalIds) {
-  return Array.isArray(signalIds) && signalIds.length > 0 && signalIds.length <= 50
-    && signalIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128);
 }
 
 function validWakeArgs(name, args) {

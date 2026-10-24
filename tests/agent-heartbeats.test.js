@@ -298,6 +298,25 @@ test("heartbeat endpoints: auth, scopes, validation, and the ack roundtrip", asy
   assert.deepEqual(after.pendingWakes, []);
 });
 
+test("REST wake ack enforces the shared batch cap: 51 ids rejected, 50 accepted (issue #3264)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("hb-cap-agent");
+  const scoped = await (await post(origin, "/api/agent-keys",
+    { scopes: ["heartbeats:report", "heartbeats:read"] }, identity.secret)).json();
+  await post(origin, "/api/agent-heartbeats", beat("host-a"), scoped.credential);
+  const ids = n => Array.from({ length: n }, (_, i) => `ws_cap_${i}`);
+  const tooMany = await post(origin, "/api/agent-heartbeats/ack", { signalIds: ids(51) }, scoped.credential);
+  assert.equal(tooMany.status, 422);
+  assert.equal(await errorCode(tooMany), "invalid_heartbeat_ack");
+  const badId = await post(origin, "/api/agent-heartbeats/ack", { signalIds: ["x".repeat(129)] }, scoped.credential);
+  assert.equal(badId.status, 422);
+  assert.equal(await errorCode(badId), "invalid_heartbeat_ack");
+  const atCap = await post(origin, "/api/agent-heartbeats/ack", { signalIds: ids(50) }, scoped.credential);
+  assert.equal(atCap.status, 200);
+  assert.deepEqual((await atCap.json()).acknowledged, []);
+});
+
 test("mention of an offline agent enqueues a wake and journals the webhook ping", async t => {
   const f = createAcceptanceFixture();
   let at = Date.now();
