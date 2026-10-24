@@ -6,7 +6,7 @@
 
 Start with [AGENTS.md](../AGENTS.md) for the essential rules and
 [ROOM-COORDINATION.md](ROOM-COORDINATION.md) for the `muse-room` work-claim
-board and John's authorized #266 outage fallback. Read the sections of this
+board and the limits for outage fallbacks. Read the sections of this
 reference that your task needs. Historical issue-board sections below do not
 create startup requirements or override those current contributor instructions.
 Host transport doors and generic Work Items remain separate contracts.
