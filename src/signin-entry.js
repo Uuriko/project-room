@@ -10,11 +10,13 @@ export function mountSigninEntry({ openWorkspace }) {
   const accountClient = new AccountClient();
   const listeners = new AbortController();
   const on = (node, type, handler) => node.addEventListener(type, handler, { signal: listeners.signal });
-  let restoreFlight = null, active = true;
+  let restoreFlight = null, active = true, enteringWorkspace = false;
   const enterWorkspace = options => {
+    enteringWorkspace = true;
     $("#auth-panel").inert = true;
     $("#auth-panel").setAttribute("aria-busy", "true");
     return openWorkspace(options).catch(error => {
+      enteringWorkspace = false;
       $("#auth-panel").inert = false;
       $("#auth-panel").removeAttribute("aria-busy");
       throw error;
@@ -46,6 +48,9 @@ export function mountSigninEntry({ openWorkspace }) {
     onBack: navigation.back,
     onSignedIn: enterAccount,
     onBusyChange: value => {
+      if (!active) return;
+      $("#auth-panel").inert = value || enteringWorkspace;
+      $("#auth-panel").setAttribute("aria-busy", String(value || enteringWorkspace));
       if (!value && active && (location.search || location.hash)) void enterWorkspace().catch(() => {});
     },
     onSignInUncertain: async () => { await restore(); },
