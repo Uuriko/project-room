@@ -232,11 +232,10 @@ const gr1PublicPath = pathname => {
   return null;
 };
 const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})\.json$/;
+const PUBLIC_CLONE_JSON = /^\/receipts\/lot_[a-f0-9]{16}\/clone\.json$/;
 const isPublicReceiptsJson = pathname => pathname === "/api/public/receipts"
   || pathname === "/api/public/receipts/gallery"
-  || pathname === "/room/api/public/receipts/gallery"
-  || /^\/receipts\/lot_[a-f0-9]{16}\/clone\.json$/.test(pathname)
-  || (/^\/receipts\/lot_[a-f0-9]{16}\/clone\.json$/.test(pathname.slice("/room".length)) && pathname.startsWith("/room"))
+  || PUBLIC_CLONE_JSON.test(pathname)
   || pathname === "/room/api/public/receipts"
   || PUBLIC_RECEIPT_JSON.test(pathname)
   || (pathname.startsWith("/room") && PUBLIC_RECEIPT_JSON.test(pathname.slice("/room".length)));
@@ -2104,11 +2103,61 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end GR2 ---
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
-      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
-      const receiptGallery = url.pathname === "/receipts/gallery" || url.pathname === "/api/public/receipts/gallery";
+      // --- #3526: the completed-bounty gallery and clone-as-template.
+      // A standalone block ahead of the receipts block (the paths are
+      // disjoint from every receipt shape). The gallery paths are named
+      // as direct pathname literals so the route inventory binds their
+      // GET/HEAD methods to them; the clone path is a regex const like
+      // the receipt shapes below.
       const receiptClone = /^\/receipts\/(lot_[a-f0-9]{16})\/clone(\.json)?$/.exec(url.pathname);
+      if ((url.pathname === "/receipts/gallery" || url.pathname === "/api/public/receipts/gallery" || receiptClone) && ["GET", "HEAD"].includes(req.method)) {
+        rate(`receipts:${remoteAddress}`, 120);
+        if (!url.search) res.setHeader("X-Robots-Tag", "all");
+        // Toggle-controlled like the receipts below: never shared-cached,
+        // so an owner switching public receipts off hides entries at once.
+        res.setHeader("Cache-Control", "no-store");
+        if (receiptClone) {
+          // The draft exists only while the lot is a gallery entry —
+          // the template read applies the same visibility and
+          // paid-settlement gates as the gallery itself.
+          const template = publicBountyTemplate(store, receiptClone[1]);
+          if (!template) reject(404, "not_found", "Not found");
+          res.setHeader("Link", publicPageLinks(url, `/receipts/${receiptClone[1]}`));
+          if (receiptClone[2]) {
+            const body = Buffer.from(JSON.stringify(bountyTemplateJson(template)));
+            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
+          const cloneHtml = Buffer.from(renderBountyCloneHtml(template));
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": cloneHtml.length });
+          return res.end(req.method === "HEAD" ? undefined : cloneHtml);
+        }
+        const galleryLimitRaw = url.searchParams.get("limit");
+        const queried = queryPublicBountyGallery(store, {
+          cursor: url.searchParams.get("cursor"),
+          limit: galleryLimitRaw == null ? 20 : Number(galleryLimitRaw),
+        });
+        if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
+        res.setHeader("Link", publicPageLinks(url, "/receipts/gallery"));
+        if (url.pathname === "/api/public/receipts/gallery") {
+          const body = Buffer.from(JSON.stringify(bountyGalleryJson(queried)));
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+          return res.end(req.method === "HEAD" ? undefined : body);
+        }
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
+        const galleryHtml = Buffer.from(renderBountyGalleryHtml(queried));
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": galleryHtml.length });
+        return res.end(req.method === "HEAD" ? undefined : galleryHtml);
+      }
+      if (url.pathname === "/receipts/gallery" || url.pathname === "/api/public/receipts/gallery" || receiptClone) reject(405, "method_not_allowed", "Method not allowed");
+      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
-      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard || receiptGallery || receiptClone) && ["GET", "HEAD"].includes(req.method)) {
+      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
@@ -2167,45 +2216,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
         }
-        if (receiptGallery) {
-          const galleryLimitRaw = url.searchParams.get("limit");
-          const queried = queryPublicBountyGallery(store, {
-            cursor: url.searchParams.get("cursor"),
-            limit: galleryLimitRaw == null ? 20 : Number(galleryLimitRaw),
-          });
-          if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
-          res.setHeader("Link", publicPageLinks(url, "/receipts/gallery"));
-          if (url.pathname === "/api/public/receipts/gallery") {
-            const body = Buffer.from(JSON.stringify(bountyGalleryJson(queried)));
-            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
-            return res.end(req.method === "HEAD" ? undefined : body);
-          }
-          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
-          // JDOT-PUBLIC-CSP-RUM end
-          const html = Buffer.from(renderBountyGalleryHtml(queried));
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
-          return res.end(req.method === "HEAD" ? undefined : html);
-        }
-        if (receiptClone) {
-          // Clone-as-template (#3526): the draft exists only while the
-          // lot is a gallery entry — the template read applies the same
-          // visibility and paid-settlement gates as the gallery itself.
-          const template = publicBountyTemplate(store, receiptClone[1]);
-          if (!template) reject(404, "not_found", "Not found");
-          res.setHeader("Link", publicPageLinks(url, `/receipts/${receiptClone[1]}`));
-          if (receiptClone[2]) {
-            const body = Buffer.from(JSON.stringify(bountyTemplateJson(template)));
-            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
-            return res.end(req.method === "HEAD" ? undefined : body);
-          }
-          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
-          // JDOT-PUBLIC-CSP-RUM end
-          const html = Buffer.from(renderBountyCloneHtml(template));
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
-          return res.end(req.method === "HEAD" ? undefined : html);
-        }
         const limitRaw = url.searchParams.get("limit");
         const queried = queryPublicReceipts(store, {
           room: url.searchParams.get("room"),
@@ -2227,7 +2237,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
       }
-      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard || receiptGallery || receiptClone) reject(405, "method_not_allowed", "Method not allowed");
+      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) reject(405, "method_not_allowed", "Method not allowed");
       if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET", "HEAD"].includes(req.method)) {
         res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
         return res.end();

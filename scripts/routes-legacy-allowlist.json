@@ -975,6 +975,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/public/receipts/gallery"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public/receipts/gallery"
+    },
+    {
+      "method": "GET",
       "path": "/api/public/rooms/{id}"
     },
     {
@@ -3127,6 +3135,14 @@
     },
     {
       "method": "GET",
+      "path": "/receipts/gallery"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/gallery"
+    },
+    {
+      "method": "GET",
       "path": "/receipts/{id}/{id}"
     },
     {
@@ -4518,6 +4534,14 @@
     {
       "method": "HEAD",
       "path": "/api/public/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/receipts/gallery"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public/receipts/gallery"
     },
     {
       "method": "GET",
@@ -6762,6 +6786,14 @@
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/gallery"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/gallery"
     },
     {
       "method": "GET",
