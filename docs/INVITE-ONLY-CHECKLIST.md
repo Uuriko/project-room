@@ -90,7 +90,7 @@ evidence URLs, and is sent with a `default-src 'none'` Content-Security-Policy
 that pins its single style block by hash and sandboxes the document; both
 formats are buffered and `Content-Length`-framed so a failed export is a JSON
 error, never a shorter file. Semantics and the leave/close procedure:
-`docs/EXPORT-RETENTION-DELETION.md`.
+`archive/docs/history/EXPORT-RETENTION-DELETION.md`.
 
 Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
 
@@ -192,7 +192,7 @@ expiry, revocation, and rate limits.
   link cancellation). No automated blocklist — the deployment is
   invite-only by construction, not by filtering.
 - **Incident communication**: via the room itself and the operator's normal
-  channels; there is no separate status page (see `docs/PRODUCTION-PLAN.md`
+  channels; there is no separate status page (see `archive/docs/history/PRODUCTION-PLAN.md`
   runbook requirements before any hosted launch).
 - **Backups**: `scripts/backup-room.mjs` is preserved; restore rehearsal
   landed in W4-12 (B5) at `713d156b`: `backupRoom` writes a watermark

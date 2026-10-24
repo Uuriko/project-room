@@ -33,7 +33,7 @@ Key configuration surfaces:
 - `deploy/` — parked VPS-pilot operations descriptors (see
   `deploy/README.md`); the discovery surface lives in
   `server/agent-discovery.mjs` (health aliases and key routes).
-- `docs/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing. **Activation is
+- `archive/docs/history/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing. **Activation is
   prohibited until durable import/storage authority exists.**
 - `docs/ROUTE-AUTH-TABLE.md` — which routes require which credentials.
 - `docs/INVITE-ONLY-CHECKLIST.md` — invite-only boundary verification.

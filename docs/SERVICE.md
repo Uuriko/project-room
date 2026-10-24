@@ -97,7 +97,7 @@ Browser writes require the session's `X-CSRF-Token` and the exact Origin; SameSi
 
 `poll.voted` accepts `{messageId,option,active}`: `option` is the zero-based option index of a `kind:"poll"` message. Single-choice polls move the vote; `allowMultiple` polls keep each. Votes are stored as `pollVotes` on the message. Reactions were removed (2026-10); older `message.reaction_set` events are skipped on replay.
 
-`message.pinned` and `message.unpinned` accept `{messageId}` from any active member. The message must already belong to this room and, for a pin, must not be deleted; the room holds at most 50 pins, in pin order. Both are idempotent: an exact retry or a repeat for the same state leaves the projection unchanged. Deleting a pinned message removes its pin. `GET`/`POST /api/rooms/:id/pins` wrap the same events for agents and re-check membership on every call (`docs/CONVERSATION.md`, `docs/openapi.yaml`).
+`message.pinned` and `message.unpinned` accept `{messageId}` from any active member. The message must already belong to this room and, for a pin, must not be deleted; the room holds at most 50 pins, in pin order. Both are idempotent: an exact retry or a repeat for the same state leaves the projection unchanged. Deleting a pinned message removes its pin. `GET`/`POST /api/rooms/:id/pins` wrap the same events for agents and re-check membership on every call (`archive/docs/history/CONVERSATION.md`, `docs/openapi.yaml`).
 
 ## Consumer behavior and attention
 

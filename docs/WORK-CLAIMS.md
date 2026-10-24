@@ -25,7 +25,7 @@ that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 `POST /api/rooms/{roomId}/work-claims`
 
 ```json
-{ "id": "lane-a", "title": "Lane A", "reviewPolicy": "self_attested", "note": "optional", "tags": ["migration"], "files": ["server/a.mjs"], "dependsOn": ["lane-b"], "pullRequest": "https://github.com/Uuriko/project-room/pull/7" }
+{ "id": "lane-a", "title": "Lane A", "reviewPolicy": "self_attested", "note": "optional", "tags": ["migration"], "files": ["server/work-claims.mjs"], "dependsOn": ["lane-b"], "pullRequest": "https://github.com/Uuriko/project-room/pull/7" }
 ```
 
 `id` matches `[A-Za-z0-9_-]{1,128}`. Only `id` is required. A duplicate id is
