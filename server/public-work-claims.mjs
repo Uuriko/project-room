@@ -70,6 +70,14 @@ const overlaps = (left, right) => left === right || left.startsWith(right + '/')
 // seed-dc-* tasks are deliberately absent — they belong to another
 // product's repository pinned at a historical commit, so re-issuing
 // them from this codebase would mint stale work, not starter work.
+// The starter-pool floor: the keeper restocks while the board's public
+// claimable supply is below this many tasks. The original gate fired
+// only at exactly zero, which wedged the shelf in production: one
+// stale claimable task (the linkcheck round) sat above the trigger
+// while three submitted seeds were due, so no round ever advanced.
+// server/jobs.mjs carries the same floor as a literal in the
+// public-work-reseed job gate — keep the two in sync.
+export const PUBLIC_WORK_STARTER_POOL_FLOOR = 4;
 export const PUBLIC_WORK_STARTER_SEED_IDS = Object.freeze([
   'pw-garden-firsttask-probe-20261005',
   'pw-garden-glossary-20261005',
@@ -327,7 +335,8 @@ export class PublicWorkClaims {
     return live?.owner ? 'claimed' : 'unclaimed';
   }
   // Replenish the starter set, bounded so it cannot spam: it fires only
-  // when the board's public claimableCount is exactly zero, it mints at
+  // while the board's public claimableCount is below the starter-pool
+  // floor (PUBLIC_WORK_STARTER_POOL_FLOOR), it mints at
   // most one new round per anchored seed, and only for a seed whose
   // latest round is submitted (a live claimed round blocks its own seed
   // alone). The create/publish/enable request ids are derived from the
@@ -338,7 +347,7 @@ export class PublicWorkClaims {
     return this.store.transaction(() => {
       const { claimableCount } = this.list({ limit: 100 });
       const summary = { seeded: 0, claimable: claimableCount, rounds: [], skipped: [], errors: [] };
-      if (claimableCount > 0) return summary;
+      if (claimableCount >= PUBLIC_WORK_STARTER_POOL_FLOOR) return summary;
       for (const baseId of PUBLIC_WORK_STARTER_SEED_IDS) {
         try {
           const outcome = this._reseedStarter(baseId);
