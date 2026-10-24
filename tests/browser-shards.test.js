@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { browserPlan, parseShard, verifyBrowserShards, SHARD_COUNT } from "../scripts/browser-shards.mjs";
 import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
@@ -112,4 +112,42 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
     const share = shard.estimatedMs / total;
     assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
   }
+});
+
+test("verifyBrowserShards rejects tampered, missing, and cross-run receipts", () => {
+  const plan = browserPlan(canonicalBrowserScript());
+  const ident = { matrixResult: "success", revision: "r", runId: "1", runAttempt: "1" };
+  const good = plan.shards.map(s => ({
+    index: s.index, total: SHARD_COUNT, files: s.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "r", runId: "1", runAttempt: "1",
+  }));
+  assert.deepEqual(verifyBrowserShards(plan, good, ident), { scripts: plan.files.length, shards: SHARD_COUNT });
+  const tampered = structuredClone(good);
+  tampered[0].files = tampered[0].files.slice(1);
+  assert.throws(() => verifyBrowserShards(plan, tampered, ident), /mismatched evidence/);
+  assert.throws(() => verifyBrowserShards(plan, good.slice(0, SHARD_COUNT - 1), ident), /Missing or duplicate/);
+  const foreign = structuredClone(good);
+  foreign[0].runId = "other-run";
+  assert.throws(() => verifyBrowserShards(plan, foreign, ident), /mismatched evidence/);
+  assert.throws(() => verifyBrowserShards(plan, good, { ...ident, matrixResult: "failure" }), /did not succeed/);
+});
+
+test("browser receipt attempts are positive bounded integers and conflicting duplicates fail closed", () => {
+  const plan = browserPlan(canonicalBrowserScript());
+  const ident = { matrixResult: "success", revision: "r", runId: "1", runAttempt: "2" };
+  const good = plan.shards.map(s => ({
+    index: s.index, total: SHARD_COUNT, files: s.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "r", runId: "1", runAttempt: "1",
+  }));
+  for (const attempt of [undefined, null, "", "abc", "1.5", "0", "-1", "Infinity", "9007199254740992"]) {
+    const bad = structuredClone(good); bad[0].runAttempt = attempt;
+    assert.throws(() => verifyBrowserShards(plan, bad, ident), /invalid run attempt/, String(attempt));
+  }
+  const future = structuredClone(good); future[0].runAttempt = "3";
+  assert.throws(() => verifyBrowserShards(plan, future, ident), /future attempt/);
+  assert.throws(() => verifyBrowserShards(plan, [...good, good[0]], ident), /Duplicate/);
+  const failed = { ...good[0], status: 1 };
+  for (const duplicate of [[...good, failed], [failed, ...good]]) assert.throws(() => verifyBrowserShards(plan, duplicate, ident), /Duplicate/);
+  assert.deepEqual(verifyBrowserShards(plan, [...good, { ...good[0], runAttempt: "2" }], ident), { scripts: plan.files.length, shards: SHARD_COUNT });
+  assert.throws(() => verifyBrowserShards(plan, [...good, { ...good[0], runAttempt: "2", status: 1 }], ident), /mismatched evidence/);
 });
