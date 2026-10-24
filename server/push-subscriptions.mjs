@@ -1,3 +1,5 @@
+import { envConfig } from "./config.mjs";
+
 // Push subscriptions: validate them, decide what a push may say, deliver it,
 // and retire the ones the push service says are dead.
 //
@@ -337,15 +339,17 @@ export async function deliverToSubscriptions({ subscriptions = [], payload, vapi
  * different code.
  */
 export function pushConfigured(env = {}) {
-  return Boolean(env.ROOM_VAPID_PUBLIC_KEY && env.ROOM_VAPID_PRIVATE_KEY && env.ROOM_VAPID_SUBJECT);
+  const cfg = envConfig(env);
+  return Boolean(cfg.vapidPublicKey && cfg.vapidPrivateKey && cfg.vapidSubject);
 }
 
 export function vapidFromEnv(env = {}) {
   if (!pushConfigured(env)) return null;
+  const cfg = envConfig(env);
   return {
-    publicKey: env.ROOM_VAPID_PUBLIC_KEY,
-    privateKey: env.ROOM_VAPID_PRIVATE_KEY,
-    subject: env.ROOM_VAPID_SUBJECT
+    publicKey: cfg.vapidPublicKey,
+    privateKey: cfg.vapidPrivateKey,
+    subject: cfg.vapidSubject
   };
 }
 

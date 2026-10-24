@@ -3,6 +3,7 @@
 // a row with no context is backfilled, source unknown, and its loop comes
 // only from the event data.
 import { attributionFromRef } from "./attribution.mjs";
+import { loadConfig } from "../config.mjs";
 import { LOOPS, SOURCES, growthEventId, sourceDetailFor, validateGrowthEvent } from "./catalog.mjs";
 import { readAnalyticsContext } from "./context.mjs";
 import { derivedSources, readDerivedPage } from "./derive-tables.mjs";
@@ -20,7 +21,8 @@ const INSERT = `INSERT OR IGNORE INTO analytics_events (
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`;
 
 export function excludedRoomSet(env = process.env) {
-  return new Set(String(env?.ANALYTICS_EXCLUDED_ROOMS ?? "").split(",").map(part => part.trim()).filter(Boolean));
+  const raw = env == null || typeof env !== "object" ? "" : (loadConfig(env).analyticsExcludedRooms ?? "");
+  return new Set(String(raw).split(",").map(part => part.trim()).filter(Boolean));
 }
 
 export function structuralExclusion({ roomId, title = "", slug = "" }) {
@@ -310,6 +312,7 @@ export async function runAnalyticsTail(db, { budgetMs = 50, batch = 500, now = D
 // AN-1b job entry. Gated on ANALYTICS_ENABLED (default on; tests leave it unset
 // and call runAnalyticsTail directly). "0" skips the run.
 export async function analyticsTailJob(db, env = process.env) {
-  if (env?.ANALYTICS_ENABLED === "0") return { skipped: true };
-  return runAnalyticsTail(db, { budgetMs: 50, now: Date.now(), key: env?.ANALYTICS_REF_KEY ?? null, env });
+  const cfg = env == null || typeof env !== "object" ? null : loadConfig(env);
+  if (cfg?.analyticsEnabled === "0") return { skipped: true };
+  return runAnalyticsTail(db, { budgetMs: 50, now: Date.now(), key: cfg?.analyticsRefKey ?? null, env });
 }

@@ -6,6 +6,7 @@
 // scrypt rows still verify. Scrypt runs only when a candidate row is still
 // v2, at most once per secret per request, then the row stores the HMAC.
 import { createHash, createHmac, scryptSync } from "node:crypto";
+import { loadConfig } from "./config.mjs";
 
 export const IDENTITY_HASH_SALT = "project-room-agent-identity-v2";
 export const IDENTITY_HASH_PARAMS = Object.freeze({ N: 16384, r: 8, p: 1 });
@@ -35,7 +36,9 @@ export function legacyIdentityHash(secret) {
 // `source` is a key string, null/undefined (fallback only), or an env object
 // such as process.env. A string shorter than 16 characters is ignored.
 export function configuredIdentityHashKey(source) {
-  const value = typeof source === "string" ? source : source?.[IDENTITY_HASH_KEY_ENV];
+  const value = typeof source === "string"
+    ? source
+    : (source != null && typeof source === "object" ? loadConfig(source).identityHashKey : undefined);
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed.length < 16) return null;

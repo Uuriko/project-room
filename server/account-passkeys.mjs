@@ -18,6 +18,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { loadConfig } from "./config.mjs";
 import {
   createRegistrationOptions, verifyRegistrationResponse, createAuthenticationOptions, verifyAuthenticationAssertion
 } from "../src/passkey-login.mjs";
@@ -86,7 +87,7 @@ const defaultVerifiers = {
 // Returns null when no origin can be established at all (the HTTP layer
 // answers an honest 503 passkey_not_configured in that case). The RP ID
 // comes from ROOM_PASSKEY_RP_ID or defaults to the origin's hostname.
-export function resolvePasskeyParams(expectedOriginValue, rpIdOverride = process.env.ROOM_PASSKEY_RP_ID) {
+export function resolvePasskeyParams(expectedOriginValue, rpIdOverride = loadConfig().passkeyRpId) {
   let url;
   try { url = new URL(expectedOriginValue); }
   catch { return null; }

@@ -3,6 +3,8 @@
 // Numeric migration folds disagreeing horizons with MIN. Flag defaults OFF.
 // Opaque compound cursors remain on their existing per-room/thread protocols.
 
+import { loadConfig } from "./config.mjs";
+
 export const UNIFY_R_STREAMS = Object.freeze([
   "needs-me",
   "mentions",
@@ -11,7 +13,9 @@ export const UNIFY_R_STREAMS = Object.freeze([
 ]);
 
 export function unifyREnabled(env = globalThis.process?.env ?? {}) {
-  return typeof env?.UNIFY_R_CURSOR === "string" && /^(1|true|on)$/i.test(env.UNIFY_R_CURSOR);
+  if (env == null || typeof env !== "object") return false;
+  const value = loadConfig(env).unifyRCursor;
+  return typeof value === "string" && /^(1|true|on)$/i.test(value);
 }
 
 /** Session-local watermark: may lag durable; must not write below durable. */

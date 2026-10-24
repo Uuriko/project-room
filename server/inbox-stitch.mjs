@@ -12,6 +12,7 @@
 // Everything here is pure and deterministic: no store reads or writes, no
 // network, no randomness. Frozen outputs; malformed inputs throw StitchError.
 import { createHmac } from "node:crypto";
+import { loadConfig } from "./config.mjs";
 
 class StitchError extends Error { constructor(code, message) { super(message); this.name = "StitchError"; this.code = code; } }
 const fail = (code, message) => { throw new StitchError(code, message); };
@@ -60,9 +61,11 @@ export const STITCH_SPLIT_REASONS = Object.freeze(["owner_request", "wrong_perso
 // writes no stitch rows. The feature stays inert until task #20's privacy
 // approval flips the flag.
 export function stitchConfigFromEnv(env = process.env) {
-  const raw = typeof env?.[STITCH_SALT_BINDING] === "string" ? env[STITCH_SALT_BINDING].trim() : "";
+  if (env == null || typeof env !== "object") return null;
+  const cfg = loadConfig(env);
+  const raw = typeof cfg.stitchSalt === "string" ? cfg.stitchSalt.trim() : "";
   const valid = /^[0-9a-fA-F]{64}$/.test(raw);
-  const enabled = String(env?.[STITCH_ENABLE_BINDING] ?? "").toLowerCase() === "true" && valid;
+  const enabled = String(cfg.stitchingEnabled ?? "").toLowerCase() === "true" && valid;
   if (!enabled) return null;
   return Object.freeze({ salt: Buffer.from(raw, "hex"), epoch: STITCH_EPOCH, enabled: true,
     bindings: Object.freeze([STITCH_SALT_BINDING, STITCH_ENABLE_BINDING]) });

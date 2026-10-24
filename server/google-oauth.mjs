@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { envConfig } from './config.mjs';
 
 export const GOOGLE_ISSUER = 'https://accounts.google.com';
 export const GOOGLE_START_PATH = '/api/auth/google/start';
@@ -35,8 +36,9 @@ export function googlePostLoginPage(href) {
 }
 
 export function googleConfig(env = {}, origin) {
-  const clientId = env.ROOM_GOOGLE_CLIENT_ID;
-  const clientSecret = env.ROOM_GOOGLE_CLIENT_SECRET;
+  const cfg = envConfig(env);
+  const clientId = cfg.googleClientId;
+  const clientSecret = cfg.googleClientSecret;
   if ([clientId, clientSecret].every(value => value === undefined)) return null;
   const invalid = () => { throw new Error('Invalid Room Google authentication configuration'); };
   if (!clientIdPattern.test(clientId || '') || !opaque(clientSecret) || clientSecret.length > 256) invalid();
