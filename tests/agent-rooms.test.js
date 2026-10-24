@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
+import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import { nextActionsForRoomCreate } from "../server/discoverability.mjs";
 import { updateWork } from "../server/work-claims.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
@@ -85,6 +86,36 @@ test("same identity retrying with the same parameters gets duplicate:true", asyn
   assert.equal(retry.duplicate, true);
   assert.equal(retry.roomId, first.roomId);
   assert.equal(retry.ownerMemberId, first.ownerMemberId);
+});
+
+const credentialDigest = value => createHash("sha256").update(value).digest("hex");
+
+test("replaying room create revokes earlier onboarding tokens and leaves other keys", async t => {
+  const { store, rooms, identity } = setup(t);
+  const first = rooms.create(identity.secret, createArgs());
+  const wider = store.agentPlugin.issueApiKey({
+    identityId: identity.identityId,
+    scopes: [...first.mcpToken.scopes, "directory:read"],
+    label: "wider than onboarding",
+  });
+  const otherRoom = rooms.create(identity.secret, createArgs("other-den"));
+  const second = rooms.create(identity.secret, createArgs());
+  const third = rooms.create(identity.secret, createArgs());
+  assert.equal(second.duplicate, true);
+  assert.equal(third.duplicate, true);
+  assert.notEqual(credentialDigest(second.mcpToken.credential), credentialDigest(first.mcpToken.credential));
+  assert.notEqual(credentialDigest(third.mcpToken.credential), credentialDigest(second.mcpToken.credential));
+  assert.throws(() => store.authenticate(first.mcpToken.credential, "agent-den"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.throws(() => store.authenticate(second.mcpToken.credential, "agent-den"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  const live = store.authenticate(third.mcpToken.credential, "agent-den");
+  assert.equal(live.identityId, identity.identityId);
+  assert.equal(live.roomId, "agent-den");
+  const kept = store.authenticate(`${API_KEY_PREFIX}${wider.secret}`, "agent-den");
+  assert.equal(kept.apiKeyId, wider.keyId);
+  const sibling = store.authenticate(otherRoom.mcpToken.credential, "other-den");
+  assert.equal(sibling.roomId, "other-den");
 });
 
 test("room id collision with different parameters is 409", async t => {

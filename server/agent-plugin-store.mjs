@@ -41,6 +41,12 @@ import {
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
+function sameScopeSet(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const have = new Set(actual);
+  return expected.every(scope => have.has(scope));
+}
+
 // Purely additive, intentionally outside the writer fence (see
 // unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
 // code path to these tables, and every row is scoped to an agent identity.
@@ -422,15 +428,19 @@ export class AgentPluginStore {
     }
   }
 
+  onboardingMcpScopes(roomId) {
+    // CX5-FIX: heartbeats:report/read let the saved credential run the
+    // room-scoped wake listener (createHeartbeatActor binds it to this
+    // room via the mcp:room: scope below). Without them the standard
+    // setup credential 403'd on its own listener surface.
+    return [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
+  }
+
   issueOnboardingMcpToken({ identityId, roomId, label }) {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      // CX5-FIX: heartbeats:report/read let the saved credential run the
-      // room-scoped wake listener (createHeartbeatActor binds it to this
-      // room via the mcp:room: scope below). Without them the standard
-      // setup credential 403'd on its own listener surface.
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
+      scopes: this.onboardingMcpScopes(roomId),
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
@@ -441,6 +451,24 @@ export class AgentPluginStore {
       label: issued.label,
       keyId: issued.keyId
     };
+  }
+
+  // A replay cannot return the original credential (only its hash is stored).
+  // Revoke every live key whose scopes are exactly this room's onboarding
+  // bundle, then the caller issues one replacement. Keys with a wider scope
+  // set, or an onboarding bundle for another room, stay live.
+  revokeOnboardingMcpTokens({ identityId, roomId }) {
+    const expected = this.onboardingMcpScopes(roomId);
+    return this.mutate(() => {
+      let revoked = 0;
+      for (const record of this.apiKeys.keysForIdentity(identityId)) {
+        if (record.revoked || !sameScopeSet(record.scopes, expected)) continue;
+        this.apiKeys.revoke(record.keyId);
+        this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(record.keyId);
+        revoked += 1;
+      }
+      return revoked;
+    });
   }
 
   notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {

@@ -217,9 +217,13 @@ export class AgentRooms {
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
-  // the original room, a fresh onboarding token, and the duplicate flag so
-  // the HTTP layer answers 200 on a replay.
+  // the original room, one replacement onboarding token, and the duplicate
+  // flag so the HTTP layer answers 200 on a replay. The previous onboarding
+  // tokens for this room are revoked first: the stored key is hash-only, so
+  // a replay cannot hand the original credential back, and leaving it live
+  // would accumulate credentials the client no longer has.
   #duplicateCreateResponse(roomId, memberId, identityId, displayName) {
+    this.store.agentPlugin.revokeOnboardingMcpTokens({ identityId, roomId });
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
       mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId, roomId, label: displayName }),
       starter: starterView(this.store, roomId),
