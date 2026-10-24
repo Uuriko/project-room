@@ -2,14 +2,17 @@
 //
 // DMs travel as message.posted events with data.toMemberId (see
 // RC-2026-09-18-012 in server/store.mjs). This module adds the consent
-// layer on top of that transport: nobody may DM a member who has not
-// approved them, in that direction.
+// layer on top of that transport.
 //
-// Model: one row per (room, requester → target) direction. Consent is
-// directional, with one implication: when B approves A's request, A asked
-// for the conversation, so B may answer A without asking A back. That
-// answer path lives only as long as A → B stays approved; any explicit row
-// in the B → A direction (pending, rejected, revoked, blocked) still wins.
+// Model: DMs are open by default (2026-09-24 standing rule) — nobody needs
+// permission to start a conversation. One row per (room, requester →
+// target) direction records the target's explicit decisions, and only an
+// explicit deny refuses a DM: blocked, rejected, or revoked rows make
+// requireDmAllowed throw 403. No row, a pending row, and an approved row
+// all allow. The request/approve flow survives as a signalling layer (a
+// requester can ask, a target can approve), but approval is not a gate:
+// abuse is handled with block/mute, per-pair rate limits, and journal
+// accountability, per requireDmAllowed.
 // States:
 //   pending  — requester asked, target has not decided
 //   approved — target approved; DMs flow requester → target
