@@ -109,6 +109,22 @@ checks. This pilot does not alter that peer-owned runtime or auto-register a
 second listener. Local artifact paths are not exposed as remotely usable URLs;
 the compact reply explicitly identifies evidence as local to the laptop.
 
+## Native stop and status integration
+
+`room-host` runs the same capability watcher under the existing native
+WatchJournal and host-status protocol. Input includes `connectionDirectory`,
+absolute `journal`, `expectedScope: {origin, roomId, memberId}`, and optional
+`intervalMs`. Scope must match the saved connection before a service starts.
+Use a dedicated capability journal; a second owner of that journal is refused.
+The existing native stop operation cancels the watcher and records a confirmed
+stop only after it returns. Unexpected exits and failures record recovery pending.
+Credentials are never written to status receipts. Model protocol status remains
+unverified: a running capability host is not proof of an active model session.
+
+This command starts a foreground process; it does not install a daemon or launch
+an AI. Run it under an explicitly configured local supervisor for restart behavior.
+It reuses native status/stop without changing the Codex runtime or human UI.
+
 ## Updating a capability
 
 `install` takes `{root,manifest}`. Manifest:

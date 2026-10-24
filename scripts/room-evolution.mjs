@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openEvolution, events, requireThat } from '../client/evolution/store.mjs';
 import { installPackage, activate, evaluate, rollback } from '../client/evolution/registry.mjs';
+import { runCapabilityHost } from '../client/evolution/host.mjs';
 import { watchRoomCapabilities } from '../client/evolution/room-service.mjs';
 import { installRepositoryPackage } from '../client/evolution/repository-package.mjs';
 import { readAgentConnection } from '../client/agent-connection.mjs';
@@ -17,6 +18,12 @@ import { configure, submit, getJob, runJob, status, cancel, reconcile, feedback 
 export const defaultDirectory = () => join(homedir(), 'Library', 'Application Support', 'Project Room', 'evolution');
 export async function command(store, name, args = {}, signal) {
   switch (name) {
+    case 'room-host': {
+      const connection = readAgentConnection(args.connectionDirectory);
+      return runCapabilityHost({ journal: args.journal, connection, expectedScope: args.expectedScope, signal,
+        service: ({ signal: hostSignal }) => watchRoomCapabilities(store, { connection, intervalMs: args.intervalMs,
+          signal: hostSignal, emit: value => console.log(JSON.stringify(value)) }) });
+    }
     case 'room-watch': return watchRoomCapabilities(store, { connection: readAgentConnection(args.connectionDirectory), intervalMs: args.intervalMs, signal, emit: value => console.log(JSON.stringify(value)) });
     case 'room-run': return runRoomCapability(store, { connection: readAgentConnection(args.connectionDirectory), requestMessageId: args.requestMessageId, signal });
     case 'configure': return configure(store, args);
@@ -39,7 +46,7 @@ export async function command(store, name, args = {}, signal) {
 async function main() {
   const [name, input] = process.argv.slice(2);
   if (!name || name === '--help') {
-    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|events|cancel|reconcile|feedback|room-run|room-watch|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
+    console.log('room-evolution <configure|install|install-repository|activate|evaluate|rollback|submit|run|job|status|events|cancel|reconcile|feedback|room-run|room-watch|room-host|watch> [JSON_FILE]\nROOM_EVOLUTION_DIRECTORY overrides the device-wide private state directory. JSON responses; no shell commands in submitted jobs.'); return;
   }
   const store = openEvolution(process.env.ROOM_EVOLUTION_DIRECTORY ?? defaultDirectory());
   const controller = new AbortController(); const stop = () => controller.abort();
