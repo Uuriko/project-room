@@ -36,7 +36,7 @@
       ] },
       "kv_namespaces": [{ "binding": "ROOM_BACKUPS_KV", "id": "ee73a90c4e6749bb92ebe16fc57c117d" }],
       "triggers": { "crons": ["*/30 * * * *"] },
-      "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-production", "ROOM_SECURITY_CONTACT": "potter@trydemigod.com" }
+      "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_PUBLIC_AGENT_PAGES": "0", "ROOM_SERVICE_MODE": "cloudflare-production", "ROOM_SECURITY_CONTACT": "potter@trydemigod.com" }
     },
     "staging": {
       "name": "project-room-stage",
