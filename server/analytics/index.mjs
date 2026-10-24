@@ -21,7 +21,7 @@ export {
   DAILY_CAP, RETENTION_DAYS_MS, RETENTION_MAX_ROWS, dayBounds, planRetention, pruneAnalytics,
   samplingFactor, storedRowsOnDay, viewSamplingPlan
 } from "./retention.mjs";
-export { closedHour, dirSink, exportAnalytics, hourWindow, nullSink, r2Sink } from "./export.mjs";
+export { closedHour, exportAnalytics, hourWindow, nullSink } from "./export.mjs";
 export { REF_TTL_SEC, attributionFromRef, mintRef, readRef } from "./attribution.mjs";
 export {
   CONTEXT_MAX_AGE_MS, CONTEXT_MAX_ROWS, classifySource, currentRequestContext, normalizeAgentClient,
