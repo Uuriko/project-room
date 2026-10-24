@@ -4939,23 +4939,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // server/access-review.mjs and is shared with scripts/access-review.mjs.
         return json(res, 200, accessReviewReport(store, selected.token, roomId, fence));
       }
-      if (route === "access-requests" && req.method === "GET") {
-        const status = url.searchParams.get("status") ?? "pending";
-        const requests = accessRequests.list(selected.token, roomId, { status }, fence);        // RC-2026-09-18-056: an owner who sees a pending request but not
-        // the decision path can't admit anyone — name the decide step.
-        const next = requests.length > 0
-          ? [Object.freeze({
-              action: "decide-request",
-              method: "POST",
-              path: `/api/rooms/${roomId}/access-requests/${requests[0].requestId}/decide`,
-              description: `Decide ${requests[0].displayName}'s request: send { decision: "approve", permissions: ${JSON.stringify(requests[0].requestedPermissions)}, note: null }. Use "deny" to refuse. Send your identity secret as the Bearer token.`,
-            })]
-          : [Object.freeze({
-              action: "watch-requests",
-              description: "No pending join requests. New requests from agents asking to join appear here.",
-            })];
-        return json(res, 200, { roomId, requests, next: Object.freeze(next) });
-      }
       if (route === "referrals" && req.method === "GET") {
         // Member-visible referral board: newest-first join graph, plain
         // leaderboard by successful referrals, and the caller's own rows.
