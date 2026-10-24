@@ -352,3 +352,48 @@ test("wakeStatusList on a DB without any heartbeat tables lists nobody, never cr
   assert.deepEqual(list.wakeable, []);
   assert.deepEqual(list.notWakeable, []);
 });
+
+test("pausedRoomsOf surfaces a guest seat's pause through guest_members (#3908 F-9)", t => {
+  const { db, hb } = unit(t);
+  db.exec(`
+    CREATE TABLE identity_links (room_id TEXT NOT NULL, identity_id TEXT NOT NULL, member_id TEXT NOT NULL, linked_at INTEGER NOT NULL);
+    CREATE TABLE guest_members (member_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, guest_identity_id TEXT NOT NULL, tier TEXT NOT NULL, invite_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE wake_queue_pause (room_id TEXT NOT NULL, member_id TEXT NOT NULL, paused_at INTEGER NOT NULL, reason TEXT, PRIMARY KEY(room_id, member_id));
+    CREATE TABLE wake_queue_pause_by (room_id TEXT NOT NULL, member_id TEXT NOT NULL, paused_by TEXT NOT NULL, paused_role TEXT NOT NULL, PRIMARY KEY(room_id, member_id));
+    INSERT INTO identity_links VALUES ('room-a', 'ai_linked', 'mem-linked', 1);
+    INSERT INTO guest_members VALUES ('mem-guest', 'room-b', 'ai_guest', 'contributor', 'inv-1', 1);
+    INSERT INTO wake_queue_pause VALUES ('room-a', 'mem-linked', 1750000000000, 'linked pause');
+    INSERT INTO wake_queue_pause VALUES ('room-b', 'mem-guest', 1750000000000, 'guest pause');
+    INSERT INTO wake_queue_pause_by VALUES ('room-b', 'mem-guest', 'mem-guest', 'self');
+  `);
+  const guest = hb.pausedRoomsOf("ai_guest");
+  assert.equal(guest.length, 1, "the guest identity's pause surfaces");
+  assert.equal(guest[0].roomId, "room-b");
+  assert.equal(guest[0].reason, "guest pause");
+  assert.equal(guest[0].heldBy, "self");
+  const linked = hb.pausedRoomsOf("ai_linked");
+  assert.equal(linked.length, 1, "the linked identity's pause still surfaces");
+  assert.equal(linked[0].roomId, "room-a");
+  assert.equal(linked[0].heldBy, "owner", "a pause with no setter record reads owner-held");
+});
+
+test("GET /api/wake-status?roomId= admits a guest caller and lists the guest seat (#3908 F-8)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const guest = await keyedAgent(f, origin, "wake-guest-agent");
+  const linked = await keyedAgent(f, origin, "wake-guest-linked");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: linked.identity.identityId, memberId: linked.identity.identityId,
+    displayName: "wake guest linked", permissions: ["write_external"],
+  });
+  // The guest seat lives in guest_members only - no identity_links row.
+  f.store.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES ('mem-wake-guest', 'commons', ?, 'contributor', 'inv-wake-guest', 1)")
+    .run(guest.identity.identityId);
+  const res = await get(origin, "/api/wake-status?roomId=commons", guest.credential);
+  assert.equal(res.status, 200, "a guest member can read its own room's wake status");
+  const doc = await res.json();
+  assert.ok(doc.notWakeable.some(e => e.agentId === guest.identity.identityId),
+    "the guest seat appears in the room's wake lists");
+  assert.ok(doc.notWakeable.some(e => e.agentId === linked.identity.identityId),
+    "linked members still appear");
+});

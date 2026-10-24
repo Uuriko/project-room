@@ -18,7 +18,8 @@ import { DatabaseSync } from "node:sqlite";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
-import { identityIdForWakeMember, memberIdForWakeIdentity } from "../server/wake-identity-resolution.mjs";
+import { identityIdForWakeMember, memberIdForWakeIdentity, identityIdsForWakeRoom, isWakeRoomMember } from "../server/wake-identity-resolution.mjs";
+import { identityNamesForRoom } from "../server/mention-lifecycle.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -191,4 +192,43 @@ test("resolver on a pre-schema database reads as no resolution, never a throw", 
     "missing guest_members table -> null after a link miss");
   assert.equal(memberIdForWakeIdentity(partial, "room-a", "id-guest"), null,
     "missing guest_members table -> null after a link miss (reverse)");
+});
+
+test("resolver room identity list: links first, guest seats included (#3908 F-8)", t => {
+  const db = resolverDb(t);
+  const ids = identityIdsForWakeRoom(db, "room-a");
+  assert.deepEqual([...ids].sort(), ["id-guest", "id-guest-shadowed", "id-linked", "id-linked-wins"],
+    "the room list carries link and guest identities, room-scoped");
+  assert.ok(!ids.includes("id-other-room"), "another room's identity does not leak");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-guest"), true, "a guest identity is a member of its room");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-linked"), true, "a linked identity is a member");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-absent"), false, "a stranger is not a member");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-other-room"), false, "membership is room-scoped");
+  assert.deepEqual(identityIdsForWakeRoom(null, "room-a"), [], "no db -> empty list");
+  assert.deepEqual(identityIdsForWakeRoom(db, ""), [], "no room -> empty list");
+});
+
+test("resolver room helpers on a pre-schema database read as no seats, never a throw", t => {
+  const bare = new DatabaseSync(":memory:");
+  t.after(() => bare.close());
+  assert.deepEqual(identityIdsForWakeRoom(bare, "room-a"), [], "missing tables -> empty list");
+  assert.equal(isWakeRoomMember(bare, "room-a", "id-guest"), false, "missing tables -> not a member");
+});
+
+test("identityNamesForRoom names guest seats from guest_members (#3908 F-9)", t => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec(`
+    CREATE TABLE agent_identities (identity_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, revoked_at INTEGER);
+    CREATE TABLE identity_links (room_id TEXT NOT NULL, identity_id TEXT NOT NULL, member_id TEXT NOT NULL, linked_at INTEGER NOT NULL);
+    CREATE TABLE guest_members (member_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, guest_identity_id TEXT NOT NULL, tier TEXT NOT NULL, invite_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO agent_identities VALUES ('id-linked', 'Linked Name', NULL);
+    INSERT INTO agent_identities VALUES ('id-guest', 'Guest Name', NULL);
+    INSERT INTO identity_links VALUES ('room-a', 'id-linked', 'mem-linked', 1);
+    INSERT INTO guest_members VALUES ('mem-guest', 'room-a', 'id-guest', 'contributor', 'inv-1', 1);
+    INSERT INTO guest_members VALUES ('mem-linked', 'room-a', 'id-guest', 'observer', 'inv-2', 1);
+  `);
+  const names = identityNamesForRoom(db, "room-a");
+  assert.equal(names["mem-linked"], "Linked Name", "linked member keeps its link name (link seat wins)");
+  assert.equal(names["mem-guest"], "Guest Name", "guest member resolves its identity display name");
 });

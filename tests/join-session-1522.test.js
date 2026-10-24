@@ -71,3 +71,27 @@ test("#1522: an unlinked member keeps the legacy null binding (no link to bind)"
   const auth = store.authenticate(token, "commons");
   assert.equal(auth.member.id, memberId);
 });
+
+test("#3908 F-9: a guest seat's join session binds to the guest identity secret", t => {
+  const { store } = setup(t);
+  const identity = store.identities.create("guest joiner");
+  const memberId = "guest-agent-joiner";
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  store.command(ownerKey, "commons", { id: "join-session-guest", type: "member.added",
+    data: { memberId, displayName: "Guest Joiner", kind: "agent", permissions: [], identityId: identity.identityId } });
+  // The trial seat lives in guest_members only - no identity_links row.
+  store.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
+    .run(memberId, "commons", identity.identityId, "contributor", "inv-join", Date.now());
+  const { token } = store.createJoinSession("commons", memberId);
+  const row = store.db.prepare(
+    "SELECT identity_secret_hash AS h FROM credentials WHERE room_id='commons' AND member_id=? AND kind='session' ORDER BY rowid DESC LIMIT 1"
+  ).get(memberId);
+  assert.ok(row && row.h !== null && row.h !== undefined,
+    "the guest join session carries the guest identity secret hash, not null");
+  const auth = store.authenticate(token, "commons");
+  assert.equal(auth.member.id, memberId, "the bound guest session authenticates");
+  store.identities.rotate(identity.identityId, identity.secret);
+  const error = authError(() => store.authenticate(token, "commons"));
+  assert.ok(error, "rotating the guest identity secret invalidates its join session");
+  assert.equal(error.status, 401);
+});
