@@ -522,8 +522,10 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
 // purely additive, created lazily on first lease use. CX5-FIX adds
 // agent_wake_room_activity (room-attributed listener activity), created
-// lazily on first room-scoped poll/heartbeat.
-const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
+// lazily on first room-scoped poll/heartbeat. WAKE-S34 adds
+// agent_wake_signal_serves (per-host first-pickup stamps), created
+// lazily on first served wake page.
+const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity", "agent_wake_signal_serves"]);
 // Wake-reliability accounting (#3345, server/wake-metrics.mjs): counters +
 // loss journal, purely additive, created lazily on first recorded outcome;
 // kind/timestamp/subject only, never content. Older writers have no code

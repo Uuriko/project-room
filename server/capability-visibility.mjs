@@ -61,7 +61,7 @@ export const GUEST_WRITABLE_TOOLS = Object.freeze(new Set(["room_post_message"])
 // heartbeats and session status/stop reports landing while every other
 // write is 403 agent_readonly (enforceAutonomyTiers /
 // enforceAutonomyTierForAction).
-export const T1_WRITABLE_TOOLS = Object.freeze(new Set(["heartbeat_set", "heartbeat_ack"]));
+export const T1_WRITABLE_TOOLS = Object.freeze(new Set(["heartbeat_set", "heartbeat_ack", "heartbeat_claim"]));
 
 // A capability is a write when it is explicitly non-readonly. Unknown
 // capabilities default to visible: withholding must never hide a tool

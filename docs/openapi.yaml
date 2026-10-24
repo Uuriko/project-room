@@ -11386,6 +11386,49 @@ paths:
         '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
+  /api/agent-heartbeats/claim:
+    post:
+      summary: Claim pending wake signals as started under a listener lease
+      x-room-permission: self
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:report` scope. The started door for the durable
+        listener queue: the caller presents the `fencingToken` from a
+        `listenerLease` heartbeat and claims the oldest unacked signals as
+        one atomic batch, marking them started. Claiming is neither
+        delivery completion nor acknowledgement — claimed signals stay
+        queued until `/api/agent-heartbeats/ack`, and their started state
+        expires with the lease's fencing if the consumer dies. A batch
+        whose claiming lease lapsed is replayed to the next claim with
+        `redelivered: true`. Returns `{ signals }` whose entries carry
+        the lifecycle stamps: `createdAt`, `servedAt` (first pickup by
+        any host; pickup is not completion), `startedAt` / `startedLive`
+        (the live claim), and `deliveredAt` (the ack stamp, null until
+        acked). A room-scoped credential claims only its bound room's
+        queue; an identity credential naming a `roomId` must be a live
+        agent member of that room. No live lease for the token answers
+        409 `stale_listener`. Same call as MCP `heartbeat_claim`. 120 per
+        identity per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fencingToken]
+              properties:
+                fencingToken: { type: string, minLength: 1, description: "the live listener lease's fencing token, from a listenerLease heartbeat" }
+                limit: { type: integer, minimum: 1, maximum: 50, description: "batch size, oldest first; default 50" }
+                roomId: { type: string, minLength: 1, description: "room queue to claim; must match the lease's scope; omit for the identity queue" }
+      responses:
+        '200': { description: "{ signals: [...] } — the claimed batch with lifecycle stamps; an empty array when nothing is pending" }
+        '401': { description: unauthenticated }
+        '403': { description: 'insufficient_scope / room_mismatch / identity_changed' }
+        '409': { description: 'stale_listener — no live listener lease for this fencing token; acquire a lease first' }
+        '422': { description: invalid_wake_claim }
+        '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
       summary: Check an identity's join or permission request status

@@ -14,6 +14,19 @@
 // first, at most 50, with more:true when the page is truncated. The poll
 // does not acknowledge. The host acknowledges with ackWakes.
 //
+// WAKE-S34 lifecycle states (MIG-WAKE Specs S3/S4): a signal's life is
+// received -> started -> acked, and the three stamps stay distinct.
+// servedAt (the pickup stamp) is written the first time a page served
+// on any door includes the signal for a given host — being served a
+// page is pickup, not completion. startedAt is the listener claim
+// layer's claim stamp: a consumer holding a live listener lease claims
+// a batch (POST /api/agent-heartbeats/claim, MCP heartbeat_claim) when
+// it begins handling it, and the started state expires with that
+// lease's fencing if the consumer dies. delivered_at, despite its
+// name, is the ACK stamp: it is written only by ackWakes, and a signal
+// leaves the pending set only through that ack — serving and claiming
+// never remove it.
+//
 // Push is a separate doorbell. An offline wakeable host with a usable
 // push subscription receives a pointer-only POST. Push does not decide
 // who gets a queued signal.
@@ -132,6 +145,21 @@ export const wakeListenerLeaseSchema = `
 // redelivery replays the batch with redelivered=true.
 export const WAKE_LISTENER_LEASE_TTL_MS = 60000;
 
+// WAKE-S34 (Spec S3): first-pickup stamps, one row per (signal, host).
+// A signal's servedAt is the earliest row's served_at; re-serves insert
+// nothing (INSERT OR IGNORE), so the stamp is the FIRST time that host
+// was served the signal. Lazy like the lease tables above, for the same
+// reason: kept out of agentHeartbeatSchema so old databases keep
+// passing the strict DDL-text verifySchema.
+export const wakeSignalServesSchema = `
+  CREATE TABLE IF NOT EXISTS agent_wake_signal_serves (
+    signal_id TEXT NOT NULL, host_id TEXT NOT NULL DEFAULT '',
+    served_at INTEGER NOT NULL, door TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(signal_id, host_id)
+  );
+  CREATE INDEX IF NOT EXISTS agent_wake_signal_serves_signal ON agent_wake_signal_serves(signal_id, served_at);
+`;
+
 // CX5-FIX: room-attributed listener activity. agent_wake_polls is the
 // identity-GLOBAL last-activity stamp; activity performed under a
 // room-scoped credential (a room access key, or a rak_ API key bound to one
@@ -240,12 +268,23 @@ const claimWakeOf = messageId => {
   if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
   return { workClaim: parts[1], reason: parts[2] };
 };
-const signalView = row => {
+// WAKE-S34: every signal view carries its lifecycle stamps (see the
+// file header): servedAt = first pickup (Spec S3), startedAt /
+// startedLive = the listener claim layer's started state (Spec S4),
+// redelivered = the claim layer's replay flag. deliveredAt is the ack
+// stamp. Callers that read rows pass the lifecycle map built by
+// lifecycleOfSignals; a row read without one (a fresh enqueue) reports
+// the unclaimed, unserved defaults.
+const signalView = (row, lifecycle = null) => {
   const claim = claimWakeOf(row.message_id);
   return Object.freeze({
     signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
+    servedAt: lifecycle?.servedAt ?? null,
+    startedAt: lifecycle?.startedAt ?? null,
+    startedLive: lifecycle?.startedLive === true,
+    redelivered: lifecycle?.redelivered === true,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
     // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
@@ -876,6 +915,55 @@ export class AgentHeartbeats {
     return this;
   }
 
+  // Idempotent DDL for the pickup-stamp table (no-op on warm databases).
+  ensureSignalServesSchema() {
+    this.db.exec(wakeSignalServesSchema);
+    return this;
+  }
+
+  // WAKE-S34: the lifecycle map for a set of signals — first-pickup
+  // stamp from the serves sidecar, started stamp + liveness from the
+  // claims sidecar joined to the lease that fences the claim. A claim
+  // whose token no longer holds a live lease reads startedLive=false:
+  // the started state expired with the lease, the stamp stays as
+  // history. Missing sidecars (a database from before these tables)
+  // read as no lifecycle — never an error, like the other read paths.
+  lifecycleOfSignals(signalIds, at = this.now()) {
+    const lifecycle = new Map();
+    if (!Array.isArray(signalIds) || signalIds.length === 0) return lifecycle;
+    const entryFor = signalId => {
+      if (!lifecycle.has(signalId))
+        lifecycle.set(signalId, { servedAt: null, startedAt: null, startedLive: false, redelivered: false });
+      return lifecycle.get(signalId);
+    };
+    try {
+      const marks = [...sqlChunks(signalIds)].flatMap(chunk => this.db.prepare(
+        `SELECT signal_id AS signalId, MIN(served_at) AS servedAt FROM agent_wake_signal_serves
+         WHERE signal_id IN (${sqlPlaceholders(chunk)}) GROUP BY signal_id`).all(...chunk));
+      for (const mark of marks) entryFor(mark.signalId).servedAt = mark.servedAt;
+    } catch (error) { if (!isMissingTable(error)) throw error; }
+    try {
+      const claims = [...sqlChunks(signalIds)].flatMap(chunk => this.db.prepare(
+        `SELECT c.signal_id AS signalId, c.claimed_at AS claimedAt, c.claimed_by AS claimedBy,
+           c.redelivered AS redelivered, l.lease_expires_at AS leaseExpiresAt
+         FROM agent_wake_signal_claims c
+         LEFT JOIN agent_wake_listener_leases l
+           ON l.agent_id = c.agent_id AND l.fencing_token = c.claimed_by
+         WHERE c.signal_id IN (${sqlPlaceholders(chunk)})`).all(...chunk));
+      for (const claim of claims) {
+        const entry = entryFor(claim.signalId);
+        if (claim.redelivered === 1) entry.redelivered = true;
+        // A released claim (claimed_by='') is no longer started: the
+        // signal waits for its flagged redelivery instead.
+        if (claim.claimedBy !== "") {
+          entry.startedAt = claim.claimedAt;
+          entry.startedLive = claim.leaseExpiresAt !== null && claim.leaseExpiresAt > at;
+        }
+      }
+    } catch (error) { if (!isMissingTable(error)) throw error; }
+    return lifecycle;
+  }
+
   roomKeyOf(roomId) {
     check(roomId === null || (typeof roomId === "string" && roomId.length > 0),
       422, "invalid_listener_lease", "roomId must be a non-empty string or null");
@@ -953,12 +1041,23 @@ export class AgentHeartbeats {
         RETURNING signal_id, redelivered`)
       .all(agentId, fencingToken, at, agentId, roomId, roomId, fencingToken, at, agentId, roomKey, fencingToken, at, limit);
     const views = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?");
-    const signals = claimed.map(({ signal_id, redelivered }) =>
-      Object.freeze({ ...signalView(views.get(signal_id)), redelivered: redelivered === 1 }));
+    // WAKE-S34 (Spec S4): the claim IS the started state — the response
+    // carries it (startedAt, startedLive under this lease, the replay
+    // flag), and the claims just written make it readable on every
+    // later page through lifecycleOfSignals.
+    const lifecycle = this.lifecycleOfSignals(claimed.map(({ signal_id }) => signal_id), at);
+    const signals = claimed.map(({ signal_id, redelivered }) => {
+      const entry = lifecycle.get(signal_id) ?? { servedAt: null, startedAt: at, startedLive: true, redelivered: redelivered === 1 };
+      return signalView(views.get(signal_id), { ...entry, startedAt: at, startedLive: true, redelivered: redelivered === 1 });
+    });
     // #3345: a claimed batch is a delivery on the listener door.
+    // WAKE-S34: it is also the started leg — counted separately so
+    // received / started / acked reconcile (review seat seq 17376).
     for (const signal of signals) {
       recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
         event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId });
+      recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
+        event: "started", door: "listener", kind: signal.kind, subjectId: agentId });
     }
     return Object.freeze({ signals: Object.freeze(signals) });
   }
@@ -1037,21 +1136,51 @@ export class AgentHeartbeats {
     }
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+    const messageRows = this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY created_at,signal_id LIMIT ?`)
       .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
-        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
+        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
-    const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
+    const workIds = new Set(work.map(entry => entry.signalId));
+    const combined = [
+      ...messageRows.map(row => ({ row, createdAt: row.created_at, signalId: row.signal_id, roomId: row.room_id })),
+      ...work.map(entry => ({ entry, createdAt: entry.createdAt, signalId: entry.signalId, roomId: entry.roomId })),
+    ].filter(s => !held.has(s.roomId))
       .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
-    const page = combined.slice(0, limit);
+    const pageSlice = combined.slice(0, limit);
+    // WAKE-S34 (Spec S3): serving this page is the pickup. Stamp each
+    // signal's first serve for this host (INSERT OR IGNORE: a re-serve
+    // inserts nothing and moves nothing) and count first pickups on the
+    // metrics served leg, batched like the delivered count below.
+    const at = this.now();
+    const pageRows = pageSlice.filter(s => s.row).map(s => s.row);
+    if (pageRows.length > 0) {
+      try {
+        this.ensureSignalServesSchema();
+        const stamp = this.db.prepare(`INSERT OR IGNORE INTO agent_wake_signal_serves
+          (signal_id, host_id, served_at, door) VALUES (?, ?, ?, ?)`);
+        const fresh = new Map();
+        for (const row of pageRows) {
+          if (stamp.run(row.signal_id, hostId ?? "", at, door).changes > 0) {
+            const key = `${row.kind}\0${row.room_id ?? ""}`;
+            fresh.set(key, (fresh.get(key) ?? 0) + 1);
+          }
+        }
+        for (const [key, n] of fresh) {
+          const [kind, room] = key.split("\0");
+          recordWakeEvent(this.db, { at, roomId: room === "" ? null : room,
+            store: "signals", event: "served", door, kind, n });
+        }
+      } catch (error) { if (!isMissingTable(error)) throw error; }
+    }
+    const lifecycle = this.lifecycleOfSignals(pageRows.map(row => row.signal_id), at);
+    const page = pageSlice.map(s => s.row ? signalView(s.row, lifecycle.get(s.row.signal_id)) : s.entry);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
     if (page.length > 0) {
-      const workIds = new Set(work.map(entry => entry.signalId));
       const batches = new Map();
       for (const signal of page) {
         const isWork = workIds.has(signal.signalId);

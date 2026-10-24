@@ -454,6 +454,15 @@
         "openWorldHint": false
       }
     },
+    "heartbeat_claim": {
+      "inputSchema": "5f1b402b8d037602",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "heartbeat_get": {
       "inputSchema": "d746974fa9afd5e9",
       "annotations": {
