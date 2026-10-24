@@ -3,13 +3,12 @@
 name: zero-bug-quarantine
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  # Runs from nightly.yml (one nightly lane) or by hand. Not a per-PR check.
+  workflow_call:
+  workflow_dispatch:
 
-# A newer push to the same PR cancels the older run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  group: zero-bug-quarantine-${{ github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -30,7 +29,7 @@ jobs:
   # Runs on main pushes only: it never gates a PR, and a full npm ci +
   # Playwright install per PR push was occupying runners other PRs need.
   quarantined-tests:
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # Quarantined tests are the flaky ones; on 2026-10-07 five of these runs
     # hung for 30-140 minutes each on the 6-hour default, holding runners.

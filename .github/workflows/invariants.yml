@@ -17,11 +17,8 @@
 name: invariants
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-  merge_group:
-    types: [checks_requested]
+  # Runs from nightly.yml (one nightly lane) or by hand. Not a per-PR check.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -30,7 +27,7 @@ permissions:
 # Same grouping discipline as `test`: PRs cancel their own older runs;
 # pushes to main and merge-group runs are never cancelled mid-flight.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: invariants-${{ github.run_id }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
