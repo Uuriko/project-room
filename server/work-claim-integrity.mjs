@@ -14,7 +14,7 @@
 // - deploy status: one GitHub read per store per 60 s, single-flight, with
 //   the stale cached value while the GitHub budget is held.
 import { TEXT_CHARACTER_CLASSES } from "./display-name-guard.mjs";
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { readCachedDeployStatus, readClaimPullBudget, readRoomDeployStatus } from "./claim-pr-sync.mjs";
 
 const INVISIBLE = new RegExp(TEXT_CHARACTER_CLASSES.invisible.source, "gu");

@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PILOT_LIMITS } from "../server/store.mjs";
+import { PILOT_LIMITS } from "../server/pilot-limits.mjs";
+import { PILOT_LIMITS as PILOT_LIMITS_VIA_STORE } from "../server/store.mjs";
 import { DurableDatabase, isTooBig } from "../cloudflare/storage.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -55,4 +56,10 @@ test("a platform SQLITE_TOOBIG refusal surfaces as a typed 409, not a 500", () =
   other.isTransaction = true;
   assert.throws(() => other.prepare("SELECT 1").all(), /no such table/);
   assert.equal(isTooBig(new Error("disk I/O error")), false);
+});
+
+test("store.mjs re-exports the leaf's identical frozen object (importer equivalence)", () => {
+  assert.equal(PILOT_LIMITS_VIA_STORE, PILOT_LIMITS);
+  assert.ok(Object.isFrozen(PILOT_LIMITS));
+  assert.deepEqual({ ...PILOT_LIMITS }, { eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 });

@@ -18,7 +18,7 @@ import { ServiceError } from "./service-error.mjs";
 // Read at call time, like the other satellite modules (access-requests,
 // referrals): store.mjs sits above this module in the import graph, so the
 // binding is only safe to dereference once modules are fully loaded.
-import { PILOT_LIMITS } from "./store.mjs";
+import { PILOT_LIMITS } from "./pilot-limits.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };

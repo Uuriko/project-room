@@ -95,7 +95,7 @@ Paste this into the review and tick every box that applies:
 - [ ] **Behavior.** The description states the user-visible change. The diff matches it and nothing else.
 - [ ] **Tests.** New behavior has a test at the owning boundary that fails without the change (per the `.agents/skills/test-audit` gate). No test-only production seams.
 - [ ] **Auth.** Every new route checks membership and permission. Unauthenticated routes are rate-limited and have a global budget that can't be exhausted.
-- [ ] **Limits.** New stored state has a cap and a reaper (pilot caps: 100 members, 500 work items, 1M events, 4 MiB projection — `PILOT_LIMITS` in server/store.mjs).
+- [ ] **Limits.** New stored state has a cap and a reaper (pilot caps: 100 members, 500 work items, 1M events, 4 MiB projection — `PILOT_LIMITS` in server/pilot-limits.mjs).
 - [ ] **UI.** Checked at 390 and 1280 px. Keyboard reachable. Labels on inputs. Contrast AA. Uses the app's tokens and components, not a new theme.
 - [ ] **Copy.** Plain, confident, says what happens. No hedges or internal jargon in product UI.
 - [ ] **Discovery.** Any advertised URL resolves. `openapi.yaml` is updated for new routes (the route-docs gate enforces this).

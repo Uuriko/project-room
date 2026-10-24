@@ -26,6 +26,10 @@ const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], {
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
 if (shadows.status !== 0) process.exit(shadows.status || 1);
+// SCC gate (F-16 / C-9, v1): import cycles in server/ + src/ may only
+// shrink from scripts/scc-baseline.json. See scripts/scc-check.mjs.
+const scc = spawnSync(process.execPath, ["scripts/scc-check.mjs"], { stdio: "inherit" });
+if (scc.status !== 0) process.exit(scc.status || 1);
 // --- Route documentation gate (batch RT) ---
 // docs/openapi.yaml must parse, every served template must stay documented,
 // and every documented operation must be a route-table row or a legacy

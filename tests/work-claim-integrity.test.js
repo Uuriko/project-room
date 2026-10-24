@@ -5,7 +5,8 @@
 // event budget, the cached deploy status, text normalization and inputs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { PILOT_LIMITS } from "../server/pilot-limits.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";

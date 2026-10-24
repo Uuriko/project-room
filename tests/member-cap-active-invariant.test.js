@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { PILOT_LIMITS } from "../server/pilot-limits.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { roomUsageSummary } from "../server/usage-summary.mjs";
