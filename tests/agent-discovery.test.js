@@ -114,7 +114,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
-  assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
+  assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json"), null, "the /project-room/ mirror is cut");
 });
 
 test("short and full packets tell a pasted agent the next action; kits and door stay off", () => {
@@ -175,7 +175,7 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
   assert.equal(discoveryDoc("/join.txt").body, prompt);
   assert.equal(discoveryDoc("/room/join.txt").body, prompt);
-  assert.equal(discoveryDoc("/project-room/join.txt").body, prompt);
+  assert.equal(discoveryDoc("/project-room/join.txt"), null, "the /project-room/ mirror is cut");
   assert.match(discoveryDoc("/join.txt").type, /text\/plain/);
 });
 
@@ -259,7 +259,7 @@ test("agents.json is a machine-readable flows/steps/actions doc served at /agent
   assert.equal(canonical.body, body);
   assert.equal(discoveryDoc("/room/agents.json").body, body);
   assert.equal(discoveryDoc("/room/agents.json/").body, body);
-  assert.equal(discoveryDoc("/project-room/agents.json").body, body);
+  assert.equal(discoveryDoc("/project-room/agents.json"), null, "the /project-room/ mirror is cut");
   assert.ok(DISCOVERY_PATHS.includes("/agents.json"));
   assert.ok(DISCOVERY_PATHS.includes("/room/agents.json"));
   const origin = await serve(t);
@@ -332,7 +332,7 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.ok(skill.body.includes("Unknown error"), "skill documents the unknown-error fallthrough recovery");
   assert.ok(skill.body.includes("rooms: []"), "skill documents the fresh-mint 401 / rooms dead end");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
-  for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
+  for (const path of ["/room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
     assert.equal(discoveryDoc(path).body, skill.body, `${path} serves identical bytes`);
     const get = await fetch(origin + path);
@@ -438,7 +438,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.equal(FORBIDDEN.test(catalog.body), false);
   const origin = await serve(t);
   const catalogPaths = [
-    "/kits.txt", "/kits", "/kits/", "/room/kits.txt", "/project-room/kits.txt",
+    "/kits.txt", "/kits", "/kits/", "/room/kits.txt",
     ...KITS_CATALOG_SYNONYMS, ...KITS_CATALOG_SYNONYMS.map(p => `${p}/`),
     ...KITS_CATALOG_FILES.flatMap(name => [`/${name}`, `/room/${name}`])
   ];
@@ -524,9 +524,7 @@ test("door serves the same discovery bytes and points at origin", async () => {
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
     "/room/skill", "/room/skill/", "/room/agents", "/room/llms",
     "/room/agent.json", "/room/readme.md", "/room/gemini.md", "/room/cursor.md",
-    "/room/kits.txt", "/room/kits", "/room/kit", "/room/apps", "/room/tools",
-    "/project-room/llms.txt", "/project-room/join.txt", "/project-room/llms-full.txt", "/project-room/kits.txt",
-    "/project-room/.well-known/agent.json"
+    "/room/kits.txt", "/room/kits", "/room/kit", "/room/apps", "/room/tools"
   ]) {
     const expected = discoveryDoc(doorPath);
     const get = roomEntry(new Request(`https://www.trydemigod.com${doorPath}`));
