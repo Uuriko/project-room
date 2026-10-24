@@ -121,6 +121,7 @@ export class ProjectRoom extends DurableObject {
         });
       });
     });
+    this.store.featureEnv = env;
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials

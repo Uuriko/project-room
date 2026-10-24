@@ -20,6 +20,7 @@ import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/
 import { growthCollector } from "../src/growth-emit.js";
 import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -65,6 +66,16 @@ function channelPending(store) {
 function webhookDueAt(store) {
   const row = read(store, "SELECT MIN(next_attempt_at) AS due FROM agent_webhook_deliveries WHERE state IN ('pending','failed')");
   return row?.due == null ? null : Number(row.due);
+}
+
+// A missed dm/mention wake is due even when no delivery row exists yet.
+// An armed flag with nothing waiting stays null so the job stays idle.
+function webhookNextDue(store) {
+  const webhook = webhookDueAt(store);
+  const missed = missedWakeDueAt(store);
+  if (webhook == null) return missed;
+  if (missed == null) return webhook;
+  return Math.min(webhook, missed);
 }
 
 function landDueAt(store, now) {
@@ -340,12 +351,16 @@ export const JOBS = Object.freeze([
     name: "webhook-dispatch",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    enabled(_env, store) { return store ? webhookDueAt(store) != null : true; },
+    enabled(_env, store) { return store ? webhookNextDue(store) != null : true; },
     disabledReason: () => "No webhook delivery is waiting",
-    nextDueAt: store => webhookDueAt(store),
+    nextDueAt: store => webhookNextDue(store),
     async run(store, ctx) {
-      if (ctx.room?.drainWebhookDeliveries) return ctx.room.drainWebhookDeliveries();
-      return store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
+      const drained = ctx.room?.drainWebhookDeliveries
+        ? await ctx.room.drainWebhookDeliveries()
+        : await store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
+      try { catchUpMissedWakes(store); }
+      catch (error) { console.error(`missed wake catch-up failed: ${error?.message ?? "failed"}`); }
+      return drained;
     }
   }),
   defineJob({

@@ -157,6 +157,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -6251,7 +6252,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
@@ -6528,7 +6529,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+      const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
