@@ -47,6 +47,12 @@ function setup() {
   const db = new DatabaseSync(":memory:");
   db.exec(workClaimSchema);
   const registry = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
+  // STATUS-LEG (C-07): the tick also materializes the main-HEAD cache.
+  // Seed it fresh (checked just past every nowMs these tests use) so the
+  // deploy refresh is never due here — these tests count pull lookups,
+  // and a not-due refresh makes no GitHub call.
+  db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
+    .run("_claim-main-head", JSON.stringify({ sha: SHA, behind: null, checkedAt: new Date(NOW + 60_000).toISOString() }), NOW);
   return { store: { db, workClaims: registry }, registry };
 }
 

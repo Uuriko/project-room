@@ -5313,21 +5313,16 @@ paths:
       summary: Live revision compared with GitHub main
       description: |
         Returns this server's live source revision, the last known GitHub
-        main head (cached, and refreshed inside the pull-poll rate-limit
-        budget), how many commits live is behind main when that count is
+        main head, how many commits live is behind main when that count is
         known, and when the head was checked. behind is 0 when the two
-        revisions match and null when the count is not known. Reading this
-        also closes land and deploy claims whose revision is now live.
+        revisions match and null when the count is not known. This route
+        serves the main-HEAD cache only and never reads GitHub: the
+        claim-prs job materializes the cache on its 60-second cadence,
+        inside the pull-poll rate-limit budget. Reading this also closes
+        land and deploy claims whose revision is now live.
         API keys need `rooms:read`.
       parameters:
-        - $ref: '#/components/parameters/RoomId'
-        - name: refresh
-          in: query
-          schema: { type: string, enum: ['1'] }
-          description: |
-            `refresh=1` skips the 60s deploy-status cache and polls GitHub
-            now. Only a member with Board write access may force it; anyone
-            else reads the shared cached value.
+        - $ref: '#/components/parameters/RoomId' 
       responses:
         '200':
           description: Live and main
@@ -5341,7 +5336,7 @@ paths:
                   main: { type: [string, 'null'] }
                   behind: { type: [integer, 'null'] }
                   checkedAt: { type: [string, 'null'], format: date-time }
-                  stale: { type: boolean, description: True while the GitHub pull-poll budget is held and the cached value is served }
+                  stale: { type: boolean, description: True when the cached value is older than 60 seconds or the GitHub pull-poll budget is held }
                   heldUntil: { type: [string, 'null'], format: date-time, description: When the pull-poll budget releases, when stale }
                   eventsRemaining: { type: [integer, 'null'], description: Room event budget left before Board writes are limited to the owner and claim managers }
         '401': { description: unauthenticated }

@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
-import { readRoomDeployStatus, collectPullRequestLookups } from "../server/claim-pr-sync.mjs";
+import { readRoomDeployStatus, refreshMainHeadCache, collectPullRequestLookups } from "../server/claim-pr-sync.mjs";
 import { readBoardDeployStatus } from "../server/work-claim-integrity.mjs";
 import { boardHtml } from "../src/board-ui.js";
 import { discoverUnlinkedPulls } from "../server/claim-autolink.mjs";
@@ -82,7 +82,9 @@ test("GitHub App token without credentials is a named not_configured error, with
 // A failed GitHub read hands back the CACHED main. That value can predate a
 // deploy, so it must be marked stale: the Board chip only says "Live differs
 // from main" for a fresh read, and a rate-limited GitHub right after a deploy
-// used to produce a false mismatch.
+// used to produce a false mismatch. STATUS-LEG (C-07): the GitHub read is
+// the claim-prs job's (refreshMainHeadCache); the route's reader
+// (readBoardDeployStatus) only ever serves the cache the job left behind.
 const SHA_OLD = "a".repeat(40), SHA_LIVE = "b".repeat(40);
 const failedReads = {
   "403": async () => res(403),
@@ -99,7 +101,8 @@ for (const [name, fetchImpl] of Object.entries(failedReads)) {
     // A cached main from before the deploy; the live build is newer.
     store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
       .run("_claim-main-head", JSON.stringify({ sha: SHA_OLD, behind: null, checkedAt: "2026-10-11T00:00:00.000Z" }), 1);
-    const status = await readBoardDeployStatus(store, { fetchImpl, token: null, nowMs: 1_750_000_000_000, force: true });
+    await refreshMainHeadCache(store, { fetchImpl, token: null, nowMs: 1_750_000_000_000, force: true });
+    const status = readBoardDeployStatus(store, { nowMs: 1_750_000_000_000 });
     assert.equal(status.main, SHA_OLD, "the cached main is still reported");
     assert.equal(status.stale, true, "a fallback to the cache is stale");
     assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Deploy status unknown", "no false mismatch from a stale cache");
@@ -110,14 +113,15 @@ test("a successful GitHub read is fresh and a real mismatch shows", async t => {
   const store = new RoomStore(":memory:");
   t.after(() => store.close?.());
   const ok = async () => ({ status: 200, ok: true, headers: { get: () => null }, json: async () => ({ sha: SHA_OLD }), text: async () => JSON.stringify({ sha: SHA_OLD }) });
-  const status = await readBoardDeployStatus(store, { fetchImpl: ok, token: null, nowMs: 1_750_000_000_000, force: true });
+  await refreshMainHeadCache(store, { fetchImpl: ok, token: null, nowMs: 1_750_000_000_000, force: true });
+  const status = readBoardDeployStatus(store, { nowMs: 1_750_000_000_000 });
   assert.equal(status.stale, false);
   assert.equal(status.main, SHA_OLD);
   assert.equal(chipFor({ ...status, live: SHA_LIVE }), "Live differs from main");
 });
 
-// Readers inside the 60 s window after a failed read share that read's result,
-// so they must not get the pre-deploy cached main back as fresh.
+// A failed job read never freshens the cache, so every reader after it —
+// inside the 60 s window or not — keeps seeing the cached main as stale.
 for (const name of ["403", "thrown fetch", "5xx"]) {
   test(`a second reader right after a failed GitHub read (${name}) still sees stale`, async t => {
     const store = new RoomStore(":memory:");
@@ -125,10 +129,10 @@ for (const name of ["403", "thrown fetch", "5xx"]) {
     store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
       .run("_claim-main-head", JSON.stringify({ sha: SHA_OLD, behind: null, checkedAt: "2026-10-11T00:00:00.000Z" }), 1);
     const nowMs = 1_750_000_000_000;
-    await readBoardDeployStatus(store, { fetchImpl: failedReads[name], token: null, nowMs, force: true });
-    const second = await readBoardDeployStatus(store, { fetchImpl: failedReads[name], token: null, nowMs: nowMs + 5_000 });
+    await refreshMainHeadCache(store, { fetchImpl: failedReads[name], token: null, nowMs, force: true });
+    const second = readBoardDeployStatus(store, { nowMs: nowMs + 5_000 });
     assert.equal(second.main, SHA_OLD);
-    assert.equal(second.stale, true, "the window reuses the failed read, so the cache is still stale");
+    assert.equal(second.stale, true, "the failed job read left the cache stale");
     assert.equal(chipFor({ ...second, live: SHA_LIVE }), "Deploy status unknown");
   });
 }

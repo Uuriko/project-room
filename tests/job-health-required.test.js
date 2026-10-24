@@ -20,6 +20,12 @@ function fixtureStore(t) {
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   store.initialize(initialRoom("commons"));
   store.patrolTick();
+  // STATUS-LEG (C-07): claim-prs has standing deploy-status work, so a
+  // store where it has never ticked reads stale and would drown the
+  // room-backup gate under test. Seed the main-HEAD cache it maintains
+  // as checked at the fixtures' "now", i.e. claim-prs ticked a moment ago.
+  store.db.prepare("INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)")
+    .run("_claim-main-head", JSON.stringify({ sha: "a".repeat(40), behind: null, checkedAt: "2026-09-24T22:00:00.000Z" }), Date.parse("2026-09-24T22:00:00Z"));
   return store;
 }
 
