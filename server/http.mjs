@@ -65,7 +65,8 @@ import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "./r
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 // Board v2 is retired. Its routes answer 410 board_v2_retired. The
-// board_vtwo_* tables stay in place; nothing here drops them.
+// board_vtwo_* tables are no longer created in fresh stores (#3997);
+// databases that already carry them keep them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -4261,7 +4262,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }, helpers: { json, reject, body } });
       }
       // Board v2 is retired. Authenticated callers get 410 and a pointer at
-      // the work-claims board. The board_vtwo_* tables are not dropped.
+      // the work-claims board.
       if (boardV2Match) {
         return json(res, 410, {
           error: { code: "board_v2_retired", message: "Board v2 is retired. Use the work-claims board." },
