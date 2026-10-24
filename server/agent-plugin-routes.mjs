@@ -314,18 +314,15 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // RC-2026-09-18-027: every publish-path 422 points at the signing guide
     // so failures teach instead of dead-ending.
     const signingDocs = "See docs/SIGNED-AGENT-CARDS.md for the signing guide.";
-    const shape = data && [
-      ["agentId", "card", "publicKey", "signature"],
-      ["agentId", "card", "visibility", "publicKey", "signature"],
-      ["agentId", "card", "publicKey", "signature", "rotationSignature"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature"],
-      ["agentId", "card", "publicKey", "signature", "recovery"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "recovery"],
-      ["agentId", "card", "publicKey", "signature", "rotationSignature", "recovery"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature", "recovery"],
-    ].some(fields => exact(data, fields));
+    const required = ["agentId", "card", "publicKey", "signature"];
+    const optional = ["visibility", "rotationSignature", "recovery", "listed"];
+    const keys = data && typeof data === "object" && !Array.isArray(data) ? Object.keys(data) : [];
+    const shape = required.every(field => keys.includes(field)) && keys.every(field => required.includes(field) || optional.includes(field));
     if (!shape) reject(422, "invalid_card",
-      "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields. " + signingDocs);
+      "agentId, card, publicKey, signature, and optional visibility, listed, rotationSignature, recovery are the accepted fields. " + signingDocs);
+    if (data.listed !== undefined && typeof data.listed !== "boolean") {
+      reject(422, "invalid_card", "listed must be true or false. " + signingDocs);
+    }
     if (data.recovery !== undefined && data.recovery !== true) {
       reject(422, "invalid_card", "recovery must be true when given. " + signingDocs);
     }
@@ -343,6 +340,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         rotationSignature: data.rotationSignature ?? null,
         ownerRecovery: data.recovery === true && auth.keyId === null,
         visibility: data.visibility ?? "public",
+        listed: data.listed === true,
       });
     } catch (error) {
       // Signing validation (invalid_signing_input / invalid_card_signature)

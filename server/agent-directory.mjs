@@ -20,10 +20,10 @@ import { excludedFromPublicDirectory, presentPublicCard, scrubPublicDirectoryTex
 // third-party agent reads over HTTP: publish/withdraw agent card documents,
 // list and search with a visibility policy, and build the frozen directory
 // document served at the directory endpoint (see agent-plugin-manifest.mjs
-// for the canonical URL). Visibility "public" cards appear in the public
-// document; "room" cards are visible only to room members (omitted from
-// the public document); "private" cards are listed to no one but their
-// owner agent.
+// for the canonical URL). Visibility "public" is not the public index:
+// a card appears there only when publish set listed true. "room" cards
+// are visible only to room members (omitted from the public document);
+// "private" cards are listed to no one but their owner agent.
 //
 // Pure module: all state is caller-owned (a Map), no network I/O.
 // Frozen outputs; malformed inputs throw DirectoryError (coded errors).
@@ -242,11 +242,12 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
   // key; the store/HTTP layer decides when that is legitimate). A stored
   // card with no pinned key yet (published before signing existed) pins the
   // new key on its next publish.
-  const publish = ({ agentId, card, visibility = "public", publicKey = null, signature = null,
+  const publish = ({ agentId, card, visibility = "public", listed = false, publicKey = null, signature = null,
     rotationSignature = null, allowRecovery = false }) => {
     check(typeof agentId === "string" && AGENT_ID_PATTERN.test(agentId),
       "agentId must match ^[a-z][a-z0-9-]*$ — this is a directory slug (e.g. 'my-agent'), not your ai_ identity id");
     check(VISIBILITIES.includes(visibility), `visibility must be one of ${VISIBILITIES.join(", ")}`);
+    check(listed === true || listed === false, "listed must be true or false");
     validateCard(card);
     if (!isValidPublicKey(publicKey)) {
       fail("invalid_card_signature",
@@ -280,6 +281,7 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
       // "self", including when it replaces an owner-seeded placeholder.
       provenance: "self",
       visibility,
+      listed,
       publishedAt: existing?.publishedAt ?? now(),
       updatedAt: now(),
       withdrawn: false,
@@ -335,6 +337,7 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
     const docs = [...entries.values()]
       .filter(e => !e.withdrawn)
       .filter(e => includeNonPublic || (e.visibility === "public" && e.provenance !== "seeded"
+        && e.listed === true
         && !excludedFromPublicDirectory({ agentId: e.agentId, name: e.card?.name })))
       .filter(e => {
         if (!q) return true;

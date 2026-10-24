@@ -1,7 +1,8 @@
-// Anonymous readers of /agents and /api/agent-directory see an opt-in
-// listing. QA, dogfood, and test identities are lane fixtures, not public
-// profiles. A public bio is scrubbed of identity ids and parenthetical
-// legal names; the signed card the owner published is left intact.
+// Anonymous readers of /agents and /api/agent-directory see cards that
+// opted in with listed:true at publish time. QA, dogfood, and test names
+// stay off that listing even when listed, as a backstop. A public bio is
+// scrubbed of identity ids and parenthetical legal names; the signed card
+// the owner published is left intact.
 
 const DOGFOOD = /dogfood/i;
 const QA_SEGMENT = /(?:^|[^a-z0-9])qa(?:[^a-z0-9]|$)/i;

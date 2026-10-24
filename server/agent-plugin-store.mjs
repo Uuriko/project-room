@@ -337,9 +337,13 @@ export class AgentPluginStore {
       });
     }
     for (const row of this.db.prepare("SELECT * FROM agent_directory_cards").all()) {
+      const parsed = JSON.parse(row.card_json);
+      const listed = parsed.listed === true;
+      delete parsed.listed;
       this.cards.set(row.agent_id, {
         agentId: row.agent_id,
-        card: JSON.parse(row.card_json),
+        card: parsed,
+        listed,
         // Legacy rows (published before signed cards) have NULL here and
         // pin a key on their next owner-signed republish.
         publicKey: row.public_key ?? undefined,
@@ -615,7 +619,7 @@ export class AgentPluginStore {
   // ---- Agent directory (public document; owner-scoped publish/withdraw) ----
 
   publishCard({ identityId, agentId, card, publicKey, signature, rotationSignature = null,
-    ownerRecovery = false, visibility = "public" }) {
+    ownerRecovery = false, visibility = "public", listed = false }) {
     return this.mutate(() => {
       const existing = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
       if (existing && existing.ownerIdentityId !== identityId) {
@@ -623,7 +627,7 @@ export class AgentPluginStore {
           `Card "${agentId}" is published by another identity`);
       }
       this.directory.publish({
-        agentId, card, visibility, publicKey, signature, rotationSignature,
+        agentId, card, visibility, listed, publicKey, signature, rotationSignature,
         allowRecovery: ownerRecovery,
       });
       const entry = this.cards.get(agentId);
@@ -633,7 +637,7 @@ export class AgentPluginStore {
         ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility=excluded.visibility,
           updated_at=excluded.updated_at, withdrawn=0,
           public_key=excluded.public_key, signature=excluded.signature, provenance='self'`)
-        .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
+        .run(agentId, JSON.stringify({ ...entry.card, listed: entry.listed === true }), entry.visibility, identityId,
           entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
       syncDirectoryCard(this.store, agentId);
       // Rebuild the doc after the owner row exists so the trust source sees
@@ -799,6 +803,7 @@ export class AgentPluginStore {
     return this.store.readTransaction(() => {
       const entry = this.cards.get(agentId);
       if (!entry || entry.withdrawn || entry.visibility !== "public" || entry.provenance === "seeded"
+        || entry.listed !== true
         || excludedFromPublicDirectory({ agentId, name: entry.card?.name })) {
         throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
       }

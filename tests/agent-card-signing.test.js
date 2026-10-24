@@ -32,7 +32,7 @@ const CARD = {
 const signedPublish = (dir, { agentId, card = CARD, keyPair, visibility, rotationSignature, allowRecovery }) => {
   const signature = signCard({ agentId, card, privateKey: keyPair.privateKey });
   return dir.publish({
-    agentId, card, visibility,
+    agentId, card, visibility, listed: true,
     publicKey: keyPair.publicKey, signature, rotationSignature, allowRecovery,
   });
 };

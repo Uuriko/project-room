@@ -64,6 +64,7 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
   directory.publish({
     agentId: "new-agent",
     card: loopCard,
+    listed: true,
     publicKey: loopKeyPair.publicKey,
     signature: signCard({ agentId: "new-agent", card: loopCard, privateKey: loopKeyPair.privateKey }),
   });

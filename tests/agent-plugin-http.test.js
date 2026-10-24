@@ -62,6 +62,7 @@ const fixtureCard = (overrides = {}) => ({
 const signedPublishBody = (agentId, card, keyPair, extras = {}) => ({
   agentId,
   card,
+  listed: true,
   publicKey: keyPair.publicKey,
   signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
   ...extras,

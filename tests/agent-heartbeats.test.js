@@ -425,6 +425,7 @@ test("directory cards carry host-reported presence (additive field)", async t =>
     publicKey: keyPair.publicKey,
     signature: signCard({ agentId: "presence-agent", card, privateKey: keyPair.privateKey }),
     visibility: "public",
+    listed: true,
   }, identity.secret);
   assert.equal(published.status, 201);
 

@@ -35,7 +35,7 @@ const CARD = {
 const publishSigned = (dir, { agentId, card = CARD, visibility } = {}) => {
   const keyPair = generateKeyPair();
   const signature = signCard({ agentId, card, privateKey: keyPair.privateKey });
-  return dir.publish({ agentId, card, visibility, publicKey: keyPair.publicKey, signature });
+  return dir.publish({ agentId, card, visibility, listed: visibility !== "room" && visibility !== "private", publicKey: keyPair.publicKey, signature });
 };
 
 const docOf = (agentId = "a2a-lane") => {

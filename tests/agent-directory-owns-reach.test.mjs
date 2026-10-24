@@ -32,7 +32,7 @@ const CARD = {
 
 const publishSigned = (dir, { agentId, card = CARD, visibility, keyPair = generateKeyPair() } = {}) => {
   const signature = signCard({ agentId, card, privateKey: keyPair.privateKey });
-  return dir.publish({ agentId, card, visibility, publicKey: keyPair.publicKey, signature });
+  return dir.publish({ agentId, card, visibility, listed: true, publicKey: keyPair.publicKey, signature });
 };
 
 test("reach() and owns() attach validated host data to the card doc", () => {
@@ -121,7 +121,7 @@ test("a signed publish over a seeded card flips provenance to self", () => {
   assert.equal(seeded.provenance, "seeded");
   const keyPair = generateKeyPair();
   const signature = signCard({ agentId: "flip-agent", card: CARD, privateKey: keyPair.privateKey });
-  const doc = dir.publish({ agentId: "flip-agent", card: CARD, publicKey: keyPair.publicKey, signature });
+  const doc = dir.publish({ agentId: "flip-agent", card: CARD, listed: true, publicKey: keyPair.publicKey, signature });
   assert.equal(doc.provenance, "self");
   assert.ok(doc.signature);
 });

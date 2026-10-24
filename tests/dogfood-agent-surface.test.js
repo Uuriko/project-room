@@ -168,6 +168,7 @@ async function publishCards(t) {
     const keyPair = generateKeyPair();
     const res = await post(origin, "/api/agent-directory/cards", {
       agentId, card, visibility,
+      ...(visibility === "public" ? { listed: true } : {}),
       publicKey: keyPair.publicKey,
       signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
     }, member.secret);

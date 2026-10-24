@@ -39,13 +39,14 @@ function card(name, description) {
   };
 }
 
-async function publish(origin, secret, agentId, name, description) {
+async function publish(origin, secret, agentId, name, description, listed = false) {
   const body = card(name, description);
   const keyPair = generateKeyPair();
   const res = await post(origin, "/api/agent-directory/cards", {
     agentId,
     card: body,
     visibility: "public",
+    ...(listed ? { listed: true } : {}),
     publicKey: keyPair.publicKey,
     signature: signCard({ agentId, card: body, privateKey: keyPair.privateKey }),
   }, secret);
@@ -58,12 +59,13 @@ test("anonymous /agents and the public directory omit test identities and legal 
   const publisher = store.identities.create("lane publisher");
   const leaked = "Keeps the lane (Jordan Hale), identity id_AbCdEf12\u2026, ai_Zz99token.";
 
-  await publish(origin, publisher.secret, "lane-keeper", "Lane Keeper", leaked);
-  await publish(origin, publisher.secret, "qa-sentinel", "QA Sentinel", "Internal QA identity used on the lane.");
-  await publish(origin, publisher.secret, "dogfood-peer", "Dogfood Peer", "Dogfood identity, not a public profile.");
-  await publish(origin, publisher.secret, "test-runner", "Test Runner", "Test identity, not a public profile.");
-  await publish(origin, publisher.secret, "contest-helper", "Contest Helper", "Mentions a QA-lane in passing.");
-  await publish(origin, publisher.secret, "latest-notes", "Latest Notes", "Ships the latest notes.");
+  await publish(origin, publisher.secret, "lane-keeper", "Lane Keeper", leaked, true);
+  await publish(origin, publisher.secret, "qa-sentinel", "QA Sentinel", "Internal QA identity used on the lane.", true);
+  await publish(origin, publisher.secret, "dogfood-peer", "Dogfood Peer", "Dogfood identity, not a public profile.", true);
+  await publish(origin, publisher.secret, "test-runner", "Test Runner", "Test identity, not a public profile.", true);
+  await publish(origin, publisher.secret, "contest-helper", "Contest Helper", "Mentions a QA-lane in passing.", true);
+  await publish(origin, publisher.secret, "latest-notes", "Latest Notes", "Ships the latest notes.", true);
+  await publish(origin, publisher.secret, "quiet-maker", "Quiet Maker", "Public card that did not opt in to the index.");
 
   // Rows already on disk, the way a card published before the filter still is.
   const insertEntry = store.db.prepare(`INSERT INTO public_directory_entries
@@ -93,7 +95,7 @@ test("anonymous /agents and the public directory omit test identities and legal 
     "Jordan Hale", "id_AbCdEf12", "ai_Zz99token",
     "QA Sentinel", "qa-sentinel", "Dogfood", "dogfood-peer",
     "Test Runner", "test-runner", "QA Stale", "Mina Cho", "id_Stale99",
-    "Seeded Placeholder", "Room Only Agent",
+    "Seeded Placeholder", "Room Only Agent", "Quiet Maker", "quiet-maker",
   ]) {
     assert.equal(html.includes(leakedText), false, leakedText);
   }
@@ -115,6 +117,7 @@ test("anonymous /agents and the public directory omit test identities and legal 
 
   assert.equal((await fetch(`${origin}/api/agents/directory/qa-sentinel`)).status, 404);
   assert.equal((await fetch(`${origin}/api/agents/directory/dogfood-peer`)).status, 404);
+  assert.equal((await fetch(`${origin}/api/agents/directory/quiet-maker`)).status, 404);
   const cardRes = await fetch(`${origin}/api/agents/directory/lane-keeper`);
   assert.equal(cardRes.status, 200);
   const cardBody = await cardRes.json();

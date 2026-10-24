@@ -172,7 +172,7 @@ test("directory cards surface the verification tier", async t => {
   const publish = async agentId => {
     const card = { name: "Tier Agent", description: "verification tier fixture", capabilities: ["chat"], version: "1.0.0" };
     return post(origin, "/api/agent-directory/cards", {
-      agentId, card, publicKey: keyPair.publicKey, signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
+      agentId, card, listed: true, publicKey: keyPair.publicKey, signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
     }, agent.secret);
   };
 

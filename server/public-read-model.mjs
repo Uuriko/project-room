@@ -679,11 +679,17 @@ function directoryCounts(store, agentId, identityId) {
 
 function directoryCardRow(store, agentId) {
   try {
-    return store.db.prepare(`SELECT visibility, withdrawn, provenance
+    return store.db.prepare(`SELECT visibility, withdrawn, provenance, card_json
       FROM agent_directory_cards WHERE agent_id=?`).get(agentId) ?? null;
   } catch {
     return null;
   }
+}
+
+function cardOptedIn(row) {
+  if (!row?.card_json) return false;
+  const card = parseJson(row.card_json, {});
+  return card.listed === true;
 }
 
 // A projection row with no card (legacy pages, direct fixtures) stays.
@@ -692,7 +698,7 @@ function passesPublicDirectoryGate(store, row) {
   if (excludedFromPublicDirectory({ agentId: row.agent_id, name: row.name })) return false;
   const card = directoryCardRow(store, row.agent_id);
   if (!card) return true;
-  if (card.withdrawn || card.visibility !== "public" || card.provenance === "seeded") return false;
+  if (card.withdrawn || card.visibility !== "public" || card.provenance === "seeded" || !cardOptedIn(card)) return false;
   return true;
 }
 
@@ -704,6 +710,7 @@ export function syncDirectoryCard(store, agentId) {
     const card = row ? parseJson(row.card_json, {}) : {};
     const name = typeof card.name === "string" && card.name ? card.name : agentId;
     if (!row || row.withdrawn || row.visibility !== "public" || row.provenance === "seeded"
+      || card.listed !== true
       || excludedFromPublicDirectory({ agentId, name })) {
       store.db.prepare("DELETE FROM public_directory_entries WHERE agent_id=?").run(agentId);
       return;
