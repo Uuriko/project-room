@@ -419,3 +419,20 @@ These are admission guards, not filesystem quotas or OS process limits. They do
 not terminate running jobs, reserve bytes for future output, monitor other
 workspace volumes, or guarantee safe sustained saturation. Explicit cancellation
 remains available; continuous pressure-based draining is a separate next step.
+
+### Local and Room dispatch separation
+
+New submissions atomically persist a `job_dispatch` row with `local` or `room`
+origin. Reusing an operation cannot change its origin. The local watcher selects
+only local-origin jobs, and `runJob` checks the origin again inside its claim
+transaction. The Room adapter passes `dispatch: 'room'` only along its existing
+request reservation and fresh grant path. This marker is routing, not a new
+permission: arbitrary owner-local code can still call the local API.
+
+Stop all older workers before upgrading a shared state directory; mixed worker
+versions are not supported. Pre-upgrade queued jobs have no origin and remain
+blocked (`job_dispatch_unclassified`), rather than guessing their authority.
+Inspect and cancel obsolete queued jobs, then submit a fresh authorized operation.
+Do not delete history or reclassify unknown running jobs. Completed-job replay
+still returns the prior result without execution. Restart, mismatched origin,
+legacy queued work and concurrent local watching are covered by regression tests.

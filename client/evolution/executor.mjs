@@ -27,12 +27,19 @@ export function getJob(store, jobId) {
   const row = store.db.prepare('SELECT * FROM jobs WHERE id=?').get(jobId); requireThat(row, 'job_not_found');
   return { ...row, payload: JSON.parse(row.payload), result: row.result ? JSON.parse(row.result) : null };
 }
-export function submit(store, { room, operation, capability, input, candidateHash }) {
+export function submit(store, { room, operation, capability, input, candidateHash, dispatch = 'local' }) {
+  requireThat(['local', 'room'].includes(dispatch), 'invalid_dispatch');
   requireThat([room, operation, capability].every(v => typeof v === 'string' && v.length > 0 && v.length <= 200), 'invalid_job');
   const payload = canonical({ capability, input, candidateHash: candidateHash ?? null }); requireThat(Buffer.byteLength(payload) <= 65536, 'input_too_large');
   return transaction(store, () => {
     const previous = store.db.prepare('SELECT * FROM jobs WHERE room=? AND operation=?').get(room, operation);
-    if (previous) { requireThat(previous.payload === payload, 'operation_payload_changed'); return getJob(store, previous.id); }
+    if (previous) {
+      requireThat(previous.payload === payload, 'operation_payload_changed');
+      const source = store.db.prepare('SELECT source FROM job_dispatch WHERE job=?').get(previous.id)?.source;
+      requireThat(!source || source === dispatch, 'operation_dispatch_changed');
+      // Never infer the authority of an older queued job from a later caller.
+      return getJob(store, previous.id);
+    }
     const p = policy(store); requireThat(p.rooms.includes(room) && p.capabilities.includes(capability), 'job_not_authorized');
     const active = activation(store, capability); requireThat(active || candidateHash, 'capability_not_active');
     const bucket = parseInt(digest(canonical([room, operation])).slice(0, 8), 16) % 100;
@@ -40,6 +47,7 @@ export function submit(store, { room, operation, capability, input, candidateHas
     requireThat(getPackage(store, pin).manifest.capability === capability, 'capability_mismatch');
     const jobId = digest(canonical([room, operation]));
     store.db.prepare("INSERT INTO jobs(id,room,operation,payload,pin,state) VALUES(?,?,?,?,?,'queued')").run(jobId, room, operation, payload, pin);
+    store.db.prepare('INSERT INTO job_dispatch VALUES(?,?)').run(jobId, dispatch);
     event(store, 'job.queued', jobId, { room, capability, pin, evaluation: Boolean(candidateHash) });
     return getJob(store, jobId);
   });
@@ -154,11 +162,14 @@ async function executeStep(store, job, step, ordinal, pack, directory, inputPath
     });
   });
 }
-export async function runJob(store, jobId, { signal, observation } = {}) {
+export async function runJob(store, jobId, { signal, observation, dispatch = 'local' } = {}) {
   const owner = randomUUID();
   const admitted = transaction(store, () => {
     const job = getJob(store, jobId);
     if (job.state !== 'queued') return { claimed: false, job };
+    const source = store.db.prepare('SELECT source FROM job_dispatch WHERE job=?').get(jobId)?.source;
+    if (!source) return { claimed: false, job, reason: 'job_dispatch_unclassified' };
+    if (source !== dispatch) return { claimed: false, job, reason: 'job_dispatch_mismatch' };
     const budget = admission(store, job, observation);
     if (!budget.allowed) return { claimed: false, job, reason: budget.reason };
     verifyPackage(store, job.pin);

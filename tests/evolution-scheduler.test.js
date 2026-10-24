@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openEvolution, digest } from '../client/evolution/store.mjs';
 import { installPackage, activate } from '../client/evolution/registry.mjs';
-import { configure, submit, getJob } from '../client/evolution/executor.mjs';
+import { configure, submit, getJob, runJob } from '../client/evolution/executor.mjs';
 import { watchLocalCapabilities, executionMetrics } from '../client/evolution/scheduler.mjs';
 import { command } from '../scripts/room-evolution.mjs';
 const memory = 64 * 1024 ** 2;
@@ -93,4 +93,28 @@ test('observer failure drains previously started jobs before rejecting', async t
   await assert.rejects(run, /sensor unavailable/);
   assert.notEqual(getJob(f.store, a.id).state, 'running');
   assert.equal(getJob(f.store, a.id).owner, null);
+});
+
+test('local watcher never claims Room or legacy jobs, including after reopen and operation replay', async t => {
+  const f = fixture(t);
+  const args = { room: 'one', operation: 'remote', capability: 'verify', input: { release: join(f.directory, 'release') }, dispatch: 'room' };
+  const remote = submit(f.store, args), legacy = f.job('legacy'), local = f.job('local');
+  f.store.db.prepare('DELETE FROM job_dispatch WHERE job=?').run(legacy.id); // Pre-upgrade queue.
+  const reopened = openEvolution(f.store.directory);
+  try {
+    assert.equal(submit(reopened, args).id, remote.id);
+    assert.throws(() => submit(reopened, { ...args, dispatch: 'local' }), /operation_dispatch_changed/);
+    assert.equal((await runJob(reopened, remote.id)).reason, 'job_dispatch_mismatch');
+    assert.equal((await runJob(reopened, legacy.id)).reason, 'job_dispatch_unclassified');
+    const run = f.start(); await until(() => f.started(local));
+    await delay(250);
+    assert.equal(getJob(reopened, remote.id).attempt, 0);
+    assert.equal(getJob(reopened, legacy.id).attempt, 0);
+    f.release(); await until(() => getJob(reopened, local.id).state === 'completed');
+    f.controller.abort(); await run;
+    assert.equal(getJob(reopened, remote.id).state, 'queued');
+    const result = await runJob(reopened, remote.id, { dispatch: 'room', observation: { at: Date.now(), cpuSlots: 4, memoryBytes: memory * 8 } });
+    assert.equal(result.job.state, 'completed'); assert.equal(result.job.attempt, 1);
+    assert.equal((await runJob(reopened, remote.id, { dispatch: 'room' })).claimed, false);
+  } finally { reopened.close(); }
 });

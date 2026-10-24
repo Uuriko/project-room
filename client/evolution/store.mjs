@@ -29,6 +29,7 @@ export function openEvolution(directory) {
     CREATE TABLE IF NOT EXISTS packages (hash TEXT PRIMARY KEY, capability TEXT NOT NULL, manifest TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS activations (capability TEXT PRIMARY KEY, current TEXT NOT NULL, candidate TEXT, percent INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, room TEXT NOT NULL, operation TEXT NOT NULL, payload TEXT NOT NULL, pin TEXT NOT NULL, state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0, owner TEXT, heartbeat INTEGER, result TEXT, UNIQUE(room,operation));
+    CREATE TABLE IF NOT EXISTS job_dispatch (job TEXT PRIMARY KEY, source TEXT NOT NULL CHECK(source IN ('local','room')));
     CREATE TABLE IF NOT EXISTS steps (job TEXT NOT NULL, ordinal INTEGER NOT NULL, state TEXT NOT NULL, receipt TEXT, PRIMARY KEY(job,ordinal));
     CREATE TABLE IF NOT EXISTS room_results (request TEXT PRIMARY KEY, job TEXT NOT NULL, binding TEXT NOT NULL, response TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, capability TEXT NOT NULL, baseline TEXT NOT NULL, candidate TEXT NOT NULL, evidence TEXT NOT NULL);

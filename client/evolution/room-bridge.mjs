@@ -58,7 +58,7 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
     let job;
     const preflight = () => {
       authorize();
-      job = submit(store, { room: connection.roomId, operation, capability: task.capability, input: task.input });
+      job = submit(store, { room: connection.roomId, operation, capability: task.capability, input: task.input, dispatch: 'room' });
       if (job.state === 'queued') requireThat(admission(store, job, observeResources()).allowed, 'device_not_available');
       else requireThat(['completed', 'needs_attention', 'cancelled'].includes(job.state), 'job_requires_reconciliation');
     };
@@ -73,7 +73,7 @@ export async function runRoomCapability(store, { connection, requestMessageId, s
           ...context.current.answerBasis, responseOutcome: 'answered', toMemberId: prepared.request.requesterId,
           workItemId: prepared.request.workItemId };
         store.db.prepare('INSERT OR IGNORE INTO room_results VALUES(?,?,?,?)').run(operation, job.id, canonical(binding), canonical(response));
-        if (job.state === 'queued') await runJob(store, job.id, { signal: prepared.signal, observation: observeResources() });
+        if (job.state === 'queued') await runJob(store, job.id, { signal: prepared.signal, observation: observeResources(), dispatch: 'room' });
         const result = getJob(store, job.id);
         requireThat(['completed', 'needs_attention', 'cancelled'].includes(result.state), 'job_requires_reconciliation');
         queueEvidence(result, response);

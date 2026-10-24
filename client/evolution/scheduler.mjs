@@ -15,7 +15,7 @@ export async function watchLocalCapabilities(store, { signal, intervalMs = 1000,
     while (!controller.signal.aborted) {
       const p = policy(store);
       // Rotate past denied jobs; a blocked head must not hide runnable work.
-      const rows = store.db.prepare("SELECT rowid,id FROM jobs WHERE state='queued' AND rowid>? ORDER BY rowid LIMIT 64").all(after);
+      const rows = store.db.prepare("SELECT j.rowid,j.id FROM jobs j JOIN job_dispatch d ON d.job=j.id WHERE j.state='queued' AND d.source='local' AND j.rowid>? ORDER BY j.rowid LIMIT 64").all(after);
       if (!rows.length) after = 0;
       for (const row of rows) {
         if (controller.signal.aborted || active.size >= p.maxJobs) break;
