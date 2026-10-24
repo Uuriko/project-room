@@ -105,7 +105,7 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
     const text = notice ? notification : link
       ? `${action}:\n\n${link}\n\n` +
         `This link expires in ${minutes} minutes and works once. ` +
-        (resetting ? "Choose a new password after opening the link.\n\n" : `If the button doesn't work, enter this code instead: ${code}\n\n`) +
+        (resetting ? "Choose a new password after opening the link.\n\n" : `If the link doesn't work, enter this code instead: ${code}\n\n`) +
         `If you didn't request this, you can ignore this email.`
       : `Your Project Room sign-in code is: ${code}\n\n` +
         `It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.`;

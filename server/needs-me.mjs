@@ -62,12 +62,15 @@ const clip = text => {
 // the whole Board to learn what a listed claim is about. Source order: the
 // first acceptance criterion (what "done" looks like), else the newest
 // history note (create / finish / review notes ride the claim's history).
-const claimSnippet = claim => {
+export const claimSnippet = claim => {
   const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
   const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
   if (criterion) return clip(criterion);
   const history = Array.isArray(claim?.history) ? claim.history : [];
   for (let index = history.length - 1; index >= 0; index -= 1) {
+    // Machine receipts (retention_ack's "retention-ack seen=1 …") are not
+    // a human summary; skip them so the snippet never shows internal keys.
+    if (history[index]?.action === "retention_ack") continue;
     const note = history[index]?.note;
     if (typeof note === "string" && note.trim()) return clip(note);
   }
