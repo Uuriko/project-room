@@ -466,7 +466,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // room_member_status (presence.status_set): one line per member, upserted
+  // in place and never appended to the event log. Older writers have no path
+  // to it. The member may replace only their own row.
+  "room_member_status"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

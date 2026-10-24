@@ -1819,3 +1819,17 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
 .result-options > div > button { display: block; width: 100%; text-align: left; }
 .result-options > div > button[hidden] { display: none; }
 @media (pointer: coarse) { .result-options > summary { min-width: 44px; min-height: 44px; } }
+
+.status-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.status-line { min-width: 0; overflow-wrap: anywhere; }
+.status-lines:empty { display: none; }

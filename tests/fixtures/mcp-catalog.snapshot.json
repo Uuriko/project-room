@@ -1165,6 +1165,15 @@
         "openWorldHint": false
       }
     },
+    "room_set_status": {
+      "inputSchema": "f1983a0d6430b049",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_start_work": {
       "inputSchema": "a164a6f1e85c925e",
       "annotations": {

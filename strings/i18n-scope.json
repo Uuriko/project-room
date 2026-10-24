@@ -114,6 +114,7 @@
   "src/signin-entry.js",
   "src/signin-navigation.js",
   "src/spend-pricing-ui.js",
+  "src/status-lines.js",
   "src/strings.js",
   "src/updates-ui.js",
   "src/work-announcements.js",

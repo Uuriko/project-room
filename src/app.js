@@ -42,6 +42,7 @@ import { createNeedsAttentionCard, installMemberPermissions } from "./needs-atte
 import { createOwnerCockpit } from "./owner-cockpit.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
+import { renderStatusLines, STATUS_LINE_POLL_MS } from "./status-lines.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
@@ -377,6 +378,7 @@ let roomActionsContext = null;
 // roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
 // Remove button is waiting for its confirming second click.
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
+let statusLineKey = "", statusLineTimer = null;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -601,6 +603,7 @@ const client = new RoomClient({
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
     $("#room-about").open = true;
     agentPauses = new Map(); armedRemoval = null;
+    stopStatusLines();
     $("#message-delivery").replaceChildren(); $("#message-delivery").hidden = true;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -1966,8 +1969,42 @@ function renderContent(selector, html) {
   container.innerHTML = html; container._content = html;
   restoreDisclosures(container, saved);
 }
+function stopStatusLines() {
+  if (statusLineTimer !== null) clearInterval(statusLineTimer);
+  statusLineTimer = null;
+  statusLineKey = "";
+  const root = $("#status-lines");
+  if (!root) return;
+  root.replaceChildren();
+  root.hidden = true;
+}
+function syncStatusLines() {
+  const root = $("#status-lines");
+  if (!root || !state?.room?.id || !session) return;
+  const key = [client.generation, state.room.id].join(":");
+  if (statusLineKey === key) return;
+  if (statusLineTimer !== null) clearInterval(statusLineTimer);
+  statusLineKey = key;
+  const generation = client.generation, roomId = state.room.id;
+  const pull = () => {
+    client.request(client.path("/status-lines")).then(view => {
+      if (generation !== client.generation || state?.room?.id !== roomId) return;
+      renderStatusLines(root, view?.lines);
+    }).catch(error => {
+      if (generation !== client.generation || state?.room?.id !== roomId) return;
+      if (error?.status === 404) {
+        if (statusLineTimer !== null) clearInterval(statusLineTimer);
+        statusLineTimer = null;
+        renderStatusLines(root, []);
+      }
+    });
+  };
+  pull();
+  statusLineTimer = setInterval(pull, STATUS_LINE_POLL_MS);
+}
 function render() {
   ownerOffersUI.sync();
+  syncStatusLines();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   // R350-n1: a seat whose identity signed out for good can't read a direct message.

@@ -199,7 +199,11 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_set_status", "Set this member's status line. Same call as POST /api/rooms/{roomId}/status-lines. text is one line of at most 140 characters. Empty text clears the line. The line is stored in place and is not a room message.", schema({
+    roomId: roomIdField,
+    text: { type: "string", maxLength: 140, description: "One line, at most 140 characters. Empty clears the line." }
+  }, ["roomId", "text"]), false)
 
 ];
 

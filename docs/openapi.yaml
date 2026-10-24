@@ -1968,6 +1968,73 @@ paths:
                   ttlMs: { type: integer, description: Milliseconds until the beat expires without a fresh heartbeat }
         '401':
           description: No room credential, or membership ended (unauthenticated)
+  /api/rooms/{roomId}/status-lines:
+    get:
+      summary: Read status lines
+      x-room-permission: member
+      description: |
+        One line per member, shown under the room header. When
+        ROOM_STATUS_LINES is unset, this answers 404 status_lines_disabled.
+        Set it to 1 or true to turn the lines on. A line is not a room message.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Current lines, named for people
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        displayName: { type: string }
+                        text: { type: string }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: Status lines are off (status_lines_disabled)
+    post:
+      summary: Set this member's status line
+      x-room-permission: member
+      description: |
+        presence.status_set. Replaces this member's own line. Empty text
+        clears it. At most 140 characters, and the text stays one line. The
+        same call as the MCP tool room_set_status. The line is stored in
+        place and is not appended to the room log. When ROOM_STATUS_LINES is
+        unset, this answers 404 status_lines_disabled.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 140 }
+      responses:
+        '200':
+          description: The stored line
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  command: { type: string }
+                  text: { type: string }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: Status lines are off (status_lines_disabled)
+        '415':
+          description: Use application/json (json_required)
+        '422':
+          description: The line is not one line of text, or it is longer than 140 characters (invalid_status_line)
   /api/rooms/{roomId}/code:
     get:
       summary: List code drops

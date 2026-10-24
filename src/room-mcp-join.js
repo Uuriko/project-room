@@ -72,6 +72,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "squads_create",
   "squads_update_members",
   "squads_disband",
+  "room_set_status",
   "inbox_put_attachment",
   "inbox_list_attachments",
   "inbox_get_attachment",

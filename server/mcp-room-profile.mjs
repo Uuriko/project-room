@@ -11,6 +11,7 @@ import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
+import { statusLinesEnabled } from "./member-status-lines.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -247,6 +248,9 @@ function validRoomArgs(name, args) {
     const requestIdOk = args.requestId === undefined
       || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
     return validId(args.itemId) && sourceOk && buildOk && requestIdOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
+  }
+  if (name === "room_set_status") {
+    return typeof args.text === "string" && !args.text.includes("\n") && !args.text.includes("\r") && args.text.trim().length <= 140;
   }
   return false;
 }
@@ -632,6 +636,11 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "dm_posted") {
     const built = friendBondCommand("dm", { to: args.to, body: args.body, messageId: args.messageId });
     return commandReceipt(store, secret, roomId, { id: args.id, type: built.type, data: built.data }, "posted");
+  }
+  if (name === "room_set_status") {
+    if (!statusLinesEnabled()) throw new ServiceError(404, "status_lines_disabled", "Status lines are off.");
+    const auth = store.authenticate(secret, roomId);
+    return store.memberStatusLines.set(roomId, auth.member.id, args.text);
   }
   throw new ServiceError(500, "internal", "Request could not be completed");
 }

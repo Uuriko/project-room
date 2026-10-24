@@ -34,6 +34,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   add_land_item: { access: `write, ${MEMBER_WRITE}`, cost: "one write; does not merge or deploy", rest: "POST /api/rooms/{roomId}/add_land_item" },
   list_land_queue: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/list_land_queue" },
   wake_pause: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/agent-pause" },
+  room_set_status: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/status-lines" },
   wake_resume: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/agent-pause" },
   bond_propose: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.propose)` },
   room_join_packet: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static enrollment document" },
