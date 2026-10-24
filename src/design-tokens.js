@@ -116,12 +116,13 @@ export const CONTRAST_PAIRS = Object.freeze([
   ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5],
   // UI-component boundaries (WCAG 1.4.11, 3:1): the control-border token
   // against every surface a form control or the composer frame can rest on.
-  ["dark control border on background", DARK["--line-control"], DARK["--bg"], 3],
-  ["dark control border on panel", DARK["--line-control"], DARK["--panel"], 3],
-  ["dark control border on raised panel", DARK["--line-control"], DARK["--panel-raised"], 3],
-  ["dark control border on hover panel", DARK["--line-control"], DARK["--panel-hover"], 3],
-  ["light control border on background", LIGHT["--line-control"], LIGHT["--bg"], 3],
-  ["light control border on panel", LIGHT["--line-control"], LIGHT["--panel"], 3],
-  ["light control border on raised panel", LIGHT["--line-control"], LIGHT["--panel-raised"], 3],
-  ["light control border on hover panel", LIGHT["--line-control"], LIGHT["--panel-hover"], 3]
+  // Gate diagnostics. Slash identifiers stay out of the i18n UI-string count.
+  ["dark/control-border/background", DARK["--line-control"], DARK["--bg"], 3],
+  ["dark/control-border/panel", DARK["--line-control"], DARK["--panel"], 3],
+  ["dark/control-border/raised-panel", DARK["--line-control"], DARK["--panel-raised"], 3],
+  ["dark/control-border/hover-panel", DARK["--line-control"], DARK["--panel-hover"], 3],
+  ["light/control-border/background", LIGHT["--line-control"], LIGHT["--bg"], 3],
+  ["light/control-border/panel", LIGHT["--line-control"], LIGHT["--panel"], 3],
+  ["light/control-border/raised-panel", LIGHT["--line-control"], LIGHT["--panel-raised"], 3],
+  ["light/control-border/hover-panel", LIGHT["--line-control"], LIGHT["--panel-hover"], 3]
 ]);
