@@ -19,7 +19,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
-import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { relieveProjectionsIncrementally, roomOverMessageWindow } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
@@ -622,10 +622,18 @@ export const JOBS = Object.freeze([
     async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
-      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
+      const window = Number.isInteger(store.messageProjectionWindow) && store.messageProjectionWindow > 0
+        ? store.messageProjectionWindow : null;
+      // A chunk can drop the byte gauge under the alarm while most messages
+      // are still on the hot row. Keep compacting those rooms on later ticks.
+      const crowded = window !== null && roomOverMessageWindow(store.db, window * 2);
+      if (storeGrowthBreach(gauges) === "maxProjectionBytes" || crowded) {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
-        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        relief = await relieveProjectionsIncrementally(store, {
+          limitBytes, recovery, settle: true,
+          ...(window ? { keepNewest: window, minMessages: window * 2 } : {})
+        });
         // Flat counts: the heartbeat keeps only top-level numbers, so a
         // nested relief object never reached /api/health/jobs.
         gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };

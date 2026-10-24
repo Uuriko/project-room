@@ -26,6 +26,7 @@
 
 import { ARCHIVE_DEFAULT_KEEP, operatorArchive } from "./operator-archive.mjs";
 import { messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { compactRoomProjection } from "./projection-compact.mjs";
 
 export const RELIEF_REASON = "store-growth automatic projection relief";
 export const RELIEF_ROOMS_PER_TICK = 3;
@@ -35,6 +36,24 @@ export const RELIEF_CATCH_UP_CHUNK = 50;
 function roomsPastLine(db, limitBytes, max) {
   return db.prepare(`SELECT id FROM rooms WHERE length(CAST(projection AS BLOB)) > ?
     ORDER BY length(CAST(projection AS BLOB)) DESC LIMIT ?`).all(limitBytes, max).map(row => row.id);
+}
+
+function roomsToRelieve(db, limitBytes, max, minMessages) {
+  if (!Number.isInteger(minMessages) || minMessages < 1) return roomsPastLine(db, limitBytes, max);
+  return db.prepare(`SELECT id FROM rooms
+    WHERE length(CAST(projection AS BLOB)) > ?
+       OR json_array_length(projection, '$.messages') > ?
+    ORDER BY length(CAST(projection AS BLOB)) DESC LIMIT ?`).all(limitBytes, minMessages, max).map(row => row.id);
+}
+
+// True when some room still holds more hot messages than a projection window
+// allows. The byte alarm can clear after one chunk while most of the history
+// is still on the hot row; the next tick has to see that.
+export function roomOverMessageWindow(db, minMessages) {
+  if (!Number.isInteger(minMessages) || minMessages < 1) return false;
+  try {
+    return Boolean(db.prepare("SELECT 1 AS hit FROM rooms WHERE json_array_length(projection, '$.messages') > ? LIMIT 1").get(minMessages));
+  } catch { return false; }
 }
 
 function parked(db, roomId) {
@@ -53,13 +72,14 @@ function errorCode(error) {
 export async function relieveProjectionsIncrementally(store, options = {}) {
   const { limitBytes, recovery = null, maxRooms = RELIEF_ROOMS_PER_TICK,
     eventCap = RELIEF_CATCH_UP_EVENTS, chunkSize = RELIEF_CATCH_UP_CHUNK,
+    settle = false, minMessages = null,
     yieldWork = () => new Promise(resolve => setTimeout(resolve, 0)) } = options;
   if (!Number.isInteger(eventCap) || eventCap < 1 || !Number.isInteger(chunkSize) || chunkSize < 1) {
     throw new TypeError("Relief catch-up limits must be positive integers");
   }
   let catchUpEvents = 0, catchUpChunks = 0;
   if (!store?.readOnly && Number.isFinite(limitBytes) && recovery && typeof recovery === "object") {
-    for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
+    for (const roomId of roomsToRelieve(store.db, limitBytes, maxRooms, minMessages)) {
       if (parked(store.db, roomId)) continue;
       while (catchUpEvents < eventCap && !messagesBackfillCaughtUp(store.db, roomId)) {
         await yieldWork();
@@ -77,28 +97,37 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
       }
     }
   }
-  const result = relieveProjections(store, { ...options, archive: (target, request) =>
-    operatorArchive(target, { ...request,
-      // The existing prefix archive checks its exact cursor and retains every
-      // message named by a later event, including edits, replies and pins.
-      belowCursor: request.belowCursor || !messagesBackfillCaughtUp(target.db, request.roomId)
-    }, null, { eventCap: 0 }) });
+  // settle copies the serving projection and archives matching rows, including
+  // a room whose backfill is parked. The default door still certifies first.
+  const result = settle
+    ? relieveProjections(store, options)
+    : relieveProjections(store, { ...options, archive: (target, request) =>
+      operatorArchive(target, { ...request,
+        // The existing prefix archive checks its exact cursor and retains every
+        // message named by a later event, including edits, replies and pins.
+        belowCursor: request.belowCursor || !messagesBackfillCaughtUp(target.db, request.roomId)
+      }, null, { eventCap: 0 }) });
   return { ...result, catchUpEvents, catchUpChunks };
 }
 
 // Returns { attempted, relieved, freedBytes, refused } with counts only:
 // the summary rides the public health surface, so no room ids or text.
-export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive } = {}) {
+export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive, settle = false, minMessages = null } = {}) {
   const result = { attempted: 0, relieved: 0, freedBytes: 0, refused: 0 };
   if (store?.readOnly || !Number.isFinite(limitBytes)) return result;
-  if (!recovery || typeof recovery !== "object") {
-    const waiting = roomsPastLine(store.db, limitBytes, maxRooms).length;
-    return waiting ? { ...result, backupMissing: 1 } : result;
-  }
-  for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
+  const waiting = roomsToRelieve(store.db, limitBytes, maxRooms, settle ? minMessages : null);
+  if (!recovery || typeof recovery !== "object") return waiting.length ? { ...result, backupMissing: 1 } : result;
+  for (const roomId of waiting) {
     result.attempted += 1;
-    const request = { roomId, keepNewest, reason: RELIEF_REASON, belowCursor: parked(store.db, roomId) };
     try {
+      if (settle) {
+        const done = compactRoomProjection(store, roomId, { keepNewest });
+        if (!done?.ok || !(done.archived > 0)) { result.refused += 1; continue; }
+        result.relieved += 1;
+        result.freedBytes += Math.max(0, Number(done.projectionBytes?.before) - Number(done.projectionBytes?.after)) || 0;
+        continue;
+      }
+      const request = { roomId, keepNewest, reason: RELIEF_REASON, belowCursor: parked(store.db, roomId) };
       const plan = archive(store, { ...request, dryRun: true });
       if (!plan?.ok || !(plan.expect?.archived > 0)) { result.refused += 1; continue; }
       const done = archive(store, { ...request, dryRun: false, expect: plan.expect });

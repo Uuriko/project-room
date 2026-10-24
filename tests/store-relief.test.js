@@ -104,6 +104,7 @@ test("the store-growth job still fails by name when relief cannot clear the brea
   assert.equal(summary.failureDetail?.code, "store_growth_limit");
   assert.equal(summary.reliefAttempted, 1);
   assert.equal(summary.reliefRelieved, 0);
+  assert.equal(summary.reliefRefused, 1);
 });
 
 // QA delta 17987: the automatic path archives only behind a verified recent

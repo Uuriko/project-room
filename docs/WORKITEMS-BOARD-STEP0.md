@@ -363,3 +363,7 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Projection size account (2026-10-24)
+
+The reference census now has 59 files. `server/projection-account.mjs` measures the stored `workItems` value as the board component of `rooms.projection`. It reads sizes only. It introduces no writer, board mapping, or second state store.

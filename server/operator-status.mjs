@@ -6,6 +6,7 @@
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { ServiceError } from "./store.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
+import { largestProjectionAccount } from "./projection-account.mjs";
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -97,7 +98,10 @@ export function operatorStatus(store, options = {}) {
     // head, error class, one-line error). The public health surface carries
     // only "patrol could not process a room (<class>)" and a count, so
     // without this no surface names the room. Operator-token gated; capped.
-    patrolBlocks: patrolBlocks(store)
+    patrolBlocks: patrolBlocks(store),
+    // Sizes of the longest stored projection. Numbers and fixed component
+    // names only; the room id is not included.
+    largestProjection: largestProjectionAccount(store.db)
   };
 }
 
