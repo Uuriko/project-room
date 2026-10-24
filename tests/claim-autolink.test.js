@@ -34,6 +34,8 @@ import {
   findClaimForPull,
   autoLinkPullRequest,
   handlePrWebhookPayload,
+  recordWebhookDelivery,
+  webhookDeliveryStale,
   discoverUnlinkedPulls,
   linkDeployToSettledClaims,
   prWebhookEnabled,
@@ -163,6 +165,19 @@ test("findClaimForPull: done and unclaimed items are not link targets", () => {
   assert.equal(findClaimForPull({ branch: "lane-b", title: "", body: "", repo: REPO }, claims), null);
 });
 
+test("findClaimForPull: superseded claims are not link targets (#4063)", () => {
+  const claims = [
+    { id: "lane-a", roomId: "commons", state: "claimed", owner: "owner", repo: REPO, supersededBy: "lane-a2" },
+  ];
+  // a superseded sole match links nothing instead of eating the PR
+  assert.equal(findClaimForPull({ branch: "lane-a", title: "", body: "", repo: REPO }, claims), null);
+  // and a superseded twin does not make a live match ambiguous
+  const mixed = [...claims,
+    { id: "lane-a", roomId: "other-room", state: "claimed", owner: "owner", repo: REPO }];
+  const hit = findClaimForPull({ branch: "lane-a", title: "", body: "", repo: REPO }, mixed);
+  assert.equal(hit.claim.roomId, "other-room");
+});
+
 // --- 2. system auto-link -------------------------------------------------
 
 test("autoLinkPullRequest: links the PR and emits one receipt", async t => {
@@ -252,6 +267,33 @@ test("handlePrWebhookPayload: opened only links, unknown ids and garbage never w
   const nulls = handlePrWebhookPayload(make.store, null, {});
   assert.equal(nulls.ok, false);
   assert.equal(claimEvents(make.store, make.roomId).length, before + 1);
+});
+
+test("handlePrWebhookPayload: a superseded claim is not auto-linked (#4063)", async t => {
+  const make = makeRoom(t);
+  await liveClaim(make, "lane-superseded");
+  const item0 = make.store.workClaims.get(make.roomId, "lane-superseded");
+  make.store.workClaims.set(make.roomId, { ...item0, supersededBy: "lane-successor" });
+  const out = handlePrWebhookPayload(make.store,
+    prPayload({ pull_request: { head: { ref: "lane-superseded" } } }), {});
+  assert.equal(out.ok, true);
+  assert.equal(out.linked, null);
+  assert.equal(make.store.workClaims.get(make.roomId, "lane-superseded").pullRequests.length, 0);
+});
+
+test("webhook journal: repo casing never defeats freshness (#4063)", async t => {
+  const make = makeRoom(t);
+  const now = 1_700_000_000_000;
+  // the payload's casing writes the journal; the claim-declared casing reads it
+  assert.equal(recordWebhookDelivery(make.store, "Uuriko/Project-Room", now), true);
+  assert.equal(webhookDeliveryStale(make.store, REPO, now + 60_000), false);
+  assert.equal(webhookDeliveryStale(make.store, "UURIKO/PROJECT-ROOM", now + 60_000), false);
+  // and a payload-cased delivery is fresh under the claim-declared casing
+  const viaPayload = handlePrWebhookPayload(make.store,
+    prPayload({ pull_request: { html_url: URL_B, head: { ref: "ghost" }, title: "ghost", body: "" },
+      top: { repository: { full_name: "UURIKO/project-room" } } }), { nowMs: now });
+  assert.equal(viaPayload.ok, true);
+  assert.equal(webhookDeliveryStale(make.store, REPO, now + 60_000), false);
 });
 
 // --- 4. poll fallback ----------------------------------------------------
