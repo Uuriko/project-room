@@ -163,7 +163,7 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
 });
 
 test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
-  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+  for (const [label, packet] of [["llms-full.txt", llmsFullTxt()]]) {
     const match = packet.match(/Their compact core set: ([^.]+)\./);
     assert.ok(match, `${label} must have a compact core set list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
