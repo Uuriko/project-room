@@ -8,6 +8,11 @@ export const safeGmailHtml = value => sanitizeHtml(value, {
   allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'hr', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'span', 'div', 'sub', 'sup'],
   allowedAttributes: { a: ['href', 'title', 'target', 'rel'] }, allowedSchemes: ['https', 'http', 'mailto'], allowProtocolRelative: false,
   transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }) },
+  // Display-context containers whose contents are never the message body:
+  // discard them whole instead of promoting their contents to live markup.
+  // The first five are the vendored bundle's fallback list; noscript joins
+  // it (PR #4424), template and iframe fallback join here — same class.
+  nonTextTags: ['script', 'style', 'textarea', 'option', 'xmp', 'noscript', 'template', 'iframe'],
   enforceHtmlBoundary: true
 });
 export const gmailHeader = (m, name) => m.payload?.headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
