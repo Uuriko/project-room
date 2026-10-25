@@ -84,7 +84,7 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   assert.ok(html.includes('data-action="enable" data-id="m2"'));
   assert.ok(html.includes('data-action="remove"'));
   assert.ok(html.includes("/api/auth/github/link/start"), "configured GitHub offers a connect link");
-  assert.ok(html.includes("Google sign-in isn\u2019t configured on this Room."), "unconfigured Google is honest");
+  assert.ok(!html.includes("/api/auth/google/link/start"), "unconfigured Google is not offered");
   assert.ok(html.includes("Email delivery isn\u2019t configured on this Room"), "unconfigured mail is honest");
   assert.ok(html.includes("data-form=\"password-change\""), "an existing password offers change, not set");
   for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Billing / plan", "Advanced", "Linked sign-in methods"]) {
@@ -102,7 +102,7 @@ test("settingsHtml offers password set when none exists and recovery generation"
   const html = settingsHtml({ methods: [{ id: "m1", type: "magic", label: "Email link", email: "a@b.c", disabled: false }], providers: null });
   assert.ok(html.includes("data-form=\"password-set\""));
   assert.ok(html.includes("Generate recovery codes"));
-  assert.ok(html.includes("GitHub sign-in isn\u2019t configured on this Room."));
+  assert.ok(!html.includes("/api/auth/github/link/start"));
 });
 
 test("an account with no email or password (a guest) is offered Keep this account, not a dead-end Set a password", () => {
@@ -328,4 +328,10 @@ test("a refresh response landing after sign-out (session/generation change) is d
   await mounted;
   assert.equal(container.innerHTML.includes("prev@b.c"), false, "late response must not repaint after sign-out");
   assert.equal(ui.html().includes("prev@b.c"), false, "late response must not overwrite state after sign-out");
+});
+
+test("linked OAuth provider is represented as connected, not offered for linking again", () => {
+  const html = settingsHtml({ methods: [{ id: "g", type: "oauth", provider: "google", disabled: false }], providers: { google: { configured: true } } });
+  assert.match(html, /Google connected/);
+  assert.doesNotMatch(html, /href="\/api\/auth\/google\/link\/start"/);
 });

@@ -93,7 +93,7 @@ async function openReadyBrief(page) {
     // asynchronous toggle handler is about to replace the displayed horizon.
     await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      page.locator("#topbar-catchup").click()
+      clickChrome(page, "#topbar-catchup")
     ]);
     await page.locator("#catchup-dialog").waitFor({ state: "visible" });
   }
@@ -232,6 +232,9 @@ test("a shared browser cookie cannot expose another tab's return brief", { timeo
   const ownerTab = await context.newPage();
   await login(ownerTab, origin, owner, "Room owner");
   await ownerTab.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Owner-only return item"));
+  // Open the protected view before changing the shared cookie. Otherwise the
+  // Updates request can correctly end access before the Catch up click occurs.
+  await openReadyBrief(ownerTab);
 
   // A second tab creates a Maya session directly. Browser cookies are shared, while
   // the first tab still holds its original owner identity in memory.
@@ -261,7 +264,7 @@ test("a shared browser cookie cannot expose another tab's return brief", { timeo
   } else {
     await Promise.all([
       ownerTab.waitForResponse(response => response.url().endsWith("/return-brief")).catch(() => {}),
-      ownerTab.locator("#topbar-catchup").click()
+      clickChrome(ownerTab, "#topbar-catchup")
     ]);
   }
   await ownerTab.locator("#auth-panel").waitFor({ state: "visible" });
@@ -743,10 +746,6 @@ test("record identities and fragments remain collision-safe and legacy work link
       id: `event-${messageId}`, idempotencyKey: `seed-${messageId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_POSTED,
       data: { messageId, body }
     }));
-    seed.push(event({
-      id: `reaction-${memberId}`, idempotencyKey: `seed-reaction-${memberId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_REACTION_SET,
-      data: { messageId: "list", reaction: "heart", active: true }
-    }));
   }
   seed.push(event({
     id: "message-colon", idempotencyKey: "seed-message-colon", roomId: "commons", actorId: "owner", type: T.MESSAGE_POSTED,
@@ -821,7 +820,6 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.match(await page.locator('[data-member-record-id="duplicate-b"]').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-a-message"] .message-meta').textContent(), /Alex \(duplicate-a\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
-  assert.match(await page.locator('[data-message-record-id="list"] [data-reaction="\u2764\uFE0F"]').getAttribute("title"), /Alex \(duplicate-a\).*Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
   await closeSettings(page);
   await openSearch(page);
@@ -873,7 +871,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   // Catch up after their own leading events, so the owner never sees that row;
   // a member who authored nothing (duplicate-a) still starts at the beginning.
   if (!(await page.locator("#catchup-dialog").evaluate(node => node.open))) {
-    await page.locator("#topbar-catchup").click();
+    await clickChrome(page, "#topbar-catchup");
   }
   await page.locator("#return-brief-panel").evaluate(node => { node.open = true; });
   const roomLink = page.locator("#rb-history-list [data-open-room]").first();

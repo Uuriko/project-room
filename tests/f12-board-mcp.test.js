@@ -95,6 +95,20 @@ const durableEffects = f => {
     f.store.db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()])));
 };
 
+test("room_read_board uses the work view and does not load the event tail", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 8; i += 1) {
+    f.store.command(f.identity.secret, f.roomId, { id: `msg-${i}`, type: "message.posted", data: { messageId: `msg-${i}`, body: `board-body-${i} ${"x".repeat(80)}` } });
+  }
+  const statements = [];
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  t.mock.method(f.store.db, "prepare", sql => { statements.push(sql); return prepare(sql); });
+  const board = pageValue(await f.mcp());
+  assert.equal(board.contractVersion, 1);
+  assert.equal(statements.some(sql => /SELECT body FROM events/.test(sql)), false);
+  assert.equal(JSON.stringify(board).includes("board-body-0"), false);
+});
+
 test("stored Board pages preserve legacy handoff and halt with equal IDs in separate namespaces", async t => {
   const f = await fixture(t);
   setTier(f.store.db, f.roomId, f.ownerId, "t2_standard", { updatedBy: f.ownerId, nowMs: Date.now() });
