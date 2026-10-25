@@ -208,7 +208,7 @@ const DEMO_ROOM = Object.freeze({
     Object.freeze({ from: "Leo", body: "Please prioritize the mobile issues. We have a release coming up." }),
     Object.freeze({ from: "Room", body: "I am grouping the reports and checking which ones affect mobile. I have included Leo's priority." }),
     Object.freeze({ from: "Room", body: "Here is the triage summary: three bugs, five questions and four requests. Two mobile bugs should come first." }),
-    Object.freeze({ from: "Mara", body: "Looks good. Let us take those two first." }),
+    Object.freeze({ from: "Mara", body: "Looks good. Let's take those two first." }),
   ]),
   tasks: Object.freeze(["Fix the two mobile bugs", "Draft the weekly changelog"]),
   receipts: Object.freeze(["Support triage summary", "Changelog draft"]),
