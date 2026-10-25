@@ -129,10 +129,15 @@ jobs:
         run: npm ci
       # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, runs
       # alongside eslint.
-      - if: needs.changes.outputs.docs_only != 'true'
-        parallel:
-          - run: npm run lint
-          - run: node scripts/untested-modules-lint.mjs
+      - name: Lint and the untested-module gate
+        if: needs.changes.outputs.docs_only != 'true'
+        run: |
+          npm run lint &
+          pid=$!
+          node scripts/untested-modules-lint.mjs
+          status=$?
+          wait "$pid" || status=$?
+          exit "$status"
   # One unit job. Hosted shards on 2026-10-24 were 4–6 minutes each,
   # including setup, and they queued behind the two-job account limit, so
   # the split cost three runner slots without overlapping. One process is
@@ -155,13 +160,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Install Linux host isolation for automatic-run unit tests
-        id: bwrap
-        background: true
-        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      - run: npm ci
-      - name: Wait for host isolation install
-        wait: bwrap
+      - name: Install dependencies and Linux host isolation
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap &
+          pid=$!
+          npm ci
+          wait "$pid"
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
         # unless the launcher has an application profile. Scope the exception to
@@ -321,16 +325,13 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
-      - name: Install Playwright Chromium (binary cached) and its OS deps
-        id: pwinstall
+      - name: Install Playwright Chromium and the Cloudflare packages
         if: needs.changes.outputs.docs_only != 'true'
-        background: true
-        run: npx playwright install --with-deps chromium
-      - if: needs.changes.outputs.docs_only != 'true'
-        run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
-      - name: Wait for Playwright install
-        if: needs.changes.outputs.docs_only != 'true'
-        wait: pwinstall
+        run: |
+          npx playwright install --with-deps chromium &
+          pid=$!
+          pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+          wait "$pid"
       - name: Verify the shared Workers runtime and restart journey
         if: needs.changes.outputs.docs_only != 'true'
         working-directory: cloudflare
@@ -376,13 +377,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Install Linux host isolation for automatic-run unit tests
-        id: bwrap
-        background: true
-        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      - run: npm ci
-      - name: Wait for host isolation install
-        wait: bwrap
+      - name: Install dependencies and Linux host isolation
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap &
+          pid=$!
+          npm ci
+          wait "$pid"
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
         # unprivileged user namespaces without an application profile).
