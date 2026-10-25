@@ -27,7 +27,16 @@ export async function startServer() {
     if (child.exitCode !== null) throw new Error(`server exited early:\n${log}`);
     await new Promise(r => setTimeout(r, 200));
   }
-  return { origin, stop: () => { child.kill("SIGTERM"); rmSync(dir, { recursive: true, force: true }); }, log: () => log };
+  return {
+    origin,
+    stop: () => {
+      child.kill("SIGTERM");
+      // The process can still be creating the sqlite wal while this directory
+      // is removed. Node retries ENOTEMPTY for that race.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    },
+    log: () => log
+  };
 }
 
 // Map an execFile error to the checker's truthful outcome. A signal-killed
