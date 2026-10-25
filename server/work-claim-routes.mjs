@@ -42,6 +42,7 @@ import {
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
+import { effectiveOpenClaimLimit } from "../src/agent-join-profile.js";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
@@ -66,7 +67,7 @@ import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, ownMember } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -996,7 +997,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const assignee = data.assignee;
     if (assignee !== undefined) {
       const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof assignee === "string" ? members[assignee] : null;
+      const member = typeof assignee === "string" ? ownMember(members, assignee) : null;
       if (!member || member.active === false) {
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
@@ -1012,9 +1013,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, acceptanceCriteria: data.acceptanceCriteria }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const assigneeLimit = effectiveOpenClaimLimit(ownMember(store.roomAuthority(roomId).members, assignee), config.maxMemberOpenClaims);
+      if (held >= assigneeLimit) {
         refuseCap("too_many_open_claims",
-          `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          `${assignee} already holds ${assigneeLimit} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
       item = runPure(reject, () => claimWork(item, assignee, {
@@ -1092,9 +1094,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-    if (held >= config.maxMemberOpenClaims) {
+    const claimLimit = effectiveOpenClaimLimit(ownMember(store.roomAuthority(roomId).members, caller), config.maxMemberOpenClaims);
+    if (held >= claimLimit) {
       refuseCap("too_many_open_claims",
-        `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
+        `You already hold ${claimLimit} open claims. Release or finish one before claiming another.`,
         "Release or finish an open claim before claiming another.");
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
@@ -1448,7 +1451,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // room membership: the new owner must be a current, active member.
     const members = store.roomAuthority(roomId).members ?? {};
     const target = data.newOwner;
-    const targetMember = typeof target === "string" ? members[target] : null;
+    const targetMember = typeof target === "string" ? ownMember(members, target) : null;
     if (!targetMember || targetMember.active === false) {
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
@@ -1457,9 +1460,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // create-with-assignee do; otherwise reassign bypasses the per-member cap.
     if (target !== item.owner) {
       const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const targetLimit = effectiveOpenClaimLimit(targetMember, config.maxMemberOpenClaims);
+      if (held >= targetLimit) {
         refuseCap("too_many_open_claims",
-          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          `${target} already holds ${targetLimit} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
     }

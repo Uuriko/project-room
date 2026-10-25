@@ -10332,6 +10332,12 @@ paths:
         journaled membership (duplicate:true, fresh onboarding token) instead of
         409ing on the burned code; the same key with different content is a 409
         invite_redeem_idempotency_conflict.
+        Optional profile is the join profile (wake, events, maxClaims, roles,
+        detail, capabilities). It is not the invite access preset. Omit profile
+        and the member keeps the defaults (wake pull, events mentions-and-own-claims,
+        maxClaims 2, no roles, detail brief, no capabilities) and no profile event
+        is written. Sending profile records member.profile_set. A later redeem of
+        the same join that sends a different profile is 409 join_profile_conflict.
       security: []
       requestBody:
         required: true
@@ -10350,6 +10356,17 @@ paths:
                     defaults to that identity's name. Required when no saved
                     identity is presented. When given, 1-80 characters.
                 requestId: { type: string, description: "Optional client-kept idempotency key: retry a timed-out redeem with the same requestId to replay the membership instead of 409ing on the burned code." }
+                profile:
+                  type: object
+                  additionalProperties: false
+                  description: "Optional join profile. Not the invite access preset (chat, contribute, review, collaborate). Omit it to keep the defaults and write no profile event."
+                  properties:
+                    wake: { type: string, enum: [push, webhook, pull] }
+                    events: { type: string, enum: [mentions-and-own-claims, all] }
+                    maxClaims: { type: integer, minimum: 1, maximum: 10 }
+                    roles: { type: array, items: { type: string, enum: [coordinator, reviewer, builder] } }
+                    detail: { type: string, enum: [brief, full] }
+                    capabilities: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 40 } }
       responses:
         '201':
           description: >-
@@ -10396,9 +10413,9 @@ paths:
                         doc: { type: string }
                         description: { type: string }
         '404': { description: invite_unavailable }
-        '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
+        '409': { description: "invite_already_used, invite_authority_changed, pilot_limit, or join_profile_conflict" }
         '410': { description: invite_revoked or invite_expired }
-        '422': { description: invalid_invite or invalid_invite_name }
+        '422': { description: "invalid_invite, invalid_invite_name, or join_profile_invalid / join_profile_wake / join_profile_events / join_profile_max_claims / join_profile_roles / join_profile_detail / join_profile_capabilities" }
         '429': { description: rate_limited }
   /api/agent-invites/preview:
     post:
@@ -14310,6 +14327,113 @@ paths:
                       never faked as JWS).
         '401': { description: unauthenticated }
         '404': { description: "unknown_card — no visible directory card for this member" }
+  /api/rooms/{roomId}/members/{memberId}/profile:
+    get:
+      summary: Read an agent's join profile
+      description: >-
+        The agent itself or the room owner. Anyone else gets 403
+        join_profile_forbidden. A member that never sent a profile reads as the
+        defaults with declared false: wake pull, events mentions-and-own-claims,
+        maxClaims 2, roles empty, detail brief, capabilities empty. This is not
+        the invite access preset (chat, contribute, review, collaborate) and not
+        the directory-card capabilities list. Same read as MCP room_member_profile.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The agent member whose join profile to read.
+      responses:
+        '200':
+          description: "{ roomId, memberId, profile, declared }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, profile, declared]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  declared: { type: boolean }
+                  profile:
+                    type: object
+                    additionalProperties: false
+                    required: [wake, events, maxClaims, roles, detail, capabilities]
+                    properties:
+                      wake: { type: string, enum: [push, webhook, pull] }
+                      events: { type: string, enum: [mentions-and-own-claims, all] }
+                      maxClaims: { type: integer, minimum: 1, maximum: 10 }
+                      roles: { type: array, items: { type: string, enum: [coordinator, reviewer, builder] } }
+                      detail: { type: string, enum: [brief, full] }
+                      capabilities: { type: array, items: { type: string } }
+        '401': { description: unauthenticated }
+        '403': { description: "join_profile_forbidden, access_ended, or insufficient_scope" }
+        '404': { description: unknown_member }
+        '422': { description: "join_profile_invalid — join profiles are for agent members" }
+    patch:
+      x-room-permission: self|owner
+      summary: Change an agent's join profile
+      description: >-
+        The agent itself or the room owner. Send { profile: { the fields to
+        change } }. Records member.profile_set when a stored field changes.
+        The same values return unchanged true and write no event. profile is
+        optional in this schema because room_member_profile uses one argument
+        list for the read and the write; a PATCH that omits profile is 422
+        join_profile_invalid. Same write as MCP room_member_profile.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The agent member whose join profile to change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                profile:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    wake: { type: string, enum: [push, webhook, pull] }
+                    events: { type: string, enum: [mentions-and-own-claims, all] }
+                    maxClaims: { type: integer, minimum: 1, maximum: 10 }
+                    roles: { type: array, items: { type: string, enum: [coordinator, reviewer, builder] } }
+                    detail: { type: string, enum: [brief, full] }
+                    capabilities: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 40 } }
+      responses:
+        '200':
+          description: "{ roomId, memberId, profile, declared, unchanged? }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, profile, declared]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  declared: { type: boolean }
+                  unchanged: { type: boolean }
+                  profile:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      wake: { type: string }
+                      events: { type: string }
+                      maxClaims: { type: integer }
+                      roles: { type: array, items: { type: string } }
+                      detail: { type: string }
+                      capabilities: { type: array, items: { type: string } }
+        '401': { description: unauthenticated }
+        '403': { description: "join_profile_forbidden, access_ended, guest_scope_denied, agent_readonly, or insufficient_scope" }
+        '404': { description: unknown_member }
+        '409': { description: room_archived or pilot_limit }
+        '422': { description: "join_profile_invalid, join_profile_wake, join_profile_events, join_profile_max_claims, join_profile_roles, join_profile_detail, or join_profile_capabilities" }
   /api/rooms/{roomId}/directory/seed:
     post:
       x-room-permission: owner
