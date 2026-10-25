@@ -315,7 +315,8 @@ export function reliefCounts(relief) {
   if (!relief || typeof relief !== "object") return {};
   const out = {};
   for (const [key, name] of [["attempted", "reliefAttempted"], ["relieved", "reliefRelieved"],
-    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"]]) {
+    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"],
+    ["deferred", "reliefDeferred"]]) {
     if (Number.isFinite(relief[key])) out[name] = relief[key];
   }
   return out;
@@ -658,13 +659,16 @@ export const JOBS = Object.freeze([
     // breach that relief could not clear fails the tick.
     // Relief needs a verified recovery point (the newest verified daily
     // backup, at most a day old); without one it archives nothing.
+    // Relief is bound by ctx.deadline: past it, catch-up stops and the
+    // remaining rooms are counted as reliefDeferred, so the tick returns
+    // and its outcome is recorded instead of dying unrecorded.
     async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
       if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
-        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery, deadline: ctx.deadline });
         // Flat counts: the heartbeat keeps only top-level numbers, so a
         // nested relief object never reached /api/health/jobs.
         gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };

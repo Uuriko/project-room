@@ -53,10 +53,18 @@ function errorCode(error) {
 export async function relieveProjectionsIncrementally(store, options = {}) {
   const { limitBytes, recovery = null, maxRooms = RELIEF_ROOMS_PER_TICK,
     eventCap = RELIEF_CATCH_UP_EVENTS, chunkSize = RELIEF_CATCH_UP_CHUNK,
+    deadline = null,
     yieldWork = () => new Promise(resolve => setTimeout(resolve, 0)) } = options;
   if (!Number.isInteger(eventCap) || eventCap < 1 || !Number.isInteger(chunkSize) || chunkSize < 1) {
     throw new TypeError("Relief catch-up limits must be positive integers");
   }
+  // The caller's cooperative deadline (a ms epoch, as handed to the job in
+  // ctx.deadline): when it passes, catch-up stops and the archive leg
+  // defers its remaining rooms, so the tick returns and its outcome is
+  // recorded instead of dying unrecorded in its RPC. Catch-up progress is
+  // committed per chunk, so a deferred room resumes where it left off on
+  // the next tick.
+  const deadlinePassed = () => Number.isFinite(deadline) && Date.now() >= deadline;
   let catchUpEvents = 0, catchUpChunks = 0;
   if (!store?.readOnly && Number.isFinite(limitBytes) && recovery && typeof recovery === "object") {
     // A quarantined event must not keep this room out of catch-up. The
@@ -64,9 +72,12 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
     // still skips catch-up and archives below the cursor.
     try { healBackfillQuarantines(store); } catch { /* parked() still treats an unreadable row as not parked */ }
     for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
+      if (deadlinePassed()) break;
       if (parked(store.db, roomId)) continue;
       while (catchUpEvents < eventCap && !messagesBackfillCaughtUp(store.db, roomId)) {
+        if (deadlinePassed()) break;
         await yieldWork();
+        if (deadlinePassed()) break;
         let result;
         try { result = store.backfillMessages({ limit: Math.min(chunkSize, eventCap - catchUpEvents) }); }
         catch {
@@ -92,14 +103,24 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
 
 // Returns { attempted, relieved, freedBytes, refused } with counts only:
 // the summary rides the public health surface, so no room ids or text.
-export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive } = {}) {
+// When a deadline is given and passes between rooms, the rooms not yet
+// attempted are counted as `deferred` (the field is present only then):
+// they stay past the line, the breach still fails the tick, and the next
+// tick resumes them.
+export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive, deadline = null } = {}) {
   const result = { attempted: 0, relieved: 0, freedBytes: 0, refused: 0 };
   if (store?.readOnly || !Number.isFinite(limitBytes)) return result;
   if (!recovery || typeof recovery !== "object") {
     const waiting = roomsPastLine(store.db, limitBytes, maxRooms).length;
     return waiting ? { ...result, backupMissing: 1 } : result;
   }
-  for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
+  const roomIds = roomsPastLine(store.db, limitBytes, maxRooms);
+  for (let index = 0; index < roomIds.length; index += 1) {
+    if (Number.isFinite(deadline) && Date.now() >= deadline) {
+      result.deferred = roomIds.length - index;
+      break;
+    }
+    const roomId = roomIds[index];
     result.attempted += 1;
     const request = { roomId, keepNewest, reason: RELIEF_REASON, belowCursor: parked(store.db, roomId) };
     try {
