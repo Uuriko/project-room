@@ -85,6 +85,12 @@ export const KNOWN_CATEGORIES = Object.freeze({
   // (direct_channel_sends, quarantine_thread_splits, spam_quarantine are
   // Fo's #2229 territory — folded into derived_inbox there, not duplicated.)
   bounty_journal: { priority: 77, dependsOn: [] },
+  // #3614 (accountability R-3): decision records are a legal-hold category
+  // (verdicts, receipts, settlements, underlying events; >=4-year class in
+  // RETENTION_POLICY). The planner only ever emits a retain step for a
+  // legalHold inventory entry, so the priority never orders a purge; it
+  // sits beside bounty_journal, the other retained ledger category.
+  decision_records: { priority: 78, dependsOn: [] },
   profile: { priority: 100, dependsOn: [] },
 });
 
