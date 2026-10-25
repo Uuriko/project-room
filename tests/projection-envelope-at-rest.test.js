@@ -65,16 +65,17 @@ test("on: the stored row is smaller per message than with the flag off", t => {
 
 test("messages that do not carry the canonical null run are left exactly as they are", t => {
   const room = open(t, { bodiesAtRest: true });
+  room.command(T.MEMBER_ADDED, { memberId: "ada", displayName: "Ada", kind: "human", permissions: [] });
   room.post("root", "hello");
   room.post("reply", "re", { replyToId: "root" });
-  room.post("dm", "psst", { toMemberId: "owner" });
+  room.post("dm", "psst", { toMemberId: "ada" });
   const stored = JSON.parse(room.raw()).messages;
   const by = id => stored.find(m => m.id === id);
   assert.equal(by("root")[NULL_ENVELOPE_KEY], 1);
   assert.equal(NULL_ENVELOPE_KEY in by("reply"), false);
   assert.equal(by("reply").replyToId, "root");
   assert.equal(NULL_ENVELOPE_KEY in by("dm"), false);
-  assert.equal(by("dm").toMemberId, "owner");
+  assert.equal(by("dm").toMemberId, "ada");
   const live = room.store.room("commons").state.messages;
   assert.equal(live.find(m => m.id === "root").toMemberId, null);
 });
@@ -108,13 +109,14 @@ test("turning the flag off writes full envelopes back on the next write", t => {
 
 test("the unindexed conversation read returns full envelopes, and a DM still stays private", t => {
   const room = open(t, { bodiesAtRest: true });
+  room.command(T.MEMBER_ADDED, { memberId: "ada", displayName: "Ada", kind: "human", permissions: [] });
   room.post("pub", "hello");
-  room.post("secret", "psst", { toMemberId: "owner" });
+  room.post("secret", "psst", { toMemberId: "ada" });
   const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
   const pub = page.messages.find(m => m.id === "pub");
   assert.equal(pub.toMemberId, null); assert.equal(pub.workItemId, null); assert.equal(pub.replyToId, null);
   assert.equal(NULL_ENVELOPE_KEY in pub, false);
-  assert.equal(page.messages.find(m => m.id === "secret").toMemberId, "owner");
+  assert.equal(page.messages.find(m => m.id === "secret").toMemberId, "ada");
 });
 
 test("hydrateRecordText and hydrateProjection restore the marker with or without a body ref", t => {
