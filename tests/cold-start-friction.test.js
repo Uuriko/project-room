@@ -134,7 +134,12 @@ test("room create defaults kind, roomId, and displayName and names the bad field
   assert.throws(() => rooms.create(identity.secret, {}), error => {
     assert.equal(error.status, 422);
     assert.equal(error.code, "invalid_room_request");
-    assert.match(error.message, /title/);
+    assert.match(error.message, /Missing title\. Missing purpose/);
+    return true;
+  });
+  assert.throws(() => rooms.create(identity.secret, { name: "Ada", roomId: "ada-den", displayName: "Ada" }), error => {
+    assert.match(error.message, /Unexpected field name/);
+    assert.match(error.message, /Missing title\. Missing purpose/);
     return true;
   });
   assert.throws(() => rooms.create(identity.secret, { title: "Ada", purpose: "Work", kind: "agent" }), error => {
