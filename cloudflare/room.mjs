@@ -34,6 +34,7 @@ import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { alarmAlreadyScheduled } from '../server/job-alarm-arm.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -564,7 +565,7 @@ export class ProjectRoom extends DurableObject {
       if (current != null) await this.ctx.storage.deleteAlarm();
       return { armed: false, alarmAt: null };
     }
-    if (current != null && current <= when) return { armed: false, alarmAt: current };
+    if (alarmAlreadyScheduled(current, when, now)) return { armed: false, alarmAt: current };
     await this.ctx.storage.setAlarm(when);
     return { armed: true, alarmAt: when };
   }
@@ -575,9 +576,13 @@ export class ProjectRoom extends DurableObject {
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
     const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
-    const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
-    if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
-    return { ...armed, ran: outcomes.map(outcome => outcome.job) };
+    // A failed fast job is reported to the worker after this RPC returns.
+    // Throwing here rolls the re-arm and the heartbeat back with the
+    // Durable Object transaction, and the platform drops the alarm after
+    // six retries. The minute jobs then move only on the 30-minute cron.
+    const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow)
+      .map(outcome => outcome.job);
+    return { ...armed, ran: outcomes.map(outcome => outcome.job), failed };
   }
   // Separate RPC invocations give each slow job its own CPU budget. A reset
   // cannot erase outcomes already committed by another invocation.
@@ -589,20 +594,21 @@ export class ProjectRoom extends DurableObject {
     await yieldToQueuedRequests();
     return this.#runDueJobs({ includeSlow: true, onlyJob: name });
   }
-  // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
+  // Platform alarm. A thrown tick used to rethrow after re-arming, and
+  // workerd rolls the setAlarm back with the exception. The alarm then
+  // retries at most six times and is dropped, so every fast job on this
+  // shared tick stops together. Record the failure, arm the next tick,
+  // and return. The worker cron still throws after the RPC so Cron
+  // Events show the failure.
   async alarm() {
     if (this.paused || !this.store) return;
     let retryDelayMs = 0;
     try {
       const outcomes = await this.#runDueJobs({ includeSlow: false });
-      const failed = outcomes.filter(outcome => !outcome.ok);
-      if (failed.length) {
-        retryDelayMs = ALARM_RETRY_MS;
-        throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
-      }
+      if (outcomes.some(outcome => !outcome.ok)) retryDelayMs = ALARM_RETRY_MS;
     } catch (error) {
-      if (!retryDelayMs) retryDelayMs = ALARM_RETRY_MS;
-      throw error;
+      retryDelayMs = ALARM_RETRY_MS;
+      console.error(`[jobs] alarm tick failed: ${error?.message ?? error}`);
     } finally {
       try { await this.#armJobAlarm({ retryDelayMs }); }
       catch (error) { console.error(`[jobs] alarm re-arm failed: ${error?.message ?? error}`); }
@@ -794,8 +800,10 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     let room = env.ROOM.getByName('invite-only-pilot');
     const failures = [];
-    try { await room.ensureJobAlarm(); }
-    catch { failures.push("fast jobs"); room = env.ROOM.getByName('invite-only-pilot'); }
+    try {
+      const armed = await room.ensureJobAlarm();
+      if (Array.isArray(armed?.failed)) failures.push(...armed.failed);
+    } catch { failures.push("fast jobs"); room = env.ROOM.getByName('invite-only-pilot'); }
     for (const job of JOBS.filter(job => job.slow && job.runtimes.includes("worker"))) {
       try { await room.runSlowJob(job.name); }
       catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
