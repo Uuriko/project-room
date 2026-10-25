@@ -68,6 +68,8 @@ for (const theme of ["dark", "light"]) test(`People at 390 (${theme}): owner rem
   await remove.tap();
   await row.locator(".member-actions").waitFor({ state: "detached" });
   assert.equal(store.room("commons").state.members.riley.active, false, "the confirming tap ended access");
+  // The roster redraws inside the command's snapshot read, before the status line.
+  await page.locator("#status").getByText(/Riley removed\. They can no longer read or post/).waitFor();
   assert.match(await page.locator("#status").textContent(), /Riley removed\. They can no longer read or post in this room/);
   assert.equal(await row.count(), 1, "the removed person stays in history, without controls");
   assert.deepEqual(dialogs, [], "no native confirm dialog");

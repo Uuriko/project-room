@@ -2131,7 +2131,7 @@ function render() {
   syncAcquisitionControls(); // GR2 public room page, join link, name, and tasks
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief({ timelineRendered: true });
-  setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
+  setText("#decision-count", (state.eventLog ?? []).filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
   humanExperience?.sync();
   revealAgentSigninLink();

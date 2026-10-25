@@ -42,8 +42,12 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(activity.auditView, 'activity'); assert.equal(activity.auditVersion, 1);
     assert.deepEqual(activity.state.messages, fullAudit.state.messages);
     assert.equal(activity.sequence, fullAudit.sequence);
-    assert.ok(fullAudit.state.eventLog.some(e => e.type === 'message.posted'));
-    assert.equal(activity.state.eventLog.some(e => e.type === 'message.posted'), false);
+    assert.equal(fullAudit.eventTail, 'events');
+    assert.equal(activity.eventTail, 'events');
+    assert.equal(fullAudit.state.eventLog, undefined);
+    assert.equal(activity.state.eventLog, undefined);
+    const tail = await json(await call('/api/rooms/commons/events?tail=100', { headers: { Authorization: `Bearer ${ownerKey}` } }));
+    assert.ok(tail.events.some(row => row.event?.type === 'message.posted'));
     const presenceProbe = await json(await call('/api/rooms/commons/presence', {
       headers: { Authorization: `Bearer ${ownerKey}` }
     }));

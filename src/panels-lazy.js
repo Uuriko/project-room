@@ -34,7 +34,15 @@ function restore(root) {
   if (!saved) return;
   PARKED.delete(root);
   parkedRoots.delete(root);
-  for (const node of saved.all) root.appendChild(node);
+  // Put removed nodes back in their original order. Leave a node that is
+  // already there: moving the summary during pointerdown cancels the click
+  // that opens the details, and the control inside stays hidden.
+  let previous = null;
+  for (const node of saved.all) {
+    const expected = previous ? previous.nextSibling : root.firstChild;
+    if (node !== expected) root.insertBefore(node, expected);
+    previous = node;
+  }
 }
 
 function parkedFragments(doc) {
@@ -55,6 +63,39 @@ function matchesIn(node, selector) {
   if (node.matches(selector)) found.push(node);
   for (const element of nativeElQueryAll.call(node, selector)) found.push(element);
   return found;
+}
+
+// "#composer-options .panel" names the details element, which stays in the
+// document while its children are detached. A query from those children
+// cannot see that id, so retry the part after it.
+function relativeToRoot(root, selector) {
+  if (!root?.id || typeof selector !== "string") return null;
+  const prefix = `#${CSS.escape(root.id)}`;
+  if (!selector.startsWith(prefix)) return null;
+  const rest = selector.slice(prefix.length);
+  if (!/^[ >+~]/.test(rest)) return null;
+  return rest.trim();
+}
+
+function matchesParked(node, selector, root) {
+  try {
+    const direct = matchesIn(node, selector);
+    if (direct.length) return direct;
+  } catch {
+    return [];
+  }
+  const rest = relativeToRoot(root, selector);
+  if (!rest) return [];
+  try {
+    if (rest.startsWith(">")) {
+      const child = rest.slice(1).trim();
+      return child && node.matches(child) ? [node] : [];
+    }
+    if (rest.startsWith("+") || rest.startsWith("~")) return [];
+    return matchesIn(node, rest);
+  } catch {
+    return [];
+  }
 }
 
 function fragmentVisibleTo(scope, root) {
@@ -78,7 +119,7 @@ function firstInParked(doc, selector, scope) {
     if (!saved) continue;
     for (const node of saved.all) {
       if (node.nodeType !== 1 || node.parentNode === root) continue;
-      const found = matchesIn(node, selector);
+      const found = matchesParked(node, selector, root);
       if (found.length) return found[0];
     }
   }
@@ -93,7 +134,7 @@ function allInParked(doc, selector, scope) {
     if (!saved) continue;
     for (const node of saved.all) {
       if (node.nodeType !== 1 || node.parentNode === root) continue;
-      found.push(...matchesIn(node, selector));
+      found.push(...matchesParked(node, selector, root));
     }
   }
   return found;

@@ -26,6 +26,7 @@ async function sample(origin, { park }) {
       textareas: doc.getElementsByTagName("textarea").length,
       forms: doc.getElementsByTagName("form").length,
       composer: doc.getElementById("message-input")?.isConnected === true,
+      optionsPanel: doc.querySelector("#composer-options .composer-options-panel") !== null,
       createBefore: doc.getElementById("account-room-create")?.childElementCount ?? 0
     };
   });
@@ -76,6 +77,7 @@ test("lazy panel mount drops connected fields and keeps the composer", { timeout
   assert.deepEqual(after.errors, []);
   assert.equal(before.composer, true);
   assert.equal(after.composer, true);
+  assert.equal(after.optionsPanel, true, "a parked panel is still found by its ancestor id");
   assert.ok(after.textareas < before.textareas, `textareas ${after.textareas} vs ${before.textareas}`);
   assert.ok(after.forms < before.forms, `forms ${after.forms} vs ${before.forms}`);
   assert.ok(after.nodes < before.nodes, `nodes ${after.nodes} vs ${before.nodes}`);
