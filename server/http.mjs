@@ -902,6 +902,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function setCookie(res, name, token, maxAge, sameSite = "Strict") {
     res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
+  // Only this short-lived transaction nonce crosses Google's top-level return.
+  // It is not an account credential; account_session remains SameSite=Strict.
+  function setGoogleFlowCookie(res, state, maxAge = 600) {
+    const existing = res.getHeader("Set-Cookie");
+    const flow = `${scopedCookieName("google_oauth_state")}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`;
+    res.setHeader("Set-Cookie", [...(Array.isArray(existing) ? existing : existing ? [existing] : []), flow]);
+  }
   function json(res, status, value, head = false) {
     const body = JSON.stringify(value);
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
@@ -1377,6 +1384,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
         }
         const started = signIn.begin({ slotToken, expectedRevision });
+        setGoogleFlowCookie(res, new URL(started.authorizationUrl).searchParams.get("state"));
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();
@@ -1395,11 +1403,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         let stage = "provider";
         try {
-          // Bind the callback to the browser session that started the flow: a
-          // cross-session (or cookie-less) completion fails closed in
-          // complete() instead of adopting the state's slot (login CSRF).
+          // Strict account cookies are absent on Google's cross-site redirect.
+          // Require the browser's independently stored transaction nonce before
+          // consuming state. A copied callback URL alone cannot complete login.
+          const flowState = cookie(req, "google_oauth_state");
+          if (!tokenPattern.test(flowState || "") || flowState !== url.searchParams.get("state"))
+            reject(400, "google_state_invalid", "Google sign-in confirmation is missing or expired");
           const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search,
-            expectedSlotToken: cookie(req, accountCookieName) ?? null });
+            expectedSlotToken: cookie(req, accountCookieName) ?? undefined });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
@@ -1422,6 +1433,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
               rotateSlot: true });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+          setGoogleFlowCookie(res, "", 0);
           const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
             .get(linked.accountId);
           // A fresh account has no rooms yet: land on the account home, where
@@ -2749,6 +2761,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
         const started = signIn.begin({ slotToken, expectedRevision, link: true });
+        setGoogleFlowCookie(res, new URL(started.authorizationUrl).searchParams.get("state"));
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();

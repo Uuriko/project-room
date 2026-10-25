@@ -32,7 +32,7 @@ async function googleSignIn(origin) {
   const startRes = await fetch(origin + GOOGLE_START_PATH, { redirect: "manual" });
   const state = new URL(startRes.headers.get("location")).searchParams.get("state");
   return fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${state}&code=code-${Math.random()}`,
-    { redirect: "manual", headers: { Cookie: `account_session=${cookieOf(startRes)}` } });
+    { redirect: "manual", headers: { Cookie: startRes.headers.getSetCookie().map(c => c.split(";")[0]).join("; ") } });
 }
 
 test("a deleted Google account can sign in with Google again and gets a fresh, working account", async t => {

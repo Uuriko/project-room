@@ -101,7 +101,7 @@ async function completeFlow(origin) {
   assert.ok(slotCookie);
   const callback = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-email`,
-    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: start.headers.getSetCookie().map(c => c.split(";")[0]).join("; ") } });
   assert.equal(callback.status, 200);
   return { slotToken: accountCookie(callback) };
 }
