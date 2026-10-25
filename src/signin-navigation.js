@@ -26,10 +26,12 @@ export function createSigninNavigation({ getUI, active }) {
     $("#email-auth-step").hidden = !auxiliary;
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
-    $("#google-signin").hidden = view === "welcome";
-    $("#github-signin").hidden = view === "welcome";
-    if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
-    if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
+    const google = $("#google-signin");
+    if (google) google.hidden = view === "welcome";
+    const github = $("#github-signin");
+    if (github) github.hidden = view === "welcome";
+    if (unavailableProviders.has("google") && google) google.hidden = true;
+    if (unavailableProviders.has("github") && github) github.hidden = true;
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
