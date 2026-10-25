@@ -86,13 +86,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal((await call('/api/agent-rooms')).status, 401);
     assert.equal((await call('/api/agent-rooms', { headers: { Authorization: `Bearer ${ownerKey}` } })).status, 401);
 
-    // The webhook inbox is mounted: an unknown connection or wrong secret is 401
-    // channel_webhook_denied, not 409 channel_webhook_unavailable, and nothing is journaled.
+    // Deferred inbox webhooks are absent from the shipped Workers surface.
     const webhook = await call('/api/inbox/webhooks/unknown-connection', { data: { update_id: 1 }, headers: { 'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123' } });
-    assert.equal((await json(webhook, 401)).error.code, 'channel_webhook_denied');
+    assert.equal((await json(webhook, 404)).error.code, 'not_found');
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const version = await json(await call('/api/version'));
-    assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    // r56: storage.valueLimitBytes is the Durable Object's SQLite value limit,
+    // read without a write; it follows the workerd build (2,200,000 on the
+    // repo pin, 8,388,642 on 1.20261018.1), so only its shape is fixed here.
+    const { storage, ...versionFields } = version;
+    assert.deepEqual(versionFields, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    assert.ok(Number.isSafeInteger(storage?.valueLimitBytes) && storage.valueLimitBytes >= 2_000_000, JSON.stringify(storage));
     const versionHead = await call('/api/version', { method: 'HEAD' });
     assert.equal(versionHead.status, 200); assert.equal(await versionHead.text(), '');
     const healthHead = await call('/api/health', { method: 'HEAD' });
@@ -164,7 +168,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer' });
+    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
@@ -274,26 +278,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(remainingSessions.sessions, inventory.sessions.filter(item => item.id !== nativeEntry.id));
     assert.equal(remainingSessions.sessions.filter(item => item.current).length, 1);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
-    const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
-    assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
-    assert.equal(draftReview.comparison, undefined);
-    const comparison = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v2'), { headers: mailHeaders }));
-    assert.deepEqual(comparison.attempt, draftReview.attempt);
-    assert.equal(typeof comparison.comparison.originalBody, 'string'); assert.equal(comparison.comparison.updateStatus, null);
-    assert.doesNotMatch(JSON.stringify(comparison.comparison), /providerDraftId|Authorization|https:/);
-    const latest = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v3'), { headers: mailHeaders }));
-    assert.deepEqual(latest.attempt, comparison.attempt); assert.deepEqual(latest.comparison, comparison.comparison);
-    const updated = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v4'), { headers: mailHeaders }));
-    assert.deepEqual(updated.attempt, latest.attempt); assert.deepEqual(updated.comparison, latest.comparison); assert.equal(updated.update, null);
-    const reviewCommand = { action: 'reply.review', requestId: 'worker-browser-review', sourceId, attemptId: draftReview.attempt.id,
-      expectedRevision: draftReview.attempt.revision, reviewVersion: draftReview.attempt.observation.version };
-    await json(await call('/api/inbox/review', { headers: { ...mailHeaders, 'X-CSRF-Token': '' }, data: reviewCommand }), 403);
-    await json(await call('/api/inbox/review', { headers: mailHeaders, data: { ...reviewCommand, action: 'reply.dispatch' } }), 422);
-    const reviewed = await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }), 201);
-    assert.equal(reviewed.receipt.attempt, undefined); assert.equal(reviewed.receipt.reviewVersion, reviewCommand.reviewVersion);
-    assert.equal((await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }))).duplicate, true);
-    assert.equal((await json(await call(reviewPath, { headers: mailHeaders }))).attempt.review.current, true);
-    await json(await call(reviewPath, { headers: { Authorization: 'Bearer ' + ownerKey } }), 401);
+    for (const version of ['reply-review-v1', 'reply-review-v2', 'reply-review-v3', 'reply-review-v4']) {
+      await json(await call(reviewPath.replace('reply-review-v1', version), { headers: mailHeaders }), 404);
+    }
+    await json(await call('/api/inbox/review', { headers: mailHeaders, data: { action: 'reply.review', sourceId } }), 404);
     const linkToken = randomBytes(32).toString('base64url');
     const link = await json(await call('/api/rooms/commons/share-links', { headers: ownerHeaders,
       data: { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 3, expectedMemberRevision: 0 } }), 201);
