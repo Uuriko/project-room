@@ -295,6 +295,11 @@ export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDE
   throw new Error("proof search exhausted");
 }
 
+// On the create response only. The seed is not written to the store; a
+// later read of the identity or its key list does not include it. Logs of
+// this response can see the seed because the server generated it.
+const PRIVATE_KEY_ONCE_WARNING = "privateKey is shown once in this response and is not stored. Save it now. A later read does not return it. This server generated the key, so a log of this response can see it.";
+
 // Machine-readable next steps for a brand-new agent. The signup response
 // is the first thing a cold agent sees: instead of returning a secret with
 // no direction, it names the concrete first actions (create your own room,
@@ -446,14 +451,16 @@ export class AgentIdentities {
         .run(identityId, verifier.secretHash, verifier.fallbackHash, name, now, activatedAt, mintAddress, mintNetwork);
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
-      // operator-attested binding — see server/agent-key-registry.mjs) and
-      // the private seed is shown once, like the secret. The agent signs
-      // public-key claims (signed-claims.mjs ed25519 mode) with it, so
-      // cross-room claim verification needs no shared secret.
+      // operator-attested binding — see server/agent-key-registry.mjs).
+      // The private seed is returned once on this object, with
+      // privateKeyWarning, and is not stored. The agent signs public-key
+      // claims (signed-claims.mjs ed25519 mode) with it, so cross-room
+      // claim verification needs no shared secret.
       const keyPair = generateEd25519KeyPair();
       this.store.keyRegistry.registerKey(identityId, keyPair.publicKey, { validFrom: now });
       return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }),
         publicKey: keyPair.publicKey, privateKey: keyPair.privateKey,
+        privateKeyWarning: PRIVATE_KEY_ONCE_WARNING,
         next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
     });
   }
