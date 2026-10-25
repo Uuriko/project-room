@@ -72,7 +72,7 @@
     "src/auth-signin-ui.js": "sha256:952dbdc3ebdf238a469a169ca23fb936d41b111c01c7f1fac3e0a2461719e485",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:9e106107c532c8195328acb22ef08f3057b3226c768eb620e78c6d6c5359f3be",
+    "src/board-ui.js": "sha256:18ca39a335df8a22663375f7745843f8d29149ea2def9e67a7ed2cbf9e4f6d42",
     "src/board.css": "sha256:48ae65eb6537a829a0dd8f90b02f660b83941ffc48ddd09295b58c4f30162ea5",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
@@ -151,8 +151,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ed50070e82de9b7bd313da460fdf67da4ef540e12675c57f2a7bf827fd5fa097",
-    "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
+    "strings/en.js": "sha256:f36445f4afa99e2a4a1f01099b447fd818b7c2adec0e7206c32d4d990a28dc66",
+    "strings/en.json": "sha256:48fcbfe34906f34df2fec2319b2c82bdf1f6d9a1d8dd7894d6b97f545f56df9a"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ea6161b091a3d0f8bab5b5f921534039fc784a339d650d38b11f487287b77c12",
