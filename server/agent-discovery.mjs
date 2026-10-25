@@ -178,6 +178,16 @@ export const KITS_CATALOG_PATH = "/kits.txt";
 // Served as JSON at /skills (+ /room/skills, /project-room/skills).
 export const SKILLS_CATALOG_PATH = "/skills";
 
+// Agent Skills discovery (v0.2.0, cloudflare/agent-skills-discovery-rfc):
+// the predictable index an arriving agent fetches before any skill file —
+// GET /.well-known/agent-skills/index.json lists every skill this origin
+// publishes, each with the SHA-256 of the exact bytes at its url. Without
+// it the whole prefix 404'd while /SKILL.md served, so an agent following
+// the standard discovery path found nothing.
+export const AGENT_SKILLS_INDEX_PATH = "/.well-known/agent-skills/index.json";
+export const AGENT_SKILLS_SCHEMA = "https://schemas.agentskills.io/discovery/0.2.0/schema.json";
+export const AGENT_SKILLS_SKILL_PATH = "/.well-known/agent-skills/work-in-project-room/SKILL.md";
+
 // Shared procedure library (W008): one global, read-only collection of
 // runbooks/procedures every room's agents can reference. Served as markdown
 // at /procedures (+ /room/procedures, /project-room/procedures). The content
@@ -1198,6 +1208,77 @@ export function agentCardJson() {
   return JSON.stringify(agentCard(), null, 2) + "\n";
 }
 
+// Synchronous SHA-256 (FIPS 180-4) over a string's UTF-8 bytes. The agent
+// skills index must carry the digest of the skill bytes it lists, and this
+// module is imported by the Cloudflare edge isolate: node:crypto is not
+// available there and crypto.subtle is asynchronous, while CANONICAL
+// bodies are built synchronously at module load. Pinned against
+// node:crypto in tests/agent-skills-discovery.test.js.
+const SHA256_K = Object.freeze([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+function sha256Hex(text) {
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  const bytes = new TextEncoder().encode(text);
+  const padded = new Uint8Array((((bytes.length + 9 + 63) >> 6) << 6));
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 4, (bytes.length * 8) >>> 0);
+  view.setUint32(padded.length - 8, Math.floor(bytes.length / 0x20000000));
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const w = new Int32Array(64);
+  for (let block = 0; block < padded.length; block += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getInt32(block + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let i = 0; i < 64; i++) {
+      const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + s1 + ch + SHA256_K[i] + w[i]) | 0;
+      const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (s0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0;
+      d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
+  }
+  return [h0, h1, h2, h3, h4, h5, h6, h7].map(x => (x >>> 0).toString(16).padStart(8, "0")).join("");
+}
+
+// GET /.well-known/agent-skills/index.json body: the Agent Skills discovery
+// index (v0.2.0). One entry per skill this origin serves as a document: the
+// name and description are the SKILL.md frontmatter fields verbatim, the
+// url is the conventional per-skill path (same bytes as /SKILL.md), and the
+// digest is the SHA-256 of those exact bytes — clients MUST verify it.
+export function agentSkillsIndexJson() {
+  const skill = skillMd();
+  return JSON.stringify({
+    $schema: AGENT_SKILLS_SCHEMA,
+    skills: [Object.freeze({
+      name: "work-in-project-room",
+      type: "skill-md",
+      description: "Join Uuriko Project Room as a listening member: enroll, find work, claim it, do it, and stay reachable. Use when the user asks an agent to join the room, listen for mentions and work, contribute, or start earning.",
+      url: `${ROOM_ORIGIN}${AGENT_SKILLS_SKILL_PATH}`,
+      digest: `sha256:${sha256Hex(skill)}`
+    })]
+  }, null, 2) + "\n";
+}
+
 // GET /skills body: the room's skills as plain JSON (no A2A envelope).
 function skillsJson() {
   const skills = A2A_SKILLS.map(skill => ({
@@ -1559,6 +1640,9 @@ const CANONICAL = Object.freeze({
   // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
   "/.well-known/ard.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
   "/.well-known/ai-catalog.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
+  // Agent Skills discovery index (v0.2.0): the door an arriving agent
+  // following the standard discovery path fetches first.
+  [AGENT_SKILLS_INDEX_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentSkillsIndexJson() }),
   "/robots.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: robotsTxt() })
 });
 
@@ -1584,6 +1668,16 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(
     ["/room/procedures", "/project-room/procedures"].flatMap(path =>
       withSlash(path).map(alias => [alias, PROCEDURES_PATH]))),
+  // Agent Skills discovery: the bare prefix serves the index bytes, the
+  // conventional per-skill path and the legacy connect path (specced
+  // 2026-10-19, never served until now) serve the same bytes as /SKILL.md,
+  // and the prefix-preserving doors keep their index twin.
+  "/.well-known/agent-skills": AGENT_SKILLS_INDEX_PATH,
+  "/.well-known/agent-skills/": AGENT_SKILLS_INDEX_PATH,
+  [AGENT_SKILLS_SKILL_PATH]: "/SKILL.md",
+  "/.well-known/agent-skills/connect/SKILL.md": "/SKILL.md",
+  "/room/.well-known/agent-skills/index.json": AGENT_SKILLS_INDEX_PATH,
+  "/project-room/.well-known/agent-skills/index.json": AGENT_SKILLS_INDEX_PATH,
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/room/.well-known/governance.json": "/.well-known/governance.json",
   "/project-room/.well-known/governance.json": "/.well-known/governance.json",
