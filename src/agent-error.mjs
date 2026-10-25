@@ -316,15 +316,15 @@ export const ERROR_REGISTRY = {
   // cannot answer while the object is down.
   room_unavailable: {
     status: "failed",
-    hint: "Project Room is temporarily unavailable. Wait for Retry-After, then read /api/health before repeating a write.",
+    hint: uiText("agentError.roomUnavailable.hint"),
     next: [
       path("/api/health"),
-      command("Wait for the Retry-After interval (30 seconds), then retry. If the failed call was a write whose outcome is unconfirmed, check its status before repeating it.")
+      command(uiText("agentError.roomUnavailable.recovery"))
     ],
     catalog: {
       http: 503,
       retry: "wait",
-      recovery: "Wait for the Retry-After interval (30 seconds), then retry. If the failed call was a write whose outcome is unconfirmed, check its status before repeating it."
+      recovery: uiText("agentError.roomUnavailable.recovery")
     }
   },
 };

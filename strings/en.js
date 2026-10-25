@@ -465,6 +465,8 @@ export default {
   "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>",
   "agentError.memberPaused.hint": "The room owner paused this member, so its posting is locked. Nothing was applied.",
   "agentError.memberPaused.next": "Ask the room owner to resume the member; do not retry until they do.",
+  "agentError.roomUnavailable.hint": "Project Room is temporarily unavailable. Wait for Retry-After, then read /api/health before repeating a write.",
+  "agentError.roomUnavailable.recovery": "Wait for the Retry-After interval (30 seconds), then retry. If the failed call was a write whose outcome is unconfirmed, check its status before repeating it.",
   "work.announce.claimed": "{actor} claimed '{title}'.",
   "work.announce.completed": "{actor} completed '{title}' — ready for your review.",
   "work.announce.review_passed": "{actor} recorded a passing review for '{title}'.",
