@@ -398,8 +398,14 @@ document.addEventListener("keydown", event => {
 let recovery;
 let pendingTailPaint = false;
 // Set when the message window paints before its event tail, so the completing
-// snapshot still runs the one-time open (drafts, hash reveal, companion reads).
+// snapshot still runs the one-time open (hash reveal, companion reads).
 let deferOpening = false;
+// Drafts are put back on that first paint. The completing snapshot must not
+// write them again over anything typed while the tail was loading.
+let openingDraftsRestored = false;
+// Presence started for this generation and room while the tail was still out.
+// The completing snapshot must not cancel that request and start another.
+let presencePollKey = "";
 let leavingPage = false;
 let composerFiles = [];
 let composerReselectId = null;
@@ -418,8 +424,8 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     snapshotAuditView = snapshot.auditView ?? "full";
     // The message window can arrive before the event tail. That first call
-    // paints. Draft restore, hash reveal, and the companion reads wait until
-    // the tail is installed, or they would run against an empty log.
+    // paints, including saved drafts. Hash reveal and the companion reads
+    // wait until the tail is installed.
     const pending = snapshot.eventTailPending === true;
     const completingTail = pendingTailPaint && !pending;
     pendingTailPaint = pending;
@@ -429,8 +435,10 @@ const client = new RoomClient({
     const firstSnapshot = (!state && !pending) || (completingTail && deferOpening);
     if (firstSnapshot) deferOpening = false;
     const presenceBoundary = firstSnapshot || state?.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    const presenceKey = [client.generation, snapshot.state?.room?.id ?? ""].join(":");
+    const restartPresence = presenceBoundary && presencePollKey !== presenceKey;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
-    if (presenceBoundary) stopPresencePoll();
+    if (restartPresence) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
     announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary, pending);
@@ -460,6 +468,16 @@ const client = new RoomClient({
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    // The composer is on screen with this paint. Saved drafts do not need the
+    // event tail (they check messages and work records), so restore them now.
+    // Waiting for the tail left the composer empty for that round trip.
+    if (pending && deferOpening && !openingDraftsRestored) {
+      restoreOpeningDrafts();
+      openingDraftsRestored = true;
+    }
+    // A room or generation change is noticed here. The next snapshot will not
+    // notice it again, so presence has to start before the tail returns.
+    if (restartPresence) { startPresencePoll(); presencePollKey = presenceKey; }
     if (pending) return;
     syncRoomLifecycle();
     shareLinksUI?.sync();
@@ -469,7 +487,6 @@ const client = new RoomClient({
     updatesUi?.sync();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
-    if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       const accountId = accountClient.session?.account?.id ?? session?.account?.id;
@@ -486,20 +503,9 @@ const client = new RoomClient({
     resultCopyUI?.sync();
     portableWorkUI?.sync();
     workspaceUI?.sync();
+    if (firstSnapshot && !openingDraftsRestored) restoreOpeningDrafts();
     if (firstSnapshot) {
-      // JDOT-MEMBER-PERMS-UI begin
-      // render() synchronizes the existing attention card for owners/admins.
-      // JDOT-MEMBER-PERMS-UI end
-      const saved = recovery.read(draftScope(identity), state);
-      if (saved) {
-        drafts = saved.drafts; currentThreadId = saved.threadId;
-        if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
-        syncChannelChrome();
-        const draft = drafts.get(saved.activeKey);
-        requestMode = draft.mode ?? null;
-        restoreComposer(draft);
-        updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
-      }
+      openingDraftsRestored = false;
       if (!location.hash) restoreResultSelection();
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
@@ -529,7 +535,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
-    pendingTailPaint = false; deferOpening = false;
+    pendingTailPaint = false; deferOpening = false; openingDraftsRestored = false; presencePollKey = "";
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
@@ -3022,6 +3028,18 @@ document.addEventListener("click", event => {
 });
 $("#request-exit").addEventListener("click", () => switchThread(currentThreadId, true));
 $("#request-refresh").addEventListener("click", () => { if (requestMode?.requestMessageId) openRequestMode(requestMode.kind, requestMode.requestMessageId); });
+function restoreOpeningDrafts() {
+  if (!session || !state) return;
+  const saved = recovery.read(draftScope(session), state);
+  if (!saved) return;
+  drafts = saved.drafts; currentThreadId = saved.threadId;
+  if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
+  syncChannelChrome();
+  const draft = drafts.get(saved.activeKey);
+  requestMode = draft.mode ?? null;
+  restoreComposer(draft);
+  updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
+}
 function persistDrafts() {
   // The composer no longer asks. This tab keeps nonempty drafts until the
   // 12-hour expiry or sign-out. In-memory drafts still work if storage fails.
