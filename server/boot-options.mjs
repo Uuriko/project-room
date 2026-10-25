@@ -1,3 +1,4 @@
+import { envConfig } from './config.mjs';
 import { googleConfig } from './google-oauth.mjs';
 import { githubConfig } from './github-oauth.mjs';
 import { gmailConfig } from './gmail-mailbox.mjs';
@@ -21,7 +22,7 @@ export function defaultServerArgs({ store, env = process.env, ...rest }) {
   const gmailAuth = rest.origin ? gmailConfig(env, rest.origin, googleAuth) : null;
   return {
     googleAuth, githubAuth, gmailAuth,
-    publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === "1",
+    publicAgentPages: envConfig(env).roomPublicAgentPages === "1",
     ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer,
   };
 }

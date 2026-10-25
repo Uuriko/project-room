@@ -12,9 +12,8 @@ export const IDENTITY_HASH_SALT = "project-room-agent-identity-v2";
 export const IDENTITY_HASH_PARAMS = Object.freeze({ N: 16384, r: 8, p: 1 });
 export const IDENTITY_V2_PREFIX = "v2:";
 const IDENTITY_FAST_PREFIX = "v3:";
-// Worker secret / Node env. Unset uses the fallback below so a deploy that
-// has not been given the secret still verifies and issues verifiers.
-const IDENTITY_HASH_KEY_ENV = "ROOM_IDENTITY_HASH_KEY";
+// ROOM_IDENTITY_HASH_KEY is optional. Unset uses the fallback below so a
+// deploy that has not been given the secret still verifies and issues verifiers.
 // Built-in key for local Node, self-hosted installs, and a Worker deploy
 // that has not set ROOM_IDENTITY_HASH_KEY. Not a substitute for the Worker
 // secret once an operator sets one: verification accepts this key as well,

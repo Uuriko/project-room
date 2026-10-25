@@ -79,6 +79,7 @@
 // | CHANNEL_DRAIN_INTERVAL_MS | drain default | left in server/jobs.mjs | scheduler |
 // | ROOM_BACKUPS / ROOM_BACKUPS_KV | unset | binding objects, left in jobs.mjs and room.mjs | scheduler / #4562 |
 // | ROOM_BACKUP_TOKEN | unset | left in cloudflare/room.mjs | #4562 |
+// | ROOM_PUBLIC_AGENT_PAGES | off | exactly "1" | server boot (defaultServerArgs) |
 // | ROOM_BOARD_V2_ENABLED | off | "1", left in cloudflare/room.mjs | #4562 |
 // | ROOM_BODIES_AT_REST | off | "1", left in cloudflare/room.mjs | #4562 |
 // | ROOM_SERVICE_MODE | cloudflare-staging | left in cloudflare/room.mjs | #4562 |
@@ -176,6 +177,7 @@ export function loadConfig(env = process.env) {
     roomAgentToken: read("ROOM_AGENT_TOKEN"),
     growthWatchIntervalMs: read("GROWTH_WATCH_INTERVAL_MS"),
     channelDrainIntervalMs: read("CHANNEL_DRAIN_INTERVAL_MS"),
+    roomPublicAgentPages: read("ROOM_PUBLIC_AGENT_PAGES"),
     roomBoardV2Enabled: read("ROOM_BOARD_V2_ENABLED"),
     roomBodiesAtRest: read("ROOM_BODIES_AT_REST"),
     roomServiceMode: read("ROOM_SERVICE_MODE"),

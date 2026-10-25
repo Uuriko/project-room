@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deploymentConfig, loadConfig, streamIntervalConfig } from "../server/config.mjs";
+import { defaultServerArgs } from "../server/boot-options.mjs";
 
 test("an empty env loads the Node defaults and does not throw", () => {
   const cfg = loadConfig({});
@@ -40,6 +41,13 @@ test("null does not read process.env", () => {
 test("GITHUB_TOKEN wins over GH_TOKEN, and an empty token falls through", () => {
   assert.equal(loadConfig({ GITHUB_TOKEN: "app", GH_TOKEN: "cli" }).githubToken, "app");
   assert.equal(loadConfig({ GITHUB_TOKEN: "", GH_TOKEN: "cli" }).githubToken, "cli");
+});
+
+test("a loaded config still turns public agent pages on only for exactly 1", () => {
+  const on = defaultServerArgs({ store: null, env: loadConfig({ ROOM_PUBLIC_AGENT_PAGES: "1" }), origin: "http://127.0.0.1:4173" });
+  const off = defaultServerArgs({ store: null, env: loadConfig({ ROOM_PUBLIC_AGENT_PAGES: "0" }), origin: "http://127.0.0.1:4173" });
+  assert.equal(on.publicAgentPages, true);
+  assert.equal(off.publicAgentPages, false);
 });
 
 test("invalid PORT and stream interval keep their messages", () => {
