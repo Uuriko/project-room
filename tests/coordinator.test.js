@@ -10,6 +10,7 @@ import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 import { claimHistoryLength, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { COORDINATOR_ACTIONS_PER_HOUR, COORDINATOR_MAX_HOPS } from "../server/coordinator.mjs";
+import { COORDINATOR_RANKING_VERSION } from "../server/coordinator-ranking.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:");
@@ -374,7 +375,7 @@ test("a room with no coordinator picks the highest-ranked live member", async t 
   assert.match(owner.body.assistant.coordinatorReason, /Claude Code \(claude\)/);
   assert.match(owner.body.assistant.coordinatorReason, /supports push wakes or webhooks/);
   assert.match(owner.body.assistant.coordinatorReason, /no claim attempts in this room/);
-  assert.match(owner.body.assistant.coordinatorReason, /Ranking version 1/);
+  assert.ok(owner.body.assistant.coordinatorReason.includes(`Ranking version ${COORDINATOR_RANKING_VERSION}.`));
   const agent = await room.call("plain", null, "GET");
   assert.equal(agent.body.assistant.coordinatorMemberId, owner.body.assistant.coordinatorMemberId);
   assert.equal(agent.body.assistant.coordinatorSource, "auto");
@@ -384,7 +385,7 @@ test("a room with no coordinator picks the highest-ranked live member", async t 
   assert.equal(logged[0].type, "message.posted");
   assert.equal(logged[0].data.coordinatorSource, "auto");
   assert.equal(logged[0].data.coordinatorMemberId, "claude");
-  assert.equal(logged[0].data.rankingVersion, 1);
+  assert.equal(logged[0].data.rankingVersion, COORDINATOR_RANKING_VERSION);
   assert.equal(logged[0].data.body, owner.body.assistant.coordinatorReason);
   assert.equal((await room.choices("owner")).length, 1);
 
