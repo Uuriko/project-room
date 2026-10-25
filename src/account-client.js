@@ -85,6 +85,7 @@ export const sameAccountSession = (candidate, owner) => Boolean(candidate?.accou
   && candidate.sessionBinding === owner.sessionBinding;
 
 export class AccountClient {
+  #invalidatedGeneration = -1;
   constructor({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
     this.fetcher = fetcher;
     this.session = null;
@@ -106,6 +107,7 @@ export class AccountClient {
   invalidate(generation, session) {
     if (!this.owns(generation, session)) return false;
     this.generation++;
+    this.#invalidatedGeneration = this.generation;
     this.session = null;
     return true;
   }
@@ -156,6 +158,10 @@ export class AccountClient {
   }
   async confirm() {
     const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
+    // A sibling read can confirm expiry first. A newer restore also clears
+    // session temporarily, but it must keep ownership of the replacement UI.
+    const superseded = () => this.session === null && this.generation === generation + 1
+      && this.#invalidatedGeneration === this.generation ? false : null;
     let value;
     try {
       // Name the session this read is checking: a delayed confirmation must
@@ -164,7 +170,7 @@ export class AccountClient {
     } catch (error) {
       // A response that lands after a newer session replaced this one is
       // obsolete: never let it touch the replacement, whatever it reports.
-      if (!this.owns(generation, session)) return null;
+      if (!this.owns(generation, session)) return superseded();
       // Ownership ended (signed out, revoked, binding rotated): retire the
       // view instead of throwing. Uncertain failures (5xx, offline) keep
       // the session so the caller can retry.
@@ -175,7 +181,7 @@ export class AccountClient {
       }
       throw error;
     }
-    if (!this.owns(generation, session)) return null;
+    if (!this.owns(generation, session)) return superseded();
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
   }
@@ -200,6 +206,31 @@ export class AccountClient {
     let previous = after ?? "";
     for (const room of value.rooms) { if (room.id <= previous) throw new Error("Room list order could not be confirmed"); previous = room.id; }
     if (value.nextCursor !== null && (value.nextCursor <= (after ?? "") || value.nextCursor < previous)) throw new Error("Room continuation could not be confirmed");
+    return value;
+  }
+  // #3342 Owner Cockpit slice 1: the cross-room Decisions + Exceptions
+  // document. Session-identity checked exactly like rooms(): a document
+  // that does not echo this session's binding is never rendered.
+  async ownerOverview({ window = "7d", after = null } = {}) {
+    const session = this.currentSession("loading the owner overview", { authenticated: true }), generation = this.generation;
+    let value;
+    const query = new URLSearchParams({ window });
+    if (after !== null) query.set("after", after);
+    try { value = await this.request("/api/owner/overview?" + query.toString(), { session }); }
+    catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+    if (!this.owns(generation, session)) return null;
+    const v = value?.viewer;
+    if (value?.contractVersion !== 1 || v?.accountId !== session.account.id || v.authEpoch !== session.account.authEpoch
+      || v.sessionRevision !== session.sessionRevision || v.sessionBinding !== session.sessionBinding) {
+      this.invalidate(generation, session); throw accountSessionError("Account changed");
+    }
+    if (!Array.isArray(value.decisions?.items) || !Array.isArray(value.exceptions?.items) || !Array.isArray(value.roomErrors)) {
+      throw new Error("Owner overview could not be confirmed");
+    }
     return value;
   }
   async logout() {

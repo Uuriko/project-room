@@ -345,3 +345,24 @@ export async function writeDailyBackup(env, room, now = new Date(), { r2Restorab
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
 }
+
+// Recovery gate for automatic relief (server/store-relief.mjs, QA delta
+// 17987): the newest verified daily backup, from today or yesterday (UTC),
+// or null. "Verified" is the same test the writer uses to skip a day: an R2
+// object with its sha256 metadata at the current version, or a current KV
+// manifest. Any read error answers null, so a missing or broken binding
+// fails closed: no backup, no automatic archive.
+export const RELIEF_BACKUP_MAX_AGE_DAYS = 2;
+export async function verifiedRecentBackup(env, now = Date.now()) {
+  try {
+    const bucket = backupBucket(env);
+    const kv = bucket ? null : backupKv(env);
+    if (!bucket && !kv) return null;
+    for (let day = 0; day < RELIEF_BACKUP_MAX_AGE_DAYS; day++) {
+      const key = backupObjectKey(new Date(Number(now) - day * 86_400_000));
+      const ok = bucket ? verifiedR2Backup(await bucket.head(key)) : currentManifest(await kv.get(key));
+      if (ok) return { key, target: bucket ? "r2" : "kv", ageDays: day };
+    }
+    return null;
+  } catch { return null; }
+}
