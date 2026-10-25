@@ -106,7 +106,7 @@
     "src/needs-attention.js": "sha256:1177ebb1a066648f13fa74978b07f40b40b323fc056a3fa5a6096154b98fa080",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
-    "src/owner-cockpit.js": "sha256:3d57012ebdcfc6985f91c93477c48f565505c23dccb4eea958da898e716a36c5",
+    "src/owner-cockpit.js": "sha256:88a08dbf10602f94111f56a27a1f8145aad7ddacde976e26b04099097778debc",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:88d9325a8cbb698ced48b9eb2ba594606b093a443d21939ca3a7fbee62e49c24",
@@ -151,8 +151,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ed50070e82de9b7bd313da460fdf67da4ef540e12675c57f2a7bf827fd5fa097",
-    "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
+    "strings/en.js": "sha256:5b6e158cd2eb8731c09574ac523942dc475456f500a3768976234806c143b54e",
+    "strings/en.json": "sha256:102a2ffb1b05a5f619f3cc3da8b12dea1772bfc384426771aa0f7c47f97e5cba"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
