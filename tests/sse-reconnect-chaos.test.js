@@ -90,9 +90,32 @@ test("ten drop/reconnect cycles during live writes lose nothing", async t => {
   for (const seq of written) assert.ok(delivered.includes(seq), `sequence ${seq} delivered`);
 });
 
+test("a Last-Event-ID past the room head resumes at the head and delivers the next event", async t => {
+  const f = await fixture(t);
+  const response = await f.open({ "Last-Event-ID": "999999999" });
+  assert.equal(response.status, 200);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const waitFor = async (ready) => {
+    const deadline = Date.now() + 3000;
+    while (!ready() && Date.now() < deadline) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+  await waitFor(() => buffer.includes(": connected transport only"));
+  assert.match(buffer, /: connected transport only/);
+  const posted = f.post("after an ahead cursor");
+  await waitFor(() => buffer.includes(`id: ${posted.sequence}`));
+  assert.match(buffer, new RegExp(`id: ${posted.sequence}`));
+  await reader.cancel().catch(() => {});
+});
+
 for (const [label, value, status, code] of [
   ["non-numeric", "abc", 422, "invalid_cursor"], ["negative", "-1", 422, "invalid_cursor"],
-  ["fractional", "1.5", 422, "invalid_cursor"], ["ahead of history", "999999999", 409, "cursor_ahead"],
+  ["fractional", "1.5", 422, "invalid_cursor"],
 ]) {
   test(`a ${label} Last-Event-ID is a ${status} ${code}, never a 500 or an empty 200`, async t => {
     const f = await fixture(t);

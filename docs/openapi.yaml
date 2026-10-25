@@ -1421,18 +1421,20 @@ paths:
         - name: since
           in: query
           description: >
-            Only events at or after this instant. RFC 3339 with `Z` or a
+            Only events at or after this instant. ISO 8601 with `Z` or a
             numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
-            timestamp or a bare date is 422 `invalid_event_cursor`, and the
-            message names `since`. `since` later than `until` is 422.
+            timestamp or a bare date is 400 `invalid_time_zone`, and the
+            message names `since`. A zoned value that is not a real instant
+            is 422 `invalid_event_cursor`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: until
           in: query
           description: >
-            Only events at or before this instant. RFC 3339 with `Z` or a
+            Only events at or before this instant. ISO 8601 with `Z` or a
             numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
-            timestamp or a bare date is 422 `invalid_event_cursor`, and the
-            message names `until`. `since` later than `until` is 422.
+            timestamp or a bare date is 400 `invalid_time_zone`, and the
+            message names `until`. A zoned value that is not a real instant
+            is 422 `invalid_event_cursor`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: type
           in: query
@@ -1469,21 +1471,26 @@ paths:
                       $ref: '#/components/schemas/RoomEvent'
                   next:
                     type: integer
-                    description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
+                    description: >
+                      Pass this back as `after`. When the scan reaches the end
+                      of the log, `next` is the room head. A cursor already past
+                      that head is an empty page whose `next` is the room head.
                   hasMore:
                     type: boolean
                     description: True when the room has events beyond `next`
-        '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
+        '400':
+          description: >
+            invalid_time_zone — since or until is a zone-less ISO 8601 value
+            (a bare date or a timestamp with no Z and no numeric offset). The
+            message names the parameter and includes an example with Z.
         '422':
           description: >
-            invalid_event_cursor — since and until must be RFC 3339 with Z or
-            an offset (for example 2026-10-24T20:30:00Z), and the message names
-            the field; since later than until is refused; limit must be an
-            integer from 1 to 100 and after an integer of 0 or more, and the
-            message names the parameter. Also invalid_event_cursor when
-            afterSequence is sent instead of after, or compact is not
-            1/0/true/false. invalid_cursor when actor, type, or mentions is
-            malformed.
+            invalid_event_cursor — a zoned since or until that is not a real
+            instant, since later than until, limit outside 1 to 100, or after
+            that is not an integer of 0 or more. The message names the
+            parameter. Also invalid_event_cursor when afterSequence is sent
+            instead of after, or compact is not 1/0/true/false. invalid_cursor
+            when actor, type, or mentions is malformed.
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -1513,7 +1520,7 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
-        '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
+        '409': { description: session_binding_changed. A Last-Event-ID past the room head is 200; the stream resumes at the room head and does not replay earlier events. }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
         '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
   /api/rooms/{roomId}/presence:
@@ -2974,7 +2981,11 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: ISO timestamp or epoch milliseconds; only items opened/created after the cursor are returned
+          description: >
+            ISO 8601 timestamp with Z or a numeric offset, or epoch milliseconds.
+            A zone-less timestamp or bare date is 400 invalid_time_zone and the
+            message names since. Only items opened or created after the cursor
+            are returned.
       responses:
         '200':
           description: Feed snapshot
@@ -3009,6 +3020,7 @@ paths:
                         deadlineMs: { type: [integer, 'null'] }
                         label: { type: [string, 'null'] }
                         createdAt: { type: [string, 'null'] }
+        '400': { description: invalid_time_zone — since has no Z or numeric offset }
         '422':
           $ref: '#/components/responses/InvalidInput'
         '429':
@@ -4813,7 +4825,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: Digest; fetching never acknowledges }
+        '200': { description: Digest; fetching never acknowledges. A horizon past the room head is an empty history page whose evaluatedThrough is the room head. }
   /api/rooms/{roomId}/notifications:
     get:
       summary: Per-member notification feed (read model)
@@ -8020,6 +8032,9 @@ paths:
         Poster-only triage decision: the proposal stays open (PROPOSED)
         with a defer-until date; a snoozed proposal is protected from
         expired-unfunded finalization while deferred. Emits `bounty.snoozed`.
+        `until` is an ISO 8601 timestamp with Z or a numeric offset, for
+        example `2026-10-24T20:30:00Z`. A zone-less value is 400
+        `invalid_time_zone` and the message names `until`.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -8032,7 +8047,10 @@ paths:
               type: object
               required: [until]
               properties:
-                until: { type: string, format: date-time }
+                until:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 with Z or a numeric offset. A zone-less value is 400 invalid_time_zone.
                 idempotencyKey: { type: string }
       responses:
         '200':
@@ -8045,6 +8063,7 @@ paths:
                   roomId: { type: string }
                   bounty: { $ref: '#/components/schemas/Bounty' }
                   receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '400': { description: invalid_time_zone — until has no Z or numeric offset }
         '401': { description: unauthenticated }
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
@@ -8473,6 +8492,10 @@ paths:
         - name: since
           in: query
           required: false
+          description: >
+            ISO 8601 timestamp with Z or a numeric offset, for example
+            2026-10-24T20:30:00Z. A zone-less value is 400 invalid_time_zone
+            and the message names since.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -8486,6 +8509,7 @@ paths:
                   receipts:
                     type: array
                     items: { $ref: '#/components/schemas/CreditReceipt' }
+        '400': { description: invalid_time_zone — since has no Z or numeric offset }
         '401': { description: unauthenticated }
         '403': { description: not_authorized (only the lane itself or the room owner) }
         '422': { description: invalid_bounty_input }
@@ -15219,7 +15243,12 @@ paths:
   /api/rooms/{roomId}/work-changes:
     get:
       summary: Change list for one work item
-      description: Member read, derived at read time (never a write). `workItemId` is required; `since` is a basis revision.
+      description: >
+        Member read, derived at read time (never a write). `workItemId` is
+        required; `since` is a basis revision. Each change's `revision` is the
+        monotonic per-item counter (the proposal is 0; every later work
+        revision event adds one). A stored `expectedRevision` that disagrees
+        with that counter is not the revision.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: workItemId

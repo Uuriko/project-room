@@ -78,6 +78,7 @@ export const ERROR_KEYS = new Set([
   "invalid_handoff_transition",
   "invalid_referral",
   "invalid_request",
+  "invalid_time_zone",
   "invalid_url",
   "invitation_already_used",
   "invitation_authority_changed",

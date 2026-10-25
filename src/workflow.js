@@ -1,5 +1,5 @@
 import { workProgress } from "./work-packet.js";
-import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
+import { EVENT_TYPES as T, WORK_REVISION_TYPES, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
 
 // Reuse content, never a prior assignment, permission, result or source relationship.
 export function reusableWorkDefinition(work) {
@@ -267,6 +267,22 @@ const WORK_REVISION_TYPES_FOR_CHANGES = [
   T.WORK_HANDOFF_RECORDED
 ];
 const WORK_CHANGE_TYPES = new Set([T.WORK_PROPOSED, ...WORK_REVISION_TYPES_FOR_CHANGES]);
+// Revision the projection holds after these events. Proposal is 0. Each
+// work-revision event adds one, including work.accepted, whether or not the
+// stored expectedRevision matches. Help events and other non-revision types
+// do not add one. Read-time only: stored event bytes stay as recorded.
+const WORK_REVISION_TYPE_SET = new Set(WORK_REVISION_TYPES);
+export function workRevisionAfter(events) {
+  if (!Array.isArray(events)) throw new Error("Work history must be a list");
+  let revision = null;
+  for (const event of events) {
+    if (!event || typeof event !== "object") continue;
+    if (event.type === T.WORK_PROPOSED) revision = 0;
+    else if (WORK_REVISION_TYPE_SET.has(event.type)) revision = (revision ?? 0) + 1;
+  }
+  return revision;
+}
+
 export function workItemChanges(events) {
   if (!Array.isArray(events)) throw new Error("Work history must be a list");
   const changes = [];

@@ -24,6 +24,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // `import { ServiceError } from "./store.mjs"` resolves to the exact same
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
+import { timeZoneMessage, zoneLessTime, zonedTimestampMillis } from "./iso-time.mjs";
 import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
@@ -5633,9 +5634,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
       if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
+      let sinceIso = null, untilIso = null;
       for (const [name, value] of [["since", since], ["until", until]]) {
-        if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+        if (value === null) continue;
+        if (typeof value !== "string") fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+        if (zoneLessTime(value)) fail(400, "invalid_time_zone", timeZoneMessage(name));
+        const ms = zonedTimestampMillis(value);
+        if (ms === null) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+        const iso = new Date(ms).toISOString();
+        if (name === "since") sinceIso = iso; else untilIso = iso;
       }
+      if (sinceIso !== null && untilIso !== null && sinceIso > untilIso) fail(422, "invalid_cursor", "since is after until");
       // B4 agent read-path: type + mentions filters, same SQL-level audit
       // filter family as actor/since/until — a filtered page still advances
       // its cursor by what was scanned (see the note at `next` below).
@@ -5653,7 +5662,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         : Boolean(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mention_states'").get());
       const authority = this.roomAuthority(roomId);
       const sequence = authority.sequence;
-      if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      // A cursor already at the head is an empty page (sequence > after). A
+      // cursor past the head is the same page: nothing new, resume at the head.
+      if (after > sequence) return { events: [], next: sequence, hasMore: false };
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
       // filtered read, not a new table.
@@ -5662,7 +5673,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         `AND (? IS NULL OR json_extract(body,'$.at')>=?)`,
         `AND (? IS NULL OR json_extract(body,'$.at')<=?)`
       ];
-      const filterArgs = [actor, actor, since, since, until, until];
+      const filterArgs = [actor, actor, sinceIso, sinceIso, untilIso, untilIso];
       if (types !== null) {
         filterClauses.push(`AND json_extract(body,'$.type') IN (${types.map(() => "?").join(",")})`);
         filterArgs.push(...types);

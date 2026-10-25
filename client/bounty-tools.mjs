@@ -53,7 +53,7 @@ export const bountyTools = [
     schema()),
 
   tool("bounty_read_history",
-    "Read your own movement receipts, newest first: every fund, bond-lock, attribution, payout and refund that touched your lane, each hash-chained to the previous entry on your account. Signed receipts carry an Ed25519 signature over canonical JSON, verifiable offline against the operator public key without trusting this server. Optional state filters to one lot state; since takes an ISO timestamp.",
+    "Read your own movement receipts, newest first: every fund, bond-lock, attribution, payout and refund that touched your lane, each hash-chained to the previous entry on your account. Signed receipts carry an Ed25519 signature over canonical JSON, verifiable offline against the operator public key without trusting this server. Optional state filters to one lot state. since is an ISO 8601 timestamp with Z or a numeric offset, for example 2026-10-24T20:30:00Z. A zone-less value is invalid_time_zone.",
     schema({ state: { type: "string", enum: ["payable", "locked", "attributed", "approved", "paid", "refunded"] },
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 

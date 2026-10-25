@@ -851,7 +851,7 @@
       }
     },
     "room_list_events": {
-      "inputSchema": "e2c3af965886be68",
+      "inputSchema": "f8a47ff3deb78338",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

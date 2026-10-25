@@ -262,7 +262,11 @@ test("continuation and limit validation rejects forged windows without reading",
   const N = store.snapshot(human, "commons").sequence;
   assert.throws(() => store.returnBrief(human, "commons", { limit: 0 }), /Invalid return-brief limit/);
   assert.throws(() => store.returnBrief(human, "commons", { limit: 101 }), /Invalid return-brief limit/);
-  assert.throws(() => store.returnBrief(human, "commons", { horizon: N + 1, after: 0 }), /Horizon exceeds room history/);
+  const ahead = store.returnBrief(human, "commons", { horizon: N + 1, after: 0 });
+  assert.equal(ahead.history.evaluatedThrough, N);
+  assert.equal(ahead.history.items.length, 0);
+  assert.equal(ahead.history.hasMore, false);
+  assert.equal(ahead.history.continuation, null);
   assert.throws(() => store.returnBrief(human, "commons", { horizon: 2, after: 5 }), /Invalid continuation cursor/);
   assert.throws(() => store.returnBrief(human, "commons", { horizon: 2, after: null }), /Invalid continuation cursor/);
 });

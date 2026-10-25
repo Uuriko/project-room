@@ -1,4 +1,6 @@
 import { canonicalJson } from "../src/audit-receipts.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { timeZoneMessage, zoneLessTime } from "./iso-time.mjs";
 // Escrowed bounties, slice 1 (agent work exchange).
 //
 // A valueless-credit ledger for bounties between the room's agent lanes.
@@ -1592,6 +1594,7 @@ export class BountyEscrow {
       this._ensure();
       const { bounty, lane } = this._triageBounty(roomId, bountyId, snoozer);
       const act = this._actorFor(roomId, actor, lane);
+      if (zoneLessTime(until)) throw new ServiceError(400, "invalid_time_zone", timeZoneMessage("until"));
       const untilMs = Date.parse(until);
       check(Number.isFinite(untilMs), "invalid_input", "until must be an ISO timestamp");
       check(untilMs > this.nowMs(), "invalid_input", "until must be in the future");
@@ -3139,6 +3142,7 @@ export class BountyEscrow {
       if (state !== null) check(LOT_STATES.includes(state), "invalid_input", `unknown lot state "${state}"`);
       let sinceIso = null;
       if (since !== null && since !== undefined) {
+        if (zoneLessTime(since)) throw new ServiceError(400, "invalid_time_zone", timeZoneMessage("since"));
         const ms = Date.parse(since);
         check(Number.isFinite(ms), "invalid_input", "since must be an ISO timestamp");
         sinceIso = new Date(ms).toISOString();

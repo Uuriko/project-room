@@ -35,7 +35,13 @@ export function resolveHistoryWindow({ sequence, storedCursor, horizon = null, a
   if (!Number.isSafeInteger(storedCursor) || storedCursor < 0) fail(422, "invalid_cursor", "Invalid stored cursor");
   if (horizon === null) return { H: sequence, startAfter: storedCursor, C: storedCursor, limit };
   if (!Number.isSafeInteger(horizon) || horizon < 0) fail(422, "invalid_cursor", "Invalid history horizon");
-  if (horizon > sequence) fail(409, "cursor_ahead", "Horizon exceeds room history; fetch a fresh return brief");
+  // A horizon past the room head is an empty page through the head. It does
+  // not move the member's caught-up marker, and it does not compare cursors:
+  // there is no frozen window to continue.
+  if (horizon > sequence) {
+    const C = Number.isSafeInteger(continuationCursor) && continuationCursor >= 0 ? continuationCursor : storedCursor;
+    return { H: sequence, startAfter: sequence, C, limit };
+  }
   if (!Number.isSafeInteger(after) || after < 0 || after > horizon) fail(422, "invalid_cursor", "Invalid continuation cursor");
   if (!Number.isSafeInteger(continuationCursor) || continuationCursor < 0) fail(422, "invalid_cursor", "Continuations must carry the frozen cursor");
   // Malformed tuples are rejected before any cursor comparison: the frozen cursor opens the

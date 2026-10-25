@@ -305,6 +305,7 @@
   "error.invalid_handoff_transition": "That handoff can't move to the requested state. Check its current state and try a valid transition.",
   "error.invalid_referral": "That referral isn't valid. Ask for a fresh referral link.",
   "error.invalid_request": "That request is missing required details. Fill them in and try again.",
+  "error.invalid_time_zone": "That time needs a timezone. Use an ISO 8601 time with Z or an offset, such as 2026-10-24T20:30:00Z.",
   "error.invalid_url": "That link isn't a valid URL. Check the link and try again.",
   "error.invitation_already_used": "That invitation was already accepted. Sign in with the account that accepted it.",
   "error.invitation_authority_changed": "The inviter's authority changed. Ask a current room administrator for a new invitation.",

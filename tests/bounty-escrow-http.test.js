@@ -193,6 +193,16 @@ test("triage quartet: decline, duplicate, snooze", async t => {
   }, keys.owner);
   assert.equal(snooze.status, 200);
   assert.equal((await snooze.json()).bounty.state, "proposed", "snooze keeps the proposal open");
+  const zoneLessUntil = await post(origin, `/api/rooms/${ROOM}/bounties/${snoozeId}/snooze`, {
+    until: "2099-01-01T00:00:00",
+  }, keys.owner);
+  assert.equal(zoneLessUntil.status, 400);
+  assert.equal((await zoneLessUntil.json()).error.code, "invalid_time_zone");
+  const zoneLessHistory = await get(origin, `/api/rooms/${ROOM}/credits/history/owner?since=2026-10-25T10:00:00`, keys.owner);
+  assert.equal(zoneLessHistory.status, 400);
+  const historyBody = await zoneLessHistory.json();
+  assert.equal(historyBody.error.code, "invalid_time_zone");
+  assert.match(historyBody.error.message, /since/);
 
   // Only the poster may triage.
   const forbidden = await post(origin, `/api/rooms/${ROOM}/bounties/${snoozeId}/decline`, { reason: "no" }, keys.producer);

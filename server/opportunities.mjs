@@ -1,4 +1,6 @@
 import { hydrateWorkItems } from "./work-repository.mjs";
+import { ServiceError as RoomServiceError } from "./service-error.mjs";
+import { timeZoneMessage, zoneLessTime } from "./iso-time.mjs";
 import { createHash } from "node:crypto";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
@@ -94,6 +96,9 @@ const cleanLabels = value => {
 // a silent mis-parse would drop items the agent has never seen.
 const parseSince = value => {
   if (value == null || value === "") return null;
+  if (typeof value === "string" && zoneLessTime(value)) {
+    throw new RoomServiceError(400, "invalid_time_zone", timeZoneMessage("since"));
+  }
   let ms = Number(value);
   if (!Number.isFinite(ms)) ms = Date.parse(value);
   if (!Number.isFinite(ms) || ms < 0) fail(422, "invalid_since", "since must be an ISO timestamp or milliseconds");
