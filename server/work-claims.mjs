@@ -48,6 +48,17 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+//
+// Claim fencing (#3545): every claim round carries a monotonic
+// claimGeneration (starts 0; bumped on claim, reassign, release and
+// sweep-release). The write verbs accept expectedClaimGeneration — the
+// generation the caller read — and refuse a mismatch with
+// work_claim_conflict, so a holder from a stale round cannot land writes
+// even when its identity matches the current holder (the same agent
+// re-claiming is the case owner identity alone cannot discriminate). The
+// machine also enforces the lease it issues: updateWork refuses non-release
+// verbs on a lapsed lease with claim_lease_lapsed, instead of relying on
+// the routes layer's per-request sweep to have run first.
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
@@ -177,6 +188,18 @@ const parentClaimIdOf = (value, selfId) => {
   check(value !== selfId, "a claim cannot be its own parent");
   return value;
 };
+// SCALE-HANDOFF F-2: the progress-message pointer. A holder names the room
+// message carrying their working context (noteMessageId on update/release,
+// after the route has validated it names their own public message in this
+// room); the claim projects it as progressMessageId. Unlike the round's
+// reviews/files/delivery, the pointer SURVIVES release — it exists so the
+// next holder can find the context, so clearing it at release would defeat
+// it. An explicit null clears it.
+const progressMessageIdOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && value.length <= 128, "progressMessageId must be a message id of at most 128 characters");
+  return value;
+};
 const MAX_EVIDENCE_REFS = 16;
 const evidenceRefsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -304,6 +327,34 @@ const optionalId = (value, what) => {
   if (value === undefined || value === null || value === "") return null;
   return idOf(value, what, 256);
 };
+// Member-id reference on a claim row (B-4' Phase 0 board fields): a member
+// id string of 1..128 characters, or null when the row names nobody.
+const memberRefOf = (value, what) => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && value.length >= 1 && value.length <= 128, `${what} must be 1..128 characters or null`);
+  return value;
+};
+const briefOf = value => {
+  if (value.mode !== undefined && value.mode !== null) {
+    check(value.mode === "read" || value.mode === "write", "mode must be one of read, write");
+  }
+  if (value.definitionOfDone !== undefined && value.definitionOfDone !== null) {
+    check(typeof value.definitionOfDone === "string", "definitionOfDone must be a string or null");
+  }
+  return {
+    mode: value.mode ?? null,
+    definitionOfDone: value.definitionOfDone ?? null,
+  };
+};
+const decisionGateOf = value => {
+  if (value.ownerDecisionRequired !== undefined && value.ownerDecisionRequired !== null) {
+    check(typeof value.ownerDecisionRequired === "boolean", "ownerDecisionRequired must be a boolean");
+  }
+  return {
+    ownerDecisionRequired: value.ownerDecisionRequired === true,
+    humanDecisionMakerId: memberRefOf(value.humanDecisionMakerId, "humanDecisionMakerId"),
+  };
+};
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
   check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
@@ -398,7 +449,25 @@ const executedChecksOf = value => {
     check(EXECUTED_CHECK_RESULTS.includes(entry.result), `each executed check result must be one of ${EXECUTED_CHECK_RESULTS.join(", ")}`);
     if (entry.detail !== undefined && entry.detail !== null)
       check(typeof entry.detail === "string" && entry.detail.length <= 500, "executed check detail must be at most 500 characters");
-    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.detail != null ? { detail: entry.detail } : {}) });
+    // #3613 B3: an executed check may carry a structured per-criterion
+    // breakdown (the criteria_coverage check's results, computed by
+    // executeDeliveryChecks) beside its prose detail.
+    let criteria;
+    if (entry.criteria !== undefined && entry.criteria !== null) {
+      check(Array.isArray(entry.criteria) && entry.criteria.length <= MAX_DELIVERY_CRITERIA, `executed check criteria must hold at most ${MAX_DELIVERY_CRITERIA} entries`);
+      criteria = Object.freeze(entry.criteria.map(row => {
+        check(row !== null && typeof row === "object" && !Array.isArray(row), "each executed check criterion must be an object");
+        check(typeof row.criterion === "string" && row.criterion.length > 0 && row.criterion.length <= 500,
+          "each executed check criterion must be 1..500 characters");
+        check(["met", "not_met", "na", "missing"].includes(row.result), "each executed check criterion result must be met, not_met, na or missing");
+        if (row.evidenceBacked !== undefined && row.evidenceBacked !== null)
+          check(typeof row.evidenceBacked === "boolean", "executed check criterion evidenceBacked must be a boolean");
+        return Object.freeze({ criterion: row.criterion, result: row.result,
+          ...(row.evidenceBacked != null ? { evidenceBacked: row.evidenceBacked } : {}) });
+      }));
+    }
+    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.detail != null ? { detail: entry.detail } : {}),
+      ...(criteria ? { criteria } : {}) });
   }));
 };
 const verificationOf = value => {
@@ -551,6 +620,28 @@ const currentReviewBasis = (review, item) => {
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
+// #3613 B3: a review may record per-criterion outcomes against the
+// item's acceptanceCriteria — { criterion, verdict } pairs with the
+// bounty lane's closed pass|fail verdict set (citationsAgainstRubric's
+// contract, mirrored here; board criteria are text-keyed, so outcomes
+// cite the criterion text). The codec validates shape only; recordReview
+// validates membership and complete coverage against the item.
+export const REVIEW_CRITERION_VERDICTS = ["pass", "fail"];
+const reviewCriteriaOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(Array.isArray(value) && value.length >= 1 && value.length <= MAX_ACCEPTANCE_CRITERIA,
+    `criteriaOutcomes must hold 1..${MAX_ACCEPTANCE_CRITERIA} entries`);
+  const seen = new Set();
+  return Object.freeze(value.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each criteria outcome must be an object");
+    check(typeof entry.criterion === "string" && entry.criterion.length > 0 && entry.criterion.length <= 500,
+      "each criteria outcome criterion must be 1..500 characters");
+    check(!seen.has(entry.criterion), `criteriaOutcomes cites criterion "${entry.criterion}" twice`);
+    seen.add(entry.criterion);
+    check(REVIEW_CRITERION_VERDICTS.includes(entry.verdict), `each criteria outcome verdict must be one of ${REVIEW_CRITERION_VERDICTS.join(", ")}`);
+    return Object.freeze({ criterion: entry.criterion, verdict: entry.verdict });
+  }));
+};
 const reviewRecordOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
   check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
@@ -559,8 +650,9 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  const criteriaOutcomes = reviewCriteriaOutcomesOf(value.criteriaOutcomes);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
-    ...(basis ? { basis } : {}) });
+    ...(basis ? { basis } : {}), ...(criteriaOutcomes ? { criteriaOutcomes } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -629,8 +721,19 @@ const canonicalPayload = value => {
 // The digest binding a requestId to the update it carried: every field
 // updateWork can apply, and nothing else (now/requestId itself excluded —
 // a retry is stamped later and re-uses the id by definition).
-export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery } = {}) =>
-  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }), "utf8").digest("hex");
+// CURE-4396-2: progressMessageId joins the payload only when a pointer is
+// actually given (an id, or an explicit null clearing one) — the same
+// condition under which updateWork applies it. Builds from before the
+// pointer field digest the no-pointer shape with no such key, and
+// canonicalPayload spells undefined out, so an unconditional key made
+// every no-pointer update digest differently across the deploy boundary
+// and its cross-build retry conflicted (409) instead of replaying. Absent
+// stays byte-identical to the pre-pointer shape; absent, null and an id
+// remain pairwise distinct payloads, so no two of them can collide.
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId } = {}) =>
+  createHash("sha256").update(canonicalPayload(progressMessageId === undefined
+    ? { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }
+    : { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId }), "utf8").digest("hex");
 // The bundle digest frozen at finish: sha256 over exactly the bundle's
 // content fields, so the verify step can prove the bundle it checks is the
 // bundle that was delivered (any later mutation of the stored row fails
@@ -685,9 +788,19 @@ export function executeDeliveryChecks(item) {
         ...(notMet.length > 0 ? [`criteria the delivery declares not_met: ${notMet.join("; ")}`] : []),
         ...(unbackedNa.length > 0 ? [`criteria declared na without evidence resolving to the delivered artifact: ${unbackedNa.join("; ")}`] : []),
       ];
+      // #3613 B3: the same per-criterion results, structured — the prose
+      // detail above stays for existing readers, but a review or receipt
+      // no longer has to parse sentences to learn which criterion failed.
+      const breakdown = criteria.map(criterion => {
+        const entry = mapped.get(criterion);
+        if (!entry) return Object.freeze({ criterion, result: "missing" });
+        if (entry.status === "na") return Object.freeze({ criterion, result: "na", evidenceBacked: naEvidenceResolves(delivery, entry.evidenceRef) });
+        return Object.freeze({ criterion, result: entry.status });
+      });
       results.push(Object.freeze({ name: "criteria_coverage",
         result: problems.length > 0 ? "fail" : "pass",
-        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met` }));
+        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met`,
+        criteria: Object.freeze(breakdown) }));
     }
   }
   const ci = item?.ci ?? null;
@@ -854,6 +967,7 @@ export const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
+  if (value.claimGeneration !== undefined && value.claimGeneration !== null) check(Number.isSafeInteger(value.claimGeneration) && value.claimGeneration >= 0, "claimGeneration must be a non-negative integer");
   if (value.claimedAt !== undefined && value.claimedAt !== null) check(typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "claimedAt must be an ISO timestamp");
   if (value.leaseStartAt !== undefined && value.leaseStartAt !== null) check(typeof value.leaseStartAt === "string" && Number.isFinite(Date.parse(value.leaseStartAt)), "leaseStartAt must be an ISO timestamp");
   if (value.leaseExpiresAt !== undefined && value.leaseExpiresAt !== null) check(typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)), "leaseExpiresAt must be an ISO timestamp");
@@ -883,6 +997,9 @@ export const workOf = value => {
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
+  const decisionGate = decisionGateOf(value);
+  const accountableMemberId = memberRefOf(value.accountableMemberId, "accountableMemberId");
+  const brief = briefOf(value);
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
@@ -891,11 +1008,21 @@ export const workOf = value => {
     readingAcks,
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
+    claimGeneration: claimGenerationOf(value),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
+    // The work-item claim names this timestamp expiresAt. A board lease
+    // written before the field existed still carries leaseExpiresAt; surface
+    // that same instant so a write response and a later read match.
+    ...(typeof value.expiresAt === "string" ? { expiresAt: value.expiresAt }
+      : typeof value.leaseExpiresAt === "string" ? { expiresAt: value.leaseExpiresAt } : {}),
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
+    ...decisionGate,
+    accountableMemberId,
+    ...brief,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
+    progressMessageId: progressMessageIdOf(value.progressMessageId),
     acceptanceCriteria, delivery, verification,
     // #3684: how many deliveries this claim round has frozen (0 = none
     // yet). In-flight approvals (basis generation 0) cover only the
@@ -925,6 +1052,22 @@ export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
+// The claim-round fencing token (#3545). Rows written before fencing carry
+// no generation and read as round 0.
+export const claimGenerationOf = value =>
+  (Number.isSafeInteger(value?.claimGeneration) && value.claimGeneration >= 0 ? value.claimGeneration : 0);
+// Fencing check shared by the write verbs: when the caller presents the
+// generation it read, it must still be the current round. A mismatch is the
+// same work_claim_conflict the claimedAt+historyLength binding raises.
+// Absent (undefined) keeps the pre-fencing call contract unchanged.
+const checkClaimGeneration = (item, expectedClaimGeneration) => {
+  if (expectedClaimGeneration === undefined) return;
+  check(Number.isSafeInteger(expectedClaimGeneration) && expectedClaimGeneration >= 0,
+    "expectedClaimGeneration must be a non-negative integer");
+  if (claimGenerationOf(item) !== expectedClaimGeneration) {
+    fail("work_claim_conflict", "The claim changed since it was read — stale claim generation");
+  }
+};
 const withHistory = (work, atMs, agentId, action, note) => {
   const full = [...work.history, stamp(atMs, agentId, action, note)];
   const dropped = Math.max(0, full.length - MAX_CLAIM_HISTORY);
@@ -1043,6 +1186,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+    claimGeneration: 0,
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
@@ -1053,6 +1197,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     parentClaimId: parentClaimIdOf(parentClaimId, id),
     evidenceRefs: evidenceRefsOf(evidenceRefs),
     premiseFlag: null,
+    progressMessageId: null,
     acceptanceCriteria: acceptanceCriteriaOf(acceptanceCriteria),
     delivery: null,
     verification: null,
@@ -1088,6 +1233,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+    claimGeneration: item.claimGeneration + 1, // a claim opens a new round (#3545)
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
@@ -1149,7 +1295,7 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
 // reset (outcome cleared) and the poller re-reads it — without the reset
 // the stale outcome would veto every future poll of the reopened PR.
 // A same-round duplicate stays a byte-identical no-op.
-export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
+export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
   const parsed = parsePullRequestUrl(pullRequest);
@@ -1164,6 +1310,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   const settledLink = item.pullRequests.find(pull => pull.url === parsed.url) ?? null;
   // A recorded outcome is stale only when it provably predates the current
   // claim round (recorded before this round's claimedAt — the poller always
@@ -1222,8 +1369,11 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, expectedClaimGeneration, now, authority = false, pauseForRelease = false, noteMessageId, progressMessageId } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // noteMessageId is the write-side alias for the same pointer.
+  const pointerInput = progressMessageId !== undefined ? progressMessageId : noteMessageId;
+  const pointer = pointerInput === undefined ? undefined : progressMessageIdOf(pointerInput);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1231,7 +1381,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // carrying a different update is refused, never silently swallowed.
   const key = requestId === undefined ? undefined : requestIdOf(requestId);
   const digest = key === undefined ? undefined
-    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, progressMessageId: pointer });
   if (key !== undefined) {
     const verdict = requestReplayVerdict(item.requestOutcomes, key, digest, item.claimRound);
     if (verdict === "replay") return item;
@@ -1296,6 +1446,21 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
     evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
   };
+  // #3545 fencing, checked after every field validation above (invalid
+  // input keeps its precedence — invariant failed-updatework-no-mutation)
+  // and after the requestId replay, so an already-landed update's retry
+  // still replays: a caller presenting the generation it read must still
+  // be in that round — owner identity alone cannot tell a stale round
+  // from the current one when the same agent re-claimed.
+  checkClaimGeneration(item, expectedClaimGeneration);
+  // #3545 lease enforcement: the machine refuses non-release verbs on a
+  // lapsed lease itself, not only when a sweep happened to run first.
+  // Release (state -> unclaimed) stays allowed — it is how a lapsed claim
+  // is given up — and releaseWork's internal pause step (pauseForRelease,
+  // never set by route layers) precedes exactly such a release.
+  if (state !== "unclaimed" && pauseForRelease !== true && isLeaseExpired(item, atMs)) {
+    fail("claim_lease_lapsed", "The current claim lease has lapsed — claim it again instead");
+  }
   // Finish step: validate the bundle against the item's contract and freeze
   // it (with its digest) onto the item. A fresh delivery clears any earlier
   // verification fact — the new bundle awaits a new verdict.
@@ -1357,7 +1522,11 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = null;
   }
   if (released) verification = null;
-  const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
+  const next = state === undefined ? { ...item, ...withProvenance, ...(pointer !== undefined ? { progressMessageId: pointer } : {}) } : { ...item, state,
+    claimGeneration: released ? item.claimGeneration + 1 : item.claimGeneration, // a release ends the round (#3545)
+    // The progress pointer survives release (see progressMessageIdOf):
+    // a release that names one sets it, a plain release keeps the old one.
+    ...(pointer !== undefined ? { progressMessageId: pointer } : {}),
     owner: released ? null : item.owner,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
@@ -1402,18 +1571,19 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
 // re-claims, which keep the previous round's claimedAt. Claims held
 // in_progress/blocked are routed through the internal pause transition
 // first (W2); both steps are stamped in history.
-export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, note, now, authority = false, noteMessageId, progressMessageId } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
   check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   let current = item;
   if (current.state === "in_progress" || current.state === "blocked") {
-    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority, pauseForRelease: true });
   }
-  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority, noteMessageId, progressMessageId });
 }
 // Retire open work without delivering it. close: the room's claim managers
 // (authority) or the current holder. cancel: whoever opened the item while
@@ -1475,7 +1645,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis, criteriaOutcomes } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
@@ -1488,6 +1658,19 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     try { parsed = new URL(url); } catch { parsed = null; }
     check(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password, "url must be an https URL without credentials");
     reviewUrl = url;
+  }
+  // #3613 B3: per-criterion outcomes, when supplied, must satisfy the
+  // full contract against the item's acceptanceCriteria — every cited
+  // criterion is one of the item's, and coverage is complete (the bounty
+  // citations contract, mirrored for text-keyed board criteria). The
+  // field stays optional: reviews recorded without it are unchanged,
+  // and changes_requested/comment never require it.
+  const reviewOutcomes = reviewCriteriaOutcomesOf(criteriaOutcomes);
+  if (reviewOutcomes) {
+    const known = new Set(item.acceptanceCriteria ?? []);
+    for (const outcome of reviewOutcomes)
+      check(known.has(outcome.criterion), `criteriaOutcomes cites criterion "${outcome.criterion}" which is not one of this item's acceptanceCriteria`);
+    check(reviewOutcomes.length === known.size, "criteriaOutcomes must record one outcome per acceptance criterion");
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
   // #2966, revised: an identical resubmission is ambiguous — it can be a
@@ -1509,7 +1692,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
       fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
     }
   }
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl
+    && canonicalPayload(prior.criteriaOutcomes ?? null) === canonicalPayload(reviewOutcomes)) {
     // A true replay on the still-current basis changes nothing.
     if (currentReviewBasis(prior, item)) return Object.freeze(item);
     // The prior basis is stale (or the record predates bases). Only a
@@ -1527,7 +1711,8 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item),
+    ...(reviewOutcomes ? { criteriaOutcomes: reviewOutcomes } : {}) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
@@ -1591,7 +1776,7 @@ export function notePullMerged(work, mergedSha, now) {
 //    send-back produces — with the delivery retained as the round's
 //    record and no verdict standing (verification clears with the
 //    reviews). The new owner re-finishes and a reviewer verifies.
-export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
+export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
@@ -1606,6 +1791,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
       fail("work_claim_conflict", "The claim changed since it was read");
     }
   }
+  checkClaimGeneration(item, expectedClaimGeneration);
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no
@@ -1626,7 +1812,9 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     : item.state === "delivered"
       ? { state: "in_progress", verification: null }
       : {};
-  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+  return withHistory({ ...item, ...claim, ...round, owner: target,
+    claimGeneration: item.claimGeneration + 1, // a handover opens the new owner's round (#3545)
+    attestations: Object.freeze([]), reviews: Object.freeze([]) },
     atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
@@ -1660,6 +1848,7 @@ export function releaseExpired(items, now) {
     // verification, ci, and the delivery generation.
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
       delivery: null, verification: null, deliveryGeneration: 0,
+      claimGeneration: item.claimGeneration + 1, // the sweep ends the round (#3545)
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

@@ -74,12 +74,21 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"? }`.
+`POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"?, "noteMessageId"?, "progressMessageId"? }`.
 Read the claim first. Send its `claimedAt` and
 `history.length + (historyOmitted ?? 0)` as the two required fields. Missing
 fields are **422** `invalid_claim_input`; a stale round is **409**
 `work_claim_conflict`. Re-read before deciding whether to release the current
 round. A delayed retry must not release a newer claim.
+
+Handoff pointer: `noteMessageId` (also accepted as `progressMessageId` on
+`.../release` and `.../update`) names the holder's own public room message
+carrying the working context. The claim projects it as `progressMessageId`,
+and — unlike the round's files and attestations — it survives release, so
+the next holder can find the context from the claim alone. A message that
+does not exist is **422** `claim_progress_source_required`; a DM is the
+same refusal; another member's message is **403**
+`claim_progress_source_foreign`. An explicit `null` clears the pointer.
 
 Release returns the item to `unclaimed` and clears owner, lease, files, and attestations. The holder
 can release their own claim. The room owner, or any member with
@@ -136,6 +145,13 @@ Neither `done` nor `closed` counts toward the room's open-claim cap.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
+
+Write-rate ceiling: room writes (including every work-claim mutation) share
+the per-credential `write` bucket — **60 writes per 60-second window**. A
+burst past it is **429** `rate_limited`; the body carries
+`rateLimit: { scope: "write", limit: 60, windowSeconds: 60, remaining: 0,
+retryAfterSeconds, resetAt }` and the same terms ride the `Retry-After` and
+`X-RateLimit-*` headers. Wait `retryAfterSeconds`, then retry unchanged.
 
 These are not `file_lease_conflict`. The room owner sets either cap, or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and

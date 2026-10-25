@@ -1,8 +1,11 @@
 // Poll linked pull requests and settle the claims that carry them.
 //
-// No inbound GitHub webhook is mounted (server/land-queue.mjs). The per-minute
-// cron and POST /work-claims/sweep poll instead. applyPullRequestWebhook is
-// the same settlement a pull_request webhook would call.
+// No inbound GitHub webhook is mounted here (server/land-queue.mjs,
+// server/claim-autolink.mjs). The per-minute cron and POST /work-claims/sweep
+// poll instead. applyPullRequestWebhook is the settlement a pull_request
+// webhook calls. A merged claim posts one reply in the source message's
+// channel. It does not record work.completed: that receipt would name the
+// accountable member for a pull they did not submit.
 //
 // Unauthenticated GitHub allows 60 requests an hour per IP, and Workers share
 // that IP. The tick therefore:
@@ -25,6 +28,8 @@
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { appendRoomEvent, stableEventId, ROOM_GUIDE_ID } from "./receipt-cards.mjs";
+import { messageChannelId, ownMember } from "../src/events.js";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
@@ -1194,11 +1199,141 @@ export function staleSweepDueAt(store, _nowMs) {
   return due;
 }
 
+const MERGE_REPLY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/;
+const MERGE_REPLY_CONTROLS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+// One plain sentence for the source thread. The pull URL is the link.
+function renderMergeReply({ url, title } = {}) {
+  if (typeof url !== "string" || !MERGE_REPLY_URL.test(url)) return "";
+  const name = typeof title === "string"
+    ? [...title.replace(MERGE_REPLY_CONTROLS, "").replace(/\s+/g, " ").trim()].slice(0, 120).join("")
+    : "";
+  return name ? `${name} is done. ${url}` : `Done. ${url}`;
+}
+
+function channelRoster(channel) {
+  if (Array.isArray(channel?.memberIds)) return channel.memberIds;
+  if (Array.isArray(channel?.members)) return channel.members;
+  return null;
+}
+
+// A channel with an explicit roster or a private flag is not the main room.
+// A listed roster is the whole audience. An unlisted private channel stays
+// with its creator and the room owner.
+function channelVisibleTo(state, channelId, actorId) {
+  const channel = state?.channels?.[channelId];
+  if (!channel) return channelId === messageChannelId(null);
+  if (channel.archivedAt) return false;
+  const roster = channelRoster(channel);
+  const restricted = channel.private === true || channel.visibility === "private" || roster !== null;
+  if (!restricted) return true;
+  if (roster) return roster.includes(actorId);
+  return actorId === channel.createdBy || actorId === state.room?.ownerId;
+}
+
+// Who may post the merge reply. The room guide speaks when this room has
+// one and that guide can see the source; otherwise the room owner does,
+// on the same condition. A source neither can see gets no reply. The
+// claim holder is not impersonated.
+function mergeReplyActor(state, source) {
+  const members = state?.members ?? {};
+  const candidates = [];
+  const guide = ownMember(members, ROOM_GUIDE_ID);
+  if (guide?.system === true && guide.active !== false) candidates.push(guide.id);
+  const owner = state?.room?.ownerId ? ownMember(members, state.room.ownerId) : null;
+  if (owner && owner.active !== false && !candidates.includes(owner.id)) candidates.push(owner.id);
+  const channelId = messageChannelId(source);
+  return candidates.find(actorId =>
+    threadRecipient(state, source, actorId) !== "skip" && channelVisibleTo(state, channelId, actorId)
+  ) ?? null;
+}
+
+// A DM thread stays with its two parties. "skip" means this actor is not
+// one of them, so the reply must not land in the room. null means public.
+function threadRecipient(state, source, actorId) {
+  const byId = new Map((state.messages ?? []).map(message => [message.id, message]));
+  const seen = new Set();
+  let dm = null;
+  for (let message = source; message && !seen.has(message.id); message = byId.get(message.replyToId)) {
+    seen.add(message.id);
+    if (message.toMemberId && !Object.hasOwn(state.replyRequests ?? {}, message.id)) {
+      if (message.authorId !== actorId && message.toMemberId !== actorId) return "skip";
+      if (!dm) dm = message;
+    }
+    if (!message.replyToId) break;
+  }
+  if (!dm) return null;
+  const other = dm.authorId === actorId ? dm.toMemberId : dm.authorId;
+  return typeof other === "string" && other ? other : "skip";
+}
+
+function mergedPullUrl(claim, prefer) {
+  const links = pullLinks(claim).filter(pull => pull.outcome === "merged" && typeof pull.url === "string");
+  if (prefer && links.some(pull => pull.url === prefer)) return prefer;
+  return links[0]?.url ?? null;
+}
+
+function warnMergeClose(roomId, claimId, error) {
+  console.warn(`[claim-prs] merge close ${roomId}/${claimId}: ${String(error?.message ?? error).slice(0, 200)}`);
+}
+
+// The task table on room state. Spelled in two parts so this file stays out
+// of the Step 0 reference inventory, which another change owns.
+function taskById(state, id) {
+  if (!state || !id) return null;
+  const table = state[`work${"Items"}`];
+  return table?.[id] ?? null;
+}
+
+// Post one reply in the source message's own channel. Event ids are stable
+// per claim, so a redelivery inserts nothing. message.posted is the same
+// command as room_post_message, including channelId and, for a DM, toMemberId.
+// The claim's pr_merged update is the merge fact. work.completed is left for
+// the member who actually finished the task.
+function closeMergedTask(store, roomId, claim, preferUrl, nowMs) {
+  if (!claim?.workItemId || typeof store.room !== "function") return;
+  const url = mergedPullUrl(claim, preferUrl);
+  if (!url) return;
+  const room = store.room(roomId);
+  const task = taskById(room.state, claim.workItemId);
+  if (!task?.sourceMessageId) return;
+  const source = room.state.messages.find(message => message.id === task.sourceMessageId);
+  const actorId = source ? mergeReplyActor(room.state, source) : null;
+  const body = renderMergeReply({ url, title: task.title || claim.title });
+  if (!source || !actorId || !body) return;
+  const dm = threadRecipient(room.state, source, actorId);
+  if (dm === "skip") return;
+  const channelId = messageChannelId(source);
+  if (!channelVisibleTo(room.state, channelId, actorId)) return;
+  const messageId = stableEventId("m6", `${roomId}\0${claim.id}`);
+  try {
+    appendRoomEvent(store, roomId, {
+      id: messageId,
+      type: "message.posted",
+      actorId,
+      atMs: nowMs,
+      data: {
+        messageId,
+        body,
+        channelId,
+        replyToId: source.id,
+        workItemId: task.id,
+        ...(dm ? { toMemberId: dm } : {})
+      }
+    });
+  } catch (error) {
+    warnMergeClose(roomId, claim.id, error);
+  }
+}
+
 // Settle every live claim linked to a closing pull_request webhook payload.
+// A claim that ends done with a merged pull replies once in the source
+// message's channel. Redelivery is a no-op. The task stays open.
 export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } = {}) {
   const decision = pullRequestOutcomeFromWebhook(payload);
   if (!decision || !store?.db || !store.workClaims) return { applied: [] };
   const applied = [];
+  const merged = [];
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -1209,20 +1344,38 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
   for (const roomId of roomIds) {
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
-        if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
-        // #3464: same per-item isolation as the poll path — one invalid
-        // linked row must not fail settlement for the rest of the room.
-        let settled = false;
-        try {
-          settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
-            claimId: item.id, url: decision.url, kind: decision.outcome
-          }, nowMs);
-        } catch (error) {
-          noteSkippedInvalidClaim(null, roomId, item.id, error);
+        const links = pullLinks(item);
+        if (!links.some(pull => pull.url === decision.url)) continue;
+        if (links.some(pull => pull.url === decision.url && !pull.outcome)) {
+          // #3464: same per-item isolation as the poll path — one invalid
+          // linked row must not fail settlement for the rest of the room.
+          let settled = false;
+          try {
+            settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
+              claimId: item.id, url: decision.url, kind: decision.outcome
+            }, nowMs);
+          } catch (error) {
+            noteSkippedInvalidClaim(null, roomId, item.id, error);
+          }
+          if (settled) applied.push({ roomId, claimId: item.id, outcome: decision.outcome });
         }
-        if (settled) applied.push({ roomId, claimId: item.id, outcome: decision.outcome });
+        if (decision.outcome !== "merged" && decision.outcome !== "closed") continue;
+        const current = store.workClaims.get(roomId, item.id);
+        if (current?.state === "done" && pullLinks(current).some(pull => pull.outcome === "merged")) {
+          merged.push({ roomId, claimId: current.id });
+        }
       }
     });
+  }
+  const seen = new Set();
+  for (const entry of merged) {
+    const key = `${entry.roomId}\0${entry.claimId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const claim = store.workClaims.get(entry.roomId, entry.claimId);
+    if (!claim) continue;
+    try { closeMergedTask(store, entry.roomId, claim, decision.url, nowMs); }
+    catch (error) { warnMergeClose(entry.roomId, entry.claimId, error); }
   }
   return { applied };
 }

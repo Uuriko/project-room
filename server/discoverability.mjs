@@ -382,6 +382,7 @@ const publicWorkSchemas = {
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
         state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
         identityId: { type: ["string", "null"] }, leaseExpiresAt: { type: ["string", "null"] }, submittedReceiptId: { type: ["string", "null"] },
+        pathFenced: { type: "boolean" },
       } },
     },
   },

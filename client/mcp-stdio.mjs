@@ -55,7 +55,8 @@ export const roomTools = [
     claimId: { ...id, pattern: "^[A-Za-z0-9_-]{1,128}$" },
     pullRequest: { type: "string", minLength: 1, maxLength: 300, description: "HTTPS github.com owner/repo/pull/number URL only; no credentials, query, fragment or observed outcome fields." },
     expectedClaimedAt: { type: "string", minLength: 1, maxLength: 100, description: "Exact claimedAt from the current claim round." },
-    expectedHistoryLength: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: "Exact history.length + (historyOmitted ?? 0) from the same fresh claim read; omitted history counts as zero when absent." }
+    expectedHistoryLength: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: "Exact history.length + (historyOmitted ?? 0) from the same fresh claim read; omitted history counts as zero when absent." },
+    expectedClaimGeneration: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: "Optional claimGeneration from the same fresh claim read. When present, a stale round is refused even if claimedAt and history length still match." }
   }, ["claimId", "pullRequest", "expectedClaimedAt", "expectedHistoryLength"]), false),
   tool("room_close_work_claim", "Retire one open Board work claim without delivering it. verb=close: the claim holder or a claim manager (room owner or manage_claims). verb=cancel: whoever created the item while it is still unclaimed, or its holder. The claim moves to the terminal closed state, frees its open-claim slot, and records who retired it and why. Done or already closed claims are refused.", schema({
     claimId: { ...id, pattern: "^[A-Za-z0-9_-]{1,128}$" },
@@ -125,7 +126,8 @@ function validArguments(tool, args) {
   if (tool.name === "room_link_work_claim_pr") return typeof args.claimId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(args.claimId)
     && Boolean(parsePullRequestUrl(args.pullRequest)) && !new URL(args.pullRequest.trim()).port
     && typeof args.expectedClaimedAt === "string" && args.expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(args.expectedClaimedAt))
-    && Number.isSafeInteger(args.expectedHistoryLength) && args.expectedHistoryLength >= 0;
+    && Number.isSafeInteger(args.expectedHistoryLength) && args.expectedHistoryLength >= 0
+    && (args.expectedClaimGeneration === undefined || Number.isSafeInteger(args.expectedClaimGeneration) && args.expectedClaimGeneration >= 0);
   if (tool.name === "room_begin_work") return validBeginArguments(args);
   if (tool.name === "room_close_work_claim") return typeof args.claimId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(args.claimId)
     && (args.verb === undefined || args.verb === "close" || args.verb === "cancel")
@@ -182,7 +184,9 @@ async function callTool(client, identity, name, args, signal) {
   if (name === "room_begin_work") return beginOnClient(client, identity, args, signal);
   if (name === "room_link_work_claim_pr") return client.linkWorkItemPullRequest(args.claimId, {
     pullRequest: args.pullRequest, expectedClaimedAt: args.expectedClaimedAt,
-    expectedHistoryLength: args.expectedHistoryLength, signal
+    expectedHistoryLength: args.expectedHistoryLength,
+    ...(args.expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration: args.expectedClaimGeneration }),
+    signal
   });
   if (name === "room_close_work_claim") return client.closeWorkClaim(args.claimId, { verb: args.verb ?? "close", reason: args.reason, signal });
   if (name === "room_set_member_claim_cap") return client.workClaimConfig({ maxMemberOpenClaims: args.maxMemberOpenClaims, maxOpenClaims: args.maxOpenClaims, signal });

@@ -286,7 +286,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     try {
       const value = linkWorkClaimPullRequest({ store, roomId, auth, claimId: rest.claimId,
         data: { appendPullRequest: rest.pullRequest, expectedClaimedAt: rest.expectedClaimedAt,
-          expectedHistoryLength: rest.expectedHistoryLength },
+          expectedHistoryLength: rest.expectedHistoryLength,
+          ...(rest.expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration: rest.expectedClaimGeneration }) },
         reauthorize: () => {
           const current = store.authenticate(secret, roomId, auth.sessionBinding);
           enforceHostedStdioCallVisibility(store, secret, current.member.id, name);

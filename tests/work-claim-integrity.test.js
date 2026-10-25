@@ -210,7 +210,16 @@ test("the Board list pages done claims by age and summarizes history", async t =
   await f.call("owner", "list", { query: "?limit=200" });
   const page = await f.call("owner", "list", { query: "?limit=50" });
   const bytes = Buffer.byteLength(JSON.stringify(page.value));
-  assert.ok(bytes < 64 * 1024, `a 50-claim page is ${bytes} bytes`);
+  // Page budget, measured on the G1 combined tree. The same page at main
+  // bdc5a04bc is 63701 bytes (#3629). The two decision-gate fields add
+  // exactly 2900 bytes (50 x 58). The brief, accountable member, claim
+  // generation, and progress pointer ride on every row after that, and a
+  // live lease also repeats expiresAt. Measured size of this page: 73912.
+  // The fields belong in list rows (workOf returns them for board-native
+  // claims too). The budget stays at the measured size, so further
+  // per-claim payload growth fails this test.
+  const PAGE_BYTES_BUDGET = 73912;
+  assert.ok(bytes <= PAGE_BYTES_BUDGET, `a 50-claim page is ${bytes} bytes`);
   assert.equal(page.value.olderDone, 30, "done claims older than 7 days leave the default list");
   assert.equal(page.value.olderDoneQuery, "state=done");
   for (const claim of page.value.claims) {

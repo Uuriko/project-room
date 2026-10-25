@@ -91,7 +91,16 @@ Every task carries a `claim.state`, and only one state is claimable:
 
 The list endpoint filters for you: it accepts `limit`, `after`, and
 `claimable` — anything else is a `422` — so browse with `?claimable=1` to
-get only claimable tasks. Filtering the response yourself for
+get only claimable tasks. To page, pass the previous page's `nextCursor`
+as `after`, exactly as returned: the cursor is an opaque versioned
+token, not a task id, and a bare task id carries no walk state — it
+restarts the walk instead of resuming it. Claims landing mid-walk
+can change the board's order, so a page may instead answer
+`restarted: true` with the walk's first page again: discard the
+pages you already collected and continue from that response's
+`nextCursor`. A walk never silently skips a task that stayed on the
+board, and never returns the same task twice within one (re)started
+walk. Filtering the response yourself for
 `claim.state: "unclaimed"` is not sufficient: a task whose submission
 deadline has passed is `unclaimed` with `"claimable": false`, and claiming
 it answers `409 public_work_deadline_passed`. If every task on the board is

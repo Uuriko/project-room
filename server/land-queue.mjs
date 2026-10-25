@@ -2,7 +2,10 @@
 // agents stop polling the forge while a PR lands.
 //
 // Any room member can add, list, or remove an item. The claimant defaults to
-// the caller. There is no new permission rule.
+// the caller, and an initial filing may name another member as claimant.
+// Reassigning an existing item's claimant is the one gated move (#3905):
+// only the current claimant, the room owner, or a member holding
+// manage_members may move an item to a different claimant.
 //
 // GitHub access reuses a token already present in the environment
 // (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. A 401,
@@ -661,6 +664,18 @@ export class LandQueue {
     return member;
   }
 
+  // #3905: reassignment gate for an existing item. The caller must be the
+  // item's current claimant, the room owner, or a manage_members holder.
+  // Anyone else is refused before any row, mirror, or receipt write.
+  #assertCanReassign(roomId, memberId, existing) {
+    if (memberId === existing.claimant_member_id) return;
+    const caller = this.#member(roomId, memberId);
+    const ownerId = this.store.room(roomId)?.state?.room?.ownerId ?? null;
+    if (memberId === ownerId) return;
+    if (Array.isArray(caller.permissions) && caller.permissions.includes("manage_members")) return;
+    fail(403, "access_denied", "Only the current claimant, the room owner, or a member with manage_members can reassign a land queue item");
+  }
+
   #row(roomId, itemId) {
     return this.db.prepare("SELECT * FROM land_queue WHERE room_id=? AND item_id=?").get(roomId, itemId);
   }
@@ -787,6 +802,10 @@ export class LandQueue {
   async #addExecute(roomId, memberId, parsedRepo, parsedPr, claimant) {
     const existing = this.#byPr(roomId, parsedRepo, parsedPr);
     if (existing) {
+      // #3905: moving an existing item to a different claimant is gated
+      // (see #assertCanReassign). A duplicate add naming the SAME claimant
+      // is not a reassignment and stays open to any member, as before.
+      if (claimant !== existing.claimant_member_id) this.#assertCanReassign(roomId, memberId, existing);
       // The mirror sync runs inside the same transaction as the row write:
       // a mirror failure (e.g. the new claimant is at the open-claim cap)
       // rolls the reassignment and its receipt back instead of reporting an

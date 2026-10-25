@@ -437,6 +437,31 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G1 combined
+
+Work-claim and board correctness PRs folded into the G1 combined pull request. Head SHAs are the ones combined. Restore with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #3556 | Fence core work claims: claimGeneration round token + state-machine lease enforcement | `jill/fix-3545-claim-fencing` | `4c7db86a563430aab7ecf9fb9902f23c2abc16f5` | Combined into the G1 pull request |
+| #3629 | Decision-gate fields on work-claim rows (B-4' Phase 0 slice 2) | `jill/b4prime-slice2-decision-fields` | `be600c55debda17d23dbadd1439915854d7e147d` | Combined into the G1 pull request |
+| #3641 | accountableMemberId on work-claim rows (B-4' Phase 0 slice 4) | `jill/b4prime-slice4-accountable` | `6dc3bab5ec72ac600082c26d632be4687092fb00` | Combined into the G1 pull request |
+| #3652 | Brief carriage: definitionOfDone + mode on work-claim rows (B-4' Phase 0 slice 3a) | `jill/b4prime-slice3-brief` | `6934d3b788229be6f3fb76416f3d382f61bbb6ea` | Combined into the G1 pull request |
+| #3714 | Brief readers resolve definitionOfDone + mode board-first (B-4' Phase 0 slice 3b) | `jill/b4prime-slice3-readers` | `160ab0764f45ab6fa003885b763713f344acb129` | Combined into the G1 pull request |
+| #3734 | Stop projecting lapsed work-item leases onto board rows (#3711) | `jill/fix-3711-projection-lease` | `09d28d1838320548851489a3d050cf30fac37b78` | Combined into the G1 pull request |
+| #3735 | Ready queue applies the AvailableWork eligibility rule (#3713) | `jill/fix-3713-ready-queue-premise` | `a560a7df821af4b734d6be7b0fb7c28339bd6b39` | Combined into the G1 pull request |
+| #3737 | Board claimability accounts for live path fences (#3649) | `jill/build-3649-claimable-truth` | `417d54b1af72d087406232db036fc77c6b627caa` | Combined into the G1 pull request |
+| #3691 | Versioned walk cursor: board pagination exactly-once under mid-walk claims (#3606) | `jill/fix-3606-board-pagination` | `85e970b6f7fcd9f7392a35d38f131c4a444d8ee9` | Combined into the G1 pull request |
+| #3738 | Name the refused fields in every invalid_public_work 422 (#3650) | `jill/fix-3650-invalid-public-work-fields` | `4f0c8a01cbfd40bd94a83f4b1a6b6167a47d6742` | Combined into the G1 pull request |
+| #4831 | Cap claim leases at 24 hours and reject whole-repo ** | `cursor/claim-lease-cap-da81` | `277c368abbab0f02b148e2b24646634691970763` | Combined into the G1 pull request |
+| #4275 | Archive review verdicts displaced by re-review (HW-CAPTURE) | `jill/hw-capture-verdicts` | `96c369fe1288fa64f4b8f95273e7d12b83fc7a96` | Combined into the G1 pull request |
+| #4396 | SCALE-HANDOFF: 429 scope+retry, pack truncation marker, mention messageId, claim progress pointer | `jill/scale-handoff-20261020` | `721ebd923682cc396166d15e4278f6b825bbd18c` | Combined into the G1 pull request |
+| #4056 | Criteria-level outcomes + work period for #3613 (B1–B4) | `jill/records-3613-criteria` | `a03e3efa4c1acafcd1721abddc40c898c366204c` | Combined into the G1 pull request |
+| #3752 | Work-session idempotency matcher covers usage figures and budget (#3697) | `jill/fix-3697-session-idempotency-fingerprint` | `eb64fe1c4527e8cf3516c5d8768587d0f841e84e` | Combined into the G1 pull request |
+| #4765 | Gate land-queue claimant reassignment to claimant, owner, or manage_members (#3905) | `jill/backlog-do-3905` | `99d764c8710178b834f1b1ec63407e6e505148a5` | Combined into the G1 pull request |
+| #4877 | Reply in the source channel when a linked pull merges | `cursor/strat-6-merge-reply-eccd` | `b122f241d159ec255a1b4800774c94d521b54a2a` | Combined into the G1 pull request |
+| #4521 | Remove retired board_vtwo_* tables/stub (#3997) | `jill/build-w36-b-3997` | `3ecdd0f1d537c173ed3479f0861d60e2e5e9506e` | Not combined and left open: deleting the tables is not on the approved deletion list |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |
