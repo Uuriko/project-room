@@ -136,7 +136,7 @@
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
     "src/share-links.js": "sha256:25857b0e3f7d9527df58ae31b1f2c87f4b0d3cca9ee8db9b29177ac54b7dae75",
     "src/signin-entry.js": "sha256:c797b5df7ed8961ce43bb812725d6ac27ec38401ef4d320e74480d40f05c7b42",
-    "src/signin-navigation.js": "sha256:bf9d8f72b1c9a1014309b137690d611581f2376db2566ae9b088b87dfbe3a226",
+    "src/signin-navigation.js": "sha256:2c1a2929d951ea22086802366eb35c0a35862da54a199a7839f73a2c79d5a367",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
     "src/styles.css": "sha256:d94a22ee7e40878f6e148ab616ea44f47239fedf89ccc43a02d3f31b286a3dc9",
@@ -161,7 +161,7 @@
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",
     "cloudflare/room.mjs": "sha256:42581c72d2e958c11654c0f5b231eb4e2d4c40e3d4ac14de14d54abd1e92f27c",
-    "cloudflare/storage.mjs": "sha256:74497e5eb39a649c519b37063d4358d0b813a4f84d06dab36a5a9562d44b1f8d",
+    "cloudflare/storage.mjs": "sha256:841c10ef3a3116aa592dd59daf9793b925d91d1804273a1df8d01131405ca10b",
     "cloudflare/wrangler.jsonc": "sha256:cd7454570a9f0aa54fef87933b587c5d1bfaed78069dcf16c5dcd3fc23fcb57b",
     "scripts/deploy-recovery.mjs": "sha256:7c3ada6d04b9a6944ed2e65354ef27b92ad356bca0829f4d5a76ce6884898b98"
   },
