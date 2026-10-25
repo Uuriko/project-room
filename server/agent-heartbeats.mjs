@@ -1024,7 +1024,7 @@ export class AgentHeartbeats {
     this.db.exec(wakeListenerLeaseSchema);
     // Claims-evidence migration (WAKE-QUEUE-1 Step 1): existing
     // claims tables gain holder_id + lease_expires_at by additive
-    // ALTER; the CREATE TABLE above already carries them fresh.
+    // ALTER; the CREATE statement above already carries them fresh.
     const cols = new Set(this.db.prepare("SELECT name FROM pragma_table_info(?)")
       .all("agent_wake_signal_claims").map(r => r.name));
     if (cols.size > 0 && !cols.has("holder_id"))
