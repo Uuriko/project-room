@@ -286,7 +286,7 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   // in this fixture the paged fill proves it, so no full read is owed.
   assert.equal(fills.length, 0, "the paged fill replaced the background full read: " + JSON.stringify(reads));
   assert.ok(pages.length >= 1, "the fill paged over /conversation: " + JSON.stringify(pages));
-  assert.ok(reads.filter(read => read.search !== "").every(read => read.search === "?messages=recent"), JSON.stringify(reads));
+  assert.ok(reads.filter(read => read.search !== "").every(read => read.search === "?messages=recent" || read.search === "?view=work"), JSON.stringify(reads));
 
   const opened = reads.length;
   const arrival = post(f.keys.producer, "a new arrival");

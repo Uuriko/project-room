@@ -3353,19 +3353,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this._closed) return;
     this._closed = true;
     this._projectionCache?.clear();
+    this._projectionText?.clear();
     this.db.close();
   }
   // Invalidate both parsed reads and unpublished command candidates.
+  // The projection text cache follows the same rule: a rooms write or a
+  // rollback must not leave a spliced string for a state that did not commit.
   _dropProjectionCache() {
     this._projectionCache?.clear();
+    this._projectionText?.clear();
     for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
   }
-  _queueProjectionCache(roomId, sequence, state, projection) {
+  _queueProjectionCache(roomId, sequence, state, projection, messagesEnd, restKey) {
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})), text: projection, messagesEnd, restKey });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3461,7 +3465,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
         const cache = this._projectionCache ??= new ProjectionCache();
-        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+        const texts = this._projectionText ??= new Map();
+        for (const [id, entry] of pending) {
+          cache.insert(id, entry.sequence, entry.value, entry.weight);
+          if (typeof entry.text === "string") texts.set(id, { sequence: entry.sequence, text: entry.text, messagesEnd: entry.messagesEnd, restKey: entry.restKey });
+        }
       }
       // Publish committed appends only after the cache promotion above, so
       // streams woken by the flush observe the post-commit projection state.
@@ -3531,8 +3539,49 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
+    // A body restore rewrites the row. Keep the text cache only for the
+    // projection that was just read unchanged.
+    if (!missing.length && typeof row.projection === "string") {
+      const texts = this._projectionText ??= new Map();
+      // A parsed-cache miss re-reads the same committed row. Keep the end
+      // index recorded for that sequence so the next append does not walk
+      // the messages array to find the bracket again.
+      const prior = texts.get(roomId);
+      const sameRow = prior?.sequence === sequence && prior.text?.length === row.projection.length;
+      texts.set(roomId, { sequence, text: row.projection, messagesEnd: sameRow ? prior.messagesEnd : undefined, restKey: sameRow ? prior.restKey : undefined });
+    }
     return { value: Object.freeze({ sequence, state }),
       weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
+  }
+  // Committed rooms.projection text at `sequence`, for an append that splices
+  // new messages into the previous document. A hit is published only on
+  // commit (see transaction()). A miss reads the row. A sequence mismatch
+  // returns null so the caller rewrites the projection in full.
+  committedProjectionText(roomId, sequence) {
+    if (!Number.isSafeInteger(sequence)) return null;
+    const cached = this._projectionText?.get(roomId);
+    if (cached?.sequence === sequence && typeof cached.text === "string") return cached.text;
+    const row = (this._roomProjectionTextStmt ??= this.db.prepare("SELECT sequence, projection FROM rooms WHERE id=?")).get(roomId);
+    if (!row || row.sequence !== sequence || typeof row.projection !== "string") return null;
+    return row.projection;
+  }
+  // End index of the top-level messages array in the committed projection
+  // text at `sequence`, when this process recorded it while appending.
+  // Undefined sends the appender back through a scan; a wrong sequence
+  // never reuses an index from an older document.
+  projectionMessagesEnd(roomId, sequence) {
+    if (!Number.isSafeInteger(sequence)) return undefined;
+    const cached = this._projectionText?.get(roomId);
+    if (cached?.sequence !== sequence || !Number.isSafeInteger(cached.messagesEnd)) return undefined;
+    return cached.messagesEnd;
+  }
+  // Shape of the non-message projection for the state written at `sequence`.
+  // An append uses it to refuse a read that does not match the stored row.
+  projectionRestKey(roomId, sequence) {
+    if (!Number.isSafeInteger(sequence)) return undefined;
+    const cached = this._projectionText?.get(roomId);
+    if (cached?.sequence !== sequence || typeof cached.restKey !== "string") return undefined;
+    return cached.restKey;
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -6250,7 +6299,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
-        this._queueProjectionCache(roomId, sequence, state, projection);
+        this._queueProjectionCache(roomId, sequence, state, projection, messageWrite.messagesEnd, messageWrite.restKey);
         // Board is the claim authority the MCP tools share with /work-claims.
         // Same transaction as the projection event: decision #10's write-path
         // cutover syncs the item's board claim from post-command state via

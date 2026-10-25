@@ -40,9 +40,10 @@ const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_clai
 // Any other event type, and any covered event whose preconditions fail,
 // keeps the refresh() read path below (see tryDelta).
 const DELTA_EVENT_TYPES = new Set(["message.posted", "message.edited", "message.deleted", "message.redacted"]);
-// The server's activity audit tail (store.snapshot): the last 100 events,
-// filtered to decisions and work-bearing events. Mirrored so a locally
-// advanced snapshot carries the same Record tail a fresh read would serve.
+// The server's activity audit tail: the last 100 events, filtered to
+// decisions and work-bearing events. Member snapshots omit that log
+// (eventTail: "events"); the client reads GET /events and filters locally.
+// A locally advanced snapshot carries the same Record tail a fresh read would.
 const ACTIVITY_TAIL_TYPES = /^(work\.|work_claim\.|verification\.|owner_decision\.)/;
 const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVITY_TAIL_TYPES.test(event?.type ?? "") || event?.data?.workItemId !== undefined;
 // Mirror of the server's read-time redaction for the one message a delta
@@ -96,7 +97,18 @@ function messageHistoryComplete(read) {
 }
 function mergeWorkView(read, work) {
   if (!work || work.snapshotView !== "work" || work.sequence !== read?.sequence || work.roomId !== read?.roomId || !read?.state || !work.state) return read;
-  return { ...read, state: { ...read.state, room: work.state.room, members: work.state.members, workItems: work.state.workItems } };
+  // The work view is the current record. It omits prior receipts. A question
+  // about an earlier result still has to find that receipt, so keep the
+  // history the message snapshot already carried.
+  const projected = read.state.workItems ?? {};
+  const workItems = {};
+  for (const [id, next] of Object.entries(work.state.workItems ?? {})) {
+    const prior = projected[id];
+    workItems[id] = prior?.receiptHistory && !Object.hasOwn(next, "receiptHistory")
+      ? { ...next, receiptHistory: prior.receiptHistory }
+      : next;
+  }
+  return { ...read, state: { ...read.state, room: work.state.room, members: work.state.members, workItems } };
 }
 const FILL_DELAY_MS = 250;
 // Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
@@ -137,6 +149,10 @@ export class RoomClient {
     // the raw event tail it carried, and the apply/fallback counters.
     this.live = null;
     this.rawTail = [];
+    // Sequence the raw tail is known to cover. Null until a snapshot or a
+    // continuing receipt installs one. A member snapshot omits the log, so a
+    // gap still reads /events, but that read does not hold the message paint.
+    this.tailSequence = null;
     this.windowOmitted = null;
     this.backfilling = false;
     this.lazyHistory = Boolean(lazyHistory);
@@ -337,6 +353,12 @@ export class RoomClient {
     flight.promise = (async () => {
       try {
         let covered = held?.fullSequence ?? 0;
+        // The history reload below is another wait after this loop decides it
+        // is caught up. A room event that lands during that wait is recorded
+        // on this flight, and the stream does not deliver it again.
+        let reread = true;
+        while (reread) {
+        let gaveUp = false;
         do {
           const session = this.session, holding = this.heldMessages();
           // The message read is always the newest window. Opening also reads
@@ -382,7 +404,7 @@ export class RoomClient {
           if (!snapshot) {
             // The window does not continue held history. One more window, then
             // keep what is held. The unbounded room document is not a repair.
-            if (flight.retriedWindow) break;
+            if (flight.retriedWindow) { gaveUp = true; break; }
             flight.retriedWindow = true;
             flight.again = true;
             continue;
@@ -391,18 +413,43 @@ export class RoomClient {
           else if (flight.fullSequence > covered) covered = flight.fullSequence;
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
+            // The message window is enough to paint. /events is the Record
+            // tail, and waiting for it held every own send behind a second
+            // round trip. A receipt that continues the tail we already hold
+            // fills that gap with no read. Anything else paints first, then
+            // reads. The held sequence stays put until the tail is installed,
+            // so a failed read still retries this snapshot.
+            const continued = snapshot.eventTail === "events" && this.continueKnownTail(snapshot, receipt);
+            const pendingTail = snapshot.eventTail === "events" && !continued;
+            if (pendingTail) {
+              const state = snapshot.state ??= {};
+              if (!Array.isArray(state.eventLog)) state.eventLog = [];
+              state.seenEvents ??= {};
+              state.seenIdempotencyKeys ??= {};
+              snapshot.eventTailPending = true;
+              this.onSnapshot(snapshot, this.session);
+              await this.hydrateEventTail(snapshot);
+              if (generation !== this.generation || !this.session) return;
+              if (auditView !== this.auditView) { flight.revisit = true; continue; }
+              this.tailSequence = snapshot.sequence;
+              delete snapshot.eventTailPending;
+            } else if (snapshot.eventTail !== "events") {
+              this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
+              this.tailSequence = snapshot.sequence;
+            }
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
               partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
             this.live = { generation, session, snapshot };
-            this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
         // A non-window event can change a message outside the newest page.
         // Rebuild that history from bounded pages. Never from the unbounded document.
         if (!windowed) await this.reloadHistory();
+        reread = !gaveUp && (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        }
         if (this.heldMessages()?.owesFull && this.fillWanted()) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
@@ -602,6 +649,59 @@ export class RoomClient {
     this.onSnapshot(snapshot, session);
     return true;
   }
+  // The receipt is the next event and the tail already ends at the one
+  // before it. Install that event the way a delta would, and skip /events.
+  // A gap, a first visit, or a snapshot past the receipt still reads.
+  continueKnownTail(snapshot, receipt) {
+    const state = snapshot?.state;
+    if (!state || snapshot.eventTail !== "events") return false;
+    // A refresh at the sequence we already tailed has no log of its own.
+    // Reuse the tail. Another /events read would only repeat it.
+    if (this.tailSequence === snapshot.sequence) {
+      if (!Array.isArray(state.eventLog)) {
+        const tail = this.rawTail ?? [];
+        state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+        state.seenEvents ??= {};
+        state.seenIdempotencyKeys ??= {};
+      }
+      return true;
+    }
+    const event = receipt?.event;
+    if (!event || typeof event !== "object" || receipt.sequence !== snapshot.sequence || this.tailSequence !== snapshot.sequence - 1) return false;
+    const logged = { ...event };
+    delete logged.mentions;
+    const tail = [...this.rawTail, logged].slice(-100);
+    deltaReadModel(state, tail, event);
+    this.rawTail = tail;
+    this.tailSequence = snapshot.sequence;
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    state.seenEvents = {};
+    state.seenIdempotencyKeys = {};
+    return true;
+  }
+  // Member snapshots name eventTail "events" and omit the log. Install the
+  // same shape the reducer and the Record panel already read: an unfiltered
+  // raw tail, the activity filter when that view is on, and empty seen maps.
+  // Mention chips are stream-only; a snapshot tail never carried them.
+  async hydrateEventTail(snapshot) {
+    const page = await this.request(this.path("/events?tail=100"), { auditView: "full" });
+    const events = [];
+    for (const row of page?.events ?? []) {
+      const event = row?.event;
+      if (!event || typeof event !== "object") continue;
+      if (Object.hasOwn(event, "mentions")) {
+        const copy = { ...event };
+        delete copy.mentions;
+        events.push(copy);
+      } else events.push(event);
+    }
+    const tail = events.slice(-100);
+    this.rawTail = tail;
+    const state = snapshot.state ??= {};
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    state.seenEvents = {};
+    state.seenIdempotencyKeys = {};
+  }
   // History held from this session's last snapshot, for windowed refreshes.
   heldMessages() {
     const held = this.held;
@@ -638,6 +738,7 @@ export class RoomClient {
     const tail = [...this.rawTail, logged].slice(-100);
     deltaReadModel(state, tail, event);
     this.rawTail = tail;
+    this.tailSequence = receipt.sequence;
     state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
     const snapshot = { ...live.snapshot, sequence: receipt.sequence, state };
     // R28-1 mirror: a read-derived snapshot carries the server's
@@ -1143,6 +1244,7 @@ export class RoomClient {
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
     this.historyWanted = false; this.partialReads = 0;
+    this.rawTail = []; this.tailSequence = null;
     clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;

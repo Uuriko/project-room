@@ -363,3 +363,7 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Work-view overlay (2026-10-25)
+
+The reference census is 59 files. `src/client.js` copies `workItems` from the work-view read onto the member snapshot. It does not write items, and the board mapping is unchanged.

@@ -122,6 +122,9 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   await remove.click();
   await row.locator(".member-actions").waitFor({ state: "detached" });
   assert.equal(store.room("commons").state.members.codex.active, false, "the second click ended access");
+  // The presence list redraws inside the command's snapshot read, before this
+  // click handler publishes the status line. Wait for that line.
+  await page.locator("#status").getByText(/removed\. Room access and connections ended/).waitFor();
   assert.match(await page.locator("#status").textContent(), /removed\. Room access and connections ended; context already delivered to its provider is not recalled/);
   assert.equal(await row.count(), 1, "the removed agent stays in history, without controls");
   assert.deepEqual(dialogs, [], "no native confirm dialog");

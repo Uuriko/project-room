@@ -2151,6 +2151,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/messages"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/messages/{id}/thread"
     },
     {
@@ -5762,6 +5766,10 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/mentions/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/messages"
     },
     {
       "method": "GET",

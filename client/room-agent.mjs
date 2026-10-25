@@ -196,7 +196,8 @@ function checkedWorkSnapshot(value, roomId) {
         || !exact(state, "room members workItems")) throw new Error();
     } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
-      || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
+      || !Array.isArray(state.messages)
+      || (value.eventTail === "events" ? state.eventLog !== undefined && !Array.isArray(state.eventLog) : !Array.isArray(state.eventLog))) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
     // unused history integrity. It never issues a second, weaker fallback request.
     for (const [id, member] of Object.entries(state.members)) {
@@ -535,6 +536,11 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  // Newest events, the tail a member snapshot no longer embeds.
+  eventTail(tail = 100, { signal } = {}) {
+    if (!Number.isSafeInteger(tail) || tail < 1 || tail > 200) throw new Error("tail must be an integer from 1 to 200");
+    return this.#request(`/events?tail=${tail}`, undefined, signal);
+  }
   // Agents named before they have a seat. Reading the room snapshot assembles
   // the network. It grants no access, mints no identity, and issues no invite.
   async outsideAgents({ signal } = {}) {

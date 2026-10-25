@@ -42,7 +42,7 @@ test("real CLI pull survives restart; explicit ack differs from stdout and rejec
   const f = await fixture(t); f.charter("Keep it brief");
   const before = f.store.snapshot(f.keys.producer, "commons");
   const run = await f.cli(["pull", f.attentionDirectory]); assert.equal(run.code, 0, run.stderr);
-  assert.equal(f.requests.length, 13, "two observations plus the separate CLI startup check");
+  assert.equal(f.requests.length, 17, "two observations, each with an event tail read, plus the separate CLI startup check");
   const first = JSON.parse(run.stdout); assert.equal(first.items.length, 2);
   assert.deepEqual(JSON.parse((await f.cli(["pull", f.attentionDirectory])).stdout).items, first.items);
   const instruction = first.items.find(n => n.subject === "instructions");
@@ -107,7 +107,7 @@ test("optional real MCP pull/read-pointer/ack shares persisted identity with CLI
   const before = f.store.snapshot(f.keys.producer, "commons");
   f.requests.length = 0;
   const first = (await mcp.call("room_read_attention")).result.structuredContent; assert.equal(first.pending, 2);
-  assert.equal(f.requests.length, 12, "pinned MCP pull keeps both observations with deduplicated anchors");
+  assert.equal(f.requests.length, 16, "pinned MCP pull keeps both observations, each with an event tail read, and deduplicated anchors");
   for (const n of first.items) {
     const read = (await mcp.call(n.nextRead.tool, n.nextRead.arguments)).result.structuredContent;
     assert.equal(read.context?.charter?.revision ?? read.charter.revision, 1);

@@ -302,7 +302,8 @@ test("a rotation ahead of an older inactive snapshot keeps the new private setup
   await f.page.locator("#agent-connect-done").click();
   let frozen, ready;
   const frozenReady = new Promise(resolve => { ready = resolve; });
-  await f.page.route(`${f.origin}/api/rooms/commons`, async route => {
+  // The room read is /api/rooms/commons?messages=recent. A path-only glob misses the query.
+  await f.page.route(url => url.pathname === "/api/rooms/commons", async route => {
     if (!frozen) {
       const result = await (await route.fetch()).json();
       if (result.state.members[original.memberId]?.revision === 1) { frozen = result; ready(); }

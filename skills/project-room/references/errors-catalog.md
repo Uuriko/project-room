@@ -546,6 +546,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_mention_query` | 422 | state, after, memberId and view are the accepted query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_mention_timeout` | 422 | timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_message` | 422 | messageId is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_message_page` | 422 | Choose a page of at most 100 messages | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_method` | 422 | A login method id is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_mime_input` | 500 | raw message must be bytes or a string | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_notification_limit` | 422 | Choose a positive limit | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
