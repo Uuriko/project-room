@@ -229,6 +229,7 @@ optional.push("server/updates.mjs"); // Updates projection (imported by server/h
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
+optional.push("server/records-provenance.mjs"); // #3612: consequential-record provenance stamps (imported by server/work-claims.mjs, server/bounty-escrow.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs, server/work-claim-routes.mjs, server/bounty-escrow-routes.mjs; pure, node:crypto only)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/agent-collisions.mjs"); // overlap alerts for live claims (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)

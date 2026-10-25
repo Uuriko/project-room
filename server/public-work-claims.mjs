@@ -7,6 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { buildProvenance, claimedProvenanceFromInput, sessionInstanceIdFor } from './records-provenance.mjs';
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -419,7 +420,7 @@ export class PublicWorkClaims {
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
     check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
-    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
+    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation', 'modelVersion', 'harnessVersion', 'environment', 'claimedModelVersion', 'claimedHarnessVersion', 'claimedEnvironment'] : []);
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
@@ -560,8 +561,29 @@ export class PublicWorkClaims {
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
+          // #3612 (R-1/R-9): the consequential-record provenance stamp.
+          // sessionInstanceId + authorizingPrincipalId are server-derived
+          // FACTS: the instance is this claim round (namespace + task +
+          // generation) under the authenticated identity, and the principal
+          // is the offer's owner read from the stored offer row — the human
+          // who authorized this work — never a caller-supplied value. The
+          // model/harness/environment triple is the submitter's own report
+          // about its runtime, pinned onto the receipt at finish under
+          // claimed* names (a claim, not a platform attestation); the
+          // session `environment` a caller reports is pinned here instead
+          // of leaving it floating. A bad claimed value fails the finish
+          // closed, exactly like a bad criteria attestation.
+          let provenance;
+          try {
+            provenance = buildProvenance({
+              sessionInstanceId: sessionInstanceIdFor('public-work', [row.namespace_key, offerId, row.generation, identity.identityId]),
+              authorizingPrincipalId: this.db.prepare('SELECT owner_id AS ownerId FROM project_offers WHERE offer_id=?').get(offerId)?.ownerId ?? null,
+              claimed: claimedProvenanceFromInput(input),
+            });
+          } catch (error) { fail(422, 'invalid_public_work', error.message); }
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
+            provenance,
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the

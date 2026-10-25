@@ -17592,6 +17592,31 @@ components:
               type:
                 - "string"
                 - "null"
+    RecordProvenance:
+      type: "object"
+      description: "Accountability stamp written at record creation (#3612, R-1/R-9); component salvaged from superseded PR #4043 and expressed in PR #4041's stored shape. sessionInstanceId and authorizingPrincipalId are FACTS derived by the server from the authenticated context and stored rows - caller-supplied values are never stored. claimedModelVersion, claimedHarnessVersion and claimedEnvironment are CLAIMS: the producing runtime's self-report, pinned at write time under claimed* names, never presented as platform-verified. Present on records written after the stamp shipped; historical records are not backfilled."
+      properties:
+        sessionInstanceId:
+          type:
+            - "string"
+            - "null"
+          pattern: "^sess_[0-9a-f]{24}$"
+        authorizingPrincipalId:
+          type:
+            - "string"
+            - "null"
+        claimedModelVersion:
+          type:
+            - "string"
+            - "null"
+        claimedHarnessVersion:
+          type:
+            - "string"
+            - "null"
+        claimedEnvironment:
+          type:
+            - "string"
+            - "null"
     PublicWorkReceipt:
       type: "object"
       required:
@@ -17693,6 +17718,8 @@ components:
           enum:
             - "hash_only"
             - "system_checked"
+        provenance:
+          $ref: "#/components/schemas/RecordProvenance"
         createdAt:
           type: "string"
           format: "date-time"
@@ -17735,7 +17762,27 @@ components:
         duplicateOf: { type: string, nullable: true }
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
-        resolution: { type: object, nullable: true }
+        evidence:
+          type: object
+          nullable: true
+          description: "The claimant's submission record; carries a #3612 provenance stamp on submissions written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        attestation:
+          type: object
+          nullable: true
+          description: "The verifier's acceptance attestation; carries a #3612 provenance stamp on attestations written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        resolution:
+          type: object
+          nullable: true
+          description: "Terminal resolution; its settlement record carries a #3612 provenance stamp on settlements written after the stamp shipped."
+          properties:
+            settlement:
+              type: object
+              properties:
+                provenance: { $ref: "#/components/schemas/RecordProvenance" }
         submissionHash:
           type: string
           nullable: true
@@ -18178,6 +18225,7 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              provenance: { $ref: "#/components/schemas/RecordProvenance" }
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.
@@ -18206,6 +18254,7 @@ components:
               memberId: { type: string }
               at: { type: string, format: date-time }
               note: { type: [string, 'null'] }
+              provenance: { $ref: "#/components/schemas/RecordProvenance" }
         history:
           type: array
           items:
