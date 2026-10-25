@@ -1,9 +1,7 @@
-// Dialog contents are in the document at parse time. Detach them until the
-// dialog is shown, so the first paint does not build every form. The dialog
-// element stays, which is what getElementById and the settings grouper look
-// up. Closed details stay mounted: the top bar and People address those nodes
-// while the disclosure is closed. Listeners already bound on a detached node
-// survive the move back.
+// Closed details and closed dialogs stay in the document. The room and the
+// browser checks address those fields while the dialog is closed, and a node
+// moved into a fragment is invisible to them. The park helpers remain for a
+// dialog that opts in later. installLazyPanels does not call them.
 
 const PARKED = new WeakMap();
 const parkedRoots = new Set();
@@ -16,7 +14,9 @@ const nativeDocById = docProto?.getElementById;
 const nativeElQuery = elProto?.querySelector;
 const nativeElQueryAll = elProto?.querySelectorAll;
 
-function park(root, keep) {
+// Opt-in. installLazyPanels does not call this. A dialog that wants its
+// body detached until show or showModal passes itself here.
+export function park(root, keep) {
   if (PARKED.has(root)) return;
   const all = [...root.childNodes];
   // A fragment keeps a parent, so after() and before() on a parked field
@@ -256,14 +256,10 @@ function patchPrototypes() {
 export function installLazyPanels(doc = globalThis.document) {
   if (!doc?.documentElement || doc.documentElement.dataset.panelsLazy === "1") return;
   doc.documentElement.dataset.panelsLazy = "1";
-  // Dialog bodies are the forms and fields a person has not opened. A closed
-  // details element already hides its body and keeps it in the document, which
-  // is what the top bar, People, and in-page lookups address. Detaching those
-  // nodes made the same lookups miss.
-  for (const dialog of doc.querySelectorAll("dialog")) {
-    if (dialog.id === "settings-dialog") continue;
-    park(dialog);
-  }
+  // Closed details and closed dialogs stay in the document. The room and the
+  // browser checks address those fields (work options, catch-up, room
+  // overview) while the dialog is closed. Detaching them made those lookups
+  // miss. The park helpers remain for a dialog that opts in later.
   patchPrototypes();
   doc.addEventListener("pointerdown", onPointerDown, true);
   doc.addEventListener("toggle", onToggle, true);

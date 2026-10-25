@@ -79,7 +79,10 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   const first = page.locator('#event-list li').first();
   await first.focus();
   await first.evaluate(el => { window.retainedHistory = el; });
-  const refreshed = page.waitForResponse(response => /\/api\/rooms\/commons$/.test(response.url()) && response.request().method() === 'GET');
+  const refreshed = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/rooms/commons" && response.request().method() === "GET";
+  });
   await page.locator('#refresh-button').evaluate(button => button.click());
   await refreshed; await settle(page);
   assert.equal(await page.evaluate(() => document.activeElement === window.retainedHistory && window.retainedHistory.isConnected), true);

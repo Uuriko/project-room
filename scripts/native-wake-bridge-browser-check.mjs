@@ -88,7 +88,7 @@ test("macOS wake signal: bounded revalidation for a live session, stale access d
     await page.waitForTimeout(500);
     assert.equal(sessionGets(), expected, `wake #${expected} revalidates the session exactly once`);
     assert.equal(writes(), 0, `wake #${expected} replays no writes (no duplicate send, approval, or work execution); ledger: ${JSON.stringify(ledger)}`);
-    assert.ok(ledger.length - before <= 16, `wake #${expected} traffic stays bounded (${ledger.length - before} requests)`);
+    assert.ok(ledger.length - before <= 16, `wake #${expected} traffic stays bounded (${ledger.length - before} requests): ${JSON.stringify(ledger.slice(before))}`);
   }
   assert.equal(await page.locator("#message-input").inputValue(), "draft that must survive wake",
     "the unsent composer draft survives wake revalidation");

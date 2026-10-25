@@ -568,7 +568,7 @@ test("a committed self-send is not re-announced as incoming after a delayed snap
     committed = true;
     await route.fulfill({ response });
   });
-  await page.route(/\/api\/rooms\/commons$/, async route => {
+  await page.route(url => url.pathname === "/api/rooms/commons", async route => {
     if (!committed || allowSnapshot || route.request().method() !== "GET") { await route.continue(); return; }
     await route.fulfill({
       status: 503,
@@ -668,7 +668,7 @@ test("a committed caught-up marker is not reported as failed when reconciliation
     failSnapshot = true;
     await route.fulfill({ response });
   });
-  await page.route(/\/api\/rooms\/commons$/, async route => {
+  await page.route(url => url.pathname === "/api/rooms/commons", async route => {
     if (!failSnapshot || route.request().method() !== "GET") { await route.continue(); return; }
     failSnapshot = false;
     await route.fulfill({

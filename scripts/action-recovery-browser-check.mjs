@@ -202,7 +202,8 @@ test("a competing reservation resolves an uncommitted retry without overwriting 
 
 test("a valid action receipt remains saved when its follow-up snapshot fails", { timeout: 30000 }, async t => {
   const f = await setup(t, { live: false }), { page } = f; let failSnapshot = false;
-  await page.route("**/api/rooms/commons", route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
+  const roomSnapshot = url => url.pathname === "/api/rooms/commons";
+  await page.route(roomSnapshot, route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
   await page.route("**/commands", async route => { const response = await route.fetch(); failSnapshot = true; return route.fulfill({ response }); });
   await f.open(); await f.fill(); await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   await page.getByText("Record saved.", { exact: true }).waitFor(); assert.equal(f.item().state, "completed");
@@ -230,7 +231,8 @@ test("a failed explicit refresh keeps old evidence and notes until a later succe
   f.mutate(T.WORK_BLOCKED, { reason: "Revision needed", nextAction: "Rework" });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" }); f.complete("v2", null);
   await f.save.click(); await page.locator("#refresh-action").waitFor({ state: "visible" });
-  await page.route("**/api/rooms/commons", route => fail ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic read failure" } } }) : route.continue());
+  const roomSnapshot = url => url.pathname === "/api/rooms/commons";
+  await page.route(roomSnapshot, route => fail ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic read failure" } } }) : route.continue());
   await page.locator("#refresh-action").click(); await page.getByText("Could not load current work. Try again.", { exact: true }).waitFor();
   assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1"); assert.equal(await f.input("result").inputValue(), "pass");
   assert.equal(await f.input("summary").inputValue(), "Checked this exact result"); assert.equal(await f.save.isDisabled(), true);
@@ -246,7 +248,8 @@ test("late explicit review refresh cannot expose a previous session's result lin
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" }); f.complete("v2");
   await page.locator("#refresh-action").waitFor({ state: "visible" });
   const held = new Promise(resolve => arrived = resolve);
-  await page.route("**/api/rooms/commons", async route => {
+  const roomSnapshot = url => url.pathname === "/api/rooms/commons";
+  await page.route(roomSnapshot, async route => {
     const response = await route.fetch();
     await new Promise(resolve => { release = resolve; arrived(); });
     return route.fulfill({ response, headers: { ...response.headers(), "x-test-held": "refresh" } });
@@ -255,7 +258,7 @@ test("late explicit review refresh cannot expose a previous session's result lin
   f.keys["human-reviewer"] = f.store.issueAccessKey("commons", "human-reviewer");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator("#action-evidence").getAttribute("href"), null);
-  await page.unroute("**/api/rooms/commons"); await f.login("owner"); await f.open("block"); await f.input("reason").fill("New session notes");
+  await page.unroute(roomSnapshot); await f.login("owner"); await f.open("block"); await f.input("reason").fill("New session notes");
   release(); await page.waitForFunction(() => window.oldActionRead); await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   assert.equal(await f.input("reason").inputValue(), "New session notes"); assert.equal(await f.input("reason").evaluate(node => document.activeElement === node), true);
   assert.equal(await page.locator("#action-evidence").getAttribute("href"), null); assert.equal(await page.locator("#action-error").textContent(), "");

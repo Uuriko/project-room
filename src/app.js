@@ -396,6 +396,10 @@ document.addEventListener("keydown", event => {
   if (event.key === "Tab" && event.target === $("#message-input")) lastComposerSelection = null;
 });
 let recovery;
+let pendingTailPaint = false;
+// Set when the message window paints before its event tail, so the completing
+// snapshot still runs the one-time open (drafts, hash reveal, companion reads).
+let deferOpening = false;
 let leavingPage = false;
 let composerFiles = [];
 let composerReselectId = null;
@@ -413,14 +417,24 @@ const client = new RoomClient({
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
     snapshotAuditView = snapshot.auditView ?? "full";
-    const firstSnapshot = !state;
-    const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    // The message window can arrive before the event tail. That first call
+    // paints. Draft restore, hash reveal, and the companion reads wait until
+    // the tail is installed, or they would run against an empty log.
+    const pending = snapshot.eventTailPending === true;
+    const completingTail = pendingTailPaint && !pending;
+    pendingTailPaint = pending;
+    // One-time open work waits for the tail. A later refresh, including a
+    // wake, must not run it again just because that tail was painted first.
+    if (pending && !state) deferOpening = true;
+    const firstSnapshot = (!state && !pending) || (completingTail && deferOpening);
+    if (firstSnapshot) deferOpening = false;
+    const presenceBoundary = firstSnapshot || state?.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
-    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary, snapshot.eventTailPending === true);
-    void refreshRequestRuns();
+    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary, pending);
+    if (!pending) void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
     // R28-1: the chip counts from the catch-up boundary (your own unbroken run of
@@ -446,6 +460,7 @@ const client = new RoomClient({
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    if (pending) return;
     syncRoomLifecycle();
     shareLinksUI?.sync();
     remindersUI?.sync();
@@ -514,6 +529,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingTailPaint = false; deferOpening = false;
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
@@ -3009,7 +3025,9 @@ $("#request-refresh").addEventListener("click", () => { if (requestMode?.request
 function persistDrafts() {
   // The composer no longer asks. This tab keeps nonempty drafts until the
   // 12-hour expiry or sign-out. In-memory drafts still work if storage fails.
-  if (!session) return;
+  // The window can paint before saved drafts are read back. Writing the
+  // still-empty composer then would replace them.
+  if (!session || pendingTailPaint) return;
   recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
 function switchThread(threadId, focusComposer = false) {

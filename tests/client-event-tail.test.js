@@ -99,3 +99,36 @@ test("a receipt that continues the tail does not read /events again", async t =>
   assert.equal(urls.filter(url => url.includes("/events?tail=100")).length, reads);
   assert.deepEqual(seen.at(-1), ["e1", "e2", "e3"]);
 });
+
+test("a later read at the same sequence reuses the tail and earlier receipts", async t => {
+  const urls = [];
+  const seen = [];
+  const client = new RoomClient({
+    events: null, auditView: "full",
+    onSnapshot: value => seen.push(value.state.workItems.w1?.receiptHistory?.map(receipt => receipt.eventId) ?? null),
+    fetcher: async url => {
+      urls.push(url);
+      if (url.includes("/events?tail=100")) return response({ events, next: 2, hasMore: false });
+      if (url.includes("view=work")) return response({
+        ...owner, snapshotView: "work", snapshotVersion: 1, sequence: 2,
+        state: { room: { id: "commons" }, members: {}, workItems: { w1: { id: "w1", receipt: { eventId: "r2" } } } }
+      });
+      return response({
+        ...owner, sequence: 2, eventTail: "events",
+        state: {
+          messages: [{ id: "m1", body: "hello" }],
+          workItems: { w1: { id: "w1", receipt: { eventId: "r2" }, receiptHistory: [{ eventId: "r1" }] } },
+          pins: []
+        }
+      });
+    }
+  });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await client.refresh();
+  assert.deepEqual(seen[0], ["r1"], "the work view keeps earlier receipts from the message snapshot");
+  const tailReads = urls.filter(url => url.includes("/events?tail=100")).length;
+  await client.refresh();
+  assert.equal(urls.filter(url => url.includes("/events?tail=100")).length, tailReads);
+  assert.deepEqual(seen.at(-1), ["r1"]);
+});

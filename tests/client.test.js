@@ -79,6 +79,37 @@ test("simultaneous refreshes coalesce and do not drop a pending newer event", as
   release(); await Promise.all([first, second]);
   assert.deepEqual(seen, [4, 5]); assert.equal(calls, 4, "one flight: the hanging window and its work view, then the joined follow-up reads both again because this snapshot holds no message list");
 });
+test("a room event during history reload still updates the work record", async () => {
+  const messages = [{ id: "m1", body: "kept" }];
+  const room = sequence => ({ ...snapshot(sequence), state: { messages, workItems: { w: { id: "w", state: sequence >= 3 ? "blocked" : "working" } } } });
+  const conversation = sequence => ({ ...snapshot(sequence), conversationVersion: 1, mode: "replace", limit: 100, messageId: null, channelId: null, messages, nextCursor: null, checkpoint: null });
+  let sequence = 1, conversationCalls = 0, releaseConversation;
+  const heldConversation = new Promise(resolve => { releaseConversation = resolve; });
+  const seen = [];
+  const client = new RoomClient({
+    fetcher: async url => {
+      if (url.includes("/conversation")) {
+        conversationCalls++;
+        if (conversationCalls === 1) return heldConversation;
+        return response(conversation(sequence));
+      }
+      return response(room(sequence));
+    },
+    onSnapshot: value => seen.push([value.sequence, value.state.workItems.w.state])
+  });
+  client.session = identity();
+  await client.refresh();
+  assert.deepEqual(seen, [[1, "working"]]);
+  sequence = 2;
+  const started = client.refresh({ sequence: 2, event: { roomId: "commons", type: "work.started", data: { workItemId: "w" } } });
+  for (let i = 0; i < 50 && conversationCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(conversationCalls, 1);
+  sequence = 3;
+  const blocked = client.refresh({ sequence: 3, event: { roomId: "commons", type: "work.blocked", data: { workItemId: "w" } } });
+  releaseConversation(response(conversation(2)));
+  await Promise.all([started, blocked]);
+  assert.deepEqual(seen.at(-1), [3, "blocked"]);
+});
 test("late old-session snapshots cannot repopulate a signed-out or switched account", async () => {
   const pending = []; const seen = [];
   const client = new RoomClient({ fetcher: () => new Promise(resolve => pending.push(resolve)), onSnapshot: s => seen.push(s.sequence) });

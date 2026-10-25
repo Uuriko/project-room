@@ -97,7 +97,18 @@ function messageHistoryComplete(read) {
 }
 function mergeWorkView(read, work) {
   if (!work || work.snapshotView !== "work" || work.sequence !== read?.sequence || work.roomId !== read?.roomId || !read?.state || !work.state) return read;
-  return { ...read, state: { ...read.state, room: work.state.room, members: work.state.members, workItems: work.state.workItems } };
+  // The work view is the current record. It omits prior receipts. A question
+  // about an earlier result still has to find that receipt, so keep the
+  // history the message snapshot already carried.
+  const projected = read.state.workItems ?? {};
+  const workItems = {};
+  for (const [id, next] of Object.entries(work.state.workItems ?? {})) {
+    const prior = projected[id];
+    workItems[id] = prior?.receiptHistory && !Object.hasOwn(next, "receiptHistory")
+      ? { ...next, receiptHistory: prior.receiptHistory }
+      : next;
+  }
+  return { ...read, state: { ...read.state, room: work.state.room, members: work.state.members, workItems } };
 }
 const FILL_DELAY_MS = 250;
 // Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
@@ -342,6 +353,12 @@ export class RoomClient {
     flight.promise = (async () => {
       try {
         let covered = held?.fullSequence ?? 0;
+        // The history reload below is another wait after this loop decides it
+        // is caught up. A room event that lands during that wait is recorded
+        // on this flight, and the stream does not deliver it again.
+        let reread = true;
+        while (reread) {
+        let gaveUp = false;
         do {
           const session = this.session, holding = this.heldMessages();
           // The message read is always the newest window. Opening also reads
@@ -387,7 +404,7 @@ export class RoomClient {
           if (!snapshot) {
             // The window does not continue held history. One more window, then
             // keep what is held. The unbounded room document is not a repair.
-            if (flight.retriedWindow) break;
+            if (flight.retriedWindow) { gaveUp = true; break; }
             flight.retriedWindow = true;
             flight.again = true;
             continue;
@@ -431,6 +448,8 @@ export class RoomClient {
         // A non-window event can change a message outside the newest page.
         // Rebuild that history from bounded pages. Never from the unbounded document.
         if (!windowed) await this.reloadHistory();
+        reread = !gaveUp && (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        }
         if (this.heldMessages()?.owesFull && this.fillWanted()) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
@@ -636,7 +655,17 @@ export class RoomClient {
   continueKnownTail(snapshot, receipt) {
     const state = snapshot?.state;
     if (!state || snapshot.eventTail !== "events") return false;
-    if (this.tailSequence === snapshot.sequence && Array.isArray(state.eventLog)) return true;
+    // A refresh at the sequence we already tailed has no log of its own.
+    // Reuse the tail. Another /events read would only repeat it.
+    if (this.tailSequence === snapshot.sequence) {
+      if (!Array.isArray(state.eventLog)) {
+        const tail = this.rawTail ?? [];
+        state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+        state.seenEvents ??= {};
+        state.seenIdempotencyKeys ??= {};
+      }
+      return true;
+    }
     const event = receipt?.event;
     if (!event || typeof event !== "object" || receipt.sequence !== snapshot.sequence || this.tailSequence !== snapshot.sequence - 1) return false;
     const logged = { ...event };
