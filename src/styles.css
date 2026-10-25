@@ -1788,7 +1788,10 @@ body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 #account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
 
-#signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
+/* Hide the divider unless at least one provider anchor is present and not
+   hidden. An anchor stripped from the served HTML (unconfigured provider)
+   counts as hidden, the same as a present-but-hidden anchor. */
+#signin-methods:not(:has(#google-signin:not([hidden]))):not(:has(#github-signin:not([hidden]))) .signin-divider { display: none; }
 
 /* Preview is part of the workspace, never a modal over the conversation. */
 .result-header { display: flex; align-items: center; gap: var(--space-2); position: sticky; top: 0; background: var(--panel); padding-block: var(--space-2); z-index: 2; }

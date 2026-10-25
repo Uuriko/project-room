@@ -16,9 +16,10 @@ function stubElement() {
   };
 }
 
-function mountNavigation(t) {
+function mountNavigation(t, { absent = null } = {}) {
   const nodes = new Map();
   const node = selector => {
+    if (selector === absent) return null;
     if (!nodes.has(selector)) nodes.set(selector, stubElement());
     return nodes.get(selector);
   };
@@ -47,4 +48,15 @@ test("an unavailable provider stays hidden across view syncs while the other anc
   navigation.sync("password-login");
   assert.equal(node("#google-signin").hidden, false, "back to methods: Google returns");
   assert.equal(node("#github-signin").hidden, true, "GitHub stays hidden — its route would 503");
+});
+
+test("sync tolerates a stripped GitHub anchor on an unconfigured deployment", t => {
+  const { navigation, node } = mountNavigation(t, { absent: "#github-signin" });
+  assert.doesNotThrow(() => navigation.sync("password-login"));
+  assert.equal(node("#google-signin").hidden, false, "the present anchor still syncs");
+  navigation.setProviderUnavailable("github");
+  assert.doesNotThrow(() => navigation.sync("welcome"));
+  assert.equal(node("#google-signin").hidden, true, "welcome still hides the present anchor");
+  assert.doesNotThrow(() => navigation.sync("password-login"));
+  assert.equal(node("#google-signin").hidden, false, "the present anchor returns after welcome");
 });

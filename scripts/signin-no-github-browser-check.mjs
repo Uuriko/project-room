@@ -31,6 +31,11 @@ test("signing in without GitHub OAuth opens the room", { timeout: 60000 }, async
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator("#github-signin").count(), 0, "an unconfigured server does not ship the GitHub anchor");
+  await page.waitForFunction(() => {
+    const divider = document.querySelector(".signin-divider");
+    return divider && getComputedStyle(divider).display === "none";
+  });
+  assert.equal(await page.locator(".signin-divider").isVisible(), false, "the divider is not rendered when the provider anchor is stripped");
   const signedOut = await page.locator("#auth-error").innerText();
   assert.equal(signedOut.includes("could not load"), false, signedOut);
   try {
