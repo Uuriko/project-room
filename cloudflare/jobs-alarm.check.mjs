@@ -101,22 +101,23 @@ test("a webhook due in 30 seconds waits for the alarm", { timeout: 60_000 }, asy
   }
 });
 
-test("a thrown alarm is rescheduled", async () => {
+test("a failed alarm is rescheduled without dropping the next tick", async () => {
   const mf = await start();
   try {
-    const seeded = await call(mf, "/probe/seed-throw?name=boom");
+    const seeded = await call(mf, "/probe/seed-throw?name=invite-only-pilot");
     assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
     const before = Date.now();
-    const fired = await call(mf, "/probe/alarm?name=boom");
-    assert.equal(fired.status, 500, JSON.stringify(fired.body));
-    assert.match(fired.body.error, /cron jobs failed: webhook-dispatch/);
+    const fired = await call(mf, "/probe/alarm?name=invite-only-pilot");
+    assert.equal(fired.status, 200, JSON.stringify(fired.body));
+    assert.equal(fired.body.ok, true);
     assert.equal(typeof fired.body.alarmAt, "number");
     assert.ok(fired.body.alarmAt >= before + 50_000, `alarm ${fired.body.alarmAt} before ${before}`);
     assert.ok(fired.body.alarmAt <= Date.now() + 70_000);
-    const webhook = fired.body.health.jobs.find(job => job.name === "webhook-dispatch");
+    const health = await call(mf, "/api/health/jobs");
+    const webhook = health.body.jobs.find(job => job.name === "webhook-dispatch");
     assert.ok(webhook.consecutiveFailures >= 1);
     assert.notEqual(webhook.status, "ok");
-    // The throw is armed by the fixture, not planted as a malformed
+    // The failure is armed by the fixture, not planted as a malformed
     // delivery row: #3893 made the drain isolate such rows (dead-letter,
     // job stays healthy), so a JSON.parse error can no longer be this
     // check's throw vehicle. The subject is the alarm machinery.

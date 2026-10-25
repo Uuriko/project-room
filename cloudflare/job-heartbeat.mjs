@@ -1,4 +1,5 @@
 import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
+import { jobHealthSignal } from "../server/job-health-signal.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
@@ -293,8 +294,9 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {
+  const signaled = jobHealthSignal(view);
   const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
-  return new Response(head ? null : JSON.stringify(view), { status: view?.status === 'ok' || view?.status === 'degraded' ? 200 : 503, headers });
+  return new Response(head ? null : JSON.stringify(signaled), { status: signaled?.status === 'ok' || signaled?.status === 'degraded' ? 200 : 503, headers });
 }
 
 export function jobHealthUnavailable({ head = false } = {}) {
