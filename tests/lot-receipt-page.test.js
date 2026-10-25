@@ -327,11 +327,16 @@ test("F-4: a live lot stops naming an unpublished signed receipt, published ids 
   assert.ok(after, "unpublishing a linked receipt does not hide the lot itself");
   assert.deepEqual(after.lot.signedReceiptIds, [],
     "an unpublished receipt id must not be named by a live public lot");
+  assert.deepEqual(after.lot.signedReceiptLinks, [],
+    "signedReceiptLinks must not name the unpublished receipt either");
   assert.equal(after.lot.workReceiptId, null);
   // Removing the veto restores the name: unpublish is a read-time veto.
   db.prepare("DELETE FROM public_unpublish WHERE kind='receipt' AND target=?").run(signedId);
-  assert.deepEqual(publicReceiptById(store, lotId).lot.signedReceiptIds, [signedId],
+  const restored = publicReceiptById(store, lotId);
+  assert.deepEqual(restored.lot.signedReceiptIds, [signedId],
     "a published receipt id is still named");
+  assert.deepEqual(restored.lot.signedReceiptLinks.map(link => link.receiptId), [signedId],
+    "the restored link names the same published id");
 });
 
 test("F-4: a live lot stops naming an unpublished work receipt in both fields, signed ids still named", () => {
@@ -350,6 +355,8 @@ test("F-4: a live lot stops naming an unpublished work receipt in both fields, s
     "workReceiptId pointing at an unpublished receipt must be dropped, not named");
   assert.ok(!after.lot.signedReceiptIds.includes(PWR_ID),
     "signedReceiptIds must not name the unpublished work receipt either");
+  assert.ok(!after.lot.signedReceiptLinks.some(link => link.receiptId === PWR_ID),
+    "signedReceiptLinks must not name the unpublished work receipt either");
   for (const id of after.lot.signedReceiptIds) {
     assert.notEqual(id, PWR_ID);
   }
@@ -357,6 +364,7 @@ test("F-4: a live lot stops naming an unpublished work receipt in both fields, s
   const json = receiptJson(after);
   assert.equal(json.lot.workReceiptId, null);
   assert.ok(!json.lot.signedReceiptIds.includes(PWR_ID));
+  assert.ok(!json.lot.signedReceiptLinks.some(link => link.receiptId === PWR_ID));
 });
 
 test("a lot whose entries carry no work receipt id reports workReceiptId null", () => {
