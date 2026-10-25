@@ -7,14 +7,14 @@ import { chromium } from 'playwright';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RoomStore } from '../server/store.mjs';
-import { createRoomServer } from '../server/http.mjs';
-import { roomEntry } from '../server/room-entry.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { createRoomServer } from '../../server/http.mjs';
+import { roomEntry } from '../../server/room-entry.mjs';
 
 // The deployed Worker owns host rewriting; Chromium owns fragment inheritance.
 // The destination is the actual app/asset HTTP server, never fabricated auth UI.
 test('bundled default doors reach minimal auth and inherit invitation, legacy, and room fragments', { timeout: 60000 }, async t => {
-  const bundle = await build({ entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))],
+  const bundle = await build({ entryPoints: [fileURLToPath(new URL('../../cloudflare/room.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', keepNames: true,
     external: ['node:*', 'cloudflare:*'] });
   const worker = new Miniflare({ modules: true, script: bundle.outputFiles[0].text,
