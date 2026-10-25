@@ -8,6 +8,7 @@ import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 
 import { HUMAN_PUSH_ROUTES } from "./human-push.mjs";
 import { DEMO_ROUTES } from "./demo.mjs";
+import { DOWNLOAD_ROUTES } from "../download-page.mjs";
 import { FRONT_DOOR_ROUTES } from "./front-door.mjs";
 import { ROOM_ASSISTANT_ROUTES } from "./room-assistant.mjs";
 import { DESKTOP_AUTH_ROUTES } from "./desktop-auth.mjs";
@@ -57,7 +58,7 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
+export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
   ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES, ...DECISION_ROWS_ROUTES]);
 
 export function assertRouteRow(row) {
