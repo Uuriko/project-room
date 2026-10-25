@@ -4949,7 +4949,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
               budgetEnforced: true, reason: "budget_exceeded", limit: wire,
               ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}) } }, expectedSessionBinding);
+              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}),
+              // #3349: a spend trip records the spend figure that
+              // tripped it, mirroring the toolCalls/rounds payload.
+              ...(wire === "maxSpendCents" && pendingSpend !== null ? { spendCents: pendingSpend } : {}) } }, expectedSessionBinding);
         } catch {
           // The 409 below still carries the reason; the worker's next
           // heartbeat completes the stop.
