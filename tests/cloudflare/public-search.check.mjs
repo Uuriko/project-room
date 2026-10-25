@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
-import { publicAssetPaths } from '../server/public-assets.mjs';
-import { agentPages } from '../scripts/build-agent-docs.mjs';
+import { publicAssetPaths } from '../../server/public-assets.mjs';
+import { agentPages } from '../../scripts/build-agent-docs.mjs';
 
 // Decision #36 (#3254, Option A): the docs/agents pages are generated build
 // output and never committed. A deploy generates them before building assets
@@ -42,7 +42,7 @@ function assertAboutPolicy(response, origin) {
 }
 
 test('actual Worker public search routes load packaged HTML and preserve private/error indexing defaults', async () => {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL('../tests/cloudflare/http-worker.test-fixture.mjs', import.meta.url))],
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test';
   // Asset bytes are cached for the life of the isolate. A deploy that drops
@@ -55,7 +55,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
       const path = new URL(request.url).pathname.slice(1);
       if (!publicAssetPaths.includes(path) || (missing && path === 'about.html')) return new Response(null, { status: 404 });
       if (generatedPages.has(path)) return new Response(generatedPages.get(path));
-      return new Response(await readFile(new URL('../' + path, import.meta.url)));
+      return new Response(await readFile(new URL('../../' + path, import.meta.url)));
     } }
   });
   const call = (mf, path, method = 'GET') => mf.dispatchFetch(origin + path, { method, redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });

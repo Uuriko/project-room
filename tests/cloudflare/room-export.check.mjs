@@ -12,7 +12,7 @@ const backupToken = "operator-backup-value";
 
 test("operator export streams NDJSON for the backup token and refuses anything else", async () => {
   const bundled = await build({
-    entryPoints: [fileURLToPath(new URL("./room.mjs", import.meta.url))],
+    entryPoints: [fileURLToPath(new URL("../../cloudflare/room.mjs", import.meta.url))],
     bundle: true, write: false, format: "esm", platform: "neutral",
     external: ["node:*", "cloudflare:*"]
   });
@@ -41,7 +41,7 @@ test("operator export streams NDJSON for the backup token and refuses anything e
 
 test("operator export is 404 when ROOM_BACKUP_TOKEN is unset", async () => {
   const bundled = await build({
-    entryPoints: [fileURLToPath(new URL("./room.mjs", import.meta.url))],
+    entryPoints: [fileURLToPath(new URL("../../cloudflare/room.mjs", import.meta.url))],
     bundle: true, write: false, format: "esm", platform: "neutral",
     external: ["node:*", "cloudflare:*"]
   });

@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { connectRoom } from '../client/agent-setup.mjs';
-import { readAgentConnection } from '../client/agent-connection.mjs';
-import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { connectRoom } from '../../client/agent-setup.mjs';
+import { readAgentConnection } from '../../client/agent-connection.mjs';
+import { AgentWakeClient } from '../../client/agent-wake.mjs';
 const fixture = `
 import entry, { ProjectRoom } from './room.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';

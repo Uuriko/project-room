@@ -11,9 +11,9 @@ test("workerd refuses a private webhook answer and retries a resolution failure"
   const bundled = await build({
     stdin: {
       contents: `
-        import { assertSubscriptionWebhookUrl } from "../server/agent-webhook-subscriptions.mjs";
-        import { postDelivery } from "../server/webhook-dispatch.mjs";
-        import { isWorkersRuntime } from "../server/ip-blocklist.mjs";
+        import { assertSubscriptionWebhookUrl } from "../../server/agent-webhook-subscriptions.mjs";
+        import { postDelivery } from "../../server/webhook-dispatch.mjs";
+        import { isWorkersRuntime } from "../../server/ip-blocklist.mjs";
 
         function doh(addresses, fail) {
           return async (requestUrl) => {
