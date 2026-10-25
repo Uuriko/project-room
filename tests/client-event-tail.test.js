@@ -35,15 +35,67 @@ test("a snapshot marked eventTail loads the log from /events", async t => {
   await client.refresh();
   assert.ok(urls.includes("/api/rooms/commons/events?tail=100"));
   assert.equal(headers[urls.indexOf("/api/rooms/commons/events?tail=100")], null);
-  const log = seen[0].state.eventLog;
+  const log = seen.at(-1).state.eventLog;
   assert.deepEqual(log.map(event => event.id), ["e1", "e2"]);
   assert.equal(Object.hasOwn(log[0], "mentions"), false);
-  assert.deepEqual(seen[0].state.seenEvents, {});
-  assert.deepEqual(seen[0].state.seenIdempotencyKeys, {});
+  assert.deepEqual(seen.at(-1).state.seenEvents, {});
+  assert.deepEqual(seen.at(-1).state.seenIdempotencyKeys, {});
 });
 
 test("activity view filters the /events tail locally", async t => {
   const { client, seen } = clientFor(t, { auditView: "activity", events });
   await client.refresh();
-  assert.deepEqual(seen[0].state.eventLog.map(event => event.id), ["e2"]);
+  assert.deepEqual(seen.at(-1).state.eventLog.map(event => event.id), ["e2"]);
+});
+
+test("the message window paints before the event tail returns", async t => {
+  let release = () => {};
+  const gate = new Promise(resolve => { release = resolve; });
+  const seen = [];
+  const client = new RoomClient({
+    events: null, auditView: "full", onSnapshot: value => seen.push({ pending: value.eventTailPending === true, messages: value.state.messages.map(message => message.id), log: (value.state.eventLog ?? []).map(event => event.id) }),
+    fetcher: async url => {
+      if (url.includes("/events?tail=100")) { await gate; return response({ events, next: 2, hasMore: false }); }
+      if (url.includes("view=work")) return response({ ...owner, snapshotView: "work", snapshotVersion: 1, sequence: 2, state: { room: { id: "commons" }, members: {}, workItems: {} } });
+      return response({ ...owner, sequence: 2, eventTail: "events", state: { messages: [{ id: "m1", body: "hello" }], workItems: {}, pins: [] } });
+    }
+  });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  const pending = client.refresh();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(seen[0], { pending: true, messages: ["m1"], log: [] });
+  release();
+  await pending;
+  assert.deepEqual(seen.at(-1), { pending: false, messages: ["m1"], log: ["e1", "e2"] });
+});
+
+test("a receipt that continues the tail does not read /events again", async t => {
+  const urls = [];
+  const seen = [];
+  let sequence = 2;
+  const client = new RoomClient({
+    events: null, auditView: "full", onSnapshot: value => seen.push(value.state.eventLog.map(event => event.id)),
+    fetcher: async (url, options) => {
+      urls.push(url);
+      if (url.includes("/events?tail=100")) return response({ events, next: sequence, hasMore: false });
+      if (url.includes("view=work")) return response({ ...owner, snapshotView: "work", snapshotVersion: 1, sequence, state: { room: { id: "commons" }, members: {}, workItems: {} } });
+      if (options?.method === "POST") {
+        sequence = 3;
+        return response({ sequence, event: { id: "e3", type: "message.posted", roomId: "commons", actorId: "human", data: { messageId: "m2", body: "next" } } });
+      }
+      return response({
+        ...owner, sequence, eventTail: "events",
+        messagesWindow: { mode: "recent", omitted: 5, limit: 100 },
+        state: { messages: [{ id: "m1", body: "hello" }, ...(sequence === 3 ? [{ id: "m2", body: "next" }] : [])], workItems: {}, pins: [] }
+      });
+    }
+  });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await client.refresh();
+  const reads = urls.filter(url => url.includes("/events?tail=100")).length;
+  await client.send({ id: "m2", type: "message.posted", data: { messageId: "m2", body: "next" } });
+  assert.equal(urls.filter(url => url.includes("/events?tail=100")).length, reads);
+  assert.deepEqual(seen.at(-1), ["e1", "e2", "e3"]);
 });

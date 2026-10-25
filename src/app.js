@@ -419,7 +419,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
-    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
+    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary, snapshot.eventTailPending === true);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
@@ -7355,7 +7355,7 @@ function renderContribution(steps, owned) {
   const focused = panel.contains(document.activeElement);
   const selected = (focused && steps.find(step => step.key === button.dataset.step)) || steps[0];
   const contributed = owned && (state.messages.some(message => message.authorId === session.member.id)
-    || state.eventLog.some(event => event.actorId === session.member.id && /^(work|verification|owner_decision)\./.test(event.type)));
+    || (state.eventLog ?? []).some(event => event.actorId === session.member.id && /^(work|verification|owner_decision)\./.test(event.type)));
   // An empty conversation already points at its composer. Do not push it below
   // the first mobile viewport with a second introduction prompt.
   const newcomer = owned && !contributed && state.messages.length > 0;
@@ -7402,11 +7402,21 @@ $("#contribution-open").addEventListener("click", () => {
 // boundary (first snapshot, room or generation change) only seeds the seen
 // set: history is not news, and the region restarts empty for the new room.
 let seenLogEventIds = new Set();
-function announceWorkArrivals(eventLog, boundary) {
-  const previous = seenLogEventIds;
-  seenLogEventIds = new Set(eventLog.map(event => event.id));
+let eventLogSeeded = false;
+function announceWorkArrivals(eventLog, boundary, pending = false) {
   const region = $("#work-announcement");
-  if (boundary) { region.textContent = ""; return; }
+  // The message window can paint before /events returns. That first snapshot
+  // has an empty log and must not count as the history seed, or the real
+  // tail would arrive as a room full of new work.
+  if (pending) {
+    if (boundary) { eventLogSeeded = false; seenLogEventIds = new Set(); region.textContent = ""; }
+    return;
+  }
+  const previous = seenLogEventIds;
+  const seed = boundary || !eventLogSeeded;
+  seenLogEventIds = new Set(eventLog.map(event => event.id));
+  eventLogSeeded = true;
+  if (seed) { region.textContent = ""; return; }
   const fresh = eventLog.filter(event => !previous.has(event.id));
   if (!fresh.length) return;
   const text = workArrivalAnnouncements(fresh, {

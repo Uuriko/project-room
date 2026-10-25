@@ -125,6 +125,27 @@ function matchesParked(node, selector, root) {
   }
 }
 
+function scopeSeesParked(scope) {
+  if (!scope) return true;
+  for (const root of parkedRoots) {
+    if (scope === root || scope.contains?.(root)) return true;
+  }
+  return false;
+}
+
+// A render of the message list calls querySelectorAll on nodes that do not
+// contain a dialog. Searching every parked dialog from those calls held
+// own-send behind the parent branch.
+function elementTouchesParked(scope) {
+  if (parkedRoots.size === 0 || !scope) return false;
+  if (scopeSeesParked(scope)) return true;
+  for (const root of parkedRoots) {
+    const saved = PARKED.get(root);
+    if (saved?.fragment.contains(scope)) return true;
+  }
+  return false;
+}
+
 function fragmentVisibleTo(scope, root) {
   if (!scope) return true;
   if (scope === root || scope.contains(root)) return true;
@@ -221,11 +242,14 @@ function patchPrototypes() {
   };
   elProto.querySelector = function querySelector(selector) {
     const hit = nativeElQuery.call(this, selector);
-    if (hit) return hit;
+    if (hit || !elementTouchesParked(this)) return hit;
     return firstInParked(this.ownerDocument, selector, this);
   };
   elProto.querySelectorAll = function querySelectorAll(selector) {
-    return [...nativeElQueryAll.call(this, selector), ...allInParked(this.ownerDocument, selector, this)];
+    const found = [...nativeElQueryAll.call(this, selector)];
+    if (!elementTouchesParked(this)) return found;
+    found.push(...allInParked(this.ownerDocument, selector, this));
+    return found;
   };
 }
 
