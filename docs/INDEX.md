@@ -119,3 +119,4 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 - [Adaptive Project Room master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md)
 
 - [Build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md)
+- [ARCHIVED-WORK.md](ARCHIVED-WORK.md): closed PRs from the 2026-10-25 cleanup, with head SHAs for restore
