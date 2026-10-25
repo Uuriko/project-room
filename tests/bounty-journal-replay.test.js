@@ -198,7 +198,8 @@ function receiptSet(escrow, roomId) {
 const JOURNAL_COLUMNS = ["seq", "room_id", "entry_id", "account_id", "at", "kind",
   "bounty_id", "lot_id", "amount", "lot_state", "prev_hash", "hash", "memo", "actor_kind", "actor_id",
   "track", // track joins the journal hash core when present: the replay must carry it.
-  "provenance_json"]; // #3612: outside the hash core, but history() receipts surface it — the replay must carry it too.
+  "provenance_json", // #3612: outside the hash core, but history() receipts surface it — the replay must carry it too.
+  "obligation_stamp_json"]; // #3617: outside the hash core; replay must carry it so stamped legs stay comparable.
 const canonicalRow = r => JOURNAL_COLUMNS.map(c => r[c] ?? null);
 
 function importJournal(db, roomId, rows) {

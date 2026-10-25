@@ -70,6 +70,7 @@ import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_C
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { buildProvenance, claimedProvenanceOf, sessionInstanceIdFor } from "./records-provenance.mjs";
+import { RECORDS_POLICY_VERSION, obligationStamp, recordRefusalBestEffort, listRefusals } from "./refusal-journal.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -234,7 +235,8 @@ export const bountyEscrowSchema = `
     actor_id TEXT,
     receipt_id TEXT,
     track TEXT,
-    provenance_json TEXT
+    provenance_json TEXT,
+    obligation_stamp_json TEXT
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
@@ -621,6 +623,12 @@ export function bountyProvenance(kind, bounty, actorLane, claimedInput = null) {
   } catch (error) { fail("invalid_input", error.message); }
 }
 
+
+// #3617 (R-7): the obligation stamp (ceiling in force + policy version +
+// ratified marker) is deliberately NOT part of this core. Like receipt_id
+// and #4041's provenance_json it rides a nullable column outside the hash,
+// so stamping a leg never rewrites what its hash attests and pre-stamp
+// rows (NULL stamp) keep verifying against their original hashes.
 export function journalEntryHash(entry) {
   const coreParts = [entry.prev_hash, entry.entry_id, entry.account_id, entry.at, entry.kind,
     entry.bounty_id ?? "", entry.lot_id ?? "", String(entry.amount), entry.lot_state,
@@ -1028,6 +1036,10 @@ export class BountyEscrow {
     // pre-#3612 rows (NULL provenance = written before stamps existed)
     // keep verifying against their original hashes.
     addCol("bounty_journal", "provenance_json TEXT");
+    // #3617: the obligation stamp, as JSON. Like receipt_id it is
+    // deliberately OUTSIDE the journal hash core, so pre-#3617 rows (NULL
+    // stamp = written before stamps existed) keep verifying.
+    addCol("bounty_journal", "obligation_stamp_json TEXT");
     addCol("bounty_events", "actor_kind TEXT");
     addCol("bounty_events", "before_state TEXT");
     addCol("bounty_events", "after_state TEXT");
@@ -1118,7 +1130,45 @@ export class BountyEscrow {
     return this._journalProvenanceColCache;
   }
 
-  _append({ roomId, accountId, at, kind, bountyId = null, lotId = null, amount, lotState, memo = null, actor = null, provenance = null }) {
+  // #3617: does this database's journal carry the obligation-stamp column?
+  // Write paths converge the schema first (_migrateColumns), so this is
+  // true in production; the check keeps direct legacy-schema test doubles
+  // writing without the column instead of failing on it (the #4041
+  // provenance guard pattern).
+  _journalStampCol() {
+    if (this._journalStampColCache === undefined) {
+      try {
+        this._journalStampColCache = this.db.prepare("PRAGMA table_info(bounty_journal)").all().some(row => row.name === "obligation_stamp_json");
+      } catch { this._journalStampColCache = false; }
+    }
+    return this._journalStampColCache;
+  }
+
+  // #3617 (R-7): the obligation stamp for a movement by `actor` under a
+  // ceiling. The global commitment ceiling in force is the MAX_CREDITS
+  // amount cap (enforced by toMillis on every amount); a probation-banded
+  // claimant's claim grant is governed by the tighter probation ceiling —
+  // claimBounty passes that ceiling explicitly.
+  _obligationStamp(actor, ceilingMillis = MAX_CREDITS * MILLIS_PER_CREDIT) {
+    return obligationStamp({ ceilingMillis, actor });
+  }
+
+  // #3617 (R-8): record a refused bounty action in the refusal journal.
+  // Called only from the public-method wrappers, AFTER the refusing
+  // transaction has rolled back — the probation packet's own-transaction
+  // discipline — so the record survives the refusal. Best-effort: a
+  // journaling fault never masks the refusal itself.
+  _recordRefusal({ roomId, action, actorId = null, subjectId = null, error, ceilingMillis = null }) {
+    recordRefusalBestEffort(this.db, {
+      roomId, surface: "bounty", actorId,
+      refusedAction: action, reasonCode: typeof error?.code === "string" ? error.code : "error",
+      ceilingMillis, subjectId,
+      detail: { message: String(error?.message ?? "").slice(0, 500) },
+      at: isoNow(this.nowMs()),
+    });
+  }
+
+  _append({ roomId, accountId, at, kind, bountyId = null, lotId = null, amount, lotState, memo = null, actor = null, provenance = null, stamp = null }) {
     check(LOT_STATES.includes(lotState), "invalid_input", `unknown lot state "${lotState}"`);
     check(Number.isSafeInteger(amount) && amount !== 0, "invalid_amount", "journal amount must be a non-zero integer");
     check(JOURNAL_KIND_TRACK.has(kind), "invalid_input", `unknown journal kind "${kind}"`);
@@ -1133,14 +1183,26 @@ export class BountyEscrow {
     const hash = journalEntryHash({ prev_hash: prevHash, entry_id: entryId, account_id: accountId,
       at, kind, bounty_id: bountyId, lot_id: lotId, amount, lot_state: lotState, memo,
       actor_kind: actorKind, actor_id: actorId, track });
-    // #3612: provenance_json rides OUTSIDE the hash core (like
-    // receipt_id): stamping a movement must never rewrite what its hash
-    // attests, and rows written before stamps existed stay NULL.
-    if (provenance !== null && this._journalProvenanceCol()) {
+    // #3612 provenance_json and #3617 obligation_stamp_json both ride
+    // OUTSIDE the hash core (like receipt_id). A leg writes whichever
+    // columns this database has and this movement carries.
+    const writeProvenance = provenance !== null && this._journalProvenanceCol();
+    const writeStamp = stamp !== null && this._journalStampCol();
+    if (writeProvenance && writeStamp) {
+      this.db.prepare(`INSERT INTO bounty_journal
+        (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track, provenance_json, obligation_stamp_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track, JSON.stringify(provenance), JSON.stringify(stamp));
+    } else if (writeProvenance) {
       this.db.prepare(`INSERT INTO bounty_journal
         (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track, provenance_json)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track, JSON.stringify(provenance));
+    } else if (writeStamp) {
+      this.db.prepare(`INSERT INTO bounty_journal
+        (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track, obligation_stamp_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track, JSON.stringify(stamp));
     } else {
       this.db.prepare(`INSERT INTO bounty_journal
         (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
@@ -1155,10 +1217,10 @@ export class BountyEscrow {
   // verifiable receipt for the movement (bounty-receipts.mjs). Only journal
   // kinds in SIGNABLE_KINDS may carry one; when no signer is configured the
   // receipt comes back null and the movement proceeds unsigned.
-  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null, provenance = null }) {
+  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null, provenance = null, stamp = null }) {
     check(Number.isSafeInteger(amountMillis) && amountMillis > 0, "invalid_amount", "movement amount must be positive");
-    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor, provenance });
-    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor, provenance });
+    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor, provenance, stamp });
+    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor, provenance, stamp });
     const movement = { debitEntryId: debit.entryId, creditEntryId: credit.entryId, lotId, receipt: null };
     if (receipt !== null && receipt !== undefined) {
       const expected = SIGNABLE_KINDS.get(kind);
@@ -1753,7 +1815,20 @@ export class BountyEscrow {
   }
 
   // --- claim / submit / accept --------------------------------------------------------
-  claimBounty(roomId, bountyId, { claimant, actor } = {}) {
+  // #3617 (R-8): the public claim path records every refusal in the
+  // refusal journal (see _claimBounty for the grant path). The record is
+  // written here, after the refusing transaction has rolled back, so it
+  // survives — the probation packet's discipline, generalized.
+  claimBounty(roomId, bountyId, opts = {}) {
+    try { return this._claimBounty(roomId, bountyId, opts); }
+    catch (error) {
+      this._recordRefusal({ roomId, action: "claim", actorId: opts?.claimant ?? null,
+        subjectId: bountyId, error });
+      throw error;
+    }
+  }
+
+  _claimBounty(roomId, bountyId, { claimant, actor } = {}) {
     this._ensure();
     const lane = this._requireLane(roomId, claimant, "claimant");
     // Slice 4: the reputation claim gate runs BEFORE the write transaction.
@@ -1808,8 +1883,13 @@ export class BountyEscrow {
       this._requirePayable(roomId, lane, bondMillis, "claim bond");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
+      // #3617 (R-7): a claim grant is an obligation-creating record — its
+      // journal legs carry the ceiling in force for this claimant (the
+      // probation ceiling when the gate capped them, else the global cap),
+      // the policy version, and the ratification marker.
+      const stamp = this._obligationStamp(act, eligibility.maxClaimMillis ?? MAX_CREDITS * MILLIS_PER_CREDIT);
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
-        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId,
+        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId, stamp,
         memo: `anti-flake claim bond for ${bountyId}${flake.bondMultiplier > 1 ? ` (${flake.bondMultiplier}x ladder)` : ""}`, actor: act,
         receipt: { type: "bond-locked", payload: { bondKind: "claim", fromAccount: lane } } });
       bounty.claimant = lane;
@@ -1817,9 +1897,9 @@ export class BountyEscrow {
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.claimed",
         { bountyId, actor: act, before: "funded", after: "claimed",
-          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung } });
+          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung, obligationStamp: stamp } });
       return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+        receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event, obligationStamp: stamp,
           ...this._signed(movement) } };
     });
   }
@@ -2119,6 +2199,13 @@ export class BountyEscrow {
     });
   }
 
+  // #3617 (R-8): the per-room / per-actor refusal query for this room's
+  // bounty surface (surface "bounty" unless a wider surface is named).
+  // Read-only: a room whose journal was never written reads as empty.
+  listRefusals(roomId, { actorId = null, surface = "bounty", limit = 100 } = {}) {
+    return this.store.readTransaction(() => listRefusals(this.db, { roomId, actorId, surface, limit }));
+  }
+
   // Slice 10: arbiter inspection of review packets. Room-scoped read;
   // packets are immutable once created.
   getReviewPackets(roomId, { bountyId = null } = {}) {
@@ -2176,7 +2263,16 @@ export class BountyEscrow {
     return false;
   }
 
-  acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor, modelVersion, harnessVersion, environment, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
+  acceptWork(roomId, bountyId, opts = {}) {
+    try { return this._acceptWork(roomId, bountyId, opts); }
+    catch (error) {
+      this._recordRefusal({ roomId, action: "accept", actorId: opts?.acceptor ?? null,
+        subjectId: bountyId, error });
+      throw error;
+    }
+  }
+
+  _acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor, modelVersion, harnessVersion, environment, claimedModelVersion, claimedHarnessVersion, claimedEnvironment } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, acceptor, "acceptor");
@@ -2226,7 +2322,7 @@ export class BountyEscrow {
       const lotId = newId("lot_");
       this._requireFinalityMove(bounty, "attribute");
       const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.claimant, state: "attributed" },
-        amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
+        amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId, stamp: this._obligationStamp(act),
         memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act, provenance: submissionProvenance,
         receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
       bounty.attestation = Object.freeze({ ...verifierAttestation, citations, provenance: attestationProvenance,
@@ -2275,12 +2371,10 @@ export class BountyEscrow {
       workerMillis, workerCredits: toCredits(workerMillis),
       refundMillis, refundCredits: toCredits(refundMillis),
       reason, settledAt: at,
-      // #3612: the settlement record carries the submission round's
-      // provenance — server-derived instance + poster principal; the
-      // settledBy actor above is the settlement's own actor. No model
-      // claim is stamped here: a settlement is a verdict on the work,
-      // and the work's claimed model already rides its submission stamp.
       provenance: bountyProvenance("bounty-submission", bounty, bounty.claimant),
+      ceilingMillis: MAX_CREDITS * MILLIS_PER_CREDIT,
+      policyVersion: RECORDS_POLICY_VERSION,
+      ratified: obligationStamp({ actor }).ratified,
       settledBy: actor ? Object.freeze({ kind: actor.kind, id: actor.id }) : null });
     bounty.resolution = Object.freeze({ ...(bounty.resolution ?? {}), settlement });
     this._saveBounty(bounty);
@@ -2296,7 +2390,17 @@ export class BountyEscrow {
   // bad" forfeits the claim bond to the pool and records a flake strike, the
   // same treatment as a dispute-upheld cancel. Idempotent: a second call
   // replays the stored verdict without new journal movement.
-  rejectWork(roomId, bountyId, { rejector, reason, actor } = {}) {
+  // #3617 (R-8): refused rejections are refusal-journal records too.
+  rejectWork(roomId, bountyId, opts = {}) {
+    try { return this._rejectWork(roomId, bountyId, opts); }
+    catch (error) {
+      this._recordRefusal({ roomId, action: "reject", actorId: opts?.rejector ?? null,
+        subjectId: bountyId, error });
+      throw error;
+    }
+  }
+
+  _rejectWork(roomId, bountyId, { rejector, reason, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, rejector, "rejector");
@@ -2337,7 +2441,7 @@ export class BountyEscrow {
       this._requireFinalityMove(bounty, "refund");
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
-        amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
+        amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId, stamp: this._obligationStamp(act),
         memo: `free-miss: verification rejected by ${lane} — escrow returned to poster, worker settles 0`, actor: act,
         receipt: { type: "refund-issued", payload: { reason: "verification-rejected", refundTo: bounty.poster } } });
       // 3. Anti-flake: work judged bad forfeits the claim bond to the pool
@@ -2927,13 +3031,13 @@ export class BountyEscrow {
       // Finality: payout requires the bounty to sit in approved (vested).
       this._requireFinalityMove(bounty, "payout");
       movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
-        amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
+        amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor, stamp: this._obligationStamp(actor),
         receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
           grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
       if (fee > 0) {
         this._requireFinalityMove(bounty, "fee");
         this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
-          amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+          amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor, stamp: this._obligationStamp(actor) });
       }
     }
     // The claim bond was an anti-flake lock, not a fee: it comes home now.
@@ -2992,7 +3096,18 @@ export class BountyEscrow {
     return null;
   }
 
-  finalizeBounty(roomId, bountyId, { caller } = {}) {
+  // #3617 (R-8): refused finalizations (the payment path) are
+  // refusal-journal records too.
+  finalizeBounty(roomId, bountyId, opts = {}) {
+    try { return this._finalizeBounty(roomId, bountyId, opts); }
+    catch (error) {
+      this._recordRefusal({ roomId, action: "finalize", actorId: typeof opts?.caller === "string" ? opts.caller : null,
+        subjectId: bountyId, error });
+      throw error;
+    }
+  }
+
+  _finalizeBounty(roomId, bountyId, { caller } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
@@ -3075,7 +3190,16 @@ export class BountyEscrow {
   }
 
   // --- rage-quit analog: payable -> payable transfers --------------------------------
-  transfer(roomId, { from, to, amount, actor } = {}) {
+  // #3617 (R-8): refused payments (transfers) are refusal-journal records.
+  transfer(roomId, opts = {}) {
+    try { return this._transfer(roomId, opts); }
+    catch (error) {
+      this._recordRefusal({ roomId, action: "transfer", actorId: opts?.from ?? null, error });
+      throw error;
+    }
+  }
+
+  _transfer(roomId, { from, to, amount, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);

@@ -147,6 +147,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // have no code path to it, and the packet journal verifies its own schema
   // on open; rows never drive bans, slashes, or balances.
   "bounty_reputation_packets",
+  // #3617 (R-8): refusal_journal (server/refusal-journal.mjs) — first-class
+  // refusal records for bounty, public-work and board surfaces. Purely
+  // additive and intentionally NOT fenced: older writers have no code path
+  // to it, and rows never drive bans, slashes, or balances.
+  "refusal_journal",
   // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
   // room_verification_policy (per-room gate). Purely additive and
   // intentionally NOT fenced: older writers have no code path to them, and
