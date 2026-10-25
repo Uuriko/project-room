@@ -2,6 +2,7 @@ name: machine
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "machine/**"
       - ".github/workflows/machine.yml"
@@ -22,6 +23,7 @@ concurrency:
 
 jobs:
   unit:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -34,6 +36,7 @@ jobs:
       - run: npm run test:machine
       - run: node machine/build.mjs --check
   darwin-check:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
