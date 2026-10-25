@@ -141,3 +141,14 @@ export function renderPrComment(claim, room, receipt, options = {}) {
   else lines.push(footer);
   return cap(lines.filter(Boolean).join("\n"), marker);
 }
+
+// Room thread reply when a linked pull merges. One plain sentence plus the
+// pull URL. Not a GitHub comment: no marker, footer, or markdown escapes.
+export function renderMergeReply({ url, title } = {}) {
+  const href = httpsUrl(url);
+  if (!href) return "";
+  const name = typeof title === "string"
+    ? [...title.replace(CONTROLS, "").replace(/\s+/g, " ").trim()].slice(0, 120).join("")
+    : "";
+  return name ? `${name} is done. ${href}` : `Done. ${href}`;
+}
