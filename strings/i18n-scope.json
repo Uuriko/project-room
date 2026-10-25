@@ -28,6 +28,7 @@
   "src/board.js",
   "src/browser-session.js",
   "src/chat-suggestions.js",
+  "src/client-transport.js",
   "src/client.js",
   "src/clipboard.js",
   "src/composer-files.js",
