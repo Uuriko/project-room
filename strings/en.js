@@ -543,5 +543,19 @@ export default {
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "tabs.updates.one": "1 update",
+  "tabs.updates.many": "{count} updates",
+  "tabs.update.line": "{name}: {text}",
+  "tabs.update.unnamed": "Update",
+  "tabs.col.needs": "Needs you",
+  "tabs.col.ready": "Ready",
+  "tabs.col.claimed": "Claimed",
+  "tabs.col.review": "In review",
+  "tabs.col.done": "Done",
+  "tabs.stale": "Stale claim",
+  "tabs.receipts.loading": "Loading receipts.",
+  "tabs.receipts.empty": "No public receipts for this room.",
+  "tabs.receipts.error": "Receipts didn't load.",
+  "tabs.receipts.retry": "Try again"
 };

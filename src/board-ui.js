@@ -6,6 +6,7 @@ import { workStatus } from "./work-status.js";
 
 import { needsMeHtml } from "./board-mine.js";
 import { uiText } from "./strings.js";
+import { fixedBoardColumns, readRoomTabsFlag, staleClaim } from "./room-tabs.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -709,7 +710,7 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, fixedView = false) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -815,7 +816,10 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  const card = `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  if (!fixedView || !staleClaim(item, now)) return card;
+  const badge = ["<p class=\"claim-stale\">", escapeHtml(uiText("tabs.stale")), "</p><div class=\"claim-actions\">"].join("");
+  return card.replace("<div class=\"claim-actions\">", badge);
 }
 
 function newItemForm() {
@@ -878,7 +882,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null, fixedView = false } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -900,7 +904,14 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const fixedRows = fixedView ? fixedBoardColumns(columns) : null;
+  const columnSections = fixedRows
+    ? fixedRows.map(([id, rows]) => {
+      const body = rows.map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, true)).join("") || ["<p class=\"form-hint\">", colEmpty, "</p>"].join("");
+      const heading = escapeHtml(uiText(`tabs.col.${id}`));
+      return ["<section aria-labelledby=\"board-col-", id, "\"><h3 id=\"board-col-", id, "\">", heading, "</h3>", body, "</section>"].join("");
+    }).join("")
+    : COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
@@ -999,7 +1010,8 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy,
+      fixedView: readRoomTabsFlag(globalThis.location?.search ?? "", globalThis.sessionStorage ?? null)
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");

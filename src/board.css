@@ -95,3 +95,32 @@
 @media (prefers-reduced-motion: reduce) {
   .sk-line { animation: none; }
 }
+
+.room-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line-soft); }
+.room-tabs button { min-height: 44px; padding: 0 var(--space-3); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.room-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+.room-updates { margin: var(--space-2) var(--space-3) 0; }
+.room-updates-chip { min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: 99px; background: var(--panel); color: var(--muted); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.room-updates-list { margin: var(--space-2) 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--text-sm); }
+.room-updates-list li { padding: var(--space-1) 0; overflow-wrap: anywhere; }
+.room-receipts { padding: var(--space-3); display: grid; gap: var(--space-2); }
+.room-receipts-list { margin: 0; padding: 0; list-style: none; display: grid; }
+.room-receipts-list a { display: flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
+#room-receipts-retry { min-height: 44px; }
+.claim-stale { color: var(--amber); font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+body.room-tab-work #message-list,
+body.room-tab-work #message-form,
+body.room-tab-work #typing-indicator,
+body.room-tab-work #chat-suggestions,
+body.room-tab-work #reply-bar,
+body.room-tab-work #new-messages-button,
+body.room-tab-work #thread-bar,
+body.room-tab-work #room-updates,
+body.room-tab-receipts #message-list,
+body.room-tab-receipts #message-form,
+body.room-tab-receipts #typing-indicator,
+body.room-tab-receipts #chat-suggestions,
+body.room-tab-receipts #reply-bar,
+body.room-tab-receipts #new-messages-button,
+body.room-tab-receipts #thread-bar,
+body.room-tab-receipts #room-updates { display: none !important; }

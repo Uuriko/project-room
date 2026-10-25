@@ -59,7 +59,8 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
-import { paintClaimChat } from "./board-ui.js";
+import { paintClaimChat, claimUpdateText, collapseClaimUpdates } from "./board-ui.js";
+import { partitionConversation, readRoomTabsFlag, receiptEntries, updateLine, updatesLabel } from "./room-tabs.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 import "./entry-started.js";
@@ -325,6 +326,14 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+let roomTab = "conversation";
+let conversationFolded = false;
+let roomTabUpdates = 0;
+let roomUpdatesOpen = false;
+let foldedUpdateMessages = [];
+let receiptsLoadedFor = "";
+let receiptsFlight = "";
+let syncBoardPanel = () => {};
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -512,6 +521,9 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    roomTab = "conversation"; conversationFolded = false; roomTabUpdates = 0; roomUpdatesOpen = false; foldedUpdateMessages = [];
+    receiptsLoadedFor = ""; receiptsFlight = "";
+    syncRoomTabs();
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
@@ -2294,6 +2306,125 @@ function renderTyping(typists) {
   el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
   el.hidden = false;
 }
+function roomTabsOn() {
+  return readRoomTabsFlag(globalThis.location?.search ?? "", globalThis.sessionStorage ?? null);
+}
+function placeBoardPanel(inWork) {
+  const panel = $("#board-panel");
+  const pane = $("#room-work-pane");
+  const dialog = $("#board-dialog");
+  if (!panel || !pane || !dialog) return;
+  if (inWork) {
+    if (dialog.open) dialog.close();
+    if (panel.parentElement !== pane) pane.append(panel);
+    if (!panel.open) panel.open = true;
+    syncBoardPanel();
+    return;
+  }
+  if (panel.parentElement !== dialog) dialog.append(panel);
+}
+function paintFoldedUpdates(list) {
+  list.replaceChildren();
+  const members = state?.members ?? {};
+  for (const message of foldedUpdateMessages) {
+    const row = document.createElement("li");
+    row.textContent = updateLine(message, members);
+    list.append(row);
+  }
+  for (const group of collapseClaimUpdates(state?.eventLog)) {
+    const row = document.createElement("li");
+    row.textContent = claimUpdateText(group.event, members);
+    list.append(row);
+  }
+}
+function syncRoomTabs() {
+  const on = Boolean(state) && roomTabsOn();
+  const tab = on ? roomTab : "conversation";
+  const nav = $("#room-tabs");
+  if (nav) nav.hidden = !on;
+  document.body.classList.toggle("room-tab-work", on && tab === "work");
+  document.body.classList.toggle("room-tab-receipts", on && tab === "receipts");
+  for (const id of ["conversation", "work", "receipts"]) {
+    const button = $(`#room-tab-${id}`);
+    if (button) button.setAttribute("aria-selected", id === tab ? "true" : "false");
+  }
+  const conversation = !on || tab === "conversation";
+  const chip = $("#room-updates");
+  const label = conversation ? updatesLabel(roomTabUpdates) : "";
+  if (chip) chip.hidden = !label;
+  const button = $("#room-updates-chip");
+  if (button && label) {
+    button.textContent = label;
+    button.setAttribute("aria-expanded", roomUpdatesOpen ? "true" : "false");
+  }
+  const lines = $("#room-updates-list");
+  if (lines) {
+    const open = Boolean(conversation && label && roomUpdatesOpen);
+    lines.hidden = !open;
+    if (open) paintFoldedUpdates(lines);
+  }
+  const workPane = $("#room-work-pane");
+  const receiptsPane = $("#room-receipts-pane");
+  if (workPane) workPane.hidden = !(on && tab === "work");
+  if (receiptsPane) receiptsPane.hidden = !(on && tab === "receipts");
+  placeBoardPanel(on && tab === "work");
+  if (on && tab === "receipts") void loadRoomReceipts();
+}
+function selectRoomTab(next) {
+  if (next !== "conversation" && next !== "work" && next !== "receipts") return;
+  roomTab = next;
+  if (!state || next === "conversation") renderMessages();
+  else syncRoomTabs();
+}
+async function loadRoomReceipts() {
+  const roomId = state?.room?.id;
+  const status = $("#room-receipts-status");
+  const list = $("#room-receipts-list");
+  const retry = $("#room-receipts-retry");
+  if (!roomId || !status || !list) return;
+  if (receiptsLoadedFor === roomId || receiptsFlight === roomId) return;
+  receiptsFlight = roomId;
+  status.textContent = uiText("tabs.receipts.loading");
+  list.replaceChildren();
+  if (retry) retry.hidden = true;
+  try {
+    const response = await fetch(`/api/public/receipts?room=${encodeURIComponent(roomId)}&limit=20`, { credentials: "same-origin" });
+    const body = await response.json().catch(() => null);
+    if (state?.room?.id !== roomId) return;
+    if (!response.ok || !body) throw new Error("receipts");
+    const entries = receiptEntries(body);
+    receiptsLoadedFor = roomId;
+    status.textContent = entries.length ? "" : uiText("tabs.receipts.empty");
+    for (const entry of entries) {
+      const row = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = entry.href;
+      link.textContent = entry.title;
+      row.append(link);
+      list.append(row);
+    }
+  } catch {
+    if (state?.room?.id !== roomId) return;
+    receiptsLoadedFor = "";
+    status.textContent = uiText("tabs.receipts.error");
+    if (retry) retry.hidden = false;
+  } finally {
+    if (receiptsFlight === roomId) receiptsFlight = "";
+  }
+}
+$("#room-tabs")?.addEventListener("click", event => {
+  const tab = event.target.closest("[data-room-tab]");
+  if (!tab || !$("#room-tabs").contains(tab)) return;
+  selectRoomTab(tab.dataset.roomTab);
+});
+$("#room-updates-chip")?.addEventListener("click", () => {
+  roomUpdatesOpen = !roomUpdatesOpen;
+  syncRoomTabs();
+});
+$("#room-receipts-retry")?.addEventListener("click", () => {
+  receiptsLoadedFor = "";
+  void loadRoomReceipts();
+});
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
@@ -2316,7 +2447,20 @@ function renderMessages() {
   if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
   const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
-  const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
+  let { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
+  const foldConversation = Boolean(state) && !currentThreadId && roomTabsOn() && roomTab === "conversation";
+  conversationFolded = foldConversation;
+  if (foldConversation) {
+    const part = partitionConversation(allMessages, state.members);
+    const again = windowTimeline(part.messages, shownLimit);
+    messages = again.messages;
+    hiddenCount = again.hidden;
+    foldedUpdateMessages = part.updates;
+    roomTabUpdates = part.updates.length + collapseClaimUpdates(state.eventLog).length;
+  } else {
+    foldedUpdateMessages = [];
+    roomTabUpdates = 0;
+  }
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
@@ -2381,7 +2525,7 @@ function renderMessages() {
   // messages, and hiding older cards would make that work unreachable from the
   // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
   // first shown message simply render above it, after the pager.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  const workEntries = currentThreadId || !state || foldConversation ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2480,7 +2624,8 @@ function renderMessages() {
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length && !(foldConversation && roomTabUpdates)) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  else if (!messages.length && !workEntries.length) list.replaceChildren();
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -2528,6 +2673,7 @@ function renderMessages() {
     if (now.top < 0 || now.bottom > innerHeight) settledFocus.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
+  syncRoomTabs();
 }
 function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
@@ -7904,7 +8050,10 @@ const ready = (async () => {
     $("#board-panel").open = true;
     board.sync();
   };
-  $("#tasks-board-open").addEventListener("click", openBoard);
+  $("#tasks-board-open").addEventListener("click", opener => {
+    if (state && roomTabsOn()) { selectRoomTab("work"); return; }
+    openBoard(opener);
+  });
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
@@ -7934,9 +8083,22 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
+  chooseRoomAction = id => {
+    if (id === "board") {
+      const opener = roomActionsContext?.opener;
+      closeRoomActions(false);
+      if (state && roomTabsOn()) { selectRoomTab("work"); return; }
+      openBoard(opener);
+      return;
+    }
+    priorChoose(id);
+  };
   // JDOT-COH-NAV end
-  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
+  syncBoardPanel = () => { board.sync(); };
+  const paintChat = () => {
+    if (!state || conversationFolded) return;
+    paintClaimChat(state, $("#message-list"));
+  };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;

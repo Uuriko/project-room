@@ -105,6 +105,7 @@
   "src/room-mcp-join.js",
   "src/room-roster.js",
   "src/room-setup-prompt.js",
+  "src/room-tabs.js",
   "src/room-templates.js",
   "src/seed.js",
   "src/service-origin.js",

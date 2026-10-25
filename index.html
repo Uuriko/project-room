@@ -212,6 +212,18 @@
               </details>
             </div>
           </header>
+          <div id="room-tabs" class="room-tabs" role="tablist" aria-label="Room" hidden>
+            <button type="button" role="tab" id="room-tab-conversation" data-room-tab="conversation" aria-selected="true" aria-controls="message-list">Conversation</button>
+            <button type="button" role="tab" id="room-tab-work" data-room-tab="work" aria-selected="false" aria-controls="room-work-pane">Work</button>
+            <button type="button" role="tab" id="room-tab-receipts" data-room-tab="receipts" aria-selected="false" aria-controls="room-receipts-pane">Receipts</button>
+          </div>
+          <div id="room-work-pane" role="tabpanel" aria-labelledby="room-tab-work" hidden></div>
+          <div id="room-receipts-pane" class="room-receipts" role="tabpanel" aria-labelledby="room-tab-receipts" hidden>
+            <p id="room-receipts-status" role="status"></p>
+            <ol id="room-receipts-list" class="room-receipts-list"></ol>
+            <p><button type="button" id="room-receipts-retry" class="button ghost" hidden>Try again</button></p>
+            <p><a href="/receipts">All receipts</a></p>
+          </div>
           <section id="needs-attention" aria-label="Needs your attention" hidden>
             <header class="attention-header">
               <h3>Decisions <span id="attention-count" class="sr-only"></span></h3>
@@ -246,6 +258,10 @@
             <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
           </details>
           <button id="work-navigation-return" class="button ghost" type="button" hidden>Back to room</button>
+          <div id="room-updates" class="room-updates" hidden>
+            <button type="button" id="room-updates-chip" class="room-updates-chip" aria-expanded="false" aria-controls="room-updates-list"></button>
+            <ol id="room-updates-list" class="room-updates-list" hidden></ol>
+          </div>
           <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
           <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
