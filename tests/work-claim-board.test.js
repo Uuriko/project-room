@@ -559,16 +559,15 @@ test("land queue rows copy into land claims once and the list stays the same sha
   assert.equal(listed.value.items[0].repo, "acme/demo");
 });
 
-test("board v2 routes answer 410 and point at work claims", async t => {
+test("board v2 routes are not served and the retired tables stay", async t => {
   const { origin, ownerKey } = await fixture(t);
   for (const path of ["/board/v2/claims", "/board/v2/health", "/board/v2/claims/task-1/not-a-route"]) {
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       headers: { authorization: `Bearer ${ownerKey}` }
     });
     const body = await response.json();
-    assert.equal(response.status, 410, path);
-    assert.equal(body.error.code, "board_v2_retired");
-    assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+    assert.equal(response.status, 404, path);
+    assert.equal(body.error.code, "not_found");
   }
   const near = await fetch(`${origin}/api/rooms/commons/board/v2extra`, {
     headers: { authorization: `Bearer ${ownerKey}` }

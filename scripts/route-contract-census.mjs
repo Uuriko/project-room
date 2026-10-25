@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { extractLegacyRoutes, loadRouteSources, templateKey } from "./routes-inventory.mjs";
 import { openapiOperations } from "./open-routes.mjs";
-import { servedRouteTemplates, routeSources } from "./route-docs-check.mjs";
+import { servedRouteTemplates, routeSources, boardV2SpecDeferredKeys } from "./route-docs-check.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { DISCOVERABILITY_ROUTES } from "../server/discoverability.mjs";
 
@@ -102,7 +102,11 @@ export function buildCensus(root) {
   }
 
   const phantoms = { docs: [], spec: [] };
-  for (const [k, op] of docOps) if (!served.has(k)) phantoms.docs.push(`${k} (${op.path})`);
+  const deferredBoard = boardV2SpecDeferredKeys();
+  for (const [k, op] of docOps) {
+    if (served.has(k) || deferredBoard.has(templateKey(op.path))) continue;
+    phantoms.docs.push(`${k} (${op.path})`);
+  }
   for (const [k, op] of specOps) if (!served.has(k)) phantoms.spec.push(`${k} (auth=${op.auth})`);
 
   records.sort((a, b) => a.template === b.template ? a.method.localeCompare(b.method) : a.template.localeCompare(b.template));

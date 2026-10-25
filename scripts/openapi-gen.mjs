@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { openapiOperations } from "./open-routes.mjs";
-import { routeDocsDrift, routeSources } from "./route-docs-check.mjs";
+import { routeDocsDrift, routeSources, boardV2SpecDeferredKeys } from "./route-docs-check.mjs";
 import { allowlistProblems, extractLegacyRoutes, loadRouteSources, templateKey } from "./routes-inventory.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 
@@ -31,11 +31,14 @@ export function methodCoverageProblems(operations, legacyRoutes, tableRoutes = [
   const have = new Set();
   for (const row of [...legacyRoutes, ...tableRoutes]) have.add(`${row.method} ${templateKey(row.path)}`);
   const problems = [];
+  const deferredBoard = boardV2SpecDeferredKeys();
   for (const op of operations) {
     const key = templateKey(op.path);
     const id = `${op.method} ${key}`;
     if (have.has(id)) continue;
     if (op.method === "HEAD" && have.has(`GET ${key}`)) continue;
+    // Board v2 stays in docs/openapi.yaml until that file is free to edit.
+    if (deferredBoard.has(key)) continue;
     problems.push(`documented operation is not in the route table or the legacy allowlist: ${id}`);
   }
   return problems;

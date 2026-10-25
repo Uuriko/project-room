@@ -31,6 +31,26 @@ export class ReturnBrief {
     this.onChange();
     return this.fetchPage(chain);
   }
+  // A caught-up reader has nothing new. Skip the request and keep an empty
+  // brief so the panel can say so without a body on the wire.
+  refreshIfUnread(unread) {
+    if (unread > 0) return this.refresh();
+    return this.showCaughtUp();
+  }
+  showCaughtUp() {
+    const owner = this.owner();
+    if (!owner) { this.reset(); return Promise.resolve(); }
+    if (this.owns(this.chain) && this.chain.acknowledging) return Promise.resolve();
+    const through = this.client.sequence;
+    this.chain = { owner, loading: false };
+    this.brief = { caughtUp: true, roomId: owner.room, viewerId: owner.viewer,
+      history: { cursor: through, evaluatedThrough: through, items: [], hasMore: false, continuation: null },
+      current: { evaluatedThrough: through, needsAttention: [], workInvolvingMe: [] } };
+    this.message = "";
+    this.reconciliationRequired = false;
+    this.onChange();
+    return Promise.resolve();
+  }
   more() {
     const chain = this.chain;
     if (!chain || !this.owns(chain)) { this.reset(); return Promise.resolve(); }
@@ -50,6 +70,13 @@ export class ReturnBrief {
         if (page.roomId !== chain.owner.room || page.viewerId !== chain.owner.viewer) {
           this.client.endAccess();
           this.reset();
+          return;
+        }
+        if (page.caughtUp) {
+          if (continuation) throw new Error("The catch-up page changed. Refresh your catch-up to continue.");
+          this.brief = page;
+          this.message = "";
+          this.reconciliationRequired = false;
           return;
         }
         // A brief can beat the live snapshot. Reconcile before exposing links

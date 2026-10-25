@@ -19,11 +19,12 @@ import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
 
 export const templateKey = path => path.replace(/\{[^}]+\}|:[A-Za-z]+/g, "{}");
 
-// Retired Board v2 surface. server/http.mjs matches the whole /board/v2
-// prefix with one RegExp and answers 410. A regex literal cannot express
-// that prefix: the route extractor only expands fully anchored
-// ([^/]{1,N}) templates. These are the documented paths that prefix covers.
-export const BOARD_V2_RETIRED_TEMPLATES = [
+// Board v2 routes are unserved. docs/openapi.yaml still lists them until
+// that file is free of the open-PR queue (DXFIX-17). These templates are a
+// deferred spec deletion: documented, not injected as served, and not a
+// failure of the docs gate. A pasted /board/v2 regex in server/http.mjs
+// does not put them back into the served set.
+export const BOARD_V2_SPEC_DEFERRED = [
   "/api/rooms/{id}/board/v2/board",
   "/api/rooms/{id}/board/v2/claims",
   "/api/rooms/{id}/board/v2/claims/{id}/heartbeat",
@@ -37,10 +38,8 @@ export const BOARD_V2_RETIRED_TEMPLATES = [
   "/api/rooms/{id}/board/v2/notes",
 ];
 
-const BOARD_V2_PREFIX_SOURCE = 'new RegExp("^/api/rooms/([^/]{1,384})/board/v2(?:/|$)")';
-
-export function httpRetiresBoardV2(http) {
-  return typeof http === "string" && http.includes(BOARD_V2_PREFIX_SOURCE);
+export function boardV2SpecDeferredKeys() {
+  return new Set(BOARD_V2_SPEC_DEFERRED.map(templateKey));
 }
 
 // One shared route set for the CLI gate and the test suite: every source
@@ -117,12 +116,6 @@ export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, wo
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
-  if (httpRetiresBoardV2(http)) {
-    for (const template of BOARD_V2_RETIRED_TEMPLATES) {
-      const key = templateKey(template);
-      if (!served.has(key)) served.set(key, template);
-    }
-  }
   // Required, not optional. Routes live in two files now, and a caller that
   // passed only http.mjs got a clean-looking report in which every plugin
   // route was "documented but not served" - which is how the test beside this
@@ -185,11 +178,17 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
   }
   if (documented.size < 20 || !documented.has("/api/rooms/{}/commands")) throw new Error("docs/openapi.yaml parse sanity failed");
   const failures = [];
+  const deferredKeys = boardV2SpecDeferredKeys();
+  let deferred = 0;
   for (const [key, template] of served) if (!documented.has(key)) failures.push(`served but not documented in docs/openapi.yaml: ${template}`);
-  for (const [key, path] of documented) if (!served.has(key)) failures.push(`documented in docs/openapi.yaml but not served: ${path}`);
+  for (const [key, path] of documented) {
+    if (served.has(key)) continue;
+    if (deferredKeys.has(key)) { deferred++; continue; }
+    failures.push(`documented in docs/openapi.yaml but not served: ${path}`);
+  }
   for (const op of operations) if (op.security === null && /^\/api\/(inbox|account-)/.test(op.path))
     failures.push(`${op.method} ${op.path} inherits the room-credential default; account routes must declare accountSession or security: []`);
-  return { failures, served: served.size, documented: documented.size, operations: operations.length };
+  return { failures, served: served.size, documented: documented.size, deferred, operations: operations.length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -199,5 +198,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.error("Route documentation drift:\n" + result.failures.map(f => `  ${f}`).join("\n"));
     process.exit(1);
   }
-  console.log(`Route documentation: ${result.served} served route templates, all in docs/openapi.yaml (${result.operations} operations).`);
+  console.log(`Route documentation: ${result.served} served route templates, all in docs/openapi.yaml (${result.operations} operations, ${result.deferred} board/v2 templates deferred).`);
 }

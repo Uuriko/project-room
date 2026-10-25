@@ -148,7 +148,7 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full", acceptEmpty = false } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
@@ -158,6 +158,7 @@ export class RoomClient {
           ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+      if (acceptEmpty && response.status === 204) return null;
       const body = await response.json();
       if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
       return body;
@@ -956,8 +957,20 @@ export class RoomClient {
     if (horizon !== null) { params.set("horizon", horizon); params.set("after", after); params.set("cursor", cursor); }
     if (limit !== null) params.set("limit", limit);
     const query = params.toString();
-    const brief = await this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));
+    const brief = await this.request(this.path(`/return-brief${query ? `?${query}` : ""}`), { acceptEmpty: true });
     if (generation !== this.generation || this.session !== session) return null;
+    if (brief === null) {
+      if (horizon !== null) {
+        const error = new Error("Catch-up page was empty.");
+        error.status = 204;
+        throw error;
+      }
+      if (!session) return null;
+      const through = this.sequence;
+      return { caughtUp: true, roomId: session.roomId, viewerId: session.member.id,
+        history: { cursor: through, evaluatedThrough: through, items: [], hasMore: false, continuation: null },
+        current: { evaluatedThrough: through, needsAttention: [], workInvolvingMe: [] } };
+    }
     if (!this.ownsResponse(brief, session)) {
       this.endAccess();
       return null;

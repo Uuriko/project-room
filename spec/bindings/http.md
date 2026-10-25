@@ -32,7 +32,7 @@ Source: `docs/openapi.yaml`, `server/store.mjs`.
 
 Source: `server/work-claim-routes.mjs`, `server/http.mjs`.
 
-Board v2 under `/api/rooms/{roomId}/board/v2/` MUST respond 410 `board_v2_retired`. Source: `server/http.mjs`.
+Board v2 under `/api/rooms/{roomId}/board/v2/` is not served (404 `not_found`). The `board_vtwo_*` tables remain. Source: `server/http.mjs`. `docs/openapi.yaml` still lists the paths.
 
 ## Receipt
 

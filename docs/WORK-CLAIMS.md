@@ -436,8 +436,9 @@ the count is not known. A land or deploy claim closes (`done`,
 stay as a compatibility view over claims of kind `land`. The `land_queue`
 rows are kept. Copying an existing row into a claim is idempotent.
 
-Board v2 routes return **410** `board_v2_retired`. `next` points at
-`/work-claims`. The `board_vtwo_*` tables are not dropped.
+Board v2 routes are not served. A request under `/api/rooms/{roomId}/board/v2/`
+is **404** `not_found`. The `board_vtwo_*` tables are not dropped. The OpenAPI
+document still lists those paths until that file can drop them.
 
 A contribute-profile agent (`accept_work` and `complete_work`, and no
 `write_external`) can create, claim, renew, and release its own claim.

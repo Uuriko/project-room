@@ -572,7 +572,7 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
 });
 
 
-test('Worker board v2 routes stay retired', async () => {
+test('Worker board v2 routes are not served', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test', directory = await mkdtemp(join(tmpdir(), 'project-room-cf-board-'));
@@ -581,7 +581,7 @@ test('Worker board v2 routes stay retired', async () => {
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
     durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
   const mf = new Miniflare(config);
-  const call = async (path, key, data, status = 410) => {
+  const call = async (path, key, data, status = 404) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
@@ -594,11 +594,9 @@ test('Worker board v2 routes stay retired', async () => {
     const { ownerKey } = await call('/__test-provision', undefined, undefined, 200);
     const base = '/api/rooms/commons/board/v2';
     const payload = { task_id: 'RC-2026-09-27-9001', files: ['synthetic/board-fixture.txt'], lease: 'lease=8h', reason: 'Isolated Worker persistence check' };
-    const retired = await call(base + '/board', ownerKey);
-    assert.equal(retired.error.code, 'board_v2_retired');
-    assert.equal(retired.next[0].href, '/api/rooms/commons/work-claims');
-    assert.equal((await call(base + '/claims', ownerKey, payload)).error.code, 'board_v2_retired');
-    assert.equal((await call(base + '/claims/task-1/not-a-route', ownerKey)).error.code, 'board_v2_retired');
+    assert.equal((await call(base + '/board', ownerKey)).error.code, 'not_found');
+    assert.equal((await call(base + '/claims', ownerKey, payload)).error.code, 'not_found');
+    assert.equal((await call(base + '/claims/task-1/not-a-route', ownerKey)).error.code, 'not_found');
   } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

@@ -12,6 +12,7 @@ import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
+import { roomOverviewMarkup, roomOverviewResultsLink } from "./room-overview.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
@@ -6139,19 +6140,23 @@ function renderRoomOverview() {
   if (!state || !$("#room-overview-dialog").open) return;
   setText("#room-overview-title", `${state.room.title} · Overview`);
   const orientation = roomOrientation(state);
-  setText("#room-overview-purpose", orientation.purpose || "No purpose recorded yet.");
   const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
   const steps = contributionSteps(state, session.member.id).slice(0, 3);
   const decisions = orientation.recentDecisions;
   const results = completedResults(state).slice(0, 3);
-  const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
-  renderContent("#room-overview-content",
-    (orientation.purposeSource.kind === "instructions" ? `<p class="form-hint">Room instructions · version ${orientation.purposeSource.revision} · ${esc(time(orientation.purposeSource.updatedAt))}</p>` : "")
-    + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
-    + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
-    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
-    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here.")
-    + `<section><h3>All results</h3><p><button type="button" class="text-button" data-open-results>Open the room's Results</button></p></section>`);
+  const source = orientation.purposeSource;
+  const body = roomOverviewMarkup({
+    purpose: orientation.purpose,
+    instructions: source.kind === "instructions" ? { revision: source.revision, updatedAt: time(source.updatedAt) } : null,
+    sections: [
+      { heading: "Next for you", rows: steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`) },
+      { heading: `Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, rows: orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`) },
+      { heading: "Recent decisions", rows: decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`) },
+      { heading: "Recent results", rows: results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), trailing: results.length ? roomOverviewResultsLink() : "" }
+    ]
+  });
+  setText("#room-overview-purpose", body.purpose);
+  renderContent("#room-overview-content", body.content);
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
@@ -6653,7 +6658,10 @@ window.addEventListener("pageshow", e => {
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
-function loadReturnBrief() { return briefView.refresh(); }
+function loadReturnBrief() {
+  const unread = state ? Math.max(0, client.sequence - Math.max(roomCursor, catchUpBoundary)) : 0;
+  return briefView.refreshIfUnread(unread);
+}
 // Notification feed (B4): items are derived on the server from events after your
 // caught-up marker and filtered by your notification preferences. Fetching never
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was

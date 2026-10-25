@@ -127,15 +127,26 @@ test("explicit acknowledgement still moves the marker and never goes backwards",
   assert.equal(storedCursor(store, "human"), brief.history.evaluatedThrough);
 });
 
-test("GET /return-brief over HTTP reports zero changes after only your own posts", async t => {
-  const { store, owner } = fixture(t);
+test("GET /return-brief over HTTP is empty when caught up and still a page when something is new", async t => {
+  const { store, owner, other } = fixture(t);
   for (let i = 1; i <= 3; i++) post(store, owner, `mine ${i}`);
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
-  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/return-brief`, { headers: { Authorization: `Bearer ${owner}` } });
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.history.evaluatedThrough - body.history.cursor, 0);
-  assert.deepEqual(body.history.items, []);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const get = (path, token) => fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const caughtUp = await get("/api/rooms/commons/return-brief", owner);
+  assert.equal(caughtUp.status, 204);
+  assert.equal(await caughtUp.text(), "");
+  const invalid = await get("/api/rooms/commons/return-brief?limit=0", owner);
+  assert.equal(invalid.status, 422);
+  post(store, other, "theirs");
+  const news = await get("/api/rooms/commons/return-brief?limit=1", owner);
+  assert.equal(news.status, 200);
+  const body = await news.json();
+  assert.equal(body.history.items.length, 1);
+  assert.equal(body.history.hasMore, false);
+  const page = await get(`/api/rooms/commons/return-brief?horizon=${body.history.evaluatedThrough}&after=${body.history.cursor}&cursor=${body.history.cursor}&limit=1`, owner);
+  assert.equal(page.status, 200);
+  assert.equal((await page.json()).history.evaluatedThrough, body.history.evaluatedThrough);
 });
