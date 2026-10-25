@@ -18,7 +18,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import {
   attentionBadgeCount, perRoomAttention, attentionLinesTruncated,
-  roomAttentionHref, roomAttentionLinesHtml, createOwnerCockpit,
+  roomAttentionHref, roomAttentionLinesHtml, createOwnerCockpit, ledgerNeedsHome,
 } from "../src/owner-cockpit.js";
 
 function setup(t) {
@@ -134,9 +134,10 @@ function fakeSection() {
     "#cockpit-room-stubs": fakeElement(),
   };
   return {
-    hidden: true, elements,
+    hidden: true, elements, attributes: {},
     querySelector(selector) { return elements[selector] ?? null; },
-    setAttribute() {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    removeAttribute(name) { delete this.attributes[name]; },
   };
 }
 
@@ -162,6 +163,60 @@ test("cockpit render paints the badge and per-room lines from the overview docum
   assert.match(lines, /href="\.\/\?room=room-b"/);
   assert.match(lines, /Alpha/);
   assert.match(lines, /Beta/);
+});
+
+test("a zero ledger stays off a quiet account home and does not claim Needs you", async () => {
+  const quiet = {
+    decisions: { total: 0, waiting: 0, overdue: 0, oldestAgeMs: 0, items: [] },
+    exceptions: { total: 0, items: [] },
+    rooms: { label: null },
+    roomErrors: [],
+    money: {
+      cents: { rooms: [{ spentCents: 0, reservedCents: 0, heldCents: 0, committedCents: 0, overCents: 0 }], tasks: [], totals: { unreportedAttempts: 0 } },
+      credits: { rooms: [{ lockedMillis: 0, disputedMillis: 0, poolBalanceMillis: 0 }] },
+    },
+    roster: { total: 0, counts: {}, rows: [] },
+  };
+  assert.equal(ledgerNeedsHome(quiet.money, quiet.roster), false);
+  const section = fakeSection();
+  const heading = { hidden: false };
+  section.querySelector = selector => selector === "h3" ? heading : section.elements[selector] ?? null;
+  const cockpit = createOwnerCockpit({ accountClient: { ownerOverview: async () => quiet }, section, decide: async () => {} });
+  await cockpit.refresh();
+  assert.equal(section.hidden, true);
+  assert.equal(heading.hidden, true);
+  assert.equal(section.elements["#cockpit-money"].innerHTML, "");
+  assert.equal(section.elements["#cockpit-roster"].innerHTML, "");
+});
+
+test("reported spend opens the ledger without the Needs you heading", async () => {
+  const doc = {
+    decisions: { total: 0, waiting: 0, overdue: 0, oldestAgeMs: 0, items: [] },
+    exceptions: { total: 0, items: [] },
+    rooms: { label: null },
+    roomErrors: [],
+    money: {
+      cents: {
+        rooms: [{ roomId: "room-a", roomName: "Alpha", spentCents: 250, reservedCents: 0, heldCents: 0, committedCents: 250, overCents: 0, headroomCents: 0, burnFraction: null, burnRateCentsPerDay: 1 }],
+        tasks: [],
+        totals: { unreportedAttempts: 0 },
+        costPerAcceptedOutcome: { status: "none" },
+      },
+      credits: { rooms: [] },
+    },
+    roster: { total: 0, counts: { total: 0, working: 0, stalled: 0, offline: 0 }, rows: [] },
+  };
+  assert.equal(ledgerNeedsHome(doc.money, doc.roster), true);
+  const section = fakeSection();
+  const heading = { hidden: false, attributes: {} };
+  section.querySelector = selector => selector === "h3" ? heading : section.elements[selector] ?? null;
+  const cockpit = createOwnerCockpit({ accountClient: { ownerOverview: async () => doc }, section, decide: async () => {} });
+  await cockpit.refresh();
+  assert.equal(section.hidden, false);
+  assert.equal(heading.hidden, true);
+  assert.equal(section.attributes["aria-label"], "Money and roster");
+  assert.match(section.elements["#cockpit-money"].innerHTML, /\$2\.50/);
+  assert.match(section.elements["#cockpit-roster"].innerHTML, /No agents in your rooms yet/);
 });
 
 test("cockpit render at zero hides the badge and renders no per-room lines", async () => {

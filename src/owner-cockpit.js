@@ -74,6 +74,22 @@ export function roomAttentionHref(roomId) {
   return `./?room=${encodeURIComponent(roomId)}`;
 }
 
+const ledgerSignal = value => value === "unknown" || (typeof value === "number" && Number.isFinite(value) && value > 0);
+
+// A zero ledger is the ordinary state of a room with no agents and no spend.
+// It stays off the account home. A reported cent, an unreported attempt, or
+// a roster row is enough to open the ledger without calling it Needs you.
+export function ledgerNeedsHome(money, roster) {
+  if ((roster?.total ?? 0) > 0) return true;
+  if (!money?.cents) return false;
+  const cents = money.cents;
+  if ((cents.tasks ?? []).length > 0 || (cents.totals?.unreportedAttempts ?? 0) > 0) return true;
+  const centKeys = ["spentCents", "reservedCents", "heldCents", "committedCents", "overCents"];
+  if ((cents.rooms ?? []).some(room => centKeys.some(key => ledgerSignal(room[key])))) return true;
+  const creditKeys = ["lockedMillis", "disputedMillis", "poolBalanceMillis"];
+  return (money.credits?.rooms ?? []).some(room => creditKeys.some(key => ledgerSignal(room[key])));
+}
+
 export function roomAttentionLinesHtml(doc) {
   const lines = perRoomAttention(doc);
   if (lines.length === 0) return "";
@@ -245,11 +261,18 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     const notesOpen = exceptionsBox.querySelector("details")?.open;
     const notices = exceptions.items.filter(item => item.severity === "info");
     const actionable = exceptions.items.filter(item => item.severity !== "info");
-    const showLedger = Boolean(doc.money) || Boolean(doc.roster);
-    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length) && !(doc.jobs?.length) && !showLedger;
+    const attention = decisions.total > 0 || actionable.length > 0 || (doc.roomErrors?.length > 0);
+    const showLedger = ledgerNeedsHome(doc.money, doc.roster);
+    section.hidden = !attention && exceptions.total === 0 && !(doc.jobs?.length) && !showLedger;
     const heading = section.querySelector("h3");
-    if (heading) heading.hidden = !decisions.total && !actionable.length && !doc.roomErrors?.length && !showLedger;
-    section.setAttribute("aria-labelledby", heading?.hidden ? "cockpit-notes-title" : "owner-cockpit-title");
+    if (heading) heading.hidden = !attention;
+    if (heading?.hidden && showLedger && notices.length === 0) {
+      section.setAttribute("aria-label", uiText("cockpit.ledgerLabel"));
+      if (typeof section.removeAttribute === "function") section.removeAttribute("aria-labelledby");
+    } else {
+      if (typeof section.removeAttribute === "function") section.removeAttribute("aria-label");
+      section.setAttribute("aria-labelledby", heading?.hidden ? "cockpit-notes-title" : "owner-cockpit-title");
+    }
     const parts = [`${decisions.waiting} waiting`];
     if (decisions.oldestAgeMs > 0) parts.push(`oldest ${formatAge(decisions.oldestAgeMs).replace("waiting ", "")}`);
     if (decisions.overdue > 0) parts.push(`${decisions.overdue} overdue`);
@@ -263,8 +286,8 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
       : (actionable.length ? `<h4>Exceptions</h4>` + actionable.map(renderException).join("") : "")
         + (notices.length ? uiText("human.roomNotesHtml", { open: notesOpen ? "open" : "", content: notices.map(renderException).join("") }) : ""))
       + renderJobs(doc.jobs);
-    if (moneyBox) moneyBox.innerHTML = renderMoney(doc.money);
-    if (rosterBox) rosterBox.innerHTML = renderRoster(doc.roster);
+    if (moneyBox) moneyBox.innerHTML = (showLedger || attention) ? renderMoney(doc.money) : "";
+    if (rosterBox) rosterBox.innerHTML = (showLedger || attention) ? renderRoster(doc.roster) : "";
     stubsBox.innerHTML = (doc.roomErrors ?? []).map(stub =>
       `<p class="form-hint">Couldn't read room ${esc(stub.roomId)} (${esc(stub.error)}) — it is excluded from these totals.</p>`).join("");
     for (const button of decisionsBox.querySelectorAll("[data-cockpit-decide]")) {

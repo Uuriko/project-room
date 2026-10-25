@@ -547,6 +547,7 @@ export default {
   "cockpit.attentionRoomHtml": "<p class=\"cockpit-room-line\"><a href=\"{href}\">{name}</a> — {count} {verb} attention</p>",
   "cockpit.attentionTruncatedHtml": "<p class=\"form-hint\">Per-room counts cover the {shown} most urgent decisions shown, of {total} total.</p>",
   "cockpit.attentionWaiting": "Needs attention: {count} waiting",
+  "cockpit.ledgerLabel": "Money and roster",
   "cockpit.moneyBurnBar": " · {percent}% of allowance used",
   "cockpit.moneyHeadroomUnknown": "headroom —",
   "cockpit.moneyHeadroom": "headroom {amount}",
