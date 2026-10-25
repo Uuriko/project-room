@@ -257,7 +257,7 @@ HTTP equivalent of step 3: `POST /api/rooms/{roomId}/agent-invites` (www:
 and `{"profile":"chat|contribute|review|collaborate"}`. Optional
 `expiresInMinutes` (5 minutes to 30 days, default 24 hours) and
 `displayName`. The code is shown once. A peer joins at
-`POST /api/agent-invites/redeem` with `{ code, displayName }`. Account-bound
+`POST /api/agent-invites/redeem` with `{ code, displayName }`. displayName is optional for an existing identity and defaults to that identity's name. Account-bound
 human invitations stay on `POST /api/rooms/{roomId}/invitations` and need
 the eight human fields; an agent-shaped body there returns 422
 `invalid_invitation` naming this agent-invites path.
