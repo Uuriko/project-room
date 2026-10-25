@@ -12,6 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { auditWorkHelp } from "../server/work-help.mjs";
+import { timeZoneMessage, zoneLessTime, zonedTimestampMillis } from "../server/iso-time.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const EXAMPLE = "2026-10-24T20:30:00Z";
@@ -47,6 +48,17 @@ async function serve(t) {
   const item = () => store.room(roomId).state.workItems["w-cursor"];
   return { origin, store, roomId, key, owner, get, call, send, item };
 }
+
+test("a zone-less timestamp is not an instant, and a zoned one keeps its offset", () => {
+  assert.equal(zoneLessTime(ZONE_LESS), true);
+  assert.equal(zoneLessTime("2026-10-25"), true);
+  assert.equal(zoneLessTime(`${ZONE_LESS}Z`), false);
+  assert.equal(zoneLessTime("2026-10-25T10:00:00+00:00"), false);
+  assert.match(timeZoneMessage("until"), /until/);
+  assert.match(timeZoneMessage("until"), new RegExp(EXAMPLE));
+  assert.equal(zonedTimestampMillis("2026-02-31T00:00:00Z"), null);
+  assert.equal(zonedTimestampMillis("2026-10-24T20:30:00-07:00"), Date.parse("2026-10-25T03:30:00Z"));
+});
 
 test("a cursor past the room head is an empty page at the head", async t => {
   const { store, roomId, get, call, send } = await serve(t);
