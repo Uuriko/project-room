@@ -48,6 +48,41 @@ const DUE_WHERE = `(
            OR ${TERMINAL_DISPUTE}))
 )`;
 
+// CURE-CLOCK-UNIFY (S5): the production keeper tick is fed by three
+// clock expressions that must be ONE source — the escrow-epochs job's
+// enabled gate and run sample (server/jobs.mjs) and the store clock the
+// production escrow is built with (server/store.mjs, `now: () =>
+// this.now()`). Two wall-clock samples taken back to back agree to
+// within a few milliseconds; independently-sourced clocks (a frozen
+// fixture clock on one leg, the wall clock on another, a skewed second
+// handle) diverge by orders of magnitude more. The assertion samples
+// every source it is handed and throws when the spread exceeds the
+// tolerance, so a mis-wired clock fails loud at the job door instead
+// of silently splitting scan from settlement. It is silent when fewer
+// than two sources are observable (a bare store double has neither a
+// store clock nor a wired escrow — there is nothing to disagree).
+export const ESCROW_CLOCK_DIVERGENCE_TOLERANCE_MS = 1000;
+
+export function assertUnifiedEscrowClocks({ scanNow = null, store = null, escrow = null,
+  toleranceMs = ESCROW_CLOCK_DIVERGENCE_TOLERANCE_MS } = {}) {
+  const samples = [];
+  const add = (label, value) => {
+    const n = typeof value === "function" ? value() : value;
+    if (Number.isFinite(n)) samples.push([label, Number(n)]);
+  };
+  add("scan", scanNow);
+  if (store && typeof store.now === "function") add("store", () => store.now());
+  const instance = escrow ?? (store?.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : null);
+  if (instance && typeof instance.nowMs === "function") add("escrow", () => instance.nowMs());
+  if (samples.length < 2) return 0;
+  const values = samples.map(([, v]) => v);
+  const spread = Math.max(...values) - Math.min(...values);
+  if (spread > toleranceMs)
+    throw new Error(`escrow clock sources diverge by ${spread}ms (tolerance ${toleranceMs}ms): `
+      + samples.map(([label, v]) => `${label}=${v}`).join(", "));
+  return spread;
+}
+
 function query(store, sql, params = []) {
   if (!store?.db?.prepare) return null;
   try { return store.db.prepare(sql).all(...params); }
@@ -112,7 +147,12 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
     try {
       // No caller: a mechanical close attributes to the rule actor and
       // records triggeredBy null, exactly like the keeper pass itself.
-      const { summary: epoch } = instance.closeEpoch(roomId);
+      // CURE-CLOCK-UNIFY: the tick's one `now` is threaded into the
+      // close — closeEpoch must not re-read the escrow's live clock
+      // mid-tick (S2: a lot becoming due between the scan and its room's
+      // close was approved same-tick while `due` under-reported it; S5:
+      // scan/escrow divergence split what a tick could settle).
+      const { summary: epoch } = instance.closeEpoch(roomId, { now });
       summary.approved += epoch.approved?.length ?? 0;
       summary.paid += epoch.swept?.length ?? 0;
       summary.refunded += epoch.refunded?.length ?? 0;
