@@ -359,9 +359,10 @@ export class AgentRooms {
     });
   }
 
-  // Replace the room's onboarding credential. One transaction revokes the
-  // live onboarding keys for this room and inserts the new one. The identity
-  // secret is required; a room token is not an identity secret.
+  // Replace this identity's onboarding credential for the room. One
+  // transaction revokes that identity's live onboarding keys for the room
+  // and inserts the replacement. The caller must already be linked. A room
+  // token is not an identity secret.
   rotateOnboardingToken(secret, roomId) {
     if (typeof roomId !== "string" || !validId(roomId) || roomId.length > 64) {
       fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
@@ -370,16 +371,12 @@ export class AgentRooms {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
       if (!identity) refuseRoomToken(secret);
       if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
-      const owned = this.store.db.prepare(
-        "SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?"
-      ).get(identity.identityId, roomId);
-      if (!owned) fail(404, "room_not_found", "No such room");
-      const state = this.store.room(roomId).state;
-      const displayName = ownMember(state?.members, identity.identityId)?.displayName ?? identity.displayName;
+      const link = this.store.identities.resolveIdentityLink(identity.identityId, roomId);
+      if (!link) fail(404, "room_not_found", "No such room");
       return {
         roomId,
         mcpToken: this.store.agentPlugin.rotateOnboardingMcpToken({
-          identityId: identity.identityId, roomId, label: displayName,
+          identityId: identity.identityId, roomId, label: link.member.displayName,
         }),
       };
     });
