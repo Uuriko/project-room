@@ -361,6 +361,16 @@ function defaultAssetLoader(assetRoot) {
   };
 }
 
+// Per-credential token buckets. The older fixed windows allowed the whole
+// minute up front (600 reads, 60 writes), so a tight loop never waited.
+// A read burst of 70 then refills at 10/s, so an 80-poll does not all succeed.
+// A write burst of 40 then refills at 1/s. Chat posts still meet the separate
+// per-member flood of 30. Guest command posts stay on the guest-post window instead of this
+// write bucket. Keys are credential hashes, never the token.
+export const CREDENTIAL_READ_BURST = 70;
+export const CREDENTIAL_READ_REFILL_PER_SECOND = 10;
+export const CREDENTIAL_WRITE_BURST = 40;
+export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
@@ -683,7 +693,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
-  const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
+  const credentialReads = createRateLimiter({ capacity: CREDENTIAL_READ_BURST, refillPerSecond: CREDENTIAL_READ_REFILL_PER_SECOND });
+  const credentialWrites = createRateLimiter({ capacity: CREDENTIAL_WRITE_BURST, refillPerSecond: CREDENTIAL_WRITE_REFILL_PER_SECOND });
+  function spendCredential(kind, credentialHash) {
+    const limiter = kind === "write" ? credentialWrites : credentialReads;
+    const decision = limiter.check(credentialHash);
+    if (decision.allowed) return;
+    const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
+    throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute", {
+      "Retry-After": String(seconds),
+      "X-RateLimit-Limit": limiter.capacity,
+      "X-RateLimit-Remaining": 0,
+      "X-RateLimit-Reset": Math.ceil((Date.now() + decision.retryAfterMs) / 1000),
+      "X-RateLimit-Bucket": kind === "write" ? "write" : "read",
+    });
+  }
+  const hostedRoomMcp = createHostedRoomMcp(store, {
+    agentRooms,
+    spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
+  });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -781,6 +809,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
   function rate(id, maximum) {
+    // Room routes and the route table share one per-credential burst. The
+    // fixed window used to accept the whole minute at once.
+    if (typeof id === "string" && id.startsWith("read:") && maximum === 600) {
+      spendCredential("read", id.slice("read:".length));
+      return;
+    }
+    if (typeof id === "string" && id.startsWith("write:") && maximum === 60) {
+      spendCredential("write", id.slice("write:".length));
+      return;
+    }
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
@@ -3242,7 +3280,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, webAuth, isBearer);
-        rate(`write:${webAuth.credentialHash}`, 60);
+        spendCredential("write", webAuth.credentialHash);
         const data = await body(req);
         try {
           return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
@@ -3275,7 +3313,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, researchAuth, researchIsBearer);
-        rate(`write:${researchAuth.credentialHash}`, 60);
+        spendCredential("write", researchAuth.credentialHash);
         const researchData = await body(req);
         try {
           return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
@@ -3647,14 +3685,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        spendCredential("read", auth.credentialHash);
         if (updatesListMatch) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
           return json(res, 200, listRoomUpdates(store, selected.token, roomId, updatesQuery(), fence), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         const data = await body(req);
         // JDOT-COH-UPDATES-BASIS begin
         // Missing expectedBasis can reach only an authenticated legacy receipt;
@@ -3718,14 +3756,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        spendCredential("read", auth.credentialHash);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
           return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         const data = await body(req);
         try {
           if (action === "add_land_item") {
@@ -3795,17 +3833,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (readFileId) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          spendCredential("read", auth.credentialHash);
           return json(res, 200, store.roomAttachments.get(selected.token, roomId, readFileId), req.method === "HEAD");
         }
         if (!writing) {
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          spendCredential("read", auth.credentialHash);
           return json(res, 200, store.roomAttachments.list(selected.token, roomId), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET, POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         if (fileId) {
           const data = await body(req);
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
@@ -4059,15 +4097,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const auth = roomAuth(selected, roomId, fence);
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-      rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) {
+      if (["GET", "HEAD"].includes(req.method)) {
+        spendCredential("read", auth.credentialHash);
+      } else {
         protectWrite(req, auth, selected.bearer);
         // Housekeeping writes (read markers, saves, presence, cursor)
-        // fire as a side effect of reading and typing. They get their own
-        // bucket so a fast typist's read markers don't spend the 60/min
-        // budget the chat flood guard and real writes share.
+        // fire as a side effect of reading and typing. They keep a wide
+        // per-minute window so a fast typist does not spend the credential
+        // write burst. Guest command posts stay on the guest-post window.
         const housekeeping = HOUSEKEEPING_WRITE_ROUTES.has(route);
-        rate(housekeeping ? `write-hk:${auth.credentialHash}` : `write:${auth.credentialHash}`, housekeeping ? HOUSEKEEPING_WRITE_PER_MINUTE : 60);
+        const guestCommand = route === "commands"
+          && typeof selected.token === "string"
+          && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX);
+        if (housekeeping) rate(`write-hk:${auth.credentialHash}`, HOUSEKEEPING_WRITE_PER_MINUTE);
+        else if (!guestCommand) spendCredential("write", auth.credentialHash);
       }
       // RC-2026-09-18-012: API-key callers are confined to their stored
       // scopes on every room route — reads need rooms:read, writes need

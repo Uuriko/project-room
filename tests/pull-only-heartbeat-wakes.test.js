@@ -11,7 +11,7 @@
 //    the 50-signal page.
 // 4. No new production seam. Heartbeat and ack are the HTTP routes. The
 //    120-mention burst uses store.command, the same call the command route
-//    makes, because that route allows 60 writes a minute.
+//    makes, because that route limits a credential's write burst.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
