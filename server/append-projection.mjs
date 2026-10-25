@@ -60,18 +60,29 @@ function compactBookkeeping(state) {
   return { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
 }
 
+// JSON of the projection with the messages array removed. Callers cache this
+// for the state that produced the stored text. A later read that adds a key
+// the row does not contain (the projection-cap fixture does this) must not
+// splice, or the size check would see the old row instead of the new state.
+export function projectionShapeKey(state) {
+  if (!state || typeof state !== "object") return null;
+  const book = compactBookkeeping(state);
+  if (!Object.hasOwn(book, "messages") || !Array.isArray(book.messages)) return null;
+  const { messages: _messages, ...rest } = book;
+  try { return JSON.stringify(rest); }
+  catch { return null; }
+}
+
 // True when two reducer states stringify to the same projection aside from
 // the messages array, including top-level key order. Messages themselves
 // are not stringified here.
 export function sameProjectionShape(previous, next) {
-  if (!previous || !next || typeof previous !== "object" || typeof next !== "object") return false;
-  const before = compactBookkeeping(previous), after = compactBookkeeping(next);
-  const beforeKeys = Object.keys(before), afterKeys = Object.keys(after);
-  if (beforeKeys.length !== afterKeys.length || !beforeKeys.includes("messages") || !afterKeys.includes("messages")) return false;
+  const beforeKey = projectionShapeKey(previous), afterKey = projectionShapeKey(next);
+  if (beforeKey == null || beforeKey !== afterKey) return false;
+  const beforeKeys = Object.keys(compactBookkeeping(previous)), afterKeys = Object.keys(compactBookkeeping(next));
+  if (beforeKeys.length !== afterKeys.length || !beforeKeys.includes("messages")) return false;
   for (let i = 0; i < beforeKeys.length; i++) if (beforeKeys[i] !== afterKeys[i]) return false;
-  const { messages: _beforeMessages, ...beforeRest } = before;
-  const { messages: _afterMessages, ...afterRest } = after;
-  return JSON.stringify(beforeRest) === JSON.stringify(afterRest);
+  return true;
 }
 
 function encodeAdded(added) {

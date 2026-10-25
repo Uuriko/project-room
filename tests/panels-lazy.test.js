@@ -19,33 +19,38 @@ async function sample(origin, { park }) {
   }
   const started = Date.now();
   const response = await page.goto(`${origin}/`, { waitUntil: "load", timeout: 60000 });
-  const loaded = await page.evaluate(() => ({
-    nodes: document.getElementsByTagName("*").length,
-    textareas: document.getElementsByTagName("textarea").length,
-    forms: document.getElementsByTagName("form").length,
-    composer: document.getElementById("message-input")?.isConnected === true,
-    createBefore: document.getElementById("account-room-create")?.childElementCount ?? 0
-  }));
+  const loaded = await page.evaluate(() => {
+    const doc = globalThis.document;
+    return {
+      nodes: doc.getElementsByTagName("*").length,
+      textareas: doc.getElementsByTagName("textarea").length,
+      forms: doc.getElementsByTagName("form").length,
+      composer: doc.getElementById("message-input")?.isConnected === true,
+      createBefore: doc.getElementById("account-room-create")?.childElementCount ?? 0
+    };
+  });
   const timeToComposerMs = Date.now() - started;
   if (park) {
     await page.evaluate(() => {
-      document.querySelector("#account-room-create > summary")
-        .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      const doc = globalThis.document;
+      doc.querySelector("#account-room-create > summary")
+        .dispatchEvent(new globalThis.PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
     });
   }
   const restored = await page.evaluate(() => {
-    const create = document.getElementById("account-room-create");
+    const doc = globalThis.document;
+    const create = doc.getElementById("account-room-create");
     if (create && !create.open) create.open = true;
-    const work = document.getElementById("work-dialog");
+    const work = doc.getElementById("work-dialog");
     const workBefore = work?.childElementCount ?? 0;
     work?.showModal();
     const result = {
       createAfter: create?.childElementCount ?? 0,
-      purpose: document.getElementById("account-room-purpose")?.isConnected === true,
+      purpose: doc.getElementById("account-room-purpose")?.isConnected === true,
       workBefore,
       workAfter: work?.childElementCount ?? 0,
-      workTitle: document.getElementById("work-title-input")?.isConnected === true,
-      settings: document.getElementById("settings-dialog")?.childElementCount ?? 0
+      workTitle: doc.getElementById("work-title-input")?.isConnected === true,
+      settings: doc.getElementById("settings-dialog")?.childElementCount ?? 0
     };
     work?.close();
     return result;

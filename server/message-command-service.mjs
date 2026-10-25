@@ -5,7 +5,7 @@
 import { EVENT_TYPES as T } from '../src/events.js';
 import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
-import { projectAppendedMessages, sameProjectionShape } from './append-projection.mjs';
+import { projectAppendedMessages, projectionShapeKey, sameProjectionShape } from './append-projection.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -98,15 +98,20 @@ export function prepareMessageWrite(store, { roomId, previous, state, event, seq
   // bookkeeping, bodies at rest, and entity refs fall through.
   let projection = null;
   let messagesEnd;
+  let restKey;
   const added = event?.type === T.MESSAGE_POSTED && !store.bodiesAtRest && !(store.messageEntityProjection && certificate)
     ? appendedMessages(previous?.state, state) : null;
-  if (added && sameProjectionShape(previous?.state, state)) {
+  const previousKey = added && sameProjectionShape(previous?.state, state) ? projectionShapeKey(previous.state) : null;
+  // The cached key is the state that was written. Splicing onto an older row
+  // when this read invented keys would skip the projection cap.
+  if (previousKey != null && store.projectionRestKey?.(roomId, previous?.sequence) === previousKey) {
     const previousText = store.committedProjectionText?.(roomId, previous?.sequence);
     if (typeof previousText === "string") {
       const appended = projectAppendedMessages(previousText, added, store.projectionMessagesEnd?.(roomId, previous?.sequence));
       if (appended) {
         projection = appended.text;
         messagesEnd = appended.messagesEnd;
+        restKey = previousKey;
       }
     }
   }
@@ -114,10 +119,12 @@ export function prepareMessageWrite(store, { roomId, previous, state, event, seq
     projection = store.messageEntityProjection && certificate
       ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
       : store.storedProjection(roomId,state);
+    restKey = projectionShapeKey(state);
   }
   return {
     projection,
     messagesEnd,
+    restKey,
     persistEntities() {
       syncMessageRows(store.db, {roomId,sequence,event,state});
       advanceMessageCertification(store.db,certificate,{sequence,event,state});
