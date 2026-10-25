@@ -532,5 +532,16 @@ export default {
   "composer.saved": "Message saved. ",
   "composer.savedHistoryPending": "Message saved; history is reconnecting. ",
   "composer.viewSaved": "View message",
-  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery."
+  "composer.deliveryNotExecution": " · Agent execution is not confirmed by delivery.",
+  "cockpit.jobsTitle": "Scheduled jobs",
+  "cockpit.jobsAttention": "Scheduled jobs · {count} need attention",
+  "cockpit.jobResult.ok": "ok",
+  "cockpit.jobResult.failing": "failing",
+  "cockpit.jobResult.not_run": "not run yet",
+  "cockpit.jobResult.disabled": "off",
+  "cockpit.jobFailedInRow": " · {count} failed in a row",
+  "cockpit.jobTimes": "last run {run} · last success {success}",
+  "cockpit.jobNever": "never",
+  "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
 };

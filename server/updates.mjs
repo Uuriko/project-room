@@ -9,7 +9,7 @@ import { messageRepository } from "./message-repository.mjs";
 // and are empty until a work_claim.updated event carries an attention field.
 
 import { createHash } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { validId } from "../src/events.js";
 

@@ -807,10 +807,16 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
+    // Receipt-card cost: exactly { spentCents, capCents, model }, each recorded
+    // or null. Cents are non-negative integers; model is 1-100 characters.
+    if (key === "cost" && (!value || typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).length !== 3 || !["spentCents", "capCents", "model"].every(field => field in value)
+      || [value.spentCents, value.capCents].some(c => c !== null && !(Number.isSafeInteger(c) && c >= 0))
+      || (value.model !== null && (typeof value.model !== "string" || !value.model.trim() || value.model.length > 100)))) throw new Error(`Invalid ${key}`);
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
