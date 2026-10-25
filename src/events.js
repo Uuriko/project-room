@@ -415,12 +415,12 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
-// Permissions no invitation mechanism may ever confer, whichever door the
-// invitation comes through: membership administration, decisions, and
-// inviting stay with members who hold them directly, never with whoever
-// redeems an invite. The agent-invite door refuses them at mint
-// (server/agent-invites.mjs) and the share-link grant is capped by the same
-// set (server/share-links.mjs, #3549) — one definition, every door.
+// Permissions ordinary invitations must not confer: membership
+// administration, decisions, and inviting. Share links and ordinary agent
+// invites refuse them (server/share-links.mjs, server/agent-invites.mjs,
+// #3549). The one exception is an owner-equivalent agent invite
+// (ownerEquivalent: true), which only the room owner can mint. It grants
+// these bits to a co-owner-level member and does not transfer the owner seat.
 export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
@@ -1544,7 +1544,10 @@ function recordReferral(state, incoming) {
 function recordDecision(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  // Humans record decisions. An agent can too only when the owner empowered
+  // them (delegatedAdmin), which is how an owner-equivalent invite lands.
+  // An ordinary agent cannot, even if a stale projection still lists the bit.
+  if (actor.kind !== "human" && actor.delegatedAdmin !== true) throw new Error("Only a human member may record a decision");
   requireFields(incoming.data, ["sourceMessageId", "statement"]);
   requirePublicDecisionSource(state, incoming.data.sourceMessageId);
   const statement = String(incoming.data.statement);

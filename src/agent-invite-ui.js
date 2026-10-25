@@ -13,6 +13,7 @@ export function inviteMintBody(profile, displayName) {
   const name = typeof displayName === "string" ? displayName.trim() : "";
   if (name.length > 80) throw new Error(uiText("invite.copy.001"));
   const extra = name ? { displayName: name } : {};
+  if (profile === "owner") return { ownerEquivalent: true, ...extra };
   if (profile === "collaborate") return { permissions: [...COLLABORATE_PERMISSIONS], ...extra };
   if (profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
   throw new Error(uiText("invite.copy.002"));
@@ -87,6 +88,16 @@ export function installAgentInvites({ client, getState, getSession }) {
     if ($("#agent-invite-single")) $("#agent-invite-single").hidden = !single;
     if ($("#agent-invite-bulk")) $("#agent-invite-bulk").hidden = !bulk;
     for (const input of form.querySelectorAll("input,select,button")) input.disabled = busy;
+    const ownerChoice = $("#agent-invite-profile")?.querySelector('option[value="owner"]');
+    if (ownerChoice) {
+      const state = getState();
+      const me = member();
+      const show = Boolean(me && me.active !== false && me.kind === "human" && me.id === state?.room?.ownerId);
+      ownerChoice.hidden = !show;
+      ownerChoice.disabled = !show;
+      const select = $("#agent-invite-profile");
+      if (!show && select?.value === "owner") select.value = "contribute";
+    }
     if ($("#agent-invite-copy")) $("#agent-invite-copy").disabled = copying || !single;
     if ($("#agent-invite-copy-all")) $("#agent-invite-copy-all").disabled = copying || !bulk;
     if ($("#agent-invite-another")) $("#agent-invite-another").disabled = busy;

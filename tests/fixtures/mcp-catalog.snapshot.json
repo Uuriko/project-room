@@ -734,7 +734,7 @@
       }
     },
     "room_create_agent_invite": {
-      "inputSchema": "2884f452719ad86f",
+      "inputSchema": "2c5d9e38ee7de31a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

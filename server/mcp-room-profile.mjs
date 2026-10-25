@@ -216,12 +216,13 @@ function validRoomArgs(name, args) {
       && ["approve", "deny"].includes(args.decision) && permsOk && noteOk;
   }
   if (name === "room_create_agent_invite") {
-    const hasScope = args.profile !== undefined || args.permissions !== undefined;
+    const ownerOk = args.ownerEquivalent === undefined || args.ownerEquivalent === true || args.ownerEquivalent === false;
+    const hasScope = args.profile !== undefined || args.permissions !== undefined || args.ownerEquivalent !== undefined;
     const profileOk = args.profile === undefined || typeof args.profile === "string" && args.profile.length <= 32;
     const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
     const ttlOk = args.expiresInMinutes === undefined || Number.isSafeInteger(args.expiresInMinutes) && args.expiresInMinutes >= 1;
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.length > 0 && args.displayName.length <= 80;
-    return hasScope && profileOk && permsOk && ttlOk && nameOk;
+    return hasScope && ownerOk && profileOk && permsOk && ttlOk && nameOk;
   }
   if (name === "room_list_agent_invites") return true;
   if (name === "room_revoke_agent_invite") return typeof args.inviteId === "string" && args.inviteId.length > 0 && args.inviteId.length <= 64;
@@ -599,7 +600,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_create_agent_invite") {
     const request = {};
-    for (const key of ["profile", "permissions", "expiresInMinutes", "displayName"]) {
+    for (const key of ["profile", "permissions", "ownerEquivalent", "expiresInMinutes", "displayName"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return store.invites.create(secret, roomId, request);
