@@ -263,10 +263,17 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
   const rendered = () => page.locator("[data-message-record-id]").evaluateAll(nodes => nodes.map(node => node.dataset.messageRecordId));
-  // Opening reads only the newest window; a quiet paged background fill then brings in the rest.
-  // Convergence is proven by the oldest message appearing and every history id being on screen.
+  // Opening reads only the newest window. The web app loads older history
+  // lazily (RoomClient lazyHistory): nothing older is read until the reader
+  // asks, and "Show earlier messages" runs the same paged fill. Convergence
+  // is proven by the oldest message appearing and every history id being on
+  // screen.
   assert.equal(reads[0]?.search, "?messages=recent", "opening reads the recent window first");
   assert.equal(reads[0].messages, 100, "the first read carries only the newest window");
+  await page.waitForTimeout(750); // well past the eager client's 250 ms fill delay
+  assert.deepEqual(pages, [], "no history is paged before a reader gesture");
+  assert.equal(await page.locator(`[data-message-record-id="${ids[0]}"]`).count(), 0, "older history is not loaded on open");
+  await page.locator("[data-timeline-earlier]").click();
   await page.locator(`[data-message-record-id="${ids[0]}"]`).waitFor({ state: "attached" });
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   const before = await rendered();
@@ -302,5 +309,59 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   // read. A windowed read is never correct for an edit outside the window.
   const editReads = reads.slice(edited).map(read => read.search);
   assert.ok(editReads.length <= 1 && editReads.every(search => search === ""), "the old edit applied as a delta or one full read: " + JSON.stringify(editReads));
+  assert.deepEqual(errors, []);
+});
+
+// Lazy history (RoomClient lazyHistory, the web app's mode): while older
+// history is owed, a new message re-reads only the recent window — never the
+// paged history — the pager stays offered, and a reply whose root is older
+// than the window is not shown as a top-level post.
+test("while older history is owed, a new message re-reads only the window and keeps the pager", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture();
+  f.store.roomFlood = { consume() {} };
+  const post = (key, body, data = {}) => { const id = randomUUID(); f.store.command(key, "commons", { id, type: "message.posted", data: { messageId: id, body, ...data } }); return id; };
+  const ids = [];
+  for (let i = 0; i < 130; i++) ids.push(post(f.keys.producer, `history ${i}`));
+  const server = createRoomServer({ store: f.store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(10000);
+  const errors = [], reads = [], pages = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("response", async response => {
+    const url = new URL(response.url());
+    if (url.pathname === "/api/rooms/commons/conversation" && response.request().method() === "GET") pages.push(url.search);
+    if (url.pathname === "/api/rooms/commons" && response.request().method() === "GET")
+      reads.push({ search: url.search, messages: (await response.json().catch(() => null))?.state?.messages?.length });
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
+  await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
+  await page.waitForTimeout(750);
+  assert.deepEqual(pages, [], "no history is paged on open");
+  await page.locator("[data-timeline-earlier]").waitFor({ state: "attached" });
+
+  const opened = reads.length;
+  const arrival = post(f.keys.producer, "an arrival while history is owed");
+  await page.locator(`[data-message-record-id="${arrival}"]`).waitFor({ state: "visible" });
+  const orphan = post(f.keys.producer, "a reply to a message older than the window", { replyToId: ids[5] });
+  const marker = post(f.keys.producer, "a later top-level post");
+  await page.locator(`[data-message-record-id="${marker}"]`).waitFor({ state: "visible" });
+  assert.equal(await page.locator(`#message-list [data-message-record-id="${orphan}"]`).count(), 0, "a reply whose root is not held is not shown as a top-level post");
+  const live = reads.slice(opened);
+  assert.ok(live.length >= 1 && live.every(read => read.search === "?messages=recent" && read.messages === 100), JSON.stringify(live));
+  assert.deepEqual(pages, [], "arrivals never page older history");
+  assert.equal(await page.locator(`[data-message-record-id="${ids[0]}"]`).count(), 0, "older history is still not loaded");
+  await page.locator("[data-timeline-earlier]").waitFor({ state: "attached" });
+
+  await page.locator("[data-timeline-earlier]").click();
+  await page.locator(`[data-message-record-id="${ids[0]}"]`).waitFor({ state: "attached" });
+  assert.ok(pages.length >= 1, "the pager ran the paged fill");
   assert.deepEqual(errors, []);
 });

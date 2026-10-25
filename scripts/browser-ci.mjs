@@ -4,13 +4,12 @@
 // exit code 1": the raw log and the evidence artifact live behind a blob-store
 // redirect that some environments cannot reach, so nobody could tell which
 // of the ~60 Playwright suites failed. This wrapper runs the *same* suite
-// list as test:browser (read from package.json, so journey-coverage keeps a
-// single source of truth) with two reporters: `spec` to stdout for humans
-// reading the log, and `junit` to RESULTS_FILE for
-// scripts/report-test-failures.mjs, which turns it into GitHub annotations
-// and a job summary — both readable through the GitHub API.
-//
-// `test:browser` itself is unchanged for local use.
+// list as test:browser. package.json names the disk runner
+// (scripts/browser-suites.mjs --run); an explicit `node --test` list is
+// used as written so shard fixtures keep their own files. Two reporters:
+// `spec` to stdout for humans reading the log, and `junit` to RESULTS_FILE
+// for scripts/report-test-failures.mjs, which turns it into GitHub
+// annotations and a job summary — both readable through the GitHub API.
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -32,12 +31,21 @@ export function ciArgs(script, destination = RESULTS_FILE, shard = null) {
   ];
 }
 
-function main() {
+// Dynamic import keeps shard fixtures working: they copy this file
+// without browser-suites.mjs and always pass an explicit node --test list.
+async function suiteScriptFromPackage(script) {
+  const trimmed = String(script ?? "").trim();
+  if (trimmed.startsWith("node --test ")) return trimmed;
+  const { resolveBrowserScript } = await import("./browser-suites.mjs");
+  return resolveBrowserScript(script);
+}
+
+async function main() {
   const argv = process.argv.slice(2);
   if (argv.length > 1 || (argv.length && !argv[0].startsWith("--shard="))) throw new Error("Usage: browser-ci.mjs [--shard=1/4]");
   const shard = argv.length ? parseShard(argv[0].slice(8)) : null;
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-  const script = pkg.scripts?.["test:browser"];
+  const script = await suiteScriptFromPackage(pkg.scripts?.["test:browser"]);
   const plan = browserPlan(script);
   const suffix = shard ? `-${shard.index}-of-${shard.total}` : "";
   const destination = `test-results/browser-junit${suffix}.xml`;

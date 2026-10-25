@@ -16,7 +16,7 @@ const ALLOW = [
   "/icons/apple-touch-icon-180.png"
 ];
 
-function load({ actions = false, failFetch = false, clients = [] } = {}) {
+function load({ actions = false, failFetch = false, clients = [], cacheNames = [] } = {}) {
   const notifications = [];
   const badges = [];
   const cleared = [];
@@ -24,7 +24,7 @@ function load({ actions = false, failFetch = false, clients = [] } = {}) {
   const puts = [];
   const added = [];
   const listeners = {};
-  const cacheLists = new Map();
+  const cacheLists = new Map(cacheNames.map(name => [name, []]));
   const caches = {
     async open(name) {
       return {
@@ -63,7 +63,7 @@ function load({ actions = false, failFetch = false, clients = [] } = {}) {
   vm.runInContext(source, vm.createContext({
     self, caches, navigator, Notification, fetch, URL, Response, Promise
   }), { filename: "push-sw.js" });
-  return { listeners, notifications, badges, cleared, opened, puts, added, clients };
+  return { listeners, notifications, badges, cleared, opened, puts, added, clients, cacheLists };
 }
 
 async function fire(listeners, type, event) {
@@ -153,3 +153,22 @@ test("a click focuses an existing Room window, and opens one when none is open",
   });
   assert.deepEqual(empty.opened, ["/m/needs-you"]);
 });
+
+
+test("activation deletes only obsolete Room PWA caches", async () => {
+  const worker = load({ cacheNames: ["room-pwa-v0", "room-pwa-v1", "another-app-v1", "private-offline-drafts"] });
+  await fire(worker.listeners, "activate", {});
+  assert.deepEqual([...worker.cacheLists.keys()], ["room-pwa-v1", "another-app-v1", "private-offline-drafts"]);
+});
+
+for (const url of ["https://other.example/private", "//other.example/path", "/\\other.example/path", "/\n/other.example", "javascript:alert(1)"]) {
+  test(`notification clicks reject off-origin or malformed target ${JSON.stringify(url)}`, async () => {
+    const worker = load();
+    await fire(worker.listeners, "notificationclick", { notification: { data: { url }, close() {} } });
+    assert.deepEqual(worker.opened, ["https://room.example/"]);
+    const navigated = [];
+    const live = load({ clients: [{ url: "https://room.example/", focus: async () => {}, navigate: async value => navigated.push(value) }] });
+    await fire(live.listeners, "notificationclick", { notification: { data: { url }, close() {} } });
+    assert.deepEqual(navigated, ["https://room.example/"]);
+  });
+}

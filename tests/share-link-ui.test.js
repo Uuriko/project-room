@@ -146,7 +146,7 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     await node("#share-link-form").handlers.submit({ preventDefault() {} });
     assert.equal(createAttempts, 2);
     assert.deepEqual(requests[1], requests[0], "retry preserves token, request ID, expiry, scope and membership revision");
-    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.equal(node("#share-link-status").textContent, "Guest link ready — the link shown above is the one to share.");
     assert.match(node("#share-management-status").textContent, /reload invitation links/);
     assert.equal(node("#share-link-result").hidden, false);
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
@@ -254,7 +254,7 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
     const minted = node("#share-link-form").handlers.submit({ preventDefault() {} });
     await Promise.resolve();
     assert.equal(node("#share-link-create").disabled, false, "Create is usable while clipboard is still pending");
-    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.equal(node("#share-link-status").textContent, "Guest link ready — the link shown above is the one to share.");
     assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     finishClipboard();
