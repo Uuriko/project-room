@@ -300,7 +300,8 @@ test("deactivating the delegate's member link ends delegated authority", async t
   const res = await ctx.request("/api/rooms/commons/guest-invites", {
     method: "POST", token: agent.secret, data: mintBody(store)
   });
-  assert.equal(res.status, 401, "inactive link no longer resolves the grant");
+  assert.equal(res.status, 403, "inactive link no longer resolves the grant");
+  assert.equal((await res.json()).error.code, "no_access");
 });
 
 // Behavior: grants are room-scoped.

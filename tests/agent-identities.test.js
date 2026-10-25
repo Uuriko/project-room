@@ -106,7 +106,7 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   });
   assert.equal(unlink.status, 200);
   const labClient = new RoomAgentClient({ origin, roomId: "lab", token: secret, memberId: identityId });
-  await assert.rejects(labClient.snapshot(), error => error.status === 401);
+  await assert.rejects(labClient.snapshot(), error => error.status === 403 && error.code === "no_access");
   // Still works in commons.
   const commonsClient = new RoomAgentClient({ origin, roomId: "commons", token: secret, memberId: identityId });
   assert.ok((await commonsClient.snapshot()).state.members[identityId]);
@@ -118,11 +118,11 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   assert.equal((await labAgain.checkConnection()).status, "credential_accepted");
   assert.equal((await labAgain.snapshot()).state.members[identityId].active, true);
 
-  // An identity never linked to a room gets 401 there.
+  // An identity never linked to a room is refused as no_access there.
   const other = await (await fetch(`${origin}/api/agent-identities`, { method: "POST",
     headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ displayName: "Stranger" }) })).json();
   const stranger = new RoomAgentClient({ origin, roomId: "commons", token: other.secret, memberId: other.identityId });
-  await assert.rejects(stranger.snapshot(), error => error.status === 401);
+  await assert.rejects(stranger.snapshot(), error => error.status === 403 && error.code === "no_access");
 });
 
 test("re-linking applies the permissions the owner supplies now, not the unlinked record's", async t => {

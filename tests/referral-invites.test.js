@@ -326,12 +326,12 @@ test("mint requires room membership; removed inviter's tokens die", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const outsiderCreated = await post(origin, "/api/agent-identities", { displayName: "Outsider" });
   // At the store level an identity with no room membership cannot
-  // authenticate into the room at all — the mint is refused before
-  // membership is even evaluated. (At the parked HTTP door the same
+  // authenticate into the room: the mint is refused as no_access
+  // before membership is evaluated. (At the parked HTTP door the same
   // caller gets the uniform 410: the freeze answers members and
   // non-members identically, so the door is not a membership oracle.)
   assert.throws(() => store.referralInvites.mint(outsiderCreated.json.secret, "commons"),
-    error => error.status === 401);
+    error => error.status === 403 && error.code === "no_access");
   const denied = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, outsiderCreated.json.secret);
   assert.equal(denied.status, 410);
   assert.equal(denied.json.error.code, "referral_invites_parked");

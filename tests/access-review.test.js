@@ -268,15 +268,20 @@ test("the script prints the route's report from the store file and from a runnin
 
 test("the review shares the per-credential read allowance with sibling room reads", async t => {
   const f = await fixture(t);
-  for (let i = 0; i < 600; i += 100) {
-    const statuses = await Promise.all(Array.from({ length: 100 }, () => f.get("/api/rooms/commons/presence", f.bearer(f.ownerKey)).then(r => r.status)));
-    assert.ok(statuses.every(status => status === 200), `batch ${i}: ${statuses.join(",")}`);
+  // Sixty presence reads stay inside the read burst on their own. Twenty
+  // access-review reads in the same burst push the shared bucket over 70.
+  const responses = await Promise.all([
+    ...Array.from({ length: 60 }, () => f.get("/api/rooms/commons/presence", f.bearer(f.ownerKey))),
+    ...Array.from({ length: 20 }, () => f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey))),
+  ]);
+  const limited = responses.filter(response => response.status === 429);
+  assert.ok(responses.some(response => response.status === 200), "the burst still serves reads");
+  assert.ok(limited.length > 0, "presence and access-review share one read burst");
+  for (const response of limited) {
+    assert.equal(response.json.error.code, "rate_limited");
+    assert.equal(response.headers.get("x-ratelimit-limit"), "70");
+    assert.equal(response.headers.get("x-ratelimit-bucket"), "read");
   }
-  const limited = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
-  assert.equal(limited.status, 429);
-  assert.equal(limited.json.error.code, "rate_limited");
-  assert.equal(limited.headers.get("x-ratelimit-limit"), "600");
-  assert.equal(limited.headers.get("retry-after"), "60");
 });
 
 test("the review command records one revoke that removes both administration stores", async t => {

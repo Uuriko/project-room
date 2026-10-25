@@ -927,23 +927,22 @@ test("revoke answers 200 for a revoked or expired invite and 404 for an unknown 
   assert.equal(expiredAgain.json.status, "expired");
 });
 
-test("three credential replays of a burned invite leave one live room key", async t => {
+test("three credential replays of a burned invite mint no room key", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Replay Bot" });
   const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" });
   assert.equal(first.status, 201, JSON.stringify(first.json));
-  let last = first;
+  const originalId = first.json.mcpToken.keyId;
   for (let i = 0; i < 3; i++) {
-    last = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" }, first.json.identitySecret);
+    const last = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" }, first.json.identitySecret);
     assert.equal(last.status, 201, JSON.stringify(last.json));
     assert.equal(last.json.duplicate, true);
-    assert.match(last.json.mcpToken.credential, /^rak_/);
-    assert.equal(last.json.next[0].action, "save-room-key");
+    assert.equal(last.json.mcpToken, null);
+    assert.equal(last.json.next[0].action, "rotate");
   }
   const live = store.agentPlugin.listApiKeys(first.json.identityId).filter(key => !key.revoked);
   assert.equal(live.length, 1);
-  assert.equal(live[0].keyId, last.json.mcpToken.keyId);
+  assert.equal(live[0].keyId, originalId);
   const raw = credential => credential.slice("rak_".length);
-  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(first.json.mcpToken.credential)), null);
-  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(last.json.mcpToken.credential))?.keyId, last.json.mcpToken.keyId);
+  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(first.json.mcpToken.credential))?.keyId, originalId);
 });

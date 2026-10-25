@@ -485,7 +485,7 @@ test("hosted claim PR calls honor target-room tier, write profile and membership
   t.after(() => { store.workClaims.transaction = transaction; });
   denied = await call(origin, tool, args, writer.secret);
   assert.equal(removed, true);
-  assert.equal(denied.value.status, 401);
-  assert.equal(denied.value.code, "unauthenticated");
+  assert.equal(denied.value.status, 403);
+  assert.equal(denied.value.code, "no_access");
   assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
 });

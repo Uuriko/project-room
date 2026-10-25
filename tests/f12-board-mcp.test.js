@@ -276,7 +276,8 @@ test("stored Board reads preserve member, guest, scoped-key and read-only visibi
   assert.equal((await f.request(path, undefined, null)).status, 401);
   const stranger = f.store.identities.create("Unlinked reader");
   const refused = await f.request(path, undefined, stranger.secret);
-  assert.equal(refused.status, 401);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error.code, "no_access");
   assert.equal(refused.status, (await f.request(`/api/rooms/${f.roomId}/work-claims`, undefined, stranger.secret)).status);
   assert.equal(refused.body.claims, undefined);
   const nonmemberMcp = await f.mcp({}, stranger.secret);

@@ -137,7 +137,8 @@ test("enrolled members upload and download room_attachments through hosted MCP",
 
   const hidden = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, outsider.secret);
   assert.equal(hidden.body.result.isError, true);
-  assert.equal(hidden.value.status, 401);
+  assert.equal(hidden.value.status, 403);
+  assert.equal(hidden.value.code, "no_access");
   assert.equal(JSON.stringify(hidden.body).includes("room file bytes"), false);
 
   const blocked = await call(origin, "room_put_file", {
@@ -233,7 +234,8 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   const hidden = await call(origin, "room_commit_file", {
     roomId: created.roomId, id: "note", messageId: "msg-1"
   }, outsider.secret);
-  assert.equal(hidden.value.status, 401);
+  assert.equal(hidden.value.status, 403);
+  assert.equal(hidden.value.code, "no_access");
   assert.equal(JSON.stringify(hidden.body).includes(owner.secret), false);
 
   const committed = await call(origin, "room_commit_file", {

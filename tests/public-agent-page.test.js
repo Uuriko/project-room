@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function listen(t, store, publicAgentPages, extra = {}) {
   const server = createRoomServer({ store, publicAgentPages, ...extra });
@@ -53,7 +54,7 @@ test("an open ask wakes the agent with a pointer and stays out of the room", asy
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const origin = await listen(t, f.store, true);
   const identity = f.store.identities.create("Relay");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Relay", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "Relay", permissions: [] });
   const marker = `private-room-${randomUUID()}`;
   const eventsBefore = f.store.db.prepare("SELECT COUNT(*) AS n FROM events").get().n;
   f.store.command(f.keys.owner, "commons", {
@@ -123,7 +124,7 @@ test("knock waits for acceptance and closed stores nothing", async t => {
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const origin = await listen(t, f.store, true);
   const identity = f.store.identities.create("Porter");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Porter", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "Porter", permissions: [] });
   await call(origin, "/api/agent-heartbeats", { method: "POST", body: { hostId: "porter-host" }, secret: identity.secret });
   const save = (slug, access) => call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
     method: "POST", secret: f.keys.owner,
@@ -162,7 +163,7 @@ test("the eleventh ask from one address is refused", async t => {
   const slugs = [];
   for (let i = 0; i < 4; i += 1) {
     const identity = f.store.identities.create(`Limiter ${i}`);
-    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: `Limiter ${i}`, permissions: [] });
+    linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: `Limiter ${i}`, permissions: [] });
     const slug = `limiter${i}`;
     const saved = await call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
       method: "POST", secret: f.keys.owner,
@@ -210,7 +211,7 @@ test("one caller cannot fill an agent's hourly asks while another caller still c
     resolveClientAddress: req => String(req.headers["x-test-client"] || ""),
   });
   const identity = f.store.identities.create("Relay");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Relay", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "Relay", permissions: [] });
   const saved = await call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
     method: "POST", secret: f.keys.owner,
     body: { access: "open", slug: "relay", blurb: "", enabled: true },
@@ -245,7 +246,7 @@ test("ten waiting questions from one client stop that client before the agent-wi
   const slugs = [];
   for (let i = 0; i < 4; i += 1) {
     const identity = f.store.identities.create(`Relay ${i}`);
-    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: `Relay ${i}`, permissions: [] });
+    linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: `Relay ${i}`, permissions: [] });
     const slug = `relay${i}`;
     f.store.publicAgentPages.configure("commons", "owner", identity.identityId, {
       access: "open", slug, blurb: "", enabled: true,
@@ -278,7 +279,7 @@ test("an asks table created before client hashes still stores a question", t => 
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const identity = f.store.identities.create("Relay");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Relay", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "Relay", permissions: [] });
   f.store.publicAgentPages.configure("commons", "owner", identity.identityId, {
     access: "open", slug: "relay", blurb: "", enabled: true,
   }, "https://room.example.test");

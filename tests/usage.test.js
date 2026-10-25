@@ -212,7 +212,11 @@ test("non-members are refused and the response carries no secrets or hashes", as
   const { ownerKey, store, get, usage } = await serve(t);
   assert.equal((await get("/api/rooms/commons/usage")).status, 401);
   const stranger = store.identities.create("Unlinked identity");
-  assert.equal((await get("/api/rooms/commons/usage", stranger.secret)).status, 401);
+  const strangerReply = await get("/api/rooms/commons/usage", stranger.secret);
+  assert.equal(strangerReply.status, 403);
+  const strangerBody = await strangerReply.json();
+  assert.equal(strangerBody.error.code, "no_access");
+  assert.ok(!JSON.stringify(strangerBody).includes(stranger.secret));
   const labOwner = store.issueAccessKey("lab", "owner");
   assert.equal((await get("/api/rooms/commons/usage", labOwner)).status, 403);
 
