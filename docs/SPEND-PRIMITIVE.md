@@ -1,25 +1,41 @@
-# Spend primitive MVP — priced MCP tools in room credits
+# Spend primitive MVP — priced MCP tools in cents
 
-**Status:** MVP, credits only, fully reversible. Design doc:
+**Status:** MVP, cents only, fully reversible. Design doc:
 `~/workspace/research_notes/spend-primitive-design-2026-10-04.md`.
 
-**Money honesty:** room credits are valueless ledger units — no cash-out, no
-on-chain touch, no real money moves. Priced tools cost credits, never dollars.
+**Money honesty:** spend cents are valueless ledger units — no cash-out, no
+on-chain touch, no real money moves. Priced tools cost cents, never dollars.
+
+## Units — never sum across money systems
+
+This product has two money units and **no conversion between them**:
+
+- **Cents** — the spend system in this doc (priced tools, spend grants,
+  the room spend allowance, session budgets). Integer cents throughout.
+- **Credits** — the bounty ledger's unit (`server/bounty-escrow.mjs`):
+  1 credit = 1000 milli-credits. Awards, escrow, and receipts are credits.
+
+Never add a cents figure to a credits figure, and never present a combined
+"total value": no exchange rate exists, so any sum is a factor-100 (or
+worse) error. Reports, panels, and briefs show the two in separate panels
+with separate units, forever — the owner cockpit's rule: two currencies,
+never one number. (The spend unit was mislabeled "credits" until #3305;
+the numbers were always cents.)
 
 ## What it is
 
-Three MCP tools carry a per-call price in **room credits** (integer cents —
-the same unit as the room spend allowance). Everything else is free and
+Three MCP tools carry a per-call price in **cents** (integer cents — the
+same unit as the room spend allowance). Everything else is free and
 unchanged.
 
 | Tool | Price | Why it's priced |
 |---|---|---|
-| `room_put_file` | 5 credits | 1 MiB staged bytes per call — real storage cost |
-| `bounty_post` | 10 credits | Creates downstream economic activity (design OQ2's named candidate) |
-| `add_land_item` | 1 credit | GitHub reads (head, mergeable, check rollup) per add — real external cost |
+| `room_put_file` | 5 cents | 1 MiB staged bytes per call — real storage cost |
+| `bounty_post` | 10 cents | Creates downstream economic activity (design OQ2's named candidate) |
+| `add_land_item` | 1 cent | GitHub reads (head, mergeable, check rollup) per add — real external cost |
 
 Prices are declared in the tool's public `description`
-(`[paid: room-credits] N credits per call`) — the x402 pattern: the
+(`[paid: room-cents] N cents per call`) — the x402 pattern: the
 description is advertising, the runtime charge is authoritative. There is no
 MCP price field; none is invented.
 
@@ -75,7 +91,7 @@ GET    /api/rooms/:roomId/spend-grant             → 200 { roomId, memberId, sp
 
 `capCents`/`perTxCapCents` are integer-cent strings (`"100"`); floats are
 refused. `allowlist` is null (all priced tools) or a subset of priced tool
-names. Denomination is always `"credits"` — anything else is refused.
+names. Denomination is always `"cents"` — anything else is refused.
 
 ## Reversibility
 
@@ -166,7 +182,7 @@ LIMIT 10;
 SELECT tool_name,
        COUNT(*) AS settled_calls,
        COUNT(DISTINCT agent_id) AS paying_agents,
-       SUM(CAST(price_cents AS INTEGER)) AS gross_credits
+       SUM(CAST(price_cents AS INTEGER)) AS gross_cents
 FROM spend_authorizations
 WHERE status = 'settled'
 GROUP BY tool_name;

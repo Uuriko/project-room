@@ -1,4 +1,4 @@
-// Reactions, thread mutes and read horizons answer a DM non-party exactly
+// Poll votes, thread mutes and read horizons answer a DM non-party exactly
 // like an unknown id, and write nothing onto the private DM.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +13,7 @@ import { setReadHorizon } from "../server/activity.mjs";
 
 const refusal = fn => { try { fn(); } catch (e) { return JSON.stringify({ status: e.status, code: e.code, message: e.message }); } return "accepted"; };
 
-test("reactions, thread mutes and read horizons answer a DM non-party like an unknown id", () => {
+test("poll votes, thread mutes and read horizons answer a DM non-party like an unknown id", () => {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "dm-misc-"));
   const store = new RoomStore(join(dir, "room.sqlite"));
   try {
@@ -24,14 +24,14 @@ test("reactions, thread mutes and read horizons answer a DM non-party like an un
         data: { memberId, displayName: memberId, kind: "human", permissions: [] } });
     }
     const keys = Object.fromEntries(["alice", "bob", "mallory"].map(id => [id, store.issueAccessKey("commons", id)]));
-    store.command(keys.alice, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "a2b", body: "secret", toMemberId: "bob" } });
+    store.command(keys.alice, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "a2b", body: "secret", toMemberId: "bob", kind: "poll", poll: { question: "secret", options: ["x", "y"] } } });
 
-    const react = (who, messageId) => store.command(keys[who], "commons", { id: randomUUID(), type: T.MESSAGE_REACTION_SET, data: { messageId, reaction: "\u{1F44D}", active: true } });
-    const unknownReaction = refusal(() => react("mallory", "no-such"));
-    assert.notEqual(unknownReaction, "accepted");
-    assert.equal(refusal(() => react("mallory", "a2b")), unknownReaction);
-    react("bob", "a2b");
-    assert.deepEqual(Object.values(store.room("commons").state.messages.find(m => m.id === "a2b").reactions).flat(), ["bob"]);
+    const vote = (who, messageId) => store.command(keys[who], "commons", { id: randomUUID(), type: T.POLL_VOTED, data: { messageId, option: 0, active: true } });
+    const unknownVote = refusal(() => vote("mallory", "no-such"));
+    assert.notEqual(unknownVote, "accepted");
+    assert.equal(refusal(() => vote("mallory", "a2b")), unknownVote);
+    vote("bob", "a2b");
+    assert.deepEqual(store.room("commons").state.messages.find(m => m.id === "a2b").pollVotes.flat(), ["bob"]);
 
     const mute = (who, threadId) => store.threadMutes.set(keys[who], "commons", { threadId, muted: true });
     const unknownMute = refusal(() => mute("mallory", "no-such"));

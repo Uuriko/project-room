@@ -509,6 +509,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
   assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
+  assert.equal(listTools.path, "/mcp", "list-tools pointer uses the canonical /mcp path");
+  assert.equal(minted.next.find(s => s.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   for (const step of minted.nextActions) {
     assert.equal(typeof step.transport, "string", "nextActions names the transport");
     assert.ok(step.method || step.tool, "nextActions names the method or tool");

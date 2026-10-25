@@ -4,7 +4,7 @@
 // Pure validator: no store, no network. A later slice persists handoffs.
 import { createHash, randomUUID } from "node:crypto";
 import { PERMISSIONS } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 class HandoffError extends Error { constructor(code, message) { super(message); this.name = "HandoffError"; this.code = code; } }
 const fail = (code, message) => { throw new HandoffError(code, message); };
 const requireHandoff = (condition, code = "invalid_work_handoff", message = "invalid work handoff") => { if (!condition) fail(code, message); };
