@@ -14,8 +14,8 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-async function listen(t, store, publicAgentPages) {
-  const server = createRoomServer({ store, publicAgentPages });
+async function listen(t, store, publicAgentPages, extra = {}) {
+  const server = createRoomServer({ store, publicAgentPages, ...extra });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();
@@ -25,7 +25,7 @@ async function listen(t, store, publicAgentPages) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function call(origin, path, { method = "GET", body, secret, accept } = {}) {
+async function call(origin, path, { method = "GET", body, secret, accept, client } = {}) {
   const url = path.startsWith("http") ? path : `${origin}${path}`;
   const res = await fetch(url, {
     method,
@@ -33,6 +33,7 @@ async function call(origin, path, { method = "GET", body, secret, accept } = {})
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(secret ? { authorization: `Bearer ${secret}` } : {}),
       ...(accept ? { accept } : {}),
+      ...(client ? { "x-test-client": client } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -156,19 +157,26 @@ test("the eleventh ask from one address is refused", async t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const origin = await listen(t, f.store, true);
-  const identity = f.store.identities.create("Limiter");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Limiter", permissions: [] });
-  const saved = await call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
-    method: "POST", secret: f.keys.owner,
-    body: { access: "open", slug: "limiter", blurb: "", enabled: true },
-  });
-  assert.equal(saved.status, 200, saved.text);
-  let last = null;
-  for (let n = 0; n < 10; n += 1) {
-    last = await call(origin, "/api/public/agents/limiter/asks", { method: "POST", body: { question: `n${n}` } });
-    assert.equal(last.status, 202, last.text);
+  // Three questions per agent, so the per-address minute cap is what
+  // refuses the eleventh request. One page would stop at three.
+  const slugs = [];
+  for (let i = 0; i < 4; i += 1) {
+    const identity = f.store.identities.create(`Limiter ${i}`);
+    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: `Limiter ${i}`, permissions: [] });
+    const slug = `limiter${i}`;
+    const saved = await call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
+      method: "POST", secret: f.keys.owner,
+      body: { access: "open", slug, blurb: "", enabled: true },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    slugs.push(slug);
   }
-  const blocked = await call(origin, "/api/public/agents/limiter/asks", { method: "POST", body: { question: "overflow" } });
+  const plan = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3];
+  for (let n = 0; n < plan.length; n += 1) {
+    const posted = await call(origin, `/api/public/agents/${slugs[plan[n]]}/asks`, { method: "POST", body: { question: `n${n}` } });
+    assert.equal(posted.status, 202, posted.text);
+  }
+  const blocked = await call(origin, `/api/public/agents/${slugs[3]}/asks`, { method: "POST", body: { question: "overflow" } });
   assert.equal(blocked.status, 429);
   assert.equal(code(blocked), "rate_limited");
   assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_public_asks WHERE question='overflow'").get().n, 0);
@@ -193,4 +201,103 @@ test("public and owner routes stay dark when the flag is off", async t => {
   assert.equal(list.status, 404);
   assert.equal(code(list), "not_found");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_public_asks").get().n, 0);
+});
+
+test("one caller cannot fill an agent's hourly asks while another caller still can", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = await listen(t, f.store, true, {
+    resolveClientAddress: req => String(req.headers["x-test-client"] || ""),
+  });
+  const identity = f.store.identities.create("Relay");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Relay", permissions: [] });
+  const saved = await call(origin, `/api/rooms/commons/public-agent/${identity.identityId}`, {
+    method: "POST", secret: f.keys.owner,
+    body: { access: "open", slug: "relay", blurb: "", enabled: true },
+  });
+  assert.equal(saved.status, 200, saved.text);
+  const ask = (client, n) => call(origin, "/api/public/agents/relay/asks", {
+    method: "POST", client, body: { question: `question ${client} ${n} ${randomUUID()}` },
+  });
+  for (let n = 1; n <= 3; n += 1) {
+    const posted = await ask("caller-a", n);
+    assert.equal(posted.status, 202, posted.text);
+  }
+  const blocked = await ask("caller-a", 4);
+  assert.equal(blocked.status, 429, blocked.text);
+  assert.equal(code(blocked), "rate_limited");
+  assert.match(blocked.json.error.message, /this client/);
+  const other = await ask("caller-b", 1);
+  assert.equal(other.status, 202, other.text);
+  const hashes = f.store.db.prepare("SELECT client_hash FROM agent_public_asks").all().map(row => row.client_hash);
+  assert.equal(hashes.length, 4);
+  assert.equal(new Set(hashes).size, 2);
+  for (const hash of hashes) {
+    assert.match(hash, /^[a-f0-9]{64}$/);
+    assert.equal(hash.includes("caller"), false);
+  }
+});
+
+test("ten waiting questions from one client stop that client before the agent-wide cap", t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = "https://room.example.test";
+  const slugs = [];
+  for (let i = 0; i < 4; i += 1) {
+    const identity = f.store.identities.create(`Relay ${i}`);
+    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: `Relay ${i}`, permissions: [] });
+    const slug = `relay${i}`;
+    f.store.publicAgentPages.configure("commons", "owner", identity.identityId, {
+      access: "open", slug, blurb: "", enabled: true,
+    }, origin);
+    slugs.push(slug);
+  }
+  const pages = f.store.publicAgentPages;
+  let posted = 0;
+  for (const slug of slugs.slice(0, 3)) {
+    for (let i = 0; i < 3; i += 1) {
+      const ask = pages.postAsk(slug, { question: `queued ${posted}` }, origin, "203.0.113.8");
+      assert.equal(ask.status, "open");
+      posted += 1;
+    }
+  }
+  const tenth = pages.postAsk(slugs[3], { question: "queued 9" }, origin, "203.0.113.8");
+  assert.equal(tenth.status, "open");
+  assert.throws(
+    () => pages.postAsk(slugs[3], { question: "queued 10" }, origin, "203.0.113.8"),
+    error => error.status === 429 && /this client/.test(error.message)
+  );
+  const other = pages.postAsk(slugs[0], { question: "from the other caller" }, origin, "203.0.113.9");
+  assert.equal(other.status, "open");
+  const waiting = f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_public_asks WHERE status='open'").get().n;
+  assert.equal(waiting, 11);
+  assert.ok(waiting < 50);
+});
+
+test("an asks table created before client hashes still stores a question", t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const identity = f.store.identities.create("Relay");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Relay", permissions: [] });
+  f.store.publicAgentPages.configure("commons", "owner", identity.identityId, {
+    access: "open", slug: "relay", blurb: "", enabled: true,
+  }, "https://room.example.test");
+  f.store.db.exec("DROP TABLE agent_public_asks");
+  f.store.db.exec(`CREATE TABLE agent_public_asks (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    from_name TEXT NOT NULL DEFAULT '',
+    question TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('knock','open','answered','rejected')),
+    answer TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`);
+  const posted = f.store.publicAgentPages.postAsk("relay", { question: "still works" }, "https://room.example.test", "203.0.113.10");
+  assert.equal(posted.status, "open");
+  const columns = f.store.db.prepare("PRAGMA table_info(agent_public_asks)").all().map(column => column.name);
+  assert.ok(columns.includes("client_hash"));
+  const hash = f.store.db.prepare("SELECT client_hash FROM agent_public_asks").get().client_hash;
+  assert.match(hash, /^[a-f0-9]{64}$/);
 });
