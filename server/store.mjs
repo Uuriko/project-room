@@ -44,7 +44,7 @@ import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA 
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
 import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
-import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
+import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal, ChannelUpdateJournal, channelJournalSchema, SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns, JevShadowJournal, jevShadowSchema, SlaBreachAlertJournal, slaBreachAlertSchema, membershipDelegationJournalSchema, MembershipDelegationJournal } from "./journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
@@ -60,6 +60,7 @@ import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -76,19 +77,14 @@ import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-
 import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
 import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
-import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
-import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
-import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
-import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
-import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
@@ -192,7 +188,7 @@ import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
-  validateAttemptEnvironment, validateAttemptOutputs, ensureWorkControlDefaults
+  validateAttemptEnvironment, validateAttemptModel, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -651,6 +647,7 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
+  && (event?.data?.model ?? null) === (request.model ?? null)
   && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
@@ -764,7 +761,7 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget environment`,
+  [T.SESSION_STARTED]: `${work} budget environment model`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
   [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
@@ -1136,7 +1133,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
+    roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1448,6 +1445,7 @@ export class RoomStore {
     this.codeDrops = new CodeDrops(this); // patches agents share in the room (server/code-drops.mjs).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
+    this.publicAgentPages = new PublicAgentPages(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
@@ -1806,6 +1804,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // also land on the room ledger as participant-visible events.
       this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
+      this.db.exec(agentPublicPageSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
@@ -2045,6 +2044,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // started" — their cadence starts on first sight, like a fresh park.
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
         this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
+      }
+      // Quarantine bookkeeping. Additive, like last_diagnosed_at: existing
+      // parks stay skipped=0 until healBackfillQuarantines reclassifies an
+      // event-level row. anchor_seq -1 means "no replay anchor stashed".
+      // The CREATE TABLE string is already in the schema stamp, so a warm
+      // wake on an older room re-runs this pass and applies the columns.
+      // String literals, not exec(identifier): the stamp scanner treats a
+      // named exec argument as DDL that must be hashed.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='reason'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='component'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='attempts'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='skipped'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='anchor_seq'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1");
       }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM message_replay_snapshots").run();
@@ -2316,8 +2337,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an integrity failure for any other room. Without this the record
       // stood until the room fully caught up, keeping integrity red for days
       // after the cause was fixed. A later failure re-parks and re-records.
-      const parked = this.db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
-      if (!roomExists || !parked || messagesBackfillCaughtUp(this.db, row.recordId)) {
+      const parked = this.db.prepare("SELECT skipped FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      // A quarantine (skipped=1) is one event, not a room failure. A park
+      // that was lifted, a room that is gone, or a room that has caught up
+      // stops being reported.
+      if (!roomExists || !parked || parked.skipped || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
       }
     }
@@ -4763,7 +4787,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          // The board projection needs halts. The HTTP work view strips this
+          // before it is sent; it is not part of that response's state keys.
+          agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
@@ -4869,7 +4896,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -5006,11 +5033,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // may record output references. Both are optional and validated.
       if (request.environment !== undefined && type !== T.SESSION_STARTED)
         fail(422, "invalid_session_environment", "An environment is declared when the session starts");
+      if (request.model !== undefined && type !== T.SESSION_STARTED)
+        fail(422, "invalid_session_model", "A model is declared when the session starts");
       if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
         fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
-      let environment = null, outputs = null;
+      let environment = null, outputs = null, model = null;
       try { environment = validateAttemptEnvironment(request.environment); }
       catch (error) { fail(422, "invalid_session_environment", error.message); }
+      try { model = validateAttemptModel(request.model); }
+      catch (error) { fail(422, "invalid_session_model", error.message); }
       try { outputs = validateAttemptOutputs(request.outputs); }
       catch (error) { fail(422, "invalid_session_outputs", error.message); }
       const data = { workItemId: request.workItemId };
@@ -5018,6 +5049,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
+      if (type === T.SESSION_STARTED && model) data.model = model;
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;

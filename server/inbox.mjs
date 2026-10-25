@@ -17,11 +17,11 @@ import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
 import { shadowDecisionForImport } from "./spam-shadow.mjs";
-import { spamQuarantineStatuses } from "./spam-quarantine-journal.mjs";
+import { spamQuarantineStatuses } from "./journal.mjs";
 import { reviewCoverageBySignal } from "./quarantine-review-coverage.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
-import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
+import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./journal.mjs";
 import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation } from "./graph-reply-update-review.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
