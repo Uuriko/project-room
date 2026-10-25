@@ -450,11 +450,12 @@ export class AgentPluginStore {
     return this.#onboardingTokenView(issued);
   }
 
-  // Replay cannot return the original credential (only its hash is stored).
-  // One transaction revokes the onboarding keys that were already live and
-  // inserts the replacement. A key minted by an overlapping retry is claimed
-  // before the insert returns, so this rotation does not revoke it. A wider
-  // key, or an onboarding bundle for another room, is not in the revoke set.
+  // POST /api/agent-rooms/{id}/token/rotate. One transaction revokes the
+  // onboarding keys already live for this room and inserts the replacement.
+  // A key minted by an overlapping rotate is claimed before the insert
+  // returns, so this rotation does not revoke it. A wider key, or an
+  // onboarding bundle for another room, is not in the revoke set. Room-create
+  // replay does not call this.
   rotateOnboardingMcpToken({ identityId, roomId, label }) {
     const outermost = this.#onboardingRotationDepth === 0;
     this.#onboardingRotationDepth += 1;

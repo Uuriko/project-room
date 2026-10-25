@@ -90,8 +90,10 @@ test("same identity retrying with the same parameters gets duplicate:true", asyn
 
 const credentialDigest = value => createHash("sha256").update(value).digest("hex");
 
-test("replaying room create revokes earlier onboarding tokens and leaves other keys", async t => {
+test("a room-create replay inside 60s returns no credential and rotate revokes the old one", async t => {
+  let now = 1_700_000_000_000;
   const { store, rooms, identity } = setup(t);
+  store.now = () => now;
   const first = rooms.create(identity.secret, createArgs());
   const wider = store.agentPlugin.issueApiKey({
     identityId: identity.identityId,
@@ -99,26 +101,39 @@ test("replaying room create revokes earlier onboarding tokens and leaves other k
     label: "wider than onboarding",
   });
   const otherRoom = rooms.create(identity.secret, createArgs("other-den"));
-  const second = rooms.create(identity.secret, createArgs());
-  const third = rooms.create(identity.secret, createArgs());
-  assert.equal(second.duplicate, true);
-  assert.equal(third.duplicate, true);
-  assert.notEqual(credentialDigest(second.mcpToken.credential), credentialDigest(first.mcpToken.credential));
-  assert.notEqual(credentialDigest(third.mcpToken.credential), credentialDigest(second.mcpToken.credential));
+  now += 59_000;
+  const replay = rooms.create(identity.secret, createArgs());
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.mcpToken, null);
+  assert.equal(replay.next.action, "rotate");
+  assert.equal(replay.next.path, "/api/agent-rooms/agent-den/token/rotate");
+  assert.match(replay.next.description, /inside 60 seconds/);
+  assert.equal(store.authenticate(first.mcpToken.credential, "agent-den").identityId, identity.identityId);
+  now += 2000;
+  const late = rooms.create(identity.secret, createArgs());
+  assert.equal(late.duplicate, true);
+  assert.equal(late.mcpToken, null);
+  assert.match(late.next.description, /past the 60 second window/);
+  assert.equal(store.authenticate(first.mcpToken.credential, "agent-den").roomId, "agent-den");
+  const rotated = rooms.rotateOnboardingToken(identity.secret, "agent-den");
+  assert.match(rotated.mcpToken.credential, /^rak_/);
+  assert.notEqual(credentialDigest(rotated.mcpToken.credential), credentialDigest(first.mcpToken.credential));
   assert.throws(() => store.authenticate(first.mcpToken.credential, "agent-den"),
     err => err.status === 401 && err.code === "unauthenticated");
-  assert.throws(() => store.authenticate(second.mcpToken.credential, "agent-den"),
-    err => err.status === 401 && err.code === "unauthenticated");
-  const live = store.authenticate(third.mcpToken.credential, "agent-den");
-  assert.equal(live.identityId, identity.identityId);
-  assert.equal(live.roomId, "agent-den");
-  const kept = store.authenticate(`${API_KEY_PREFIX}${wider.secret}`, "agent-den");
-  assert.equal(kept.apiKeyId, wider.keyId);
-  const sibling = store.authenticate(otherRoom.mcpToken.credential, "other-den");
-  assert.equal(sibling.roomId, "other-den");
+  assert.equal(store.authenticate(rotated.mcpToken.credential, "agent-den").identityId, identity.identityId);
+  const again = rooms.create(identity.secret, createArgs());
+  assert.equal(again.mcpToken, null);
+  assert.equal(store.authenticate(rotated.mcpToken.credential, "agent-den").roomId, "agent-den");
+  assert.equal(store.authenticate(`${API_KEY_PREFIX}${wider.secret}`, "agent-den").apiKeyId, wider.keyId);
+  assert.equal(store.authenticate(otherRoom.mcpToken.credential, "other-den").roomId, "other-den");
+  const stranger = store.identities.create("Stranger");
+  assert.throws(() => rooms.rotateOnboardingToken(stranger.secret, "agent-den"),
+    err => err.status === 404 && err.code === "room_not_found");
+  assert.throws(() => rooms.rotateOnboardingToken(rotated.mcpToken.credential, "agent-den"),
+    err => err.status === 401 && err.code === "room_token_not_identity");
 });
 
-test("overlapping room-create retries do not revoke each other's new token", async t => {
+test("overlapping rotates do not revoke each other's new token", async t => {
   const { store, rooms, identity } = setup(t);
   const first = rooms.create(identity.secret, createArgs());
   const wider = store.agentPlugin.issueApiKey({
@@ -131,25 +146,23 @@ test("overlapping room-create retries do not revoke each other's new token", asy
   const set = keys.set.bind(keys);
   let started = false;
   let nested = null;
-  // The second retry begins once the first retry has stored its new key and
-  // before that retry returns the credential. A revoke that scans every live
-  // onboarding key in that window kills the token the first retry is about
-  // to hand back.
+  // The second rotate begins once the first has stored its new key and
+  // before that rotate returns the credential. A revoke that scans every
+  // live onboarding key in that window kills the token the first rotate
+  // is about to hand back.
   keys.set = (keyId, record) => {
     const result = set(keyId, record);
     const expected = store.agentPlugin.onboardingMcpScopes("agent-den");
     const scopes = record?.scopes;
     if (!started && Array.isArray(scopes) && scopes.length === expected.length && expected.every(scope => scopes.includes(scope))) {
       started = true;
-      nested = rooms.create(identity.secret, createArgs());
+      nested = rooms.rotateOnboardingToken(identity.secret, "agent-den");
     }
     return result;
   };
   try {
-    const outer = rooms.create(identity.secret, createArgs());
-    assert.ok(nested, "second retry ran while the first retry was storing its new key");
-    assert.equal(outer.duplicate, true);
-    assert.equal(nested.duplicate, true);
+    const outer = rooms.rotateOnboardingToken(identity.secret, "agent-den");
+    assert.ok(nested, "second rotate ran while the first rotate was storing its new key");
     assert.notEqual(credentialDigest(outer.mcpToken.credential), credentialDigest(nested.mcpToken.credential));
     assert.equal(store.authenticate(outer.mcpToken.credential, "agent-den").identityId, identity.identityId);
     assert.equal(store.authenticate(nested.mcpToken.credential, "agent-den").identityId, identity.identityId);
@@ -433,6 +446,14 @@ test("HTTP: self-serve creation over the bearer identity secret", async t => {
   const retry = await post("/api/agent-rooms", { token: identity.secret, data: args });
   assert.equal(retry.status, 200);
   assert.equal(retry.body.duplicate, true);
+  assert.equal(retry.body.mcpToken, null);
+  assert.equal(retry.body.next.action, "rotate");
+  const rotated = await post("/api/agent-rooms/http-den/token/rotate", { token: identity.secret });
+  assert.equal(rotated.status, 200);
+  assert.match(rotated.body.mcpToken.credential, /^rak_/);
+  assert.throws(() => store.authenticate(first.body.mcpToken.credential, "http-den"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.authenticate(rotated.body.mcpToken.credential, "http-den").roomId, "http-den");
   const badSecret = await post("/api/agent-rooms", { token: `pri_${"z".repeat(43)}`, data: createArgs("nope") });
   assert.equal(badSecret.status, 401);
   const noAuth = await post("/api/agent-rooms", { data: createArgs("nope2") });
