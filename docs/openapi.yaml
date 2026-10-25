@@ -174,6 +174,17 @@ paths:
       security: []
       responses:
         '200': { description: Demo headers without a response body }
+  /download:
+    get:
+      summary: Install status for the web app, Node runtime, and Mac
+      security: []
+      responses:
+        '200': { description: Script-free status page with no live room data }
+    head:
+      summary: Download page metadata
+      security: []
+      responses:
+        '200': { description: Download page headers without a response body }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"
@@ -1391,9 +1402,17 @@ paths:
         - $ref: '#/components/parameters/RoomId'
         - name: after
           in: query
+          description: >
+            Sequence strictly before the page. `0` or digits without a leading
+            zero (`^(0|[1-9]\d*)$`). Anything else is 422 `invalid_event_cursor`,
+            and the message names `after`.
           schema: { type: integer, minimum: 0, default: 0 }
         - name: limit
           in: query
+          description: >
+            Digits only (`^[1-9]\d*$`), from 1 to 100. An exponent, a leading
+            zero, a sign, or a space is 422 `invalid_event_cursor`, and the
+            message names `limit` and the range.
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
         - name: actor
           in: query
@@ -1401,11 +1420,19 @@ paths:
           schema: { type: string }
         - name: since
           in: query
-          description: Only events at or after this ISO timestamp (audit filter)
+          description: >
+            Only events at or after this instant. RFC 3339 with `Z` or a
+            numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
+            timestamp or a bare date is 422 `invalid_event_cursor`, and the
+            message names `since`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: until
           in: query
-          description: Only events at or before this ISO timestamp (audit filter)
+          description: >
+            Only events at or before this instant. RFC 3339 with `Z` or a
+            numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
+            timestamp or a bare date is 422 `invalid_event_cursor`, and the
+            message names `until`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: type
           in: query
@@ -1447,7 +1474,16 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since`, `until`, `type` or `mentions` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`, or `compact` is not 1/0/true/false" }
+        '422':
+          description: >
+            invalid_event_cursor — since and until must be RFC 3339 with Z or
+            an offset (for example 2026-10-24T20:30:00Z), and the message names
+            the field; since later than until is refused; limit must be an
+            integer from 1 to 100 and after an integer of 0 or more, and the
+            message names the parameter. Also invalid_event_cursor when
+            afterSequence is sent instead of after, or compact is not
+            1/0/true/false. invalid_cursor when actor, type, or mentions is
+            malformed.
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -1679,6 +1715,12 @@ paths:
         their sender or recipient (RC-2026-09-19-070), before matching, so
         neither the hits nor any match count can reveal them to a third party.
         Work items have no author and are never filtered by mute.
+        Accepted query keys are `q`, `kind`, `limit`, `before`, and `cursor`.
+        `cursor` is an alias of `before`. `auth` may be sent once; it selects
+        the room or account credential and is not a search filter. A repeated
+        key, both `before` and `cursor`, or any other key is 422
+        `invalid_search`, and the message names the keys. When older matches
+        remain, `nextCursor` and `next.before` are that same cursor.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -1713,9 +1755,15 @@ paths:
             read, gets the same 422 `invalid_search_cursor`; start again
             without `before`. Every visibility filter runs again on each page,
             and `total` stays the full match count.
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 320 }
+          description: >
+            Alias of `before`. Send this or `before`, not both. When both are
+            present the response is 422 `invalid_search`.
       responses:
         '401': { description: unauthenticated }
-        '422': { description: invalid_search (bad q, kind, or limit) or invalid_search_cursor }
+        '422': { description: invalid_search (bad q, kind, limit, or query keys) or invalid_search_cursor }
         '200':
           description: Search results
           content:
@@ -1730,6 +1778,11 @@ paths:
                   messages: { type: array, items: { type: object } }
                   workItems: { type: array, items: { type: object } }
                   nextCursor: { type: string, description: Present on kind=messages or kind=pinned when older matches remain; pass it as `before` }
+                  next:
+                    type: object
+                    description: Present with `nextCursor` when older matches remain. `before` is that cursor.
+                    properties:
+                      before: { type: string }
   /api/rooms/{roomId}/pins:
     get:
       summary: List pinned messages
