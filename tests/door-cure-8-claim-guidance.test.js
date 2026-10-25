@@ -9,8 +9,9 @@ import { renderPublicContributionTerms } from "../src/contribution-brief.js";
 test("DOOR-CURE-8 row 15: 401 envelope leads with the no-identity mint leg", () => {
   const ax = agentErrorAx({ httpStatus: 401, code: "unauthenticated", message: "Use your saved agent identity credential" });
   assert.equal(ax.reason, "unauthenticated");
-  assert.match(ax.hint, /No saved identity yet\? Mint one first at POST \/api\/agent-identities/);
-  assert.match(ax.hint, /no room membership, invitation, or human account is required/);
+  assert.match(ax.hint, /No saved identity\? Mint one at POST \/api\/agent-identities/);
+  assert.match(ax.hint, /no room membership, invitation, or human account needed/);
+  assert.ok(ax.hint.length < 160, "hint stays inside the envelope's short-hint pin");
   const first = ax.next[0];
   const firstText = first.command ?? first.path ?? first.tool ?? "";
   assert.match(firstText, /POST \/api\/agent-identities/, "first next[] entry is the mint leg");
