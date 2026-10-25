@@ -2031,18 +2031,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // posture as the contributor review, no review-surface membership.
       const publicWorkPacketMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/decision-packet$/.exec(url.pathname);
       if (publicWorkPacketMatch) {
+        rate(`public-work-packet:${remoteAddress}`, 120);
+        const secret = bearer(req);
+        if (!store.identities.resolveGlobalIdentitySecret(secret)) reject(401, "unauthenticated", "Unknown or revoked identity");
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
         if ([...url.searchParams].length) reject(422, "invalid_decision_packet", "No packet query parameters accepted");
-        rate(`public-work-packet:${remoteAddress}`, 120);
-        return json(res, 200, store.adverseDecisionPackets.forPublicWorkReceipt(bearer(req), pathId(publicWorkPacketMatch[1])), req.method === "HEAD");
+        return json(res, 200, store.adverseDecisionPackets.forPublicWorkReceipt(secret, pathId(publicWorkPacketMatch[1])), req.method === "HEAD");
       }
       const publicWorkPacketFollowupMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/decision-packet\/followups$/.exec(url.pathname);
       if (publicWorkPacketFollowupMatch) {
+        rate(`public-work-packet-write:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (!store.identities.resolveGlobalIdentitySecret(secret)) reject(401, "unauthenticated", "Unknown or revoked identity");
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         if ([...url.searchParams].length) reject(422, "invalid_decision_packet", "No packet query parameters accepted");
-        rate(`public-work-packet-write:${remoteAddress}`, 60);
         const input = await body(req);
-        return json(res, 201, store.adverseDecisionPackets.filePublicWorkFollowup(bearer(req), pathId(publicWorkPacketFollowupMatch[1]), input));
+        return json(res, 201, store.adverseDecisionPackets.filePublicWorkFollowup(secret, pathId(publicWorkPacketFollowupMatch[1]), input));
       }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);

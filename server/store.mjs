@@ -8,6 +8,7 @@ import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
 import { AdverseDecisionPackets, adverseDecisionPacketsSchema } from "./adverse-decision-packets.mjs";
+import { refusalJournalSchema } from "./refusal-journal.mjs";
 import { DecisionRows } from "./decision-rows.mjs"; // #3616 decision-row export + evidence access log (R-5/R-11)
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
@@ -1141,7 +1142,7 @@ function roomSchemaStamp() {
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema, adverseDecisionPacketsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema, adverseDecisionPacketsSchema, refusalJournalSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
@@ -1953,6 +1954,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.adverseDecisionPackets.verifySchema({ allowAbsent: true });
       this.db.exec(adverseDecisionPacketsSchema);
       this.adverseDecisionPackets.verifySchema();
+      // #3617 refusal journal: unfenced (older writers have no path to it)
+      // but required at boot. Recovery audits every application table, and
+      // unfencedAdditiveTables includes refusal_journal.
+      this.db.exec(refusalJournalSchema);
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();

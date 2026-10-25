@@ -16,7 +16,6 @@ import { sessionInstanceIdFor } from "../server/records-provenance.mjs";
 const ROOM = "room-test";
 const JILL = "id:agent/jill";       // poster
 const GROK = "id:agent/grokbot";    // worker
-const INSTINCT = "id:agent/instinct"; // designated verifier
 
 let nowMs = 1_786_000_000_000;
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
@@ -131,21 +130,24 @@ test("free-miss settlement record carries the submission round's provenance and 
   assert.deepEqual(replay.settlement, rejected.settlement);
 });
 
-test("legacy journal without provenance_json converges: column re-added, stamps land, hashes verify", () => {
-  // Simulate a pre-#3612 database: the current schema minus the
-  // provenance column (the bounty-rubrics legacy-convergence pattern).
-  const legacySchema = bountyEscrowSchema.replace("    track TEXT,\n    provenance_json TEXT\n", "    track TEXT\n");
+test("legacy journal without provenance_json or obligation_stamp_json converges: columns re-added, stamps land, hashes verify", () => {
+  // Simulate a pre-#3612/#3617 database: the current schema minus both
+  // additive journal columns (the bounty-rubrics legacy-convergence pattern).
+  const legacySchema = bountyEscrowSchema.replace(
+    "    track TEXT,\n    provenance_json TEXT,\n    obligation_stamp_json TEXT\n",
+    "    track TEXT\n");
   assert.notEqual(legacySchema, bountyEscrowSchema);
   const db = new DatabaseSync(":memory:");
   db.exec(legacySchema);
   // The production boot path rebuilds drifted tables to the exact DDL;
-  // the request-time _migrateColumns fallback only adds the column.
+  // the request-time _migrateColumns fallback only adds the columns.
   convergeBountyDeployedSchema(db);
   const { escrow } = makeEscrow(db);
   const bounty = runToSubmitted(escrow, { modelVersion: "model-x/1.2" });
   assert.equal(bounty.evidence.provenance.claimedModelVersion, "model-x/1.2");
   const cols = db.prepare("PRAGMA table_info(bounty_journal)").all().map(row => row.name);
-  assert.ok(cols.includes("provenance_json"), "migration re-added the column");
+  assert.ok(cols.includes("provenance_json"), "migration re-added provenance_json");
+  assert.ok(cols.includes("obligation_stamp_json"), "migration re-added obligation_stamp_json");
   assert.equal(escrow.verifySchema(), true);
   assert.equal(escrow.verifyConservation(ROOM).ok, true);
 });
