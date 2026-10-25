@@ -4,7 +4,8 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../server/public-assets.mjs';
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../server/public-search.mjs';
+import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
@@ -158,6 +159,20 @@ export function assetCachePolicy(type) {
   return null;
 }
 const assetEtags = new WeakMap();
+// The packaged front door keeps the GitHub anchor. The served copy without it
+// is built once for the cached source bytes, and its etag is hashed then.
+// A fresh buffer on every request would miss this cache.
+const strippedFrontDoor = new WeakMap();
+async function frontDoorBody(bytes, githubConfigured) {
+  if (githubConfigured) return bytes;
+  let stripped = strippedFrontDoor.get(bytes);
+  if (!stripped) {
+    stripped = new TextEncoder().encode(frontDoorHtml(bytes, { githubConfigured: false }));
+    strippedFrontDoor.set(bytes, stripped);
+    await assetEtag(stripped);
+  }
+  return stripped;
+}
 async function assetEtag(bytes) {
   let etag = assetEtags.get(bytes);
   if (!etag) {
@@ -232,6 +247,13 @@ function discoveryResponse(request, url) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
+// Same rule as the Worker boot: both secrets unset means off, and a partial
+// or invalid pair is disabled rather than shown as a working button.
+function githubSignInConfigured(env, origin) {
+  try { return githubConfig(env ?? {}, env?.ROOM_ORIGIN || origin) != null; }
+  catch { return false; }
+}
+
 async function assetResponse(request, env, url) {
   const headers = baseHeaders(url);
   const servedPath = roomMarketingPath(url.pathname) ?? url.pathname;
@@ -240,7 +262,7 @@ async function assetResponse(request, env, url) {
   headers.set('Link', canonicalTarget ? `${discoveryLinks(url)}, <${ROOM_ORIGIN}${canonicalTarget}>; rel="canonical"` : discoveryLinks(url));
   // About and compare pages have no scripts. The app shell and offers page keep
   // the room policy from baseHeaders so their modules load.
-  if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', publicPageCsp(url.origin, PUBLIC_SEARCH_CSP));
+  if (canonical && publicSearchMarketingPolicy(canonical)) headers.set('Content-Security-Policy', publicSearchPageCsp(canonical, url.origin));
   if (canonical && !url.search && canonical !== servedPath) {
     headers.set('Location', canonical);
     return new Response(null, { status: 301, headers });
@@ -248,6 +270,7 @@ async function assetResponse(request, env, url) {
   if (canonical && !url.search && reviewedPublicSearchPaths.includes(canonical)) headers.set('X-Robots-Tag', 'all');
   const [file, type] = assets.get(servedPath);
   const bytes = await loadCachedAsset(env, file);
+  const githubConfigured = file === 'index.html' && githubSignInConfigured(env, url.origin);
   if (!bytes) {
     // A reviewed page with no packaged bytes is an error, not a public
     // document. Do not leave the indexable robots tag that a present page
@@ -267,6 +290,7 @@ async function assetResponse(request, env, url) {
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
   const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
+  const bodyBytes = file === 'index.html' ? await frontDoorBody(bytes, githubConfigured) : bytes;
   headers.set('Content-Type', contentType);
   // Static assets were no-store, so every visit re-downloaded the ~1.9 MB app
   // shell (app.js, styles, emoji catalog). Binary images and fonts get the
@@ -276,15 +300,15 @@ async function assetResponse(request, env, url) {
   const policy = assetCachePolicy(type);
   if (policy) {
     headers.set('Cache-Control', policy);
-    const etag = await assetEtag(bytes);
+    const etag = await assetEtag(bodyBytes);
     headers.set('ETag', etag);
     if (etagMatches(request.headers.get('if-none-match'), etag)) {
       headers.delete('Content-Type');
       return new Response(null, { status: 304, headers });
     }
   }
-  headers.set('Content-Length', String(bytes.byteLength));
-  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+  headers.set('Content-Length', String(bodyBytes.byteLength));
+  return new Response(request.method === 'HEAD' ? null : bodyBytes, { status: 200, headers });
 }
 
 // Response for a path that must not enter the Durable Object, or null when

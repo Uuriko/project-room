@@ -139,6 +139,43 @@ export class MembershipDelegation {
     })));
   }
 
+  // Lifecycle revocation (account deletion / ownership transfer): revoke
+  // every active grant in this room that the given member granted, journaled
+  // under the lifecycle actor so an operator can tell it apart from a manual
+  // owner revoke. Delegated authority is the granter's personal issuance —
+  // it lapses with their account and with their ownership of the room.
+  // Returns the revoked count plus the members whose grant-conferred
+  // invite_member bit the caller must strip: revoke() strips through a
+  // member.access_changed command spent on the owner's token, but lifecycle
+  // callers own different event mechanics (account deletion appends the
+  // event directly; the ownership-transfer hook appends it as the incoming
+  // owner), so the strip itself is theirs. A bit the member held before the
+  // grant (added_invite_member = 0) is not a strip target: it has another
+  // live source and stays.
+  revokeAllGrantedBy(roomId, grantedByMemberId, { actorId, at } = {}) {
+    return this.store.transaction(() => {
+      this.store.delegationJournal.verify();
+      const now = at ?? this.store.now();
+      const rows = this.db.prepare(
+        "SELECT identity_id, added_invite_member FROM membership_delegation_grants WHERE room_id=? AND granted_by=? AND revoked_at IS NULL ORDER BY granted_at ASC")
+        .all(roomId, grantedByMemberId);
+      const stripTargets = [];
+      for (const row of rows) {
+        this.db.prepare(
+          "UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+          .run(now, roomId, row.identity_id);
+        this.store.delegationJournal.append(roomId, row.identity_id, "revoke", actorId, now, true, false);
+        if (row.added_invite_member) {
+          const member = this.store.identities.resolveIdentityLink(row.identity_id, roomId)?.member;
+          if (member && member.active !== false && member.permissions.includes("invite_member")) {
+            stripTargets.push(Object.freeze({ identityId: row.identity_id, memberId: member.id }));
+          }
+        }
+      }
+      return Object.freeze({ revoked: rows.length, stripTargets: Object.freeze(stripTargets) });
+    });
+  }
+
   // Does the identity hold an active grant in this room right now?
   hasGrant(roomId, identityId) {
     if (typeof roomId !== "string" || !roomId || typeof identityId !== "string" || !identityId) return false;

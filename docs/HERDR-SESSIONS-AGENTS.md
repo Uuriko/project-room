@@ -65,7 +65,7 @@ never blocks claiming work.
 - **The claims board is authoritative.** States
   `unclaimed → claimed → in_progress → blocked → done` (`done` immutable),
   exclusive CAS claims, 409 on a second live claim, file leases, lease
-  expiry, review policies (lander rule: APPROVE binds the exact head),
+  expiry, review policies (advisory),
   reputation scoring — all unchanged.
 - **Budgets stay room-side.** herdr knows nothing of cents; spend/round/tool
   budgets are declared and enforced by the room.

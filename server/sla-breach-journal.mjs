@@ -19,7 +19,7 @@
 // schema version bump, no writer-fence impact, because a pre-journal writer
 // has no code path to this table and the recovery audit's exact table list
 // is the integrity gate. All writes go through the store transaction.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // snapshotBytes caps the journaled prefs snapshot (a prefs snapshot is a

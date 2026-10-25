@@ -9,7 +9,7 @@
 // DMs plus public messages; everyone else's DMs are invisible to the radar.
 // An answer the asker could not read (a DM to someone else) does not close
 // the question.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };

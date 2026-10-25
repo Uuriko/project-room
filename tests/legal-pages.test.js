@@ -293,3 +293,14 @@ test("unpublish is refused when no operator account is configured", async t => {
   assert.equal(res.status, 403);
   assert.equal(JSON.parse(res.text).error.code, "operator_unconfigured");
 });
+
+test("legal pages carry a description and allow the analytics beacon the privacy policy names", async () => {
+  const { LEGAL_PAGE_CSP, legalPageHtml } = await import("../server/legal-pages.mjs");
+  for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
+    const html = legalPageHtml(path);
+    assert.match(html, /<meta name="description" content="[^"]+ for Project Room/, path);
+  }
+  assert.match(LEGAL_PAGE_CSP, /script-src https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(LEGAL_PAGE_CSP, /connect-src 'self' https:\/\/cloudflareinsights\.com/);
+  assert.match(EMBEDDED_LEGAL["privacy.md"], /static\.cloudflareinsights\.com/);
+});

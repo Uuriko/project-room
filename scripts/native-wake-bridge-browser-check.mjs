@@ -59,11 +59,18 @@ test("macOS wake signal: bounded revalidation for a live session, stale access d
   await signInFixture(page, waker);
   await page.locator("#message-list").getByText("seed message posted before sleep").waitFor();
 
-  await page.fill("#message-input", "draft that must survive wake");
+  // fill() dispatches input without waiting for its asynchronous typing
+  // beacon. Drain that user traffic before recording any wake traffic.
+  const [typingResponse] = await Promise.all([
+    page.waitForResponse(response => response.url() === `${origin}/api/rooms/commons/typing`
+      && response.request().method() === "POST", { timeout: 10000 }),
+    page.fill("#message-input", "draft that must survive wake")
+  ]);
+  assert.ok(typingResponse.ok(), "the draft's typing beacon succeeds before the wake ledger starts");
+  assert.equal(await typingResponse.finished(), null, "the draft's typing beacon finishes before the wake ledger starts");
 
-  // Ledger starts only once the room is fully open and the draft is typed
-  // (typing beacons are user traffic), so every entry below is wake traffic
-  // and nothing else.
+  // The room is open and the draft's typing beacon has completed, so every
+  // entry below is wake traffic, with no writes exempted from the ledger.
   const ledger = [];
   page.on("request", request => ledger.push({ method: request.method(), path: new URL(request.url()).pathname }));
   const sessionGets = () => ledger.filter(entry => entry.method === "GET" && entry.path === "/api/session").length;
