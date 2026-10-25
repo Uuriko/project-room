@@ -151,8 +151,6 @@ test("signup reconciles a committed account when its response body is interrupte
   });
   assert.equal(verified.status(), 200);
   await clickChrome(page, '#nav-rooms');
-  await page.locator('#setup-name').fill('Recovery tester');
-  await page.locator('#account-setup-dialog').getByRole('button', { name: 'Done', exact: true }).click();
   await page.locator('#account-room-create summary').click();
   await page.locator('#account-room-title').fill('Recovered workspace');
   await page.locator('#account-room-purpose').fill('Continue after interrupted signup.');

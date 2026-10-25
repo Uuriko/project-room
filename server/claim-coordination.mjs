@@ -41,11 +41,16 @@ export function rateLimitUntil({ status, remaining, reset, retryAfter, message }
   const limited = status === 429 || (status === 403 && (remaining === "0" || /rate limit/i.test(message ?? "")));
   if (!limited) return null;
   let until = null;
-  if (typeof reset === "string" && /^\d+$/.test(reset.trim())) {
+  // GitHub's documented order: an explicit retry-after wins; the primary
+  // window's x-ratelimit-reset applies only when that window is spent
+  // (remaining 0). A secondary limit (403 "rate limit", remaining > 0) also
+  // carries the primary reset, up to an hour away; holding until it parked
+  // every claim poll far past the minute GitHub asked for.
+  if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
+    until = nowMs + Number(retryAfter.trim()) * 1000;
+  } else if (remaining === "0" && typeof reset === "string" && /^\d+$/.test(reset.trim())) {
     const value = Number(reset.trim());
     until = value > 1e12 ? value : value * 1000;
-  } else if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
-    until = nowMs + Number(retryAfter.trim()) * 1000;
   }
   if (!until || until <= nowMs) until = nowMs + PULL_POLL_BACKOFF_MS;
   return until;
@@ -231,6 +236,19 @@ export function pullRequestDue(item, nowMs) {
   return pull.nextPollAt == null || pull.nextPollAt <= nowMs;
 }
 
+// #3661: the verify-and-stamp class. A claim finished by hand with
+// deliveryMode "merged" asserts its pull merged; the assertion is due one
+// verification lookup while the stored outcome is still unstamped. This is
+// not settlement — the claim is already terminal — so it is gated to done
+// claims only and the poll spends on it last (see claim-pr-sync.mjs).
+export function pullVerificationDue(item, nowMs) {
+  const pull = item?.pullRequest;
+  if (!pull?.url || pull.outcome) return false;
+  if (item.state !== "done" || item.deliveryMode !== "merged") return false;
+  if (Number.isFinite(pull.rateLimitedUntil) && pull.rateLimitedUntil > nowMs) return false;
+  return pull.nextPollAt == null || pull.nextPollAt <= nowMs;
+}
+
 // Live claims whose declared files intersect. One entry per holding claim.
 // Paths are compared as already stored (the claim machine normalizes them).
 function fileSlots(item) {
@@ -272,6 +290,57 @@ export function recordPullOutcome(item, url, outcome, nowMs) {
 export function pullsReadyToSettle(item) {
   const links = pullLinks(item);
   return links.length > 0 && links.every(pull => pull.outcome === "merged" || pull.outcome === "closed");
+}
+
+// #3661: the settlement state a claim read derives from the stored pull
+// record. Computed at read time only — never stored, so no stored row can
+// disagree with it. `verified`: the poller stamped the outcome itself.
+// `asserted`: a finisher closed the claim as merged and no stamp has
+// verified that yet. `pending`: a link is attached and its outcome is
+// still unknown. `none`: no pull link at all.
+export function pullRequestSettlement(item) {
+  const pull = item?.pullRequest;
+  if (!pull?.url) return "none";
+  if (pull.outcome) return "verified";
+  if (item.state === "done" && item.deliveryMode === "merged") return "asserted";
+  return "pending";
+}
+
+// A read copy of the claim whose pull record carries the derived
+// settlement state. Link-less claims pass through unchanged: their
+// pullRequest stays null and the settlement reads as "none" by absence.
+export function withPullSettlement(item) {
+  if (!item?.pullRequest?.url) return item;
+  return { ...item, pullRequest: Object.freeze({ ...item.pullRequest, settlement: pullRequestSettlement(item) }) };
+}
+
+// #3661: a poller-observed outcome persisted onto a claim that was already
+// finished by hand. The caller passes the item after recordPullOutcome;
+// this folds the lookup's ETag onto the decided link and appends the
+// verification stamp to the history. State, owner, and lease fields are
+// untouched — the finish stands exactly as its finisher left it. A pull
+// found closed against a merged finish is a contradiction: the stamp
+// names it instead of quietly agreeing with the assertion.
+export function stampVerifiedPullOutcome(item, outcome, nowMs, { url, etag } = {}) {
+  const usable = usableEtag(etag);
+  let next = item;
+  if (usable) {
+    const links = pullLinks(item).map(pull => pull.url === url ? Object.freeze({ ...pull, etag: usable }) : pull);
+    next = {
+      ...item,
+      pullRequests: Object.freeze(links),
+      pullRequest: item.pullRequest?.url === url ? Object.freeze({ ...item.pullRequest, etag: usable }) : item.pullRequest
+    };
+  }
+  const contradiction = outcome === "closed" && next.deliveryMode === "merged";
+  const note = contradiction
+    ? `pull request closed without merging: ${url} — contradicts the merged finish; outcome stamped closed`
+    : `pull request ${outcome}: ${url}`;
+  return {
+    ...next,
+    history: Object.freeze([...(next.history ?? []),
+      stamp(nowMs, next.owner ?? "system", contradiction ? "pr_outcome_contradiction" : "pr_outcome_verified", note)])
+  };
 }
 export function batchPullOutcome(item) {
   return pullLinks(item).some(pull => pull.outcome === "merged") ? "merged" : "closed";

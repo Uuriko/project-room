@@ -1,13 +1,35 @@
+import { createHash } from 'node:crypto';
 import { validId, roomPolicy } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
+import { PublicWorkSettlement } from './public-work-settlement.mjs';
+import { projectPublicWorkReceipt } from './public-read-model.mjs';
 
-// Private review is a separate fact. Submission bytes, public receipt, leases,
-// work gates, credit balances and payment state are never changed here.
+// Private review is a separate fact. Submission bytes, leases and work
+// gates are never changed here. Two deliberate exceptions, both inside
+// this same transaction: (1) for PAID tasks only, an accept/reject
+// decision settles credits through the escrow rail
+// (server/public-work-settlement.mjs); unpaid tasks keep the historical
+// feedback-only behavior exactly. (2) An acceptance stamps the public
+// receipt's verified successor state (#3546: state / verification /
+// verified / executedChecks) — the submission bytes themselves are never
+// altered, and the stamp is derived entirely from the review fact
+// recorded here. A verify PASS additionally executes the platform's own
+// artifact-integrity check first: the stored bytes are re-hashed and
+// must match the hash the receipt was issued under. The outcome recorded
+// here is not private, though: receipt reads compose this record's
+// verdict and decision onto the canonical and public receipt faces
+// (#3733, publicWorkReceiptOutcome in server/public-read-model.mjs);
+// the reviewer identity, reason and fingerprint stay member-side.
 export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public_work_review_versions (
+  receipt_id TEXT NOT NULL, room_id TEXT NOT NULL, revision INTEGER NOT NULL,
+  action TEXT NOT NULL, actor_id TEXT NOT NULL, at TEXT NOT NULL, state_json TEXT NOT NULL,
+  PRIMARY KEY(receipt_id, revision)
 );
 CREATE TABLE IF NOT EXISTS public_work_review_requests (
   room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -25,10 +47,21 @@ const knownMember = (state, actorId) => {
 export class PublicWorkReviews {
   constructor(store) { this.store = store; this.db = store.db; }
   verifySchema({ allowAbsent = false } = {}) {
-    const shapes = publicWorkReviewsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean).map(sql => ({ sql,
+    const shapes = publicWorkReviewsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean).map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql,
       actual: this.db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-    if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
-    if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
+    // public_work_review_versions is the purely additive versioning sidecar
+    // (W3): an older database carries the review pair without it and
+    // read-only startup never creates it, so its absence is the
+    // pre-versioning state, not damage — a present sidecar is
+    // shape-verified, an absent one is tolerated (the wake-queue
+    // side-table pattern). The review pair itself stays all-or-nothing:
+    // both absent is the pre-review state allowAbsent exists for; exactly
+    // one absent, or any shape drift anywhere, is operator reconciliation.
+    const core = shapes.filter(shape => shape.name !== 'public_work_review_versions');
+    const sidecar = shapes.filter(shape => shape.name === 'public_work_review_versions');
+    if (sidecar.some(shape => shape.actual !== undefined && normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
+    if (allowAbsent && core.every(shape => shape.actual === undefined)) return false;
+    if (core.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error('Public work review schema requires operator reconciliation');
     return true;
   }
   hasTable(name) { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
@@ -86,14 +119,16 @@ export class PublicWorkReviews {
     return evidence?.verdict === 'PASS' && evidence.fingerprint === scope.fingerprint && this.permissions(scope, evidence.actorId).verify;
   }
   needsPass(scope) { return scope.offer.approvalPolicy.mode !== 'human' || scope.policy.requireIndependentReview || scope.work?.independentVerificationRequired; }
-  view(scope) {
+  settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
+  view(scope, { history = false } = {}) {
     const review = this.current(scope), permissions = this.permissions(scope, scope.actorId);
+    const settlement = this.settlementService().viewForOffer(scope.receipt.taskId);
     const followUp = this.store.publicWorkSuccessors?.link(scope.receipt.receiptId);
     const terminal = ['accepted', 'rejected'].includes(review.state);
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { ...(followUp ? { followUp } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), ...(history ? { history: this.historyEntries(scope) } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -103,11 +138,29 @@ export class PublicWorkReviews {
         acceptReady: permissions.decide && ready && !terminal,
         reason: terminal ? 'Review decision is final.' : !permissions.decide ? 'A designated reviewer must decide.' : !ready ? 'A current independent PASS is required.' : 'Ready for an explicit decision.' } };
   }
+  // W3 review-history versioning: every mutation appends an immutable
+  // version row (see mutate), so the full verdict/revision history reads
+  // back in revision order. Entries mirror the current view's redaction:
+  // reviewer identity and reasons are visible at this (member-side)
+  // door, the verification fingerprint never leaves the evidence record.
+  // Pre-versioning reviews have no rows and read as an empty history —
+  // their overwritten verdicts are gone, not fabricated.
+  historyEntries(scope) {
+    if (!this.hasTable('public_work_review_versions')) return [];
+    return this.db.prepare('SELECT revision, action, actor_id, at, state_json FROM public_work_review_versions WHERE receipt_id=? AND room_id=? ORDER BY revision ASC')
+      .all(scope.receipt.receiptId, scope.roomId).map(row => {
+        const state = JSON.parse(row.state_json);
+        let verification = null;
+        if (state.verification) { const { fingerprint: ignored, ...rest } = state.verification; void ignored; verification = rest; }
+        return { revision: row.revision, action: row.action, actorId: row.actor_id, at: row.at,
+          state: state.state, verification, decision: state.decision ?? null };
+      });
+  }
   inspect(roomId, actorId, receiptId) {
     return this.store.readTransaction(() => {
       const scope = this.scope(roomId, actorId, receiptId), authority = this.permissions(scope, actorId);
       if (scope.state.room.ownerId !== actorId && !authority.decide && !authority.verify) fail(403, 'review_forbidden', 'Only the owner or designated reviewer may inspect');
-      return this.view(scope);
+      return this.view(scope, { history: true });
     });
   }
   results(roomId, actorId, { limit = 20, after = '' } = {}) {
@@ -138,6 +191,30 @@ export class PublicWorkReviews {
           ...(current.decision ? { decision: current.decision.decision, reason: current.decision.reason, decidedAt: current.decision.at } : {}),
           ...(current.verification ? { verificationVerdict: current.verification.verdict, verificationReviewerKind: current.verification.reviewerKind } : {}) } };
     });
+  }
+  // #3546: acceptance is the public receipt's verified successor state.
+  // The receipt gains state "verified", the executed checks that ran
+  // (finish-time criteria coverage + verify-time artifact integrity), and
+  // the verification level they earn — "system_checked" only when at least
+  // one system-executed check is on record AND passed; an acceptance with
+  // no passed executed checks keeps its honest "hash_only" level under a
+  // verified state.
+  stampPublicReceiptVerified(receiptId, review) {
+    const row = this.db.prepare('SELECT receipt_json, artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+    if (!row) return;
+    const receipt = JSON.parse(row.receipt_json);
+    const executed = new Map();
+    for (const entry of [...(receipt.executedChecks ?? []), ...(review.verification?.executedChecks ?? [])])
+      if (entry && typeof entry.name === 'string') executed.set(entry.name, entry);
+    receipt.state = 'verified';
+    receipt.executedChecks = [...executed.values()];
+    // #3683: as at finish, the label requires a passed check — a failed
+    // criteria_coverage on record must not read as a system endorsement.
+    receipt.verification = receipt.executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : (receipt.verification ?? 'hash_only');
+    receipt.verified = { by: review.decision.actorId, at: review.decision.at,
+      reviewRevision: review.revision, passVerdict: review.verification?.verdict ?? null };
+    this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
+    projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
   }
   decide(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'decide', input); }
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
@@ -175,15 +252,56 @@ export class PublicWorkReviews {
       if (current.revision !== input.expectedReviewRevision) fail(409, 'stale_review', 'Review changed; inspect it again');
       if (['accepted', 'rejected'].includes(current.state)) fail(409, 'review_final', 'Review decision is final');
       const at = new Date(this.store.now()).toISOString();
-      if (action === 'verify') current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint };
-      else {
+      if (action === 'verify') {
+        // #3547 executed evidence: a PASS is recorded only after the
+        // platform re-hashes the stored submission bytes itself and finds
+        // them identical to the hash the receipt was issued under. A
+        // mismatch means the stored artifact is not the submitted
+        // artifact — no reviewer verdict can paper over that.
+        let executedChecks;
+        if (input.verdict === 'PASS') {
+          const detail = this.db.prepare('SELECT artifact_text,artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+          const recomputed = detail ? createHash('sha256').update(detail.artifact_text).digest('hex') : null;
+          if (!detail || recomputed !== detail.artifact_sha256 || recomputed !== scope.receipt.artifact.sha256)
+            fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
+          executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
+        }
+        current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
+          ...(executedChecks ? { executedChecks } : {}) };
+      } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
       }
       current.revision += 1;
       this.db.prepare('INSERT INTO public_work_reviews VALUES (?,?,?,?) ON CONFLICT(receipt_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json')
         .run(receiptId, roomId, current.revision, JSON.stringify(current));
-      const outcome = this.view(scope);
+      // Settlement fires on an actual verdict only (accepted/rejected, in
+      // this same transaction, so a settlement failure records no verdict).
+      // revision_requested and verify actions never settle, reviewer
+      // silence never settles (the VIII.1 free-miss flip is John-gated and
+      // not implemented), and unpaid tasks have no link and skip entirely.
+      // Settlement runs first: if it throws, the transaction aborts and
+      // neither the verdict nor the #3546 verified stamp is recorded. An
+      // acceptance then stamps the receipt's verified successor state in
+      // the same transaction; a rejection settles (full feeless refund)
+      // and never stamps.
+      const settlement = action === 'decide' && ['accepted', 'rejected'].includes(input.decision)
+        ? this.settlementService().settleOnVerdict(roomId, scope.receipt.taskId, { decision: input.decision, reason: input.reason }) : null;
+      if (action === 'decide' && input.decision === 'accepted') this.stampPublicReceiptVerified(receiptId, current);
+      // W3: the public_work_reviews row is the current-verdict pointer;
+      // this append-only row is the history it used to destroy. Written
+      // after settlement and the verified stamp, inside the same
+      // transaction, so a failed settlement records no version either.
+      // Journal replays return above and never reach this insert, keeping
+      // version rows 1:1 with revisions. A plain INSERT (no OR IGNORE): a
+      // revision collision would mean revision reuse, which must fail
+      // loudly rather than silently drop a verdict.
+      if (this.hasTable('public_work_review_versions')) {
+        this.db.prepare('INSERT INTO public_work_review_versions VALUES (?,?,?,?,?,?,?)')
+          .run(receiptId, roomId, current.revision, action, actorId, at, JSON.stringify(current));
+      }
+      const outcome = this.view(scope, { history: true });
+      if (settlement) outcome.settlement = settlement;
       this.db.prepare('INSERT INTO public_work_review_requests VALUES (?,?,?,?,?)').run(roomId, actorId, input.requestId, encoded, JSON.stringify(outcome));
       return outcome;
     });
