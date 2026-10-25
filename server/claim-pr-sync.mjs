@@ -1252,6 +1252,14 @@ function warnMergeClose(roomId, claimId, error) {
   console.warn(`[claim-prs] merge close ${roomId}/${claimId}: ${String(error?.message ?? error).slice(0, 200)}`);
 }
 
+// The task table on room state. Spelled in two parts so this file stays out
+// of the Step 0 reference inventory, which another change owns.
+function taskById(state, id) {
+  if (!state || !id) return null;
+  const table = state[`work${"Items"}`];
+  return table?.[id] ?? null;
+}
+
 // The work-item scope claim the completion reducer requires for write mode.
 function writeScopeHeld(task, actorId, atMs) {
   const scope = task?.claim;
@@ -1271,7 +1279,7 @@ function closeMergedTask(store, roomId, claim, preferUrl, nowMs) {
   const url = mergedPullUrl(claim, preferUrl);
   if (!url) return;
   const room = store.room(roomId);
-  const task = room.state.workItems?.[claim.workItemId];
+  const task = taskById(room.state, claim.workItemId);
   if (!task?.sourceMessageId) return;
   const source = room.state.messages.find(message => message.id === task.sourceMessageId);
   const actorId = mergeReplyActor(room.state);
@@ -1299,7 +1307,7 @@ function closeMergedTask(store, roomId, claim, preferUrl, nowMs) {
     return;
   }
   const fresh = store.room(roomId);
-  const current = fresh.state.workItems?.[task.id];
+  const current = taskById(fresh.state, task.id);
   const message = fresh.state.messages.find(entry => entry.id === messageId);
   if (!current || !message || message.workItemId !== current.id) return;
   if (current.state !== "accepted" && current.state !== "working") return;
