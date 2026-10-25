@@ -152,3 +152,25 @@ test("deleted owned source blocks successor work and later Stop reconciles witho
   assert.equal((await f.owner.assistant()).runs.find(r => r.id === "first").status, "cancelled");
   assert.equal(f.runtime().starts, 1);
 });
+
+test("restart exposes a confirmed interrupted turn as paused so the human can resume it", async t => {
+  const f = await fixture(t, "hold"); await f.invoke("interrupted");
+  const first = new AbortController(), running = f.run({ signal: first.signal });
+  await waitUntil(() => f.runtime().starts === 1); await delay(50);
+  first.abort(); await running;
+  const restart = new AbortController(), events = [];
+  const safety = setTimeout(() => restart.abort(), 2500);
+  await f.run({ signal: restart.signal, emit: event => {
+    events.push(event); if (event.status === "settled") restart.abort();
+  } });
+  clearTimeout(safety);
+  const run = (await f.owner.assistant()).runs.find(row => row.id === "interrupted");
+  assert.equal(run.status, "paused", "confirmed interruption must not remain working with endless retries");
+  assert.equal(f.runtime().starts, 1, "restart must not blindly repeat work");
+  assert.ok(events.some(event => event.status === "settled" && event.runStatus === "paused"));
+  await f.owner.assistant({ action: "resume", requestId: randomUUID(), runId: run.id,
+    expectedRevision: run.revision });
+  const resumed = new AbortController(), continuation = f.run({ signal: resumed.signal });
+  await waitUntil(() => f.runtime().starts === 2); resumed.abort(); await continuation;
+  assert.equal(Object.keys(f.runtime().threads).length, 2, "one probe plus one reused work thread");
+});

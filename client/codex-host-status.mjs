@@ -4,6 +4,7 @@ import { WatchJournal } from "./watch-journal.mjs";
 
 const phases = new Set(["watching_room", "assistant_not_selected", "protocol_qualified", "running", "settled", "recovery_pending", "retrying_room", "stopped"]);
 const credentials = new Set(["unknown", "present", "login_required", "not_required"]);
+const recoveryActions = new Set(["reconnect_agent", "inspect_original_attempt"]);
 const privatePath = (path, directory = false) => {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
@@ -24,6 +25,10 @@ function readRecord(path) {
     phase: value.phase, protocol: value.protocol, credentials: value.credentials, modelExecution: "not_tested" };
   for (const key of ["origin", "roomId", "memberId", "runId"])
     if (typeof value[key] === "string" && value[key].length <= 256) result[key] = value[key];
+  if (value.modelExecution === "completed" && typeof value.resultMessageId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value.resultMessageId)) {
+    result.modelExecution = "completed"; result.resultMessageId = value.resultMessageId;
+  }
+  if (recoveryActions.has(value.recoveryAction)) result.recoveryAction = value.recoveryAction;
   return result;
 }
 
@@ -58,10 +63,17 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
     event(event) {
       if (failure) throw failure;
       if (!["host_status", "host_readiness"].includes(event.type)) return;
+      if (event.type === "host_status" && event.status === "stopped_auth") record.recoveryAction = "reconnect_agent";
       if (event.type === "host_status" && phases.has(event.status)) {
         record.phase = event.status;
         if (event.status === "protocol_qualified") record.protocol = "qualified";
         if (event.status === "recovery_pending") record.protocol = "unverified";
+        if (event.status === "recovery_pending") record.recoveryAction = "inspect_original_attempt";
+        else if (event.status !== "stopped") delete record.recoveryAction;
+        if (event.status === "settled" && event.runStatus === "done" && typeof event.resultMessageId === "string"
+          && /^[A-Za-z0-9._:-]{1,128}$/.test(event.resultMessageId)) {
+          record.modelExecution = "completed"; record.resultMessageId = event.resultMessageId;
+        }
         if (typeof event.runId === "string" && event.runId.length <= 128) record.runId = event.runId;
         else if (["watching_room", "assistant_not_selected", "stopped"].includes(event.status)) delete record.runId;
       }

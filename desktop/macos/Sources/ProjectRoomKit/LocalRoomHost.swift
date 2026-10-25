@@ -263,14 +263,15 @@ public final class LocalRoomHost {
         if child != 0 && !isStopping {
             if let value = readStatus(child: child) {
                 evidence = ["statusFresh": true, "phase": value["phase"] as? String ?? "unknown",
-                            "protocol": value["protocol"] as? String ?? "unverified", "credentials": value["credentials"] as? String ?? "unknown"]
+                            "protocol": value["protocol"] as? String ?? "unverified", "credentials": value["credentials"] as? String ?? "unknown",
+                            "modelExecution": value["modelExecution"] as? String == "completed" && value["resultMessageId"] is String ? "completed" : "not_tested"]
                 if value["credentials"] as? String == "login_required" { text = "Sign in to the dedicated Codex account" }
                 else {
                     switch value["phase"] as? String {
                     case "running": text = "Working on a shared ask"
                     case "assistant_not_selected": text = "Not selected as this room’s assistant"
                     case "watching_room", "protocol_qualified", "settled":
-                        text = value["protocol"] as? String == "qualified" && ["present", "not_required"].contains(value["credentials"] as? String ?? "") ? "Listening · model execution not verified" : "Connecting · checking agent setup"
+                        text = value["protocol"] as? String == "qualified" && ["present", "not_required"].contains(value["credentials"] as? String ?? "") ? (evidence["modelExecution"] as? String == "completed" ? "Listening · a result was returned this session" : "Listening · model execution not verified") : "Connecting · checking agent setup"
                     case "recovery_pending": text = "Waiting for execution reconciliation"
                     case "retrying_room": text = "Reconnecting to the room…"
                     case "stopped": text = "Stopping agent…"
@@ -280,6 +281,6 @@ public final class LocalRoomHost {
             } else { text = "Connecting · current status unavailable" }
         }
         return evidence.merging(["receivingEnabled": receiving, "configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
-            "macTools": selectedTools, "lastExit": exitState, "modelExecution": "not_tested", "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]) { _, new in new }
+            "macTools": selectedTools, "lastExit": exitState, "modelExecution": evidence["modelExecution"] ?? "not_tested", "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]) { _, new in new }
     }
 }
