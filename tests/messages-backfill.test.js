@@ -156,7 +156,7 @@ test('v37 message records migrate lazily, replay populated cursors, and fence ol
   const seed = new RoomStore(filename);
   seed.initialize([...initialRoom('commons'), messageEvent('commons', 'ev-legacy', T.MESSAGE_POSTED, {messageId:'legacy', body:'retained legacy text'}, 2)]);
   finish(seed);
-  for (const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v38_*'").all()) seed.db.exec(`DROP TRIGGER ${row.name}`);
+  for (const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[89]_*' OR name GLOB 'writer_v4[012]_*')").all()) seed.db.exec(`DROP TRIGGER ${row.name}`);
   if (seed.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) seed.db.exec('ALTER TABLE messages DROP COLUMN record_json');
   for (const {name,sql} of fenceDefinitions(37)) if (!seed.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(name)) seed.db.exec(sql);
   seed.db.exec('PRAGMA user_version=37');
@@ -167,9 +167,9 @@ test('v37 message records migrate lazily, replay populated cursors, and fence ol
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version,38);
+    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 42);
     assert.equal(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json,null);
-    assert.throws(()=>oldWrite.run(),/project_room_writer_v38|unsupported database writer/);
+    assert.throws(()=>oldWrite.run(),/project_room_writer_v42|unsupported database writer/);
     assert.equal(current.checkMessagesParity().checked,0,'uncertified legacy rows are not ready');
     finish(current);
     assert.equal(JSON.parse(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json).body,'retained legacy text');
@@ -211,16 +211,11 @@ test("backfill resumes after a mid-batch interruption and passes parity on a 10k
     yieldBetween: () => { throw new Error("interrupted"); }
   }), /interrupted/);
   const cursor = store.db.prepare("SELECT applied_seq, state_seq, applied_event_id FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-  assert.ok(cursor.applied_seq > 0);
-  assert.ok(cursor.applied_seq < sequence);
-  assert.equal(cursor.state_seq, cursor.applied_seq);
-  const partial = store.db.prepare("SELECT count(*) AS n, count(DISTINCT message_id) AS ids FROM messages WHERE room_id=?").get(roomId);
-  const posted = store.db.prepare(`SELECT count(*) AS n FROM events
-    WHERE room_id=? AND sequence<=? AND json_extract(body, '$.type')='message.posted'`).get(roomId, cursor.applied_seq).n;
-  assert.equal(partial.n, posted);
-  assert.equal(partial.ids, posted);
-  assert.ok(partial.n > 0);
-  assert.ok(partial.n < count);
+  assert.equal(cursor.applied_seq,0,'serving progress stays unchanged until publication');
+  assert.ok(cursor.state_seq>0&&cursor.state_seq<sequence,'the replay checkpoint survives interruption');
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM messages WHERE room_id=?").get(roomId).n,0);
+  const staged=JSON.parse(store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id=?").get(roomId).state_json);
+  assert.ok(staged.messages.length>0&&staged.messages.length<count);
 
   finish(store);
   const parity = store.checkMessagesParity();
@@ -265,4 +260,134 @@ test("the integrity cron replays an initialize room until the parity check passe
   assert.equal(matched.tableCount, 1);
   assert.equal(matched.projectionLastSeq, matched.tableLastSeq);
   assert.equal(store.db.prepare("SELECT body FROM messages WHERE message_id='cron-note'").get().body, "from initialize");
+});
+
+test('v38 archived entities migrate to the current schema lazily and fence the old writer before history is stored',t=>{
+ const directory=mkdtempSync(join(tmpdir(),'message-v39-upgrade-'));const filename=join(directory,'room.sqlite');
+ t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const seed=new RoomStore(filename);seed.initialize(initialRoom());const token=seed.issueAccessKey('commons','owner');
+ for(const id of ['old','tail'])seed.command(token,'commons',{id:`post-${id}`,type:'message.posted',data:{messageId:id,body:`Body ${id}.`}});
+ finish(seed);seed.checkMessagesParity();seed.archiveMessages('commons',{keepNewest:1,dryRun:false});
+ for(const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v39_*' OR name GLOB 'writer_v4[012]_*')").all())seed.db.exec(`DROP TRIGGER ${row.name}`);
+ for(const {sql} of fenceDefinitions(38))seed.db.exec(sql);
+ seed.db.exec('ALTER TABLE messages DROP COLUMN reducer_extras_json');seed.db.exec('PRAGMA user_version=38');seed.close();
+ const old=new DatabaseSync(filename);old.function('project_room_writer_v38',()=>38);const write=old.prepare("UPDATE messages SET body=body WHERE message_id='old'");write.run();
+ const current=new RoomStore(filename,{messageProjectionWindow:2});
+ try{
+  assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 42);
+  assert.equal(current.db.prepare("SELECT reducer_extras_json FROM messages WHERE message_id='old'").get().reducer_extras_json,null);
+  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  current.command(token,'commons',{id:'edit-old',type:'message.edited',data:{messageId:'old',body:'Changed.',expectedMessageRevision:0}});
+  assert.equal(JSON.parse(current.db.prepare("SELECT reducer_extras_json FROM messages WHERE message_id='old'").get().reducer_extras_json).editHistory[0].body,'Body old.');
+ }finally{current.close();old.close();}
+});
+
+test('v39 writer is fenced before entity references are persisted, and a v41 reader hydrates them',t=>{
+ const directory=mkdtempSync(join(tmpdir(),'entity-projection-v40-'));const filename=join(directory,'room.sqlite');
+ t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const seed=new RoomStore(filename);seed.initialize(initialRoom());const token=seed.issueAccessKey('commons','owner');
+ seed.command(token,'commons',{id:'old-post',type:'message.posted',data:{messageId:'old-record',body:'Keep this message.'}});
+ finish(seed);seed.checkMessagesParity();
+ for(const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v4[012]_*'").all())seed.db.exec(`DROP TRIGGER ${row.name}`);
+ for(const {sql} of fenceDefinitions(39))seed.db.exec(sql);
+ seed.db.exec('PRAGMA user_version=39');seed.close();
+ const old=new DatabaseSync(filename);old.function('project_room_writer_v39',()=>39);
+ const write=old.prepare("UPDATE rooms SET projection=projection WHERE id='commons'");write.run();
+ let current;
+ try {
+  current=new RoomStore(filename,{messageProjectionWindow:4,messageEntityProjection:true});
+  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  current.command(token,'commons',{id:'new-post',type:'message.posted',data:{messageId:'new-record',body:'New message.'}});
+  assert.ok(JSON.parse(current.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection).messages.every(m=>m._entity===1));
+ } finally {current?.close();old.close();}
+ const reader=new RoomStore(filename,{readOnly:true});
+ try {assert.deepEqual(reader.room('commons').state.messages.map(m=>m.body),['Keep this message.','New message.']);}
+ finally {reader.close();}
+});
+
+
+test('schema 40 snapshots move off the cursor atomically and an open v40 writer is fenced',t=>{
+ const directory=mkdtempSync(join(tmpdir(),'replay-snapshot-v41-')),filename=join(directory,'room.sqlite');
+ t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const seed=new RoomStore(filename);seed.initialize(initialRoom());const token=seed.issueAccessKey('commons','owner');
+ seed.command(token,'commons',{id:'snapshot-message',type:'message.posted',data:{messageId:'snapshot-message',body:'Preserve replay content.'}});
+ finish(seed);seed.checkMessagesParity();
+ const snapshot=seed.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json;
+ for(const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v4[12]_*'").all())seed.db.exec(`DROP TRIGGER ${row.name}`);
+ seed.db.exec('ALTER TABLE messages_backfill_cursor ADD COLUMN state_json TEXT');
+ seed.db.prepare("UPDATE messages_backfill_cursor SET state_json=? WHERE room_id='commons'").run(snapshot);
+ seed.db.exec('DROP TABLE message_replay_snapshots');
+ for(const {sql} of fenceDefinitions(40))seed.db.exec(sql);
+ seed.db.exec('PRAGMA user_version=40');seed.close();
+ const old=new DatabaseSync(filename);old.function('project_room_writer_v40',()=>40);
+ const write=old.prepare("UPDATE rooms SET projection=projection WHERE id='commons'");write.run();
+ let current;
+ try {
+  current=new RoomStore(filename);
+  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  assert.equal(current.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json,snapshot);
+  assert.equal(current.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_cursor') WHERE name='state_json'").get(),undefined);
+  assert.equal(current.checkMessagesParity().ok,true);
+ } finally {current?.close();old.close();}
+ const reopened=new RoomStore(filename,{readOnly:true});
+ try {assert.equal(reopened.room('commons').state.messages[0].body,'Preserve replay content.');}
+ finally {reopened.close();}
+});
+
+// A state over one row's worth is split into parts; the cursor row holds
+// only a marker, and the replay still certifies.
+function longRoom(store, roomId, count = 15) {
+  const long = i => `long body ${i} `.padEnd(60000, "xyz");
+  store.initialize([
+    ...initialRoom(roomId),
+    ...Array.from({ length: count }, (_, i) => messageEvent(roomId, `ev-${i}`, T.MESSAGE_POSTED, { messageId: `m${i}`, body: long(i) }, 10 + i)),
+    messageEvent(roomId, "ev-short", T.MESSAGE_POSTED, { messageId: "short", body: "short 😀 body" }, 100)
+  ]);
+  return long;
+}
+const cursorOf = (store, roomId) => store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id=?").get(roomId)?.state_json ?? null;
+const partsOf = (store, roomId) => store.db.prepare("SELECT part, length(CAST(json AS BLOB)) AS bytes FROM messages_backfill_state WHERE room_id=? ORDER BY part").all(roomId);
+
+test("a replay state too big for one row is stored in parts and still certifies", t => {
+  const store = open(t);
+  const long = longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  assert.match(cursorOf(store, "commons"), /^parts:\d+:[0-9a-f]{64}$/);
+  const parts = partsOf(store, "commons");
+  assert.ok(parts.length >= 2, `${parts.length} parts`);
+  for (const part of parts) assert.ok(part.bytes < 2 * 1024 * 1024, `part ${part.part} is ${part.bytes} bytes`);
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+  const byId = new Map(rows(store, "commons").map(row => [row.message_id, row]));
+  assert.equal(byId.get("m3").body, long(3));
+  assert.equal(byId.get("short").body, "short 😀 body");
+});
+
+// A missing or changed part fails the hash, and the batch replays from the
+// log instead of resuming from a wrong state.
+test("a torn state replays from the log", t => {
+  const store = open(t);
+  const long = longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  store.db.prepare("DELETE FROM messages_backfill_state WHERE room_id='commons' AND part=1").run();
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+  assert.equal(rows(store, "commons").find(row => row.message_id === "m12").body, long(12));
+});
+
+// The parts can hold text a delete must remove, so a delete drops them with
+// the snapshot; an older build's JSON.parse of the marker fails, so it
+// replays rather than trusting it.
+test("a delete drops the state parts, and the marker is not JSON", t => {
+  const store = open(t);
+  longRoom(store, "commons");
+  store.backfillMessages({ limit: 14 });
+  assert.throws(() => JSON.parse(cursorOf(store, "commons")), SyntaxError);
+  assert.ok(partsOf(store, "commons").length >= 2);
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: "delete-m0", type: T.MESSAGE_DELETED, data: { messageId: "m0", expectedMessageRevision: 0 } });
+  assert.equal(partsOf(store, "commons").length, 0);
+  assert.equal(cursorOf(store, "commons"), null);
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
 });

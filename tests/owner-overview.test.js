@@ -13,7 +13,8 @@ import { AccessRequests, accessRequestSchema } from "../server/access-requests.m
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { bountyEscrowSchema } from "../server/bounty-escrow.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ownerOverview } from "../server/owner-overview.mjs";
+import { JOB_ALERT_FAILURES, ownerOverview } from "../server/owner-overview.mjs";
+import { applyOutcomes, jobHealthView } from "../cloudflare/job-heartbeat.mjs";
 import { spendAllowanceReport } from "../server/spend-allowance.mjs";
 import { foldSessionEvents } from "../server/usage-summary.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
@@ -27,7 +28,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 
 const DAY = 24 * 3600 * 1000;
 
-function setup(t, { serve = false } = {}) {
+function setup(t, { serve = false, serverOptions = {} } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-overview-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("room-a"));
@@ -53,7 +54,7 @@ function setup(t, { serve = false } = {}) {
   const signEvidence = makeTestSigner(store);
   const fixture = { directory, store, accessRequests, keys, send, owner, accountSession, signEvidence };
   if (serve) {
-    fixture.server = createRoomServer({ store });
+    fixture.server = createRoomServer({ store, ...serverOptions });
     return new Promise(resolve => fixture.server.listen(0, "127.0.0.1", () => {
       fixture.origin = `http://127.0.0.1:${fixture.server.address().port}`;
       t.after(async () => {
@@ -566,4 +567,51 @@ test("slice2-admin: an admin-everywhere viewer gets no money and no roster", asy
   assert.equal(admin.status, 200, JSON.stringify(admin.body));
   assert.equal(admin.body.money, null);
   assert.equal(admin.body.roster, null);
+});
+
+// Job-health records in the owner status view: every scheduled job's last
+// run, result, failure streak and last success; 3 in a row alerts.
+function heartbeatJobs(failingRuns) {
+  let records = applyOutcomes(null, [{ job: "store-growth", ok: true, at: 1_000, summary: {} }, { job: "room-backup", ok: true, at: 1_000, summary: {} }]);
+  for (let i = 0; i < failingRuns; i++) records = applyOutcomes(records, [{ job: "store-growth", ok: false, at: 2_000 + i, error: "store_growth_limit" }]);
+  return jobHealthView(records, 10_000).jobs;
+}
+
+test("jobs: the Worker heartbeat view lists each job and alerts at 3 consecutive failures", t => {
+  const f = setup(t);
+  const now = Date.now();
+  const doc = ownerOverview({ store: f.store, accessRequests: f.accessRequests, jobHealth: () => heartbeatJobs(JOB_ALERT_FAILURES) },
+    f.owner.slot.token, f.owner.session.sessionBinding, now, {});
+  const byName = Object.fromEntries(doc.jobs.map(job => [job.name, job]));
+  assert.equal(JOB_ALERT_FAILURES, 3);
+  assert.deepEqual(byName["store-growth"], { name: "store-growth", result: "failing", lastRunAt: new Date(2_002).toISOString(),
+    lastSuccessAt: new Date(1_000).toISOString(), consecutiveFailures: 3, alert: true });
+  assert.equal(byName["room-backup"].result, "ok");
+  assert.equal(byName["room-backup"].alert, false);
+  const alert = doc.exceptions.items.find(item => item.kind === "job_health" && item.subjectId === "store-growth");
+  assert.equal(alert?.severity, "critical");
+});
+
+test("jobs: two failures show without alerting; a disabled job never alerts", t => {
+  const f = setup(t);
+  const two = ownerOverview({ store: f.store, accessRequests: f.accessRequests, jobHealth: () => heartbeatJobs(2) },
+    f.owner.slot.token, f.owner.session.sessionBinding, Date.now(), {});
+  const growth = two.jobs.find(job => job.name === "store-growth");
+  assert.equal(growth.consecutiveFailures, 2);
+  assert.equal(growth.alert, false);
+  const off = ownerOverview({ store: f.store, accessRequests: f.accessRequests,
+    jobHealth: () => [{ name: "gmail-sync", status: "disabled", consecutiveFailures: 5, lastRunAt: null, lastSuccessAt: null }] },
+    f.owner.slot.token, f.owner.session.sessionBinding, Date.now(), {});
+  assert.deepEqual(off.jobs, [{ name: "gmail-sync", result: "disabled", lastRunAt: null, lastSuccessAt: null, consecutiveFailures: 5, alert: false }]);
+  assert.equal(off.exceptions.items.some(item => item.kind === "job_health"), false);
+});
+
+test("failing first: the served overview uses the injected job records (the Worker path)", async t => {
+  const f = await setup(t, { serve: true, serverOptions: { jobHealth: () => heartbeatJobs(4) } });
+  const response = await getOverview(f, f.owner.headers, "");
+  assert.equal(response.status, 200);
+  const growth = response.body.jobs.find(job => job.name === "store-growth");
+  assert.equal(growth?.alert, true);
+  assert.equal(growth.consecutiveFailures, 4);
+  assert.equal(JSON.stringify(response.body.jobs).includes("store_growth_limit"), false, "no error text in the list");
 });
