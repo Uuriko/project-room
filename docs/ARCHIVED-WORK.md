@@ -439,7 +439,7 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 
 ## G1 combined
 
-Work-claim and board correctness PRs folded into the G1 combined pull request. Head SHAs are the ones combined. Restore with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
+Work-claim and board correctness PRs folded into #4949. Head SHAs are the ones combined. Restore with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
 
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
