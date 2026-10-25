@@ -125,12 +125,15 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_webhook_deliveries",
   // Escrowed bounties (agent work exchange, slice 1): bounty_journal,
   // bounty_records, bounty_disputes, bounty_events, bounty_idempotency,
-  // bounty_watchers, bounty_sequences. Slice 6 adds bounty_rubric_versions
+  // bounty_watchers, bounty_sequences. CURE-CLOCK-HIGHWATER adds
+  // bounty_clock_highwater (persisted per-room monotonic clock mark).
+  // Slice 6 adds bounty_rubric_versions
   // (pinned rubric history); slice 8 adds bounty_flakes; slice 10 adds
   // bounty_sybil_flags (correlated-cluster flags).
   // Purely additive and intentionally NOT fenced: older writers have no code
   // path to them, and the append-only hash-chained journal plus the
   // conservation verifier are the integrity gate.
+  "bounty_clock_highwater",
   "bounty_journal",
   "bounty_records",
   "bounty_disputes",

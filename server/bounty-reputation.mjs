@@ -128,7 +128,7 @@ export function signalsForEvent(event) {
 // standing. Without a membership source (legacy string-only test mode) the
 // projector keeps the historical unfiltered behavior.
 export function projectBountyReputation(escrow, roomId, { nowMs } = {}) {
-  const now = nowMs === undefined ? escrow.nowMs() : nowMs;
+  const now = nowMs === undefined ? escrow.nowMs(roomId) : nowMs;
   const rep = createReputation();
   const applied = [];
   const memberIds = typeof escrow.memberLaneIds === "function" ? escrow.memberLaneIds(roomId) : null;
