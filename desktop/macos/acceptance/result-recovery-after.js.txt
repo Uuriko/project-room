@@ -1,0 +1,13 @@
+const wait = async (predicate, label) => {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
+  throw new Error('Timed out: ' + label);
+};
+const check = (value, label) => { if (!value) throw new Error(label); };
+await wait(() => document.querySelector('#result-body')?.textContent.includes('Café notes'), 'original result restored after native reload');
+check(document.querySelector('#message-input').value === 'Preserve this native feedback for the original result.', 'unsent feedback restored');
+check(document.querySelector('#result-status').textContent.includes('Earlier result'), 'older version identified');
+check(!document.querySelector('#result-dialog').contains(document.activeElement), 'reader did not steal focus');
+check(!document.querySelector('#result-body').textContent.includes('Replacement'), 'new version did not replace original');
+check(document.documentElement.scrollWidth <= innerWidth + 1, 'no horizontal overflow');
+return JSON.stringify({actualDocumentReload:true, originalVersionRestored:true, feedbackRestored:true, earlierVersionLabel:true, focusPreserved:true});
