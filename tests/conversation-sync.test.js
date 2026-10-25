@@ -95,7 +95,10 @@ test(`${indexed ? 'certified index' : 'projection fallback'}: conversation paylo
   assert.equal(page.status, 200, JSON.stringify(page.value));
   assert.ok(page.value.messages.length < 24 && page.value.messages.length > 0);
   assert.ok(page.value.messageBytes <= 512 * 1024);
-  assert.ok(JSON.stringify(page.value).length < JSON.stringify(full.value).length / 3);
+  // The member snapshot no longer repeats these bodies in eventLog, so a
+  // page is not a third of a doubled document. It stays under half the
+  // snapshot, which still holds every message.
+  assert.ok(JSON.stringify(page.value).length * 2 < JSON.stringify(full.value).length);
   const seen = [...page.value.messages.map(m => m.id)];
   let cursor = page.value.nextCursor;
   while (cursor) {
