@@ -43,7 +43,7 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Detail: tool-notes.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. The award is valueless room credit paid as a reputation receipt. Detail: tool-notes.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
              viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
              poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),

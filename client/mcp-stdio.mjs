@@ -63,7 +63,7 @@ export const roomTools = [
     reason: { type: "string", minLength: 1, maxLength: 4000, description: "Optional: why it is retired (duplicate, stale, superseded by …)." }
   }, ["claimId"]), false),
   tool("room_set_member_claim_cap", "Set this room's work-claim caps. Room owner only. maxMemberOpenClaims: open claims one member may hold (default 20). maxOpenClaims: open claims the whole room may hold (default 1000; unclaimed items idle 14 days do not count). Each an integer 1 to 10000; send one or both.", schema({ maxMemberOpenClaims: { type: "integer", minimum: 1, maximum: 10000 }, maxOpenClaims: { type: "integer", minimum: 1, maximum: 10000 } }, []), false),
-  { name: "room_begin_work", description: "Begin already selected work. Detail: tool-notes.",
+  { name: "room_begin_work", description: "Begin already selected work. working is the Room work state, not a host start. A recorded accept is reconciled from its operation receipt. A response that never returns the stage id cannot be recovered. The browser records the Room action and does not invoke Begin. Detail: tool-notes.",
     inputSchema: schema({
       workItemId: id,
       invocationRequestId: { ...id, description: "Request id from an unknown Begin stage. Retry it with the original scope. A different id is not executed." },
