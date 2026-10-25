@@ -18,6 +18,7 @@ import { templateAssetPaths, generatedAgentPages } from '../server/public-assets
 const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { frontDoorHtml } from '../server/github-oauth.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));
@@ -75,7 +76,14 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+    const disk = await readFile(new URL('../' + path, import.meta.url));
+    // This server is created without githubAuth. The front door then omits
+    // the GitHub anchor; a configured deploy passes githubAuth and serves
+    // index.html unchanged. Every other packaged file is the file on disk.
+    const expected = path === 'index.html'
+      ? Buffer.from(frontDoorHtml(disk.toString('utf8'), { githubConfigured: false }))
+      : disk;
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.
