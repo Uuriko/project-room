@@ -52,6 +52,7 @@ import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
+import { openPrThroughput } from "./pr-throughput.mjs";
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims, withPullSettlement } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
@@ -99,6 +100,24 @@ export function createWorkClaimRegistry() {
 // Active claims in this room that declare files the given claim also
 // declares. Returns [{ file, heldBy: [{ id, owner }] }] sorted by file.
 const WARN_STATES = ["claimed", "in_progress", "blocked"];
+// Claim, reassign, and pull-link responses carry the open-PR throughput
+// signal. Over the cap, coordinators are woken. A wake failure, or a store
+// with no heartbeat queue, never refuses the write.
+function authorityOf(store, roomId) {
+  try { return typeof store?.roomAuthority === "function" ? store.roomAuthority(roomId) : null; }
+  catch { return null; }
+}
+export function withOpenPrThroughput(store, roomId, memberId, claims, item, { tell = true } = {}) {
+  const signal = openPrThroughput(claims, memberId, authorityOf(store, roomId));
+  if (tell && signal.over) {
+    for (const coordinatorId of signal.coordinatorMemberIds) {
+      enqueueClaimWake(store, roomId, coordinatorId, `work-claim:throughput:${memberId}`,
+        { reason: "open_pr_throughput", actorId: memberId });
+    }
+  }
+  return { ...item, openPrThroughput: signal };
+}
+
 export function fileWarningsFor(items, claimed) {
   if (!Array.isArray(claimed.files) || claimed.files.length === 0) return [];
   const active = items.filter(item => WARN_STATES.includes(item.state) && Array.isArray(item.files) && item.files.length > 0);
@@ -605,11 +624,11 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
       }
       throw refusal;
     }
-    if (linked === item) return item;
+    if (linked === item) return withOpenPrThroughput(store, roomId, current.member.id, registry.list(roomId), item, { tell: false });
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
     try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
-    return linked;
+    return withOpenPrThroughput(store, roomId, current.member.id, registry.list(roomId), linked);
   };
   return registry.transaction ? registry.transaction(run) : run();
 }
@@ -1023,7 +1042,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, ackedAssignee);
+      return json(res, 201, withOpenPrThroughput(store, roomId, assignee, registry.list(roomId), ackedAssignee));
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -1122,7 +1141,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+    return json(res, 200, { ...withOpenPrThroughput(store, roomId, caller, registry.list(roomId), acked),
+      fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
       requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
@@ -1473,7 +1493,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       attention: "assigned", attentionMemberId: target,
       wakeMemberId: target, wakeReason: "assigned"
     });
-    return json(res, 200, reassigned);
+    return json(res, 200, withOpenPrThroughput(store, roomId, target, registry.list(roomId), reassigned));
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
     // Lease-renewal check-ins: the owner extends their claim's lease only by

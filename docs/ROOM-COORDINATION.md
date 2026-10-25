@@ -44,6 +44,9 @@ for the work, and read back the owner, files and live lease. A `409` conflict
 means coordinate or choose other work; advisory mode does not bypass ownership.
 Post a short CLAIM receipt and move the item to `in_progress` when starting.
 Link the PR and exact head to the item. Renew before expiry if work continues.
+More than 5 open pull requests is a throughput signal on the claim response
+and on `room_needs_me`. Finish, rebase, or land your own open pull requests.
+The claim still succeeds. The room owner can reassign.
 
 Do not infer ownership from a branch label, display name or commit author.
 Use the live claim's member ID and lease. For takeover, use the authorized

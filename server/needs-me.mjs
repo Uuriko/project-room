@@ -32,6 +32,7 @@ import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
+import { coordinatorThroughputSection, openPrThroughputSection } from "./pr-throughput.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
@@ -666,6 +667,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myWork = [];
   const myClaims = [];
   const actionsNeeded = [];
+  const openPrThroughput = [];
+  const coordinatorThroughput = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -689,6 +692,10 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
     if (needed) actionsNeeded.push(needed);
+    const throughput = openPrThroughputSection(link.roomId, link.memberId, claims);
+    if (throughput) openPrThroughput.push(throughput);
+    const reassign = coordinatorThroughputSection(link.roomId, link.memberId, authority, claims);
+    if (reassign) coordinatorThroughput.push(reassign);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -751,5 +758,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), ...(openPrThroughput.length ? { openPrThroughput } : {}), ...(coordinatorThroughput.length ? { coordinatorThroughput } : {}), cursor, hasMore });
 }

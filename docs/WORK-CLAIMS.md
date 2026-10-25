@@ -136,8 +136,18 @@ Neither `done` nor `closed` counts toward the room's open-claim cap.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
+- Per member, default **5** open pull requests linked to claims they own.
+  A sixth open pull is a throughput signal, not a refusal. The claim,
+  reassign, and pull-link responses include `openPrThroughput` (`over`,
+  `steer`, `blocking: false`). The steer says to finish, rebase, or land
+  those pulls. The room owner, and any other member with `manage_claims`,
+  is told and can reassign. `room_needs_me` repeats the same signal as
+  `openPrThroughput` for the holder and `coordinatorThroughput` for someone
+  who can reassign. Merged and closed pulls do not count. GitHub's own
+  check uses the same cap of 5 against the pull's author.
 
-These are not `file_lease_conflict`. The room owner sets either cap, or both,
+These are not `file_lease_conflict`. The open-PR signal stays at 5.
+The room owner sets the room cap and the per-member claim cap, either or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and
 `{ "maxMemberOpenClaims": 20, "maxOpenClaims": 1000, "staleSweep": false }`
 (caps are integers 1..10000, `staleSweep` is a boolean; send at least one). MCP: `room_set_member_claim_cap` takes the same
