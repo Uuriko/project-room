@@ -166,6 +166,7 @@ export class ProjectRoom extends DurableObject {
       deployment,
       jobHealth: () => this.jobHealthSnapshot,
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,

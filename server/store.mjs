@@ -60,6 +60,7 @@ import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -1137,7 +1138,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
+    roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1449,6 +1450,7 @@ export class RoomStore {
     this.codeDrops = new CodeDrops(this); // patches agents share in the room (server/code-drops.mjs).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
+    this.publicAgentPages = new PublicAgentPages(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
@@ -1807,6 +1809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // also land on the room ledger as participant-visible events.
       this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
+      this.db.exec(agentPublicPageSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
