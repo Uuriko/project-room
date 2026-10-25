@@ -1900,7 +1900,11 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // #3616 (PR #4051): decision-row export / evidence-read access log
+  // (server/decision-rows.mjs). Room-owned audit of evidence reads,
+  // deleted with the room; lazy-additive, hence optional.
+  { table: "evidence_access_log", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
