@@ -33,7 +33,7 @@ import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom, nextJobAlarm } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -531,7 +531,8 @@ export class ProjectRoom extends DurableObject {
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
       if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
-      return jobIsDue(job, this.store, now, lastRan[job.name]);
+      const consecutiveFailures = stored?.[job.name]?.consecutiveFailures ?? 0;
+      return jobIsDue(job, this.store, now, lastRan[job.name], job.cadenceMs, consecutiveFailures);
     });
     const outcomes = [];
     for (const job of selected) {
@@ -546,8 +547,10 @@ export class ProjectRoom extends DurableObject {
     }
     return outcomes;
   }
-  // Set the alarm only when the new time is earlier than the one already set.
-  // Nothing queued deletes a leftover alarm so an idle room is not woken.
+  // Keep an alarm only while it is still in the future and no later than
+  // the candidate. A time already in the past is a lease the platform
+  // stopped honoring; the next tick replaces it. Nothing queued deletes
+  // a leftover alarm so an idle room is not woken.
   async #armJobAlarm({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
     const now = Date.now();
@@ -560,13 +563,14 @@ export class ProjectRoom extends DurableObject {
       when = when == null ? retryAt : Math.min(when, retryAt);
     }
     const current = await this.ctx.storage.getAlarm();
-    if (when == null) {
+    const next = nextJobAlarm(current, when, now);
+    if (next == null) {
       if (current != null) await this.ctx.storage.deleteAlarm();
       return { armed: false, alarmAt: null };
     }
-    if (current != null && current <= when) return { armed: false, alarmAt: current };
-    await this.ctx.storage.setAlarm(when);
-    return { armed: true, alarmAt: when };
+    if (next === current) return { armed: false, alarmAt: current };
+    await this.ctx.storage.setAlarm(next);
+    return { armed: true, alarmAt: next };
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
