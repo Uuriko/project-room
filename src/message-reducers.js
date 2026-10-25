@@ -173,7 +173,12 @@ export function createMessageReducers({ requireMember, knownMember, requireField
     if (evidenceFor) throw new Error(`This message is the recorded result of ${evidenceFor.id} and cannot be changed`);
     const actor = requireMember(state, incoming.actorId);
     if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
-    if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
+    const current = message.revision ?? 0;
+    const expected = incoming.data?.expectedMessageRevision;
+    // A missing or non-integer fence is a malformed command. An integer that
+    // does not match is a real conflict: the message moved since the caller read it.
+    if (!Number.isInteger(expected)) throw new Error(`expectedMessageRevision is required (current revision is ${current})`);
+    if (expected !== current) throw new Error(`Message changed; refresh before editing (current revision is ${current})`);
     return { message, actor };
   }
 

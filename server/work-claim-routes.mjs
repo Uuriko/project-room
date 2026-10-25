@@ -818,6 +818,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
+  // Profile permission before any holder or owner name. A chat member must
+  // learn they cannot use the board, not who holds the item. Claim managers
+  // may release and reassign without a write profile; reviewers and managers
+  // may still reach the update route's own gates.
+  const requireClaimActor = () => {
+    // Release and reassign stay open to a reviewer who holds the item.
+    // Someone with no work profile is refused before the holder is named.
+    if (!mayWriteWorkClaims(access) && !mayReviewWorkClaims(access) && !mayManageAnyClaim(access)) refuseWorkClaims();
+  };
+  const requireClaimOrReviewActor = () => {
+    if (!mayWriteWorkClaims(access) && !mayReviewWorkClaims(access) && !mayManageAnyClaim(access)) refuseWorkClaims();
+  };
   // Q3-A: with under 10% of the room's event budget left, Board writes from
   // members without claim authority get 409 room_event_budget_low.
   const requireEventBudget = () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
@@ -1036,6 +1048,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
+    requireWriter();
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
@@ -1053,7 +1066,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(409, "work_claim_conflict",
         `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
-    requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
@@ -1126,6 +1138,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
+    requireClaimOrReviewActor();
     const data = body(req);
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
     if (data.requestId !== undefined
@@ -1386,6 +1399,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, closed);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
+    requireClaimActor();
     const data = body(req);
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
@@ -1422,6 +1436,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
+    requireClaimActor();
     const data = body(req);
     if (!shape(data, { required: ["newOwner", "expectedClaimedAt", "expectedHistoryLength"], optional: ["note"] }))
       invalidInput(reject, "{newOwner, expectedClaimedAt, expectedHistoryLength, note?}");
@@ -1480,6 +1495,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // citing their own public progress message, posted in this room after
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
+    requireWriter();
     const data = body(req);
     if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
@@ -1494,7 +1510,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         : `Work "${item.id}" is not claimed — claim it first, then renew`);
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
-    requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);

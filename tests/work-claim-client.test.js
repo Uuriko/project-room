@@ -161,7 +161,9 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
 });
 
 test('SDK lease renewal needs the owner and a fresh public progress message', async t => {
-  const { owner, peer } = await fixture(t);
+  // The peer can use the board, so the refusal is ownership rather than the
+  // profile check. A member with no work permissions is covered separately.
+  const { owner, peer } = await fixture(t, { reviewerPermissions: ['accept_work', 'complete_work'] });
   const claim = await owner.workClaim('renewed', { leaseHours: 1 });
   // The route deliberately requires progress strictly newer than lease start.
   await new Promise(resolve => setTimeout(resolve, 2));

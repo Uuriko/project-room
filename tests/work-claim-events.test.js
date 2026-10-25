@@ -75,7 +75,10 @@ test('a refused claim change appends no event', async t => {
   const { owner, peer } = await fixture(t);
   await owner.workClaim('held', { files: ['docs/x.md'] });
   const before = (await claimEvents(owner)).length;
-  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
+  // A human with only verify cannot claim. The profile check comes first,
+  // so the refusal does not name the holder.
+  await assert.rejects(peer.claimWorkItem('held'), error =>
+    error.status === 403 && error.code === 'work_claims_not_permitted' && !/held by/i.test(error.message));
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
   await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here', ...roundOf(await owner.workClaimGet('held')) }), error => error.status === 422);
   assert.equal((await claimEvents(owner)).length, before);

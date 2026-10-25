@@ -34,19 +34,13 @@ function referralEvents(store, roomId) {
     .map(row => JSON.parse(row.body));
 }
 
-test("invite redemption writes referredBy on the member and journals exactly one referral.completed", t => {
+test("invite redemption writes referredBy and a referrals row, and does not append referral.completed", t => {
   const { store, ownerKey, roomId } = fixture(t);
   const { redeemed } = mintRedeem(store, ownerKey, roomId, "Referral Recruit");
   const member = store.room(roomId).state.members[redeemed.memberId];
   assert.ok(member, "member exists");
   assert.equal(member.referredBy, "owner");
-  const events = referralEvents(store, roomId);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].data.referrerMemberId, "owner");
-  assert.equal(events[0].data.refereeMemberId, redeemed.memberId);
-  assert.equal(events[0].data.via, "invite");
-  assert.equal(typeof events[0].data.completedAt, "number");
-  // Journal row exists exactly once too.
+  assert.equal(referralEvents(store, roomId).length, 0);
   const rows = store.db.prepare("SELECT * FROM referrals WHERE room_id=?").all(roomId);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].referrer_member_id, "owner");
@@ -63,7 +57,7 @@ test("duplicate redemption of the same identity does not double-count the referr
   // Same identity redeeming the burned code hits the duplicate path.
   const second = store.invites.redeem(invite.code, { displayName: "Repeat Joiner", identitySecret: identity.secret });
   assert.equal(second.duplicate, true);
-  assert.equal(referralEvents(store, roomId).length, 1);
+  assert.equal(referralEvents(store, roomId).length, 0);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM referrals WHERE room_id=?").get(roomId).n, 1);
 });
 
@@ -93,7 +87,7 @@ test("access request with a matching 'who referred you?' attributes the join on 
   const member = store.room(roomId).state.members[decided.memberId];
   assert.equal(member.referredBy, referrer.memberId);
   const events = referralEvents(store, roomId);
-  assert.equal(events.length, 2); // invite join + access-request join
+  assert.equal(events.length, 1);
   const ar = events.find(e => e.data.via === "request");
   assert.ok(ar, "access-request referral journaled");
   assert.equal(ar.data.referrerMemberId, referrer.memberId);
@@ -144,6 +138,37 @@ test("ambiguous display names do not falsely attribute", t => {
   const member = store.room(roomId).state.members[decided.memberId];
   assert.ok(!("referredBy" in member), "ambiguous match attributes nothing");
   assert.equal(referralEvents(store, roomId).length, 0);
+});
+
+test("a stored referral.completed from an older invite join still replays", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-legacy-referral-event-"));
+  const database = join(directory, "room.sqlite");
+  const original = new RoomStore(database);
+  original.initialize(initialRoom("commons"));
+  const ownerKey = original.issueAccessKey("commons", "owner");
+  const { redeemed } = mintRedeem(original, ownerKey, "commons", "Replay Recruit");
+  const room = original.room("commons");
+  const incoming = event({
+    type: "referral.completed",
+    actorId: "owner",
+    roomId: "commons",
+    data: {
+      referrerMemberId: "owner",
+      refereeMemberId: redeemed.memberId,
+      via: "invite",
+      completedAt: Date.parse("2026-10-24T00:00:00.000Z"),
+    },
+  });
+  const sequence = room.sequence + 1;
+  original.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("commons", sequence, incoming.id, JSON.stringify(incoming));
+  original.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, "commons");
+  original.close();
+  const reopened = new RoomStore(database);
+  t.after(() => { reopened.close(); rmSync(directory, { recursive: true, force: true }); });
+  const rebuilt = reopened.rebuildProjection("commons");
+  assert.equal(rebuilt.sequence, sequence);
+  assert.equal(rebuilt.state.members[redeemed.memberId].referredBy, "owner");
+  assert.equal(rebuilt.state.members[redeemed.memberId].displayName, "Replay Recruit");
 });
 
 test("a member cannot refer themselves", t => {

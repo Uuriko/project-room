@@ -171,16 +171,18 @@ function sweep() {
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }
   } catch { /* reported below, from the log, rather than swallowed here */ }
-  // referral.completed is appended by server/referrals.mjs, not by
-  // store.command, so the step() helper above cannot reach it. Driven through
-  // the real path: the sweep fixture's producer refers a new member.
+  // referral.completed is appended by server/referrals.mjs for access-request
+  // joins, not by store.command, so the step() helper above cannot reach it.
+  // Invite joins keep the referrals table row and do not write this event.
+  // Driven through the real access-request path so replay of the type still
+  // meets the auditors.
   try {
     const referee = fixture.store.identities.create("Sweep referee");
     fixture.store.command(fixture.keys.owner, "commons", {
       id: randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: referee.identityId, displayName: "Sweep referee", kind: "agent", permissions: ["steer"] },
     });
-    fixture.store.referrals.record({ roomId: "commons", referrerMemberId: "producer", refereeMemberId: referee.identityId, via: "invite" });
+    fixture.store.referrals.record({ roomId: "commons", referrerMemberId: "producer", refereeMemberId: referee.identityId, via: "request" });
     exercised.add(T.REFERRAL_COMPLETED);
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.REFERRAL_COMPLETED}: ${error.message}`); }
