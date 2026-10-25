@@ -53,8 +53,10 @@ on:
     types: [completed]
     branches: [main]
 
+# contents: write is required so release-runtime can publish a GitHub release.
+# Every other job sets contents: read and cannot expand past that.
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 # One production change at a time. Never cancel a deploy that has started.
@@ -70,6 +72,9 @@ env:
 
 jobs:
   gate:
+    permissions:
+      contents: read
+      actions: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       ((vars.ROOM_AUTO_DEPLOY == '1' ||
@@ -150,6 +155,8 @@ jobs:
   # deploy proceeds exactly as before.
   probe:
     needs: gate
+    permissions:
+      contents: read
     if: needs.gate.outputs.go == 'true' && vars.ROOM_ONBOARDING_GATE == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -189,6 +196,8 @@ jobs:
 
   deploy:
     needs: [gate, probe]
+    permissions:
+      contents: read
     # The probe job is skipped unless the gate variable is on; a skipped probe
     # does not block. A failed or cancelled probe does.
     if: >-
@@ -363,3 +372,56 @@ jobs:
             echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishes the Node agent runtime from the deployed SHA after smoke succeeds.
+  # A same-day rerun of the same SHA marks the existing tag latest and stops.
+  # GH_TOKEN is the job token. Never echo it, CLOUDFLARE_API_TOKEN, or ROOM_RECEIPT_TOKEN.
+  release-runtime:
+    needs: [gate, deploy]
+    if: needs.deploy.result == 'success' && needs.gate.outputs.go == 'true'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Package the deployed runtime
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          case "$SHA" in
+            *[!0-9a-f]*|"") echo "::error title=runtime release::deployed sha is not 40 lowercase hex"; exit 1 ;;
+          esac
+          [ "${#SHA}" -eq 40 ] || { echo "::error title=runtime release::deployed sha is not 40 lowercase hex"; exit 1; }
+          OUT="$RUNNER_TEMP/project-room-runtime"
+          node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
+          node scripts/runtime-package.mjs verify "$OUT" "$SHA"
+          tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
+      - name: Publish the runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          SHORT="${SHA:0:7}"
+          DATE="$(date -u +%Y-%m-%d)"
+          TAG="runtime-${DATE}-${SHORT}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
+            echo "Release ${TAG} already exists; marked latest."
+            exit 0
+          fi
+          gh release create "$TAG" \
+            "$RUNNER_TEMP/project-room-runtime.tar.gz#project-room-runtime.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "$TAG" \
+            --latest \
+            --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."

@@ -52,6 +52,7 @@ for (const script of ["project-room", "project-room-staging"]) {
       assert.equal(metadata.limits.cpu_ms, 30000);
       assert.equal(vars.ROOM_DEPLOYMENT, "production");
       assert.equal(vars.ROOM_GMAIL_ENABLED, "0");
+      assert.equal(vars.ROOM_PUBLIC_AGENT_PAGES, "0");
       assert.equal(vars.ROOM_GMAIL_PILOT_ONLY, "1");
       assert.equal(vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
     } else {

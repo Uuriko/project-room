@@ -34,7 +34,7 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
-  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
+  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -60,6 +60,7 @@ import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -103,6 +104,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAutho
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
@@ -152,6 +154,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -185,7 +188,7 @@ import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
-  validateAttemptEnvironment, validateAttemptOutputs, ensureWorkControlDefaults
+  validateAttemptEnvironment, validateAttemptModel, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -644,6 +647,7 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
+  && (event?.data?.model ?? null) === (request.model ?? null)
   && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
@@ -757,7 +761,7 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget environment`,
+  [T.SESSION_STARTED]: `${work} budget environment model`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
   [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
@@ -1129,7 +1133,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
+    roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1441,6 +1445,7 @@ export class RoomStore {
     this.codeDrops = new CodeDrops(this); // patches agents share in the room (server/code-drops.mjs).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
+    this.publicAgentPages = new PublicAgentPages(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
@@ -1799,6 +1804,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // also land on the room ledger as participant-visible events.
       this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
+      this.db.exec(agentPublicPageSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
@@ -2038,6 +2044,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // started" — their cadence starts on first sight, like a fresh park.
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
         this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
+      }
+      // Quarantine bookkeeping. Additive, like last_diagnosed_at: existing
+      // parks stay skipped=0 until healBackfillQuarantines reclassifies an
+      // event-level row. anchor_seq -1 means "no replay anchor stashed".
+      // The CREATE TABLE string is already in the schema stamp, so a warm
+      // wake on an older room re-runs this pass and applies the columns.
+      // String literals, not exec(identifier): the stamp scanner treats a
+      // named exec argument as DDL that must be hashed.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='reason'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='component'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='attempts'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='skipped'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='anchor_seq'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1");
       }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM message_replay_snapshots").run();
@@ -2309,8 +2337,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an integrity failure for any other room. Without this the record
       // stood until the room fully caught up, keeping integrity red for days
       // after the cause was fixed. A later failure re-parks and re-records.
-      const parked = this.db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
-      if (!roomExists || !parked || messagesBackfillCaughtUp(this.db, row.recordId)) {
+      const parked = this.db.prepare("SELECT skipped FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      // A quarantine (skipped=1) is one event, not a room failure. A park
+      // that was lifted, a room that is gone, or a room that has caught up
+      // stops being reported.
+      if (!roomExists || !parked || parked.skipped || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
       }
     }
@@ -4756,7 +4787,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          // The board projection needs halts. The HTTP work view strips this
+          // before it is sent; it is not part of that response's state keys.
+          agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
@@ -4852,7 +4886,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -4989,11 +5023,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // may record output references. Both are optional and validated.
       if (request.environment !== undefined && type !== T.SESSION_STARTED)
         fail(422, "invalid_session_environment", "An environment is declared when the session starts");
+      if (request.model !== undefined && type !== T.SESSION_STARTED)
+        fail(422, "invalid_session_model", "A model is declared when the session starts");
       if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
         fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
-      let environment = null, outputs = null;
+      let environment = null, outputs = null, model = null;
       try { environment = validateAttemptEnvironment(request.environment); }
       catch (error) { fail(422, "invalid_session_environment", error.message); }
+      try { model = validateAttemptModel(request.model); }
+      catch (error) { fail(422, "invalid_session_model", error.message); }
       try { outputs = validateAttemptOutputs(request.outputs); }
       catch (error) { fail(422, "invalid_session_outputs", error.message); }
       const data = { workItemId: request.workItemId };
@@ -5001,6 +5039,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
+      if (type === T.SESSION_STARTED && model) data.model = model;
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;
@@ -5015,93 +5054,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
-      const now = this.now();
-      const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
-      const working = new Map();
-      const heartbeats = new Map();
-      for (const item of Object.values(room.state.workItems ?? {})) {
-        const session = sessionRecord(item);
-        if (session.worker_member_id && session.heartbeat_at) {
-          const prev = heartbeats.get(session.worker_member_id);
-          if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
-        }
-        const worker = sessionWorker(item, now);
-        const heartbeatAt = timestamp(session.heartbeat_at);
-        if (!worker || !["processing", "active"].includes(session.status)
-          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
-          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
-        if (!working.has(worker)) working.set(worker, []);
-        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
-      }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
-      const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
-      // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      // #660: raw host status per member. status is "online"|"offline"|null
-      // (null = no registered host); identityId is the linked agent identity.
-      const hostStatusOf = memberId => {
-        const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        // Unregistered (no host) stays null so RC-051 clients keep the
-        // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
-      };
-      const agentPresence = memberId => {
-        const host = hostStatusOf(memberId);
-        if (host.status === null) return null;
-        return { status: host.status, lastSeenAt: host.lastSeenAt };
-      };
-      const listed = Object.values(members)
-        .filter(m => m && m.active !== false)
-        .map(m => {
-          const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
-          const host = hostStatusOf(m.id);
-          const workingOn = working.get(m.id) ?? [];
-          const isWatching = watching.has(m.id);
-          return {
-            memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: isWatching, workingOn,
-            lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id),
-            // #660: derived working state + owner/scope projection (additive).
-            state: presenceState({
-              kind: m.kind,
-              hasActiveSession: workingOn.length > 0,
-              watching: isWatching,
-              hostStatus: host.status,
-              hostLastSeenAt: host.lastSeenAt,
-              lastCommandAt: timestamp(lastCommandAt.get(m.id)),
-              // Enrollment is retained in legacy lastSeenAt, but is not activity.
-              lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
-                timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
-              now,
-            }),
-            isOwner: m.id === ownerId,
-            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
-            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
-            // plan-dir-card: the member's linked directory card id (the
-            // member chip lazy-loads the card from
-            // /api/rooms/{roomId}/members/{memberId}/card). Null when the
-            // member has no visible card.
-            cardAgentId: m.kind === "agent" && host.identityId
-              ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
-              : null,
-          };
-        })
-        .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+      const listed = this.presenceMembers(roomId, watcherMemberIds);
       // Suggested DM targets require current connection/execution observations.
       const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
@@ -5109,6 +5062,144 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         members: listed,
         next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
+    });
+  }
+  // The per-room presence rows presence() serves, factored out so the
+  // cross-room read (agentPresence) derives a shared room's row through
+  // exactly this code — one derivation, two surfaces. The caller supplies
+  // the room's live SSE watcher member ids ([] for a read with no stream,
+  // so watching reads false there).
+  presenceMembers(roomId, watcherMemberIds) {
+    const { members, ownerId } = this.roomAuthority(roomId);
+    const room = this.room(roomId);
+    const now = this.now();
+    const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+    const working = new Map();
+    const heartbeats = new Map();
+    for (const item of Object.values(room.state.workItems ?? {})) {
+      const session = sessionRecord(item);
+      if (session.worker_member_id && session.heartbeat_at) {
+        const prev = heartbeats.get(session.worker_member_id);
+        if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+      }
+      const worker = sessionWorker(item, now);
+      const heartbeatAt = timestamp(session.heartbeat_at);
+      if (!worker || !["processing", "active"].includes(session.status)
+        || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+        || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
+      if (!working.has(worker)) working.set(worker, []);
+      working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
+    }
+    const lastCommandAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? GROUP BY actor`
+    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+    const addedAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+    ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+    const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
+    // RC-2026-09-18-051: additive host presence for agent members.
+    const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // #660: raw host status per member. status is "online"|"offline"|null
+    // (null = no registered host); identityId is the linked agent identity.
+    const hostStatusOf = memberId => {
+      const m = members[memberId];
+      if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
+      const link = identityLinkOf.get(roomId, memberId);
+      if (!link) return { identityId: null, status: null, lastSeenAt: null };
+      const status = this.agentHeartbeats.statusOf(link.identityId);
+      // Unregistered (no host) stays null so RC-051 clients keep the
+      // "no presence field or absent" contract. Roster still lists the member.
+      if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
+      return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+    };
+    const agentPresence = memberId => {
+      const host = hostStatusOf(memberId);
+      if (host.status === null) return null;
+      return { status: host.status, lastSeenAt: host.lastSeenAt };
+    };
+    const listed = Object.values(members)
+      .filter(m => m && m.active !== false)
+      .map(m => {
+        const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+        const host = hostStatusOf(m.id);
+        const workingOn = working.get(m.id) ?? [];
+        const isWatching = watching.has(m.id);
+        return {
+          memberId: m.id, displayName: m.displayName, kind: m.kind,
+          watching: isWatching, workingOn,
+          lastSeenAt, statusMessage: m.statusMessage ?? null,
+          presence: agentPresence(m.id),
+          // #660: derived working state + owner/scope projection (additive).
+          state: presenceState({
+            kind: m.kind,
+            hasActiveSession: workingOn.length > 0,
+            watching: isWatching,
+            hostStatus: host.status,
+            hostLastSeenAt: host.lastSeenAt,
+            lastCommandAt: timestamp(lastCommandAt.get(m.id)),
+            // Enrollment is retained in legacy lastSeenAt, but is not activity.
+            lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
+              timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
+            now,
+          }),
+          isOwner: m.id === ownerId,
+          scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
+          ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+          // plan-dir-card: the member's linked directory card id (the
+          // member chip lazy-loads the card from
+          // /api/rooms/{roomId}/members/{memberId}/card). Null when the
+          // member has no visible card.
+          cardAgentId: m.kind === "agent" && host.identityId
+            ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
+            : null,
+        };
+      })
+      .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+    return listed;
+  }
+  // Presence Gap 4: the cross-room presence read behind
+  // GET /api/agents/{identityId}/presence. Returns the target identity's
+  // per-room presence row for exactly the rooms where the CALLER holds
+  // standing — a live member seat, or ownership of record (the room
+  // authority's owner member names the caller's identity). The
+  // intersection is computed here, in the derivation: the target's seats
+  // (identityRoomSeats: identity_links + guest_members) are joined
+  // against the caller's standing room by room, and a room the caller
+  // cannot stand in contributes no row — so the response cannot
+  // distinguish an identity that exists but shares no room with the
+  // caller from one that does not exist at all: both read as an empty
+  // rooms list. A room-scoped
+  // credential (boundRoomId) narrows standing to its bound room. Each
+  // row is the row presenceMembers() derives for that member (watching
+  // false: this read holds no stream), with roomId attached.
+  agentPresence(caller, targetIdentityId) {
+    return this.readTransaction(() => {
+      const empty = { identityId: targetIdentityId, rooms: [] };
+      if (!caller || typeof caller.identityId !== "string" || typeof targetIdentityId !== "string") return empty;
+      const targetSeats = identityRoomSeats(this.db, targetIdentityId);
+      if (targetSeats.length === 0) return empty;
+      const callerSeatByRoom = new Map(
+        identityRoomSeats(this.db, caller.identityId).map(seat => [seat.roomId, seat]));
+      const roomRowOf = this.db.prepare("SELECT archived_at AS archivedAt FROM rooms WHERE id=?");
+      const rooms = [];
+      for (const seat of targetSeats) {
+        if (caller.boundRoomId && seat.roomId !== caller.boundRoomId) continue;
+        const roomRow = roomRowOf.get(seat.roomId);
+        if (!roomRow || roomRow.archivedAt) continue;
+        const { members, ownerId } = this.roomAuthority(seat.roomId);
+        const callerSeat = callerSeatByRoom.get(seat.roomId);
+        const callerMember = callerSeat ? ownMember(members, callerSeat.memberId) : null;
+        const memberStanding = !!callerMember && callerMember.active !== false;
+        const ownerMember = ownerId ? ownMember(members, ownerId) : null;
+        const ownerStanding = !!ownerMember && ownerMember.identityId === caller.identityId;
+        if (!memberStanding && !ownerStanding) continue;
+        const row = this.presenceMembers(seat.roomId, [])
+          .find(entry => entry.memberId === seat.memberId);
+        if (row) rooms.push({ roomId: seat.roomId, ...row });
+      }
+      return { identityId: targetIdentityId, rooms };
     });
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
@@ -6246,7 +6337,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
@@ -6523,7 +6614,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+      const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
