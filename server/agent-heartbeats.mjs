@@ -14,6 +14,32 @@
 // first, at most 50, with more:true when the page is truncated. The poll
 // does not acknowledge. The host acknowledges with ackWakes.
 //
+// WAKE-S34 lifecycle states, re-cut by WAKE-QUEUE-1 (SPEC §9): a
+// signal's life is queued -> claimed -> acked, and the stages stay
+// distinct. A page serve is pickup, not a stage: it is counted on the
+// wake accounting served leg and stamps nothing (SPEC §9 dropped the
+// per-(signal, host) serves table). claimedAt is the listener claim
+// layer's claim stamp (SPEC §4 Stage 2, Claimed): a consumer holding
+// a live listener lease claims a batch (POST
+// /api/agent-heartbeats/claim, MCP heartbeat_claim) when it begins
+// handling it, and the claimed state expires with that lease's
+// fencing if the consumer dies. A claim is NOT a turn start
+// (TurnStarted, SPEC §4 Stage 4, is a separate record that does not
+// exist yet). delivered_at, despite its name, is the ACK stamp: it
+// is written only by ackWakes, and a signal leaves the pending set
+// only through that ack — serving and claiming never remove it.
+//
+// WAKE-QUEUE-1 Step 1 substrate (re-charter): every signal carries a
+// carried idempotency key (idempotency_key, minted at enqueue —
+// SPEC §2; downstream stages bind to it, never to the signal id or
+// the coalesce tuple); the claim row stores its own evidence
+// (holder_id + a lease-expiry snapshot) so a claim stays readable
+// after its lease row is overwritten by a later lease; a claim can
+// be released before lease expiry through the routed release door
+// (POST /api/agent-heartbeats/release-claims, MCP
+// heartbeat_release_claim); and every fencing refusal of a
+// post-claim write is journaled (wake-metrics stale_write_refused).
+//
 // Push is a separate doorbell. An offline wakeable host with a usable
 // push subscription receives a pointer-only POST. Push does not decide
 // who gets a queued signal.
@@ -81,7 +107,8 @@ export const agentHeartbeatSchema = `
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land','ask')),
     room_id TEXT, message_id TEXT,
-    created_at INTEGER NOT NULL, delivered_at INTEGER
+    created_at INTEGER NOT NULL, delivered_at INTEGER,
+    idempotency_key TEXT
   );
   CREATE UNIQUE INDEX IF NOT EXISTS agent_wake_signals_coalesce ON agent_wake_signals(agent_id, COALESCE(room_id, ''), message_id);
   CREATE INDEX IF NOT EXISTS agent_wake_signals_pending ON agent_wake_signals(agent_id, delivered_at);
@@ -124,12 +151,23 @@ export const wakeListenerLeaseSchema = `
   CREATE TABLE IF NOT EXISTS agent_wake_signal_claims (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
     claimed_by TEXT NOT NULL, claimed_at INTEGER NOT NULL,
-    redelivered INTEGER NOT NULL DEFAULT 0
+    redelivered INTEGER NOT NULL DEFAULT 0,
+    holder_id TEXT, lease_expires_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS agent_wake_signal_claims_agent ON agent_wake_signal_claims(agent_id, claimed_at);
 `;
 // A claim is abandoned when its fencing token no longer holds a live lease;
 // redelivery replays the batch with redelivered=true.
+// Claims-evidence (WAKE-QUEUE-1 Step 1): claimed_by stores the fencing
+// token (it is the fencing join key and is never exposed in views);
+// holder_id and lease_expires_at are the claim's OWN evidence — the
+// listener identity that holds the claim and the lease expiry as it
+// stood when the claim was made or last renewed — copied onto the
+// claim row at claim time so both stay readable after the lease row
+// has been overwritten by a later lease for the same agent and room
+// (lease rollover). Existing claims tables gain the two columns by
+// additive ALTER in ensureListenerSchema (lazy DDL, like the tables
+// themselves).
 export const WAKE_LISTENER_LEASE_TTL_MS = 60000;
 
 // CX5-FIX: room-attributed listener activity. agent_wake_polls is the
@@ -156,6 +194,12 @@ export const isScopedListenerHostId = hostId =>
   typeof hostId === "string" && SCOPED_LISTENER_HOST_PATTERN.test(hostId);
 const WAKE_SIGNAL_FENCED_CODE = "wake_signal_fenced";
 const WAKE_SIGNAL_FENCED_MESSAGE = "one or more signals are claimed by another listener — claim them again, then ack with the claiming fencing token";
+// Thrown inside the ack transaction to carry a fencing refusal out
+// without its journal write being rolled back with the transaction:
+// ackWakes catches it, journals the refusal durably (outside the
+// aborted transaction), then rethrows the same refusal as a
+// HeartbeatError (SPEC §5.3: refused AND journaled).
+const FENCE_REFUSAL = Symbol("wakeFenceRefusal");
 
 export class HeartbeatError extends Error {
   constructor(status, code, message) {
@@ -264,19 +308,54 @@ const publicAskOf = messageId => {
   const match = /^public-ask:(ask_[A-Za-z0-9_-]{8,80})$/.exec(messageId);
   return match ? match[1] : null;
 };
-const signalView = row => {
+// WAKE-S34 / WAKE-QUEUE-1: every signal view carries its claim stamps
+// (see the file header): claimedAt / claimedLive = the listener claim
+// layer's claimed state (SPEC §4 Stage 2), redelivered = the claim
+// layer's replay flag. deliveredAt is the ack stamp. Callers that
+// read rows pass the lifecycle map built by lifecycleOfSignals; a
+// row read without one (a fresh enqueue) reports the unclaimed
+// defaults. The claim evidence rides alongside: claimHolder is the
+// holder identity stored on the claim row and claimLeaseExpiresAt
+// the lease-expiry snapshot stored with it — both survive lease
+// rollover; the fencing token itself is never a view field. No
+// servedAt: a page serve is a diagnostic counted on the accounting
+// served leg, not a per-item stamp (SPEC §9). idempotencyKey is the
+// item's carried key (SPEC §2), present on every payload that
+// serves the item.
+const signalView = (row, lifecycle = null) => {
   const claim = claimWakeOf(row.message_id);
   const publicAsk = publicAskOf(row.message_id);
   return Object.freeze({
     signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
     roomId: row.room_id, messageId: row.message_id,
+    idempotencyKey: row.idempotency_key ?? null,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
+    claimedAt: lifecycle?.claimedAt ?? null,
+    claimedLive: lifecycle?.claimedLive === true,
+    claimHolder: lifecycle?.claimHolder ?? null,
+    claimLeaseExpiresAt: lifecycle?.claimLeaseExpiresAt ?? null,
+    redelivered: lifecycle?.redelivered === true,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
     ...(publicAsk ? { publicAsk } : {}),
     // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
 };
+
+// WAKE-QUEUE-1 Step 1 (E-03): the carried idempotency key, minted when
+// a wake item is enqueued (and for pre-key rows, once, at boot
+// convergence). Random by construction — never derived from the
+// signal id, the message id, or the agent/room/message coalesce
+// tuple (SPEC §2; the Step 2 charter's D7 naming rule).
+const mintWakeIdempotencyKey = () => `wk_${randomBytes(12).toString("base64url")}`;
+
+function backfillWakeIdempotencyKeys(db) {
+  const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all("agent_wake_signals").map(r => r.name);
+  if (!cols.includes("idempotency_key")) return;
+  const missing = db.prepare("SELECT signal_id FROM agent_wake_signals WHERE idempotency_key IS NULL").all();
+  const stamp = db.prepare("UPDATE agent_wake_signals SET idempotency_key=? WHERE signal_id=? AND idempotency_key IS NULL");
+  for (const row of missing) stamp.run(mintWakeIdempotencyKey(), row.signal_id);
+}
 
 // A pre-migration or read-only DB lacks these tables; that is the only error the
 // fail-closed reads below may absorb. Busy, locked and I/O errors must surface.
@@ -307,6 +386,7 @@ export function convergeWakeSignalRoomScope(db) {
   if (normalize(actual) === normalize(tableDdl)) {
     // Table already converged; the coalesce index is purely additive.
     for (const indexDdl of indexDdls) db.exec(indexDdl);
+    backfillWakeIdempotencyKeys(db);
     return;
   }
   const legacy = "agent_wake_signals_legacy_2913";
@@ -318,6 +398,9 @@ export function convergeWakeSignalRoomScope(db) {
   db.exec(`INSERT INTO agent_wake_signals (${colList}) SELECT ${colList} FROM ${legacy}`);
   db.exec(`DROP TABLE ${legacy}`);
   for (const indexDdl of indexDdls) db.exec(indexDdl);
+  // Rows copied from a pre-key table carry no idempotency key; mint
+  // one per row so every wake item is bindable downstream (E-03).
+  backfillWakeIdempotencyKeys(db);
 }
 
 export class AgentHeartbeats {
@@ -851,7 +934,14 @@ export class AgentHeartbeats {
     // SAVEPOINT and COMMIT), and a join when the caller already holds one. The
     // check and the UPDATE loop run under one lock, so a lease expiring or
     // changing hands between them cannot let a stale ack through.
-    return this.store.transaction(() => {
+    // A fencing refusal aborts the transaction; the refusal is carried
+    // out on FENCE_REFUSAL and journaled AFTER the rollback (a journal
+    // row written inside would be rolled back with the ack), then
+    // rethrown with its exact code and message.
+    let refusal = null;
+    const result = (() => {
+      try {
+        return this.store.transaction(() => {
       const holders = chunks.flatMap(chunk => this.db.prepare(`SELECT DISTINCT l.fencing_token AS fencingToken
         FROM agent_wake_signals s
         JOIN agent_wake_listener_leases l
@@ -861,8 +951,9 @@ export class AgentHeartbeats {
           AND l.lease_expires_at > ?`)
         .all(agentId, ...chunk, roomId, roomId, at));
       if (holders.some(({ fencingToken: holder }) => holder !== fencingToken)) {
-        fail(409, "listener_fenced",
-          "a live listener lease holds this agent's wake queue — ack with its fencing token");
+        refusal = { code: "listener_fenced",
+          message: "a live listener lease holds this agent's wake queue — ack with its fencing token" };
+        throw FENCE_REFUSAL;
       }
       // Owner fence: a pending signal with a claim row belongs to the token
       // that claimed it, live lease or not. Another token (or no token) must
@@ -877,7 +968,8 @@ export class AgentHeartbeats {
           AND (? IS NULL OR c.claimed_by != ?)`)
         .get(agentId, ...chunk, roomId, roomId, fencingToken, fencingToken).n, 0);
       if (foreign > 0) {
-        fail(409, WAKE_SIGNAL_FENCED_CODE, WAKE_SIGNAL_FENCED_MESSAGE);
+        refusal = { code: WAKE_SIGNAL_FENCED_CODE, message: WAKE_SIGNAL_FENCED_MESSAGE };
+        throw FENCE_REFUSAL;
       }
       const acknowledged = [];
       const stmt = this.db.prepare(
@@ -904,13 +996,95 @@ export class AgentHeartbeats {
         acknowledged.push(signalId);
       }
       return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
-    });
+        });
+      } catch (error) {
+        if (error !== FENCE_REFUSAL) throw error;
+        return null;
+      }
+    })();
+    if (refusal) {
+      // SPEC §5.3 stale-write journal: one durable entry per refused
+      // item, naming the item, the writing holder, the refusal code
+      // and the time — readable after the fact via wakeAccounting's
+      // failure journal. The ack itself removed nothing.
+      for (const signalId of signalIds) {
+        const row = this.db.prepare(
+          "SELECT kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id=?").get(signalId);
+        recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
+          event: "stale_write_refused", door, kind: row?.kind ?? "", subjectId: agentId,
+          reason: refusal.code, itemId: signalId, holderId: agentId });
+      }
+      fail(409, refusal.code, refusal.message);
+    }
+    return result;
   }
 
   // Idempotent DDL for the lease tables (no-op on warm databases).
   ensureListenerSchema() {
     this.db.exec(wakeListenerLeaseSchema);
+    // Claims-evidence migration (WAKE-QUEUE-1 Step 1): existing
+    // claims tables gain holder_id + lease_expires_at by additive
+    // ALTER; the CREATE TABLE above already carries them fresh.
+    const cols = new Set(this.db.prepare("SELECT name FROM pragma_table_info(?)")
+      .all("agent_wake_signal_claims").map(r => r.name));
+    if (cols.size > 0 && !cols.has("holder_id"))
+      this.db.exec("ALTER TABLE agent_wake_signal_claims ADD COLUMN holder_id TEXT");
+    if (cols.size > 0 && !cols.has("lease_expires_at"))
+      this.db.exec("ALTER TABLE agent_wake_signal_claims ADD COLUMN lease_expires_at INTEGER");
     return this;
+  }
+
+  // WAKE-S34 / WAKE-QUEUE-1: the lifecycle map for a set of signals —
+  // claim stamp + liveness from the claims sidecar joined to the
+  // lease that fences the claim. A claim whose token no longer holds
+  // a live lease reads claimedLive=false: the claimed state expired
+  // with the lease, the stamp stays as history. The claim evidence
+  // (claimHolder, claimLeaseExpiresAt) is read from the CLAIM row,
+  // not the lease join, so it survives lease rollover — the lease
+  // row a later lease overwrote cannot rewrite who held this claim
+  // or when its lease stood to expire. Missing sidecar (a database
+  // from before these tables) reads as no lifecycle — never an
+  // error, like the other read paths; a sidecar from before the
+  // evidence columns reads the same way with the evidence null.
+  lifecycleOfSignals(signalIds, at = this.now()) {
+    const lifecycle = new Map();
+    if (!Array.isArray(signalIds) || signalIds.length === 0) return lifecycle;
+    const entryFor = signalId => {
+      if (!lifecycle.has(signalId))
+        lifecycle.set(signalId, { claimedAt: null, claimedLive: false, claimHolder: null, claimLeaseExpiresAt: null, redelivered: false });
+      return lifecycle.get(signalId);
+    };
+    const read = withEvidence => {
+      const rows = [...sqlChunks(signalIds)].flatMap(chunk => this.db.prepare(
+        `SELECT c.signal_id AS signalId, c.claimed_at AS claimedAt, c.claimed_by AS claimedBy,
+           c.redelivered AS redelivered, l.lease_expires_at AS liveLeaseExpiresAt
+           ${withEvidence ? ", c.holder_id AS holderId, c.lease_expires_at AS claimLeaseExpiresAt" : ""}
+         FROM agent_wake_signal_claims c
+         LEFT JOIN agent_wake_listener_leases l
+           ON l.agent_id = c.agent_id AND l.fencing_token = c.claimed_by
+         WHERE c.signal_id IN (${sqlPlaceholders(chunk)})`).all(...chunk));
+      for (const claim of rows) {
+        const entry = entryFor(claim.signalId);
+        if (claim.redelivered === 1) entry.redelivered = true;
+        // A released claim (claimed_by='') is no longer claimed: the
+        // signal waits for its flagged redelivery instead.
+        if (claim.claimedBy !== "") {
+          entry.claimedAt = claim.claimedAt;
+          entry.claimedLive = claim.liveLeaseExpiresAt !== null && claim.liveLeaseExpiresAt > at;
+          entry.claimHolder = claim.holderId ?? null;
+          entry.claimLeaseExpiresAt = claim.claimLeaseExpiresAt ?? null;
+        }
+      }
+    };
+    try {
+      read(true);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      // Pre-evidence (or pre-sidecar) database: the legacy read keeps
+      // the claim stamps working with the evidence fields null.
+      try { read(false); } catch (legacyError) { if (!isMissingTable(legacyError)) throw legacyError; }
+    }
+    return lifecycle;
   }
 
   roomKeyOf(roomId) {
@@ -969,13 +1143,19 @@ export class AgentHeartbeats {
       422, "invalid_wake_claim", `limit must be 1..${MAX_PENDING_WAKES}`);
     this.ensureListenerSchema();
     const at = this.now();
-    const lease = this.db.prepare(`SELECT fencing_token AS fencingToken, lease_expires_at AS leaseExpiresAt
+    const lease = this.db.prepare(`SELECT listener_id AS listenerId, fencing_token AS fencingToken, lease_expires_at AS leaseExpiresAt
       FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?`).get(agentId, roomKey);
-    if (!lease || lease.leaseExpiresAt <= at || lease.fencingToken !== fencingToken)
+    if (!lease || lease.leaseExpiresAt <= at || lease.fencingToken !== fencingToken) {
+      // SPEC §5.3: a write under an expired or superseded token is
+      // refused AND journaled as a stale-write attempt.
+      recordWakeEvent(this.db, { at, roomId, store: "signals",
+        event: "stale_write_refused", door: "listener", subjectId: agentId,
+        reason: "stale_listener", holderId: agentId });
       fail(409, "stale_listener", "no live listener lease for this fencing token — acquire a lease first");
+    }
     const claimed = this.db.prepare(`INSERT INTO agent_wake_signal_claims
-        (signal_id, agent_id, claimed_by, claimed_at, redelivered)
-        SELECT s.signal_id, ?, ?, ?, CASE WHEN c.signal_id IS NULL THEN 0 ELSE 1 END
+        (signal_id, agent_id, claimed_by, claimed_at, redelivered, holder_id, lease_expires_at)
+        SELECT s.signal_id, ?, ?, ?, CASE WHEN c.signal_id IS NULL THEN 0 ELSE 1 END, ?, ?
         FROM agent_wake_signals s
         LEFT JOIN agent_wake_signal_claims c ON c.signal_id = s.signal_id
         WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
@@ -986,16 +1166,29 @@ export class AgentHeartbeats {
             WHERE l.agent_id = ? AND l.room_key = ? AND l.fencing_token = ? AND l.lease_expires_at > ?)
         ORDER BY s.created_at ASC LIMIT ?
         ON CONFLICT(signal_id) DO UPDATE SET claimed_by=excluded.claimed_by,
-          claimed_at=excluded.claimed_at, redelivered=excluded.redelivered
+          claimed_at=excluded.claimed_at, redelivered=excluded.redelivered,
+          holder_id=excluded.holder_id, lease_expires_at=excluded.lease_expires_at
         RETURNING signal_id, redelivered`)
-      .all(agentId, fencingToken, at, agentId, roomId, roomId, fencingToken, at, agentId, roomKey, fencingToken, at, limit);
+      .all(agentId, fencingToken, at, lease.listenerId, lease.leaseExpiresAt, agentId, roomId, roomId, fencingToken, at, agentId, roomKey, fencingToken, at, limit);
     const views = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?");
-    const signals = claimed.map(({ signal_id, redelivered }) =>
-      Object.freeze({ ...signalView(views.get(signal_id)), redelivered: redelivered === 1 }));
+    // WAKE-S34 / WAKE-QUEUE-1 (SPEC §4 Stage 2): the claim IS the
+    // claimed state — the response carries it (claimedAt, claimedLive
+    // under this lease, the claim evidence, the replay flag), and the
+    // claims just written make it readable on every later page
+    // through lifecycleOfSignals. Claimed is not TurnStarted (Stage 4).
+    const lifecycle = this.lifecycleOfSignals(claimed.map(({ signal_id }) => signal_id), at);
+    const signals = claimed.map(({ signal_id, redelivered }) => {
+      const entry = lifecycle.get(signal_id) ?? { claimedAt: at, claimedLive: true, claimHolder: lease.listenerId, claimLeaseExpiresAt: lease.leaseExpiresAt, redelivered: redelivered === 1 };
+      return signalView(views.get(signal_id), { ...entry, claimedAt: at, claimedLive: true, redelivered: redelivered === 1 });
+    });
     // #3345: a claimed batch is a delivery on the listener door.
+    // WAKE-S34: it is also the claimed leg — counted separately so
+    // served / claimed / acked reconcile (review seat seq 17376).
     for (const signal of signals) {
       recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
         event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId });
+      recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
+        event: "claimed", door: "listener", kind: signal.kind, subjectId: agentId });
     }
     return Object.freeze({ signals: Object.freeze(signals) });
   }
@@ -1018,6 +1211,49 @@ export class AgentHeartbeats {
     return Object.freeze({ released: dropped.changes > 0 });
   }
 
+  // WAKE-QUEUE-1 Step 1 (release door): release named claims before
+  // lease expiry. The holder of the claims presents the claim's
+  // fencing token, checked against the LIVE lease at write time
+  // (SPEC §5.3/§5.4): a valid release tombstones the named claim
+  // rows (claimed_by='', redelivered=1 — the releaseListenerLease
+  // per-claim effect), so the items are Queued again at once and
+  // the next claim replays them flagged redelivered. The lease
+  // itself stays live and its other claims stand. An invalid or
+  // stale token releases nothing: the refusal is journaled
+  // (stale_write_refused / stale_listener, one entry per named
+  // item) and answered 409 stale_listener. Signals the token does
+  // not hold are skipped, never freed by another listener's say-so.
+  releaseWakeClaims({ agentId, roomId = null, fencingToken, signalIds }) {
+    checkAgentId(agentId);
+    const roomKey = this.roomKeyOf(roomId);
+    check(typeof fencingToken === "string" && fencingToken.length > 0,
+      422, "invalid_wake_release", "fencingToken is required");
+    check(Array.isArray(signalIds) && signalIds.length > 0
+      && signalIds.every(id => typeof id === "string" && id.length > 0),
+      422, "invalid_wake_release", "signalIds must be a non-empty string array");
+    this.ensureListenerSchema();
+    const at = this.now();
+    const lease = this.db.prepare(`SELECT fencing_token AS fencingToken, lease_expires_at AS leaseExpiresAt
+      FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?`).get(agentId, roomKey);
+    if (!lease || lease.leaseExpiresAt <= at || lease.fencingToken !== fencingToken) {
+      for (const signalId of signalIds) {
+        const row = this.db.prepare(
+          "SELECT kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id=?").get(signalId);
+        recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
+          event: "stale_write_refused", door: "listener", kind: row?.kind ?? "", subjectId: agentId,
+          reason: "stale_listener", itemId: signalId, holderId: agentId });
+      }
+      fail(409, "stale_listener", "no live listener lease for this fencing token — acquire a lease first");
+    }
+    const released = [];
+    const stmt = this.db.prepare(`UPDATE agent_wake_signal_claims
+      SET claimed_by='', redelivered=1 WHERE agent_id=? AND signal_id=? AND claimed_by=?`);
+    for (const signalId of signalIds) {
+      if (stmt.run(agentId, signalId, fencingToken).changes > 0) released.push(signalId);
+    }
+    return Object.freeze({ released: Object.freeze(released) });
+  }
+
   // Enqueue a wake signal for an agent (mention, DM, bond, assignment,
   // land update, or public ask — WAKE_KINDS). Coalesced on
   // (agent_id, room_id, message_id) — issue #2913: message ids repeat
@@ -1032,9 +1268,15 @@ export class AgentHeartbeats {
       422, "invalid_wake", "roomId must be a non-empty string or null");
     const at = this.now();
     const signalId = `ws_${at.toString(36)}${randomBytes(6).toString("base64url")}`;
+    // The carried idempotency key is minted here, once, when the item
+    // is enqueued (SPEC §2). A coalesced re-enqueue inserts nothing:
+    // the read-back below returns the original row and its stored
+    // key, so the same logical wake always carries the same key —
+    // the key downstream stages bind to (never the coalesce tuple).
+    const idempotencyKey = mintWakeIdempotencyKey();
     const applied = this.db.prepare(`INSERT OR IGNORE INTO agent_wake_signals
-      (signal_id, agent_id, kind, room_id, message_id, created_at, delivered_at)
-      VALUES (?, ?, ?, ?, ?, ?, NULL)`).run(signalId, agentId, kind, roomId, messageId, at);
+      (signal_id, agent_id, kind, room_id, message_id, created_at, delivered_at, idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`).run(signalId, agentId, kind, roomId, messageId, at, idempotencyKey);
     // #3345: every emission attempt resolves to exactly one audited outcome.
     recordWakeEvent(this.db, { at, roomId, store: "signals",
       event: applied.changes > 0 ? "emitted" : "coalesced", kind, subjectId: agentId });
@@ -1074,21 +1316,45 @@ export class AgentHeartbeats {
     }
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+    const messageRows = this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY created_at,signal_id LIMIT ?`)
       .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
-        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
+        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
-    const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
+    const workIds = new Set(work.map(entry => entry.signalId));
+    const combined = [
+      ...messageRows.map(row => ({ row, createdAt: row.created_at, signalId: row.signal_id, roomId: row.room_id })),
+      ...work.map(entry => ({ entry, createdAt: entry.createdAt, signalId: entry.signalId, roomId: entry.roomId })),
+    ].filter(s => !held.has(s.roomId))
       .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
-    const page = combined.slice(0, limit);
+    const pageSlice = combined.slice(0, limit);
+    // WAKE-S34 / WAKE-QUEUE-1 (SPEC §9): serving this page is the
+    // pickup — a diagnostic, not a ladder stage. It stamps nothing
+    // per item (the serves table is dropped); pickups are counted on
+    // the metrics served leg, batched like the delivered count below,
+    // so the pickup-vs-ack gap stays measurable without a table.
+    const at = this.now();
+    const pageRows = pageSlice.filter(s => s.row).map(s => s.row);
+    if (pageRows.length > 0) {
+      const served = new Map();
+      for (const row of pageRows) {
+        const key = `${row.kind}\0${row.room_id ?? ""}`;
+        served.set(key, (served.get(key) ?? 0) + 1);
+      }
+      for (const [key, n] of served) {
+        const [kind, room] = key.split("\0");
+        recordWakeEvent(this.db, { at, roomId: room === "" ? null : room,
+          store: "signals", event: "served", door, kind, n });
+      }
+    }
+    const lifecycle = this.lifecycleOfSignals(pageRows.map(row => row.signal_id), at);
+    const page = pageSlice.map(s => s.row ? signalView(s.row, lifecycle.get(s.row.signal_id)) : s.entry);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
     if (page.length > 0) {
-      const workIds = new Set(work.map(entry => entry.signalId));
       const batches = new Map();
       for (const signal of page) {
         const isWork = workIds.has(signal.signalId);

@@ -711,6 +711,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_view` | 422 | view=brief is the only accepted view; omit it for the full pack | follow hint | Follow this error's hint and next steps. |
 | `invalid_wake` | 422 | Supply a queue key, intent, due time, max attempts and request ID. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_claim` | 422 | fencingToken is required; limit must be 1..50 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_wake_release` | 422 | fencingToken is required; signalIds must be a non-empty string array | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_pause` | 422 | Supply a request ID and an optional short reason. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_poll` | 422 | hostId is required (1-128 chars, [A-Za-z0-9._-]) — one wake waiter per host | fix+resend | Fix hostId (1-128 chars, [A-Za-z0-9._-]; with several registered hosts, pass the hostId you heartbeat with) or waitMs (0..55000), then resend the poll. |
 | `invalid_wake_resume` | 422 | Supply a request ID. reason is optional. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
