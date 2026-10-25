@@ -967,6 +967,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/public/door-funnel"
+    },
+    {
+      "method": "GET",
       "path": "/api/public/receipts"
     },
     {
@@ -4510,6 +4514,10 @@
     {
       "method": "POST",
       "path": "/api/public-work/tasks/{id}/renew"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/door-funnel"
     },
     {
       "method": "GET",

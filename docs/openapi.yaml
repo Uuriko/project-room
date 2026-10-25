@@ -2893,6 +2893,61 @@ paths:
       responses:
         '200': { description: Response headers only }
         '429': { description: Response headers only }
+  /api/public/door-funnel:
+    get:
+      summary: Public door funnel counts
+      description: >-
+        Weekly funnel counts for the public door, oldest first. Joins
+        (per listed room) and identity mints are derived from the store
+        at read time; views of the Node-served public surfaces and auth
+        starts by method are counted server-side as they happen. The
+        response carries a surfaces table recording, per surface,
+        whether this instrument counts it: surfaces served at the edge
+        (the landing page, the offers page, and the agent packet) are
+        counted:false and render null views, never a silent zero. The
+        weeks parameter is clamped to the range 1 to 12 (default 12).
+      security: []
+      parameters:
+        - name: weeks
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Weekly door funnel counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string }
+                  surfaces:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        surface: { type: string }
+                        path: { type: string }
+                        counted: { type: boolean }
+                        servedBy: { type: string }
+                  weeks:
+                    type: array
+                    items:
+                      type: object
+        '429':
+          description: Per-address funnel rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: A source read failed; no partial counts are served (error.code storage_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '405':
+          description: Method not allowed
   /api/public/rooms/directory:
     get:
       summary: Public room directory

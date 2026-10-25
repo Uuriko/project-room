@@ -78,6 +78,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)
   paths.add('server/read-cursor.mjs'); // safe scalar foundation
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
+  paths.add('server/analytics/door-funnel.mjs'); // FUNNEL-COUNT-1 door funnel readout + counters (imported by server/http.mjs)
+  paths.add('server/analytics/schema.mjs'); paths.add('server/analytics/metrics.mjs'); paths.add('server/analytics/attribution.mjs'); paths.add('server/analytics/catalog.mjs'); paths.add('server/analytics/context.mjs'); paths.add('server/analytics/derive-tables.mjs'); paths.add('server/analytics/map-room-event.mjs'); paths.add('server/analytics/retention.mjs'); paths.add('server/analytics/tail.mjs'); // door-funnel import closure (imported by server/analytics/door-funnel.mjs and its siblings)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)

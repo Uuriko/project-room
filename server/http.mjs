@@ -48,6 +48,7 @@ import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "./agent-discovery.mjs";
+import { recordDoorFunnelView, recordDoorFunnelAuth, readDoorFunnel } from "./analytics/door-funnel.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
 // server/agent-discovery.mjs). Aliases (/room/skills, /project-room/skills,
 // trailing-slash twins) resolve to this same object via discoveryDoc, so
@@ -1165,6 +1166,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // once, up front, so every matcher below sees the canonical path. Only
       // the URL object is rewritten — req.url stays untouched for diagnostics.
       if (url.pathname.length > 1 && url.pathname.endsWith("/")) url.pathname = url.pathname.replace(/\/+$/, "");
+      // FUNNEL-COUNT-1 (Option B descope): count arrivals at this Node
+      // boundary for the public surfaces this process serves. The
+      // edge-served surfaces (the landing, offers and agent-packet
+      // pages) never reach this handler in production and are reported
+      // counted:false by the door-funnel readout — never a silent zero.
+      // The record call never throws; a counter failure cannot break a
+      // served request.
+      if (req.method === "GET") recordDoorFunnelView(store.db, { pathname: url.pathname, userAgent: req.headers["user-agent"], now: store.now() });
       if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }
@@ -1349,8 +1358,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === GOOGLE_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        recordDoorFunnelAuth(store.db, { method: "google", leg: "start", now: store.now() });
         const signIn = google();
         if (!signIn) {
+          recordDoorFunnelAuth(store.db, { method: "google", leg: "unavailable", now: store.now() });
           // Return browser navigations to the sign-in surface, where the
           // existing OAuth invitation stash restores their destination.
           if ((req.headers.accept || "").includes("text/html")) {
@@ -1516,8 +1527,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // is out of scope for this slice). Error responses never carry tokens.
       if (url.pathname === GITHUB_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        recordDoorFunnelAuth(store.db, { method: "github", leg: "start", now: store.now() });
         const oauth = github();
         if (!oauth) {
+          recordDoorFunnelAuth(store.db, { method: "github", leg: "unavailable", now: store.now() });
           // Slice 7: browsers navigating directly to the start route get a
           // readable landing page; API clients keep the 503 JSON body.
           if ((req.headers.accept || "").includes("text/html")) {
@@ -1985,6 +1998,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         return json(res, 200, buildOpenApiJson({ origin: expectedOrigin() }), req.method === "HEAD");
       }
+      // Public door funnel (FUNNEL-COUNT-1): the funnel readout. Joins
+      // and mints are derived from the store at read time; views and
+      // auth starts are counted at this Node boundary as they happen.
+      // The response carries its own surfaces table: a surface this
+      // instrument does not count (the edge-served landing, offers and
+      // agent-packet pages) renders null views with counted:false,
+      // never a silent zero. A source failure refuses the whole read —
+      // partial counts are never served as if complete.
+      if (url.pathname === "/api/public/door-funnel" && req.method === "GET") {
+        rate(`door-funnel:${remoteAddress}`, 120);
+        try {
+          return json(res, 200, readDoorFunnel(store, { weeks: url.searchParams.get("weeks"), now: store.now() }));
+        } catch {
+          reject(503, "storage_unavailable", "Door funnel read failed; no partial counts are served");
+        }
+      }
+      if (url.pathname === "/api/public/door-funnel") reject(405, "method_not_allowed", "Method not allowed");
       // Public room directory (#605): owner opt-in listing so a freshly
       // minted identity can discover real rooms to request access to.
       // Sanitized field-by-field in the module: no member, identity, or
