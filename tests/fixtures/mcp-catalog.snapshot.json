@@ -679,6 +679,15 @@
         "openWorldHint": false
       }
     },
+    "room_assistant_candidates": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_configure": {
       "inputSchema": "fe2266a2e15a8f70",
       "annotations": {
@@ -1432,6 +1441,15 @@
       "inputSchema": "d63b905511f840c2",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_candidates": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false

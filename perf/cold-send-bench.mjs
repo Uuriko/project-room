@@ -1,6 +1,8 @@
 // Cold load and one own send, same flags every run.
 // Prints one JSON line: coldLoad (median ms, request count, JS bytes) and ownSend (median ms).
 // Node's fetch against a throwaway local server. No browser, no prod.
+// This file is perf/cold-send-bench.mjs. perf/interaction-bench.mjs is the
+// room-switch, channel-switch, search, and DOM bench and is a different program.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
-const samples = Number(process.env.INTERACTION_BENCH_SAMPLES || 5);
+const samples = Number(process.env.COLD_SEND_BENCH_SAMPLES || process.env.INTERACTION_BENCH_SAMPLES || 5);
 
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -18,7 +20,7 @@ function median(values) {
 }
 
 async function boot() {
-  const directory = mkdtempSync(join(tmpdir(), "interaction-bench-"));
+  const directory = mkdtempSync(join(tmpdir(), "cold-send-bench-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
   const token = store.issueAccessKey("commons", "owner");

@@ -9,8 +9,10 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { demoteToReadonly, setTier } from "../server/autonomy-tiers.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 import { claimHistoryLength, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
-import { COORDINATOR_ACTIONS_PER_HOUR, COORDINATOR_MAX_HOPS } from "../server/coordinator.mjs";
-import { COORDINATOR_RANKING_VERSION } from "../server/coordinator-ranking.mjs";
+import { COORDINATOR_ACTIONS_PER_HOUR, COORDINATOR_MAX_HOPS, setRolesSetBy } from "../server/coordinator.mjs";
+import { COMPLETION_PRIOR, COORDINATOR_RANKING_VERSION } from "../server/coordinator-ranking.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { randomUUID } from "node:crypto";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:");
@@ -325,13 +327,17 @@ async function openRoom(t, specs) {
         data: { capabilities: ["coordinator"] }
       });
     }
-    if (spec.done) {
+    if (spec.done || Number.isInteger(spec.attempted)) {
       const room = { workClaims: store.workClaims.rawConfig("commons") };
-      let item = createWork({ id: `done-${spec.id}` }, { now, agentId: "owner" });
-      item = claimWork(item, spec.id, { now, room });
-      item = updateWork(item, spec.id, { state: "in_progress", now, authority: true });
-      item = updateWork(item, spec.id, { state: "done", now, authority: true, policy: "self_attested" });
-      store.workClaims.set("commons", item);
+      const total = Number.isInteger(spec.attempted) ? spec.attempted : 1;
+      const doneCount = spec.done === true ? 1 : (spec.doneCount ?? 0);
+      for (let n = 0; n < total; n += 1) {
+        let item = createWork({ id: `work-${spec.id}-${n}` }, { now, agentId: "owner" });
+        item = claimWork(item, spec.id, { now, room });
+        item = updateWork(item, spec.id, { state: "in_progress", now, authority: true });
+        if (n < doneCount) item = updateWork(item, spec.id, { state: "done", now, authority: true, policy: "self_attested" });
+        store.workClaims.set("commons", item);
+      }
     }
   }
   const server = createRoomServer({ store });
@@ -351,6 +357,13 @@ async function openRoom(t, specs) {
     });
     return { status: response.status, body: await response.json() };
   };
+  const candidates = async actor => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant/candidates`, {
+      headers: { authorization: `Bearer ${keys[actor]}` }
+    });
+    const body = await response.json();
+    return { status: response.status, body };
+  };
   const choices = async actor => {
     const response = await fetch(`${origin}/api/rooms/commons/events?after=0`, {
       headers: { authorization: `Bearer ${keys[actor]}` }
@@ -359,7 +372,7 @@ async function openRoom(t, specs) {
     assert.equal(response.status, 200, JSON.stringify(body));
     return body.events.map(row => row.event).filter(event => event?.data?.coordinatorSource);
   };
-  return { store, call, choices, advance(ms) { now += ms; } };
+  return { store, call, candidates, choices, advance(ms) { now += ms; } };
 }
 
 test("a room with no coordinator picks the highest-ranked live member", async t => {
@@ -405,9 +418,124 @@ test("a room with no coordinator picks the highest-ranked live member", async t 
   ]);
   const byAbility = await declared.call("idle", null, "GET");
   assert.equal(byAbility.status, 200, JSON.stringify(byAbility.body));
-  assert.equal(byAbility.body.assistant.coordinatorMemberId, "lead");
-  assert.match(byAbility.body.assistant.coordinatorReason, /declares coordinator/);
-  assert.equal((await declared.choices("lead"))[0].data.coordinatorMemberId, "lead");
+  assert.equal(byAbility.body.assistant.coordinatorMemberId, "idle");
+  assert.equal(byAbility.body.assistant.coordinatorReason.includes("coordinator role set by the room owner"), false);
+  assert.equal((await declared.choices("lead"))[0].data.coordinatorMemberId, "idle");
+});
+
+test("a self-set coordinator role does not outrank an equal member, an owner-set role does, and a new member outranks a 10% completer", async t => {
+  assert.equal(COORDINATOR_RANKING_VERSION, 2);
+  assert.equal(COMPLETION_PRIOR, 0.5);
+  const room = await openRoom(t, [
+    { id: "idle", agentType: "generic" },
+    { id: "lead", agentType: "generic", coordinator: true }
+  ]);
+  assert.throws(
+    () => setRolesSetBy(room.store, "commons", { actorId: "idle", memberId: "lead", roles: ["coordinator"] }),
+    error => error.status === 403 && error.code === "assistant_denied"
+  );
+  const self = setRolesSetBy(room.store, "commons", { actorId: "lead", memberId: "lead", roles: ["coordinator"] });
+  assert.equal(self.rolesSetBy, "self");
+  assert.equal(self.counts, false);
+  const before = await room.candidates("idle");
+  assert.equal(before.status, 200, JSON.stringify(before.body));
+  assert.equal(before.body.rankingVersion, COORDINATOR_RANKING_VERSION);
+  assert.equal(before.body.candidates.map(row => row.memberId).join(","), "idle,lead");
+  const lead = before.body.candidates[1];
+  assert.equal(lead.rolesSetBy, "self");
+  assert.equal(lead.signals.coordinator, 0);
+  assert.equal(lead.coordinatorRoleCounts, false);
+  assert.equal(lead.score, before.body.candidates[0].score);
+  assert.equal(before.body.assistant, undefined);
+
+  const granted = setRolesSetBy(room.store, "commons", { actorId: "owner", memberId: "lead", roles: ["coordinator"] });
+  assert.equal(granted.rolesSetBy, "owner");
+  assert.equal(granted.counts, true);
+  const after = await room.candidates("owner");
+  assert.equal(after.status, 200, JSON.stringify(after.body));
+  assert.equal(after.body.candidates[0].memberId, "lead");
+  assert.equal(after.body.candidates[0].signals.coordinator, 4);
+  assert.equal(after.body.candidates[0].coordinatorRoleCounts, true);
+  assert.ok(after.body.candidates[0].score > after.body.candidates[1].score);
+  const hidden = await room.call("owner", null, "GET");
+  assert.equal(hidden.status, 200, JSON.stringify(hidden.body));
+  assert.equal(hidden.body.assistant.coordinatorRoleGrants, undefined);
+  assert.equal(hidden.body.assistant.coordinatorMemberId, "lead");
+
+  const named = await room.call("owner", {
+    requestId: "keep-grant", action: "configure", name: "Room",
+    coordinatorMemberId: "idle", expectedRevision: 0
+  });
+  assert.equal(named.status, 200, JSON.stringify(named.body));
+  const kept = await room.candidates("lead");
+  assert.equal(kept.body.candidates.find(row => row.memberId === "lead").rolesSetBy, "owner");
+  assert.equal(kept.body.candidates.find(row => row.memberId === "lead").signals.coordinator, 4);
+  assert.equal(kept.body.assistant, undefined);
+
+  const rates = await openRoom(t, [
+    { id: "fresh", agentType: "generic" },
+    { id: "spotty", agentType: "generic", attempted: 10, doneCount: 1 }
+  ]);
+  const ranked = await rates.candidates("fresh");
+  assert.equal(ranked.status, 200, JSON.stringify(ranked.body));
+  const fresh = ranked.body.candidates.find(row => row.memberId === "fresh");
+  const spotty = ranked.body.candidates.find(row => row.memberId === "spotty");
+  assert.equal(fresh.completion.rate, null);
+  assert.equal(fresh.completion.prior, COMPLETION_PRIOR);
+  assert.equal(fresh.signals.completion, 2);
+  assert.equal(spotty.completion.done, 1);
+  assert.equal(spotty.completion.attempted, 10);
+  assert.equal(spotty.completion.prior, null);
+  assert.equal(spotty.signals.completion, 0.4);
+  assert.ok(fresh.score > spotty.score);
+  assert.equal(ranked.body.candidates[0].memberId, "fresh");
+});
+
+test("guests cannot read coordinator candidates", async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, { method = "GET", data, token } = {}) => fetch(origin + path, {
+    method,
+    headers: {
+      origin,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(data === undefined ? {} : { "content-type": "application/json" })
+    },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) })
+  });
+  const mint = await request("/api/rooms/commons/guest-invites", {
+    method: "POST", token: ownerKey,
+    data: { requestId: randomUUID(), guestLabel: "Visitor", expectedOwnerRevision: 0 }
+  });
+  const mintText = await mint.text();
+  assert.equal(mint.status, 201, mintText);
+  const minted = JSON.parse(mintText);
+  const identity = store.identities.create("Visitor");
+  const keys = generateKeyPair();
+  const cardBody = { name: "Visitor", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const redeemed = await request("/api/guest-invites/redeem", {
+    method: "POST", token: identity.secret, data: { inviteCode: minted.code, card }
+  });
+  const redeemedText = await redeemed.text();
+  assert.equal(redeemed.status, 201, redeemedText);
+  const guest = JSON.parse(redeemedText);
+  const denied = await request("/api/rooms/commons/assistant/candidates", { token: guest.token });
+  assert.equal(denied.status, 403);
+  const body = await denied.json();
+  assert.equal(body.error.code, "assistant_denied");
+  const allowed = await request("/api/rooms/commons/events", { token: guest.token });
+  assert.equal(allowed.status, 200);
 });
 
 test("a stale automatic coordinator is replaced by the next live member", async t => {
@@ -539,9 +667,20 @@ test("MCP configure, assign, ask and stop use the assistant actions", async t =>
   assert.equal(ownerCall.status, 200, await ownerCall.text());
   const listed = await rpc(lead.secret, "tools/list", { focus: "work" });
   const names = listed.result.tools.map(tool => tool.name);
-  for (const name of ["room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline"]) {
+  for (const name of ["room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline", "room_assistant_candidates"]) {
     assert.ok(names.includes(name), name);
   }
+  const seen = store.now();
+  for (const identity of [lead, hand]) {
+    store.db.prepare(`INSERT INTO agent_hosts (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?)`).run(identity.identityId, "host", "pull-only", null, seen, seen, seen);
+  }
+  const ranked = await rpc(lead.secret, "tools/call", { name: "room_assistant_candidates", arguments: { roomId: "commons" } });
+  assert.equal(ranked.result?.isError, undefined, JSON.stringify(ranked));
+  assert.equal(ranked.result.structuredContent.rankingVersion, COORDINATOR_RANKING_VERSION);
+  assert.deepEqual(ranked.result.structuredContent.candidates.map(row => row.memberId), ["hand", "lead"]);
+  assert.equal(ranked.result.structuredContent.candidates[0].signals.completion, 2);
+  assert.equal(ranked.result.structuredContent.candidates[0].completion.prior, COMPLETION_PRIOR);
   const item = putClaim(store, { id: "mcp-claim" });
   const round = roundOf(item);
   const assigned = await rpc(lead.secret, "tools/call", { name: "room_assistant_assign", arguments: {

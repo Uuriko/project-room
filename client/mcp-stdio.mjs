@@ -173,6 +173,7 @@ async function beginOnClient(client, identity, args, signal) {
   });
 }
 async function callTool(client, identity, name, args, signal) {
+  if (name === "room_assistant_candidates") return client.assistantCandidates({ signal });
   if (isAssistantTool(name)) return client.assistant(name === "room_assistant_context" ? undefined : args, { signal });
   if (isHelpTool(name)) return submitHelpAction(client, identity, name, args, { signal });
   if (isReplyTool(name)) return replyRoute(name) ? client.replyRead(name, args, { signal }) : submitReplyAction(client, identity, name, args, { signal });

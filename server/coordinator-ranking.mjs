@@ -2,16 +2,19 @@
 // signals the room can check: a kind's known push or webhook support, whether
 // this member has a wake URL or webhook registered, whether a host heartbeat
 // is inside its reachability window, that member's claim completion rate in
-// this room, and whether the member declares coordinator. Kinds are not
-// ordered by reputation. Equal scores break ties by the order below, then
-// by member id.
-export const COORDINATOR_RANKING_VERSION = 1;
+// this room, and a coordinator role the room owner set. A coordinator role
+// the member sets on itself does not count. Kinds are not ordered by
+// reputation. Equal scores break ties by the order below, then by member id.
+// Version 2: no-attempt members score a neutral completion prior, and a
+// self-set coordinator role scores 0.
+export const COORDINATOR_RANKING_VERSION = 2;
+export const COMPLETION_PRIOR = 0.5;
 
 const entry = (id, label, push, rationale) => Object.freeze({ id, label, push, coordinator: false, rationale });
 
 // coordinator is false on every row: none of these connect paths declare a
-// coordinator ability. A member declares it by advertising the capability
-// "coordinator", which the score checks separately.
+// coordinator ability. The score counts the role only when the caller passes
+// declaresCoordinator, and that caller counts an owner-set role.
 export const COORDINATOR_KINDS = Object.freeze([
   entry("claude-code", "Claude Code", true,
     "MCP client. The connect notes accept a listener or a pull fallback, so the kind can take a push wake. It does not declare coordinator."),
@@ -51,14 +54,29 @@ export function kindFor(agentType) {
   return COORDINATOR_KINDS.find(kind => kind.id === agentType) ?? GENERIC;
 }
 
+const roundPoints = value => Math.round(value * 1_000_000) / 1_000_000;
+
 // Heartbeat is 4 inside the reachability window and 0 outside. Push is 4
 // when the kind can take a push wake or this member has one registered.
-// Completion is 4 times the in-room rate, or 0 when the member has no
-// attempts (no rate is invented). Declaring coordinator is 4.
-export function scoreCandidate({ kindPush = false, pushRegistered = false, heartbeatFreshness = 0, completionRate = null, declaresCoordinator = false } = {}) {
+// Completion is 4 times the in-room rate. With no attempts the score uses
+// COMPLETION_PRIOR (the read still reports rate null). declaresCoordinator
+// is 4 only when the caller has already decided the role counts. A role the
+// member set on itself must be passed as false.
+export function explainCandidate({ kindPush = false, pushRegistered = false, heartbeatFreshness = 0, completionRate = null, declaresCoordinator = false } = {}) {
   const heartbeat = heartbeatFreshness > 0 ? 4 : 0;
   const push = kindPush || pushRegistered ? 4 : 0;
-  const completion = completionRate == null ? 0 : Math.max(0, Math.min(1, Number(completionRate))) * 4;
+  const missing = completionRate == null || !Number.isFinite(Number(completionRate));
+  const scoredRate = missing ? COMPLETION_PRIOR : Math.max(0, Math.min(1, Number(completionRate)));
+  const completion = roundPoints(scoredRate * 4);
   const coordinator = declaresCoordinator ? 4 : 0;
-  return heartbeat + push + completion + coordinator;
+  const signals = { heartbeat, push, completion, coordinator };
+  return {
+    signals,
+    total: roundPoints(heartbeat + push + completion + coordinator),
+    completionPrior: missing ? COMPLETION_PRIOR : null
+  };
+}
+
+export function scoreCandidate(input) {
+  return explainCandidate(input).total;
 }

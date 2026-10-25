@@ -15,7 +15,7 @@ import { canAdministerRoom } from "../src/room-administration.js";
 import { EVENT_TYPES, event, ownMember, validId } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts } from "./claim-coordination.mjs";
-import { COORDINATOR_RANKING_VERSION, kindFor, scoreCandidate } from "./coordinator-ranking.mjs";
+import { COMPLETION_PRIOR, COORDINATOR_RANKING_VERSION, explainCandidate, kindFor } from "./coordinator-ranking.mjs";
 import { syncMessageRows } from "./messages-store.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, isTerminalClaimState, reassignWork } from "./work-claims.mjs";
@@ -41,11 +41,19 @@ export function installCoordinator(Assistant) {
     ensurePick(this, roomId);
     const body = originalList.call(this, roomId, authorize);
     const assistant = body?.assistant;
+    if (assistant && Object.hasOwn(assistant, "coordinatorRoleGrants")) delete assistant.coordinatorRoleGrants;
     if (assistant?.coordinatorMemberId && assistant.coordinatorSource !== "auto" && assistant.coordinatorSource !== "owner") {
       assistant.coordinatorSource = "owner";
       assistant.coordinatorReason = ownerReason(assistant.coordinatorMemberId);
     }
     return body;
+  };
+  Assistant.prototype.candidates = function listCandidates(roomId, authorize) {
+    const auth = authorize();
+    if (isGuestActor(auth.member)) fail("assistant_denied", "Guests cannot read coordinator candidates.", 403);
+    const state = this.store.room(roomId).state;
+    if (state.room?.archivedAt) fail("assistant_archived", "This room is archived");
+    return candidateBody(this, roomId, state);
   };
   Assistant.prototype.apply = function applyWithCoordinator(roomId, input, authorize, postToken = null) {
     const action = input && !Array.isArray(input) ? input.action : undefined;
@@ -74,6 +82,7 @@ function preserveOnConfigure(assistant, original, roomId, input, authorize, post
   assistant.store.transaction(() => {
     writeConfig(assistant, roomId, {
       ...after,
+      coordinatorRoleGrants: before.coordinatorRoleGrants,
       coordinatorActions: kept.length ? kept : undefined,
       stoppedAt: undefined,
       coordinatorSource: owner ? "owner" : undefined,
@@ -98,8 +107,7 @@ function perform(assistant, roomId, input, authorize) {
     const auth = authorize();
     const state = assistant.store.room(roomId).state;
     const actor = auth.member;
-    if (typeof actor?.id === "string" && actor.id.startsWith("guest-agent-") || actor?.permissions?.some(permission => permission.startsWith("guest:")))
-      fail("assistant_denied", "Guests cannot coordinate shared work", 403);
+    if (isGuestActor(actor)) fail("assistant_denied", "Guests cannot coordinate shared work", 403);
     if (state.room.archivedAt) fail("assistant_archived", "This room is archived");
     const config = assistant.config(roomId);
     const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions?.includes("manage_members");
@@ -306,6 +314,13 @@ function writeConfig(assistant, roomId, config) {
     if (typeof config.coordinatorReason === "string" && config.coordinatorReason.trim()) stored.coordinatorReason = config.coordinatorReason;
     if (Number.isFinite(config.coordinatorChosenAt)) stored.coordinatorChosenAt = config.coordinatorChosenAt;
   }
+  if (config.coordinatorRoleGrants && typeof config.coordinatorRoleGrants === "object" && !Array.isArray(config.coordinatorRoleGrants)) {
+    const grants = {};
+    for (const [id, setBy] of Object.entries(config.coordinatorRoleGrants)) {
+      if ((setBy === "owner" || setBy === "self") && validId(id)) grants[id] = setBy;
+    }
+    if (Object.keys(grants).length) stored.coordinatorRoleGrants = grants;
+  }
   assistant.store.db.prepare("INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value")
     .run(roomId, JSON.stringify(stored));
 }
@@ -409,7 +424,7 @@ function autoReason(row, note) {
   else if (row.kind.push) bits.push("supports push wakes or webhooks");
   if (row.completion.attempted) bits.push(`claim completion ${row.completion.done}/${row.completion.attempted}`);
   else bits.push("no claim attempts in this room");
-  if (row.declares) bits.push("declares coordinator");
+  if (row.declares) bits.push("coordinator role set by the room owner");
   return `Coordinator choice: ${row.kind.label} (${row.member.id}) is the coordinator: ${bits.join(", ")}. Ranking version ${COORDINATOR_RANKING_VERSION}.${note}`;
 }
 
@@ -443,15 +458,19 @@ function rankMembers(assistant, roomId, state) {
     if (!presence.online) continue;
     const kind = kindFor(member.agentType);
     const completion = completionOf(claims, member.id);
-    const declares = kind.coordinator || declaresCoordinator(member);
-    const score = scoreCandidate({
+    const authority = rolesAuthority(assistant, roomId, member);
+    const explained = explainCandidate({
       kindPush: kind.push,
       pushRegistered: presence.pushRegistered,
       heartbeatFreshness: 1,
       completionRate: completion.rate,
-      declaresCoordinator: declares
+      declaresCoordinator: authority.counts
     });
-    ranked.push({ member, kind, score, pushRegistered: presence.pushRegistered, completion, declares });
+    ranked.push({
+      member, kind, score: explained.total, signals: explained.signals,
+      pushRegistered: presence.pushRegistered, completion, declares: authority.counts,
+      rolesSetBy: authority.rolesSetBy, completionPrior: explained.completionPrior
+    });
   }
   ranked.sort((left, right) => right.score - left.score || left.kind.rank - right.kind.rank || (left.member.id < right.member.id ? -1 : left.member.id > right.member.id ? 1 : 0));
   return ranked;
@@ -464,8 +483,84 @@ function eligible(member) {
   return Boolean(member.permissions?.includes("accept_work"));
 }
 
+function isGuestActor(actor) {
+  return typeof actor?.id === "string" && actor.id.startsWith("guest-agent-")
+    || Boolean(actor?.permissions?.some(permission => String(permission).startsWith("guest:")));
+}
+
 function declaresCoordinator(member) {
   return Array.isArray(member.capabilities) && member.capabilities.some(capability => String(capability).trim().toLowerCase() === "coordinator");
+}
+
+// A coordinator role counts only when the room owner set it. Self-advertised
+// capabilities and a join profile the member wrote are rolesSetBy "self".
+// joinProfile.rolesSetBy "owner" (or the owner member id) is the owner mark
+// a profile write can store on the member. setRolesSetBy stores the same
+// mark on the assistant config so a later configure does not drop it.
+function rolesAuthority(assistant, roomId, member) {
+  const ownerId = assistant.store.room(roomId).state.room?.ownerId;
+  const stored = readConfig(assistant, roomId).coordinatorRoleGrants?.[member.id] ?? null;
+  if (stored === "owner") return { rolesSetBy: "owner", counts: true };
+  if (stored === "self") return { rolesSetBy: "self", counts: false };
+  const profile = member.joinProfile;
+  const profileHas = Array.isArray(profile?.roles) && profile.roles.some(role => String(role).trim().toLowerCase() === "coordinator");
+  const markedByOwner = profile?.rolesSetBy === "owner" || (ownerId && profile?.rolesSetBy === ownerId);
+  if (profileHas && markedByOwner) return { rolesSetBy: "owner", counts: true };
+  if (profileHas || declaresCoordinator(member)) return { rolesSetBy: "self", counts: false };
+  return { rolesSetBy: null, counts: false };
+}
+
+function readStoredConfig(store, roomId) {
+  try {
+    const row = store.db.prepare("SELECT value FROM room_assistant_config WHERE room_id=?").get(roomId);
+    return row ? JSON.parse(row.value) : { name: "Room", coordinatorMemberId: null, revision: 0 };
+  } catch (error) {
+    if (String(error?.message ?? "").includes("no such table")) return { name: "Room", coordinatorMemberId: null, revision: 0 };
+    throw error;
+  }
+}
+
+// Owner sets rolesSetBy to "owner". The member setting their own role stores
+// "self", which the score ignores. Clearing coordinator removes the mark.
+export function setRolesSetBy(store, roomId, { actorId, memberId: targetId, roles } = {}) {
+  const state = store.room(roomId).state;
+  const ownerId = state.room?.ownerId;
+  const member = ownMember(state.members, targetId);
+  if (!member || member.kind !== "agent" || member.active === false) fail("assistant_denied", "Choose an active agent member.", 404);
+  const owner = actorId === ownerId && actorId !== targetId;
+  const self = actorId === targetId;
+  if (!owner && !self) fail("assistant_denied", "Only the room owner can set another member's coordinator role.", 403);
+  const has = Array.isArray(roles) && roles.some(role => String(role).trim().toLowerCase() === "coordinator");
+  const setBy = has ? (owner ? "owner" : "self") : null;
+  const current = readStoredConfig(store, roomId);
+  const grants = { ...(current.coordinatorRoleGrants ?? {}) };
+  if (setBy) grants[targetId] = setBy;
+  else delete grants[targetId];
+  writeConfig({ store }, roomId, { ...current, coordinatorRoleGrants: grants });
+  return { memberId: targetId, rolesSetBy: setBy, counts: setBy === "owner" };
+}
+
+function candidateBody(assistant, roomId, state) {
+  const ranked = rankMembers(assistant, roomId, state);
+  return {
+    roomId,
+    rankingVersion: COORDINATOR_RANKING_VERSION,
+    candidates: ranked.map(row => ({
+      memberId: row.member.id,
+      kind: row.kind.id,
+      label: row.kind.label,
+      score: row.score,
+      signals: row.signals,
+      completion: {
+        done: row.completion.done,
+        attempted: row.completion.attempted,
+        rate: row.completion.rate,
+        prior: row.completion.rate == null ? COMPLETION_PRIOR : null
+      },
+      rolesSetBy: row.rolesSetBy,
+      coordinatorRoleCounts: row.declares
+    }))
+  };
 }
 
 function presenceOf(store, roomId, memberId) {

@@ -238,6 +238,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
   const identity = { roomId, memberId: auth.member.id };
+  if (name === "room_assistant_candidates") {
+    const assistant = new RoomAssistant(store);
+    const authorize = () => store.authenticate(secret, roomId);
+    return { value: assistant.candidates(roomId, authorize), isError: false };
+  }
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
