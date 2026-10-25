@@ -9,6 +9,7 @@ import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-sett
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 import { buildProvenance, claimedProvenanceFromInput, sessionInstanceIdFor } from './records-provenance.mjs';
 import { recordRefusalBestEffort } from './refusal-journal.mjs'; // #3617 (R-8): refused public-work actions are first-class records
+import { recordNotice } from './adverse-decision-packets.mjs'; // #3615 (R-6): claim-time participation notice is a record
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -536,6 +537,16 @@ export class PublicWorkClaims {
         }
         this.store.workClaims.set(row.namespace_key, item);
         const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
+        if (action === 'claim') {
+          // #3615 (R-6): the claim is the moment the claimant is told who
+          // will review their work (the offer's approvalPolicy). That
+          // notice is a record: content version, recipient, channel and
+          // timestamp are written here, inside the claim transaction, and
+          // the delivered notice rides the claim outcome itself.
+          outcome.notice = recordNotice(this.db, { roomId: row.room_id, recipient: identity.identityId,
+            channel: 'public_work_claim', subjectRef: offerId, mode: offer.approvalPolicy.mode, title: offer.title,
+            context: { taskId: offerId, termsVersion: row.terms_version, generation: row.generation, approvalMode: offer.approvalPolicy.mode } });
+        }
         if (action === 'finish') {
           // #3707: a submission after the offer's deadline is refused, even
           // for a claim whose lease predates deadline clamping — the lease

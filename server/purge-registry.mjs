@@ -170,6 +170,19 @@ const ROWS = [
     }
   },
   {
+    "table": "adverse_decision_followups",
+    "key": "subject",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "subject"
+      ]
+    }
+  },
+  {
     "table": "agent_api_keys",
     "key": "identity_id",
     "action": "delete",
@@ -1780,6 +1793,19 @@ const ROWS = [
     "match": {
       "account": [
         "account_id"
+      ]
+    }
+  },
+  {
+    "table": "subject_notices",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "recipient"
       ]
     }
   },

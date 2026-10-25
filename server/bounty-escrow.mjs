@@ -71,6 +71,7 @@ import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { buildProvenance, claimedProvenanceOf, sessionInstanceIdFor } from "./records-provenance.mjs";
 import { RECORDS_POLICY_VERSION, obligationStamp, recordRefusalBestEffort, listRefusals } from "./refusal-journal.mjs";
+import { recordNotice } from "./adverse-decision-packets.mjs"; // #3615 (R-6): claim-time participation notice is a record
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -1828,7 +1829,7 @@ export class BountyEscrow {
     }
   }
 
-  _claimBounty(roomId, bountyId, { claimant, actor } = {}) {
+  _claimBounty(roomId, bountyId, { claimant, actor, suppressNotice = false } = {}) {
     this._ensure();
     const lane = this._requireLane(roomId, claimant, "claimant");
     // Slice 4: the reputation claim gate runs BEFORE the write transaction.
@@ -1898,7 +1899,17 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.claimed",
         { bountyId, actor: act, before: "funded", after: "claimed",
           data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung, obligationStamp: stamp } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      // #3615 (R-6): the claim is the moment the claimant is told who will
+      // review their work (the bounty's approval mode / designated
+      // verifier). That notice is a record — content version, recipient,
+      // channel, timestamp — written in the claim transaction. Internal
+      // platform claims (the public-work settlement rail attaching a
+      // submission) are not a delivery to the subject and pass
+      // suppressNotice.
+      const notice = suppressNotice ? null : recordNotice(this.db, { roomId, recipient: lane,
+        channel: "bounty_claim", subjectRef: bountyId, mode: bounty.approvalMode, title: bounty.title,
+        context: { bountyId, approvalMode: bounty.approvalMode, verifier: bounty.verifier ?? null } });
+      return { bounty: this._getBounty(roomId, bountyId), ...(notice ? { notice } : {}),
         receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event, obligationStamp: stamp,
           ...this._signed(movement) } };
     });

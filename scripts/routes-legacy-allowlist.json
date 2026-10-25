@@ -887,6 +887,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/public-work/receipts/{id}/decision-packet"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/decision-packet"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}/decision-packet/followups"
+    },
+    {
+      "method": "GET",
       "path": "/api/public-work/receipts/{id}/review"
     },
     {
@@ -1412,6 +1424,26 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
     },
     {
       "method": "GET",
@@ -4433,6 +4465,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/public-work/receipts/{id}/decision-packet"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/public-work/receipts/{id}/decision-packet"
+    },
+    {
+      "method": "POST",
+      "path": "/api/public-work/receipts/{id}/decision-packet/followups"
+    },
+    {
+      "method": "GET",
       "path": "/api/public-work/receipts/{id}/review"
     },
     {
@@ -4958,6 +5002,26 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/bounties/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/decision-packet/followups"
     },
     {
       "method": "GET",
