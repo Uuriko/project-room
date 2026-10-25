@@ -47,13 +47,17 @@ export function defaultJoinProfile() {
   return copyProfile(DEFAULT_JOIN_PROFILE);
 }
 
+function listed(value, choices) {
+  return typeof value === "string" && choices.includes(value);
+}
+
 function validateWake(value) {
-  if (typeof value !== "string" || !JOIN_PROFILE_WAKES.includes(value)) return failure("join_profile_wake");
+  if (!listed(value, JOIN_PROFILE_WAKES)) return failure("join_profile_wake");
   return { ok: true, value };
 }
 
 function validateEvents(value) {
-  if (typeof value !== "string" || !JOIN_PROFILE_EVENTS.includes(value)) return failure("join_profile_events");
+  if (!listed(value, JOIN_PROFILE_EVENTS)) return failure("join_profile_events");
   return { ok: true, value };
 }
 
@@ -68,14 +72,14 @@ function validateRoles(value) {
   if (!Array.isArray(value)) return failure("join_profile_roles");
   const seen = new Set();
   for (const role of value) {
-    if (typeof role !== "string" || !JOIN_PROFILE_ROLES.includes(role) || seen.has(role)) return failure("join_profile_roles");
+    if (!listed(role, JOIN_PROFILE_ROLES) || seen.has(role)) return failure("join_profile_roles");
     seen.add(role);
   }
   return { ok: true, value: JOIN_PROFILE_ROLES.filter(role => seen.has(role)) };
 }
 
 function validateDetail(value) {
-  if (typeof value !== "string" || !JOIN_PROFILE_DETAILS.includes(value)) return failure("join_profile_detail");
+  if (!listed(value, JOIN_PROFILE_DETAILS)) return failure("join_profile_detail");
   return { ok: true, value };
 }
 
@@ -107,7 +111,8 @@ export function validateJoinProfile(value, options = {}) {
   const complete = options.complete === true;
   if (!plainObject(value)) return failure("join_profile_invalid", { reason: "type" });
   const keys = Object.keys(value);
-  const unknown = keys.find(key => !JOIN_PROFILE_FIELDS.includes(key));
+  const fields = JOIN_PROFILE_FIELDS;
+  const unknown = keys.find(key => fields.includes(key) === false);
   if (unknown) return failure("join_profile_invalid", { reason: "unknown", field: unknown });
   if (keys.length === 0) return failure("join_profile_invalid", { reason: "empty" });
   if (complete) {
@@ -173,12 +178,40 @@ export function joinProfileLine(member) {
   return roles.length ? [roles, wake].join(" · ") : wake;
 }
 
-// Open-claim cap. Not wired into claim, wake, or needs-me while those
-// files sit in open pull requests. openCount is the member's current
-// open claims; a new claim is allowed while openCount is below maxClaims.
+// Open-claim cap. openCount is the member's current open claims; a new
+// claim is allowed while openCount is below maxClaims.
 export function claimAllowedByProfile(profile, openCount) {
   const maxClaims = Number.isInteger(profile?.maxClaims) ? profile.maxClaims : DEFAULT_JOIN_PROFILE.maxClaims;
   return Number.isInteger(openCount) && openCount >= 0 && openCount < maxClaims;
+}
+
+// A stored profile caps the member at min(maxClaims, room cap). A member
+// who never sent a profile stays on the room cap.
+export function effectiveOpenClaimLimit(member, roomCap) {
+  const room = Number.isInteger(roomCap) && roomCap > 0 ? roomCap : DEFAULT_JOIN_PROFILE.maxClaims;
+  const profile = readDeclaredAgentProfile(member);
+  if (profile.declared === false) return room;
+  return Math.min(profile.maxClaims, room);
+}
+
+// Undeclared members keep today's wakes. A stored profile uses profileWantsEvent.
+export function declaredProfileWantsWake(member, kind) {
+  const profile = readDeclaredAgentProfile(member);
+  if (profile.declared === false) return true;
+  return profileWantsEvent(profile, kind);
+}
+
+export function wakeAttentionKind(kind) {
+  if (kind === "mention" || kind === "squad-mention") return "mention";
+  return "other";
+}
+
+const OWN_CLAIM_WAKE_REASONS = new Set(["assigned", "collision"]);
+
+export function claimWakeAttention(reason, ownerId, memberId) {
+  if (OWN_CLAIM_WAKE_REASONS.has(reason)) return "own-claim";
+  if (typeof ownerId === "string" && ownerId.length > 0 && ownerId === memberId) return "own-claim";
+  return "other";
 }
 
 // Attention filter. kind is "mention", "own-claim", or "other".

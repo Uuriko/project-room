@@ -1,6 +1,6 @@
 // Join profile: optional on redeem, strict fields, defaults when omitted,
-// GET/PATCH for the member or the owner, and the claim cap the live claim
-// path cannot enforce while those files sit in open pull requests.
+// GET/PATCH for the member or the owner, and the stored cap and event
+// filter on the claim and wake paths main already has.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -10,8 +10,12 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AGENT_JOIN_PROFILE_ROUTES } from "../server/routes/agent-join-profile.mjs";
+import { enqueueClaimWake } from "../server/work-claim-events.mjs";
 import {
   claimAllowedByProfile,
+  claimWakeAttention,
+  declaredProfileWantsWake,
+  effectiveOpenClaimLimit,
   joinProfileLine,
   profileWantsEvent,
   readDeclaredAgentProfile,
@@ -229,4 +233,101 @@ test("maxClaims caps a new claim and events filtering stays a pure decision", ()
   assert.equal(line, "Coordinator, builder · Webhook");
   assert.equal(joinProfileLine({ kind: "agent" }), "Pull");
   assert.equal(joinProfileLine({ kind: "human" }), "");
+  const declared = { joinProfile: { wake: "pull", events: "mentions-and-own-claims", maxClaims: 1, roles: [], detail: "brief", capabilities: [] } };
+  assert.equal(effectiveOpenClaimLimit(declared, 20), 1);
+  assert.equal(effectiveOpenClaimLimit({ joinProfile: { ...declared.joinProfile, maxClaims: 10 } }, 2), 2);
+  assert.equal(effectiveOpenClaimLimit({ kind: "agent" }, 20), 20);
+  assert.equal(claimWakeAttention("assigned", null, "ai_1"), "own-claim");
+  assert.equal(claimWakeAttention("review", "ai_other", "ai_1"), "other");
+  assert.equal(claimWakeAttention("ci", "ai_1", "ai_1"), "own-claim");
+  assert.equal(declaredProfileWantsWake(declared, "other"), false);
+  assert.equal(declaredProfileWantsWake({ kind: "agent" }, "other"), true);
+});
+
+test("a stored maxClaims caps claim and assign under the room cap", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const cappedMint = await send(origin, "POST", "/api/rooms/commons/agent-invites", { profile: "contribute" }, ownerKey);
+  assert.equal(cappedMint.status, 201, JSON.stringify(cappedMint.json));
+  const cappedCode = cappedMint.json.code;
+  const capped = await send(origin, "POST", "/api/agent-invites/redeem", {
+    code: cappedCode, displayName: "Cap Bot", profile: { maxClaims: 1, wake: "pull", events: "mentions-and-own-claims" },
+  });
+  assert.equal(capped.status, 201, JSON.stringify(capped.json));
+  const openMint = await send(origin, "POST", "/api/rooms/commons/agent-invites", { profile: "contribute" }, ownerKey);
+  assert.equal(openMint.status, 201, JSON.stringify(openMint.json));
+  const openCode = openMint.json.code;
+  const open = await send(origin, "POST", "/api/agent-invites/redeem", { code: openCode, displayName: "Open Bot" });
+  assert.equal(open.status, 201, JSON.stringify(open.json));
+  for (const id of ["a", "b", "c", "d", "e"]) {
+    const created = await send(origin, "POST", "/api/rooms/commons/work-claims", { id, title: id }, ownerKey);
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+  }
+  const first = await send(origin, "POST", "/api/rooms/commons/work-claims/a/claim", {}, capped.json.identitySecret);
+  assert.equal(first.status, 200, JSON.stringify(first.json));
+  const second = await send(origin, "POST", "/api/rooms/commons/work-claims/b/claim", {}, capped.json.identitySecret);
+  assert.equal(second.status, 409, JSON.stringify(second.json));
+  assert.equal(second.json?.error?.code, "too_many_open_claims");
+  assert.match(second.json.error.message, /\b1\b/);
+  const assigned = await send(origin, "POST", "/api/rooms/commons/work-claims", {
+    id: "assigned", title: "Assigned", assignee: capped.json.memberId,
+  }, ownerKey);
+  assert.equal(assigned.status, 409, JSON.stringify(assigned.json));
+  assert.equal(assigned.json?.error?.code, "too_many_open_claims");
+  assert.match(assigned.json.error.message, /\b1\b/);
+  const held = store.workClaims.get("commons", "e");
+  const reassigned = await send(origin, "POST", "/api/rooms/commons/work-claims/e/reassign", {
+    newOwner: capped.json.memberId,
+    expectedClaimedAt: held?.claimedAt ?? null,
+    expectedHistoryLength: held?.history?.length ?? 0,
+  }, ownerKey);
+  assert.equal(reassigned.status, 409, JSON.stringify(reassigned.json));
+  assert.equal(reassigned.json?.error?.code, "too_many_open_claims");
+  assert.match(reassigned.json.error.message, /\b1\b/);
+  for (const id of ["b", "c", "d"]) {
+    const claimed = await send(origin, "POST", `/api/rooms/commons/work-claims/${id}/claim`, {}, open.json.identitySecret);
+    assert.equal(claimed.status, 200, `${id} ${JSON.stringify(claimed.json)}`);
+  }
+});
+
+test("a mentions profile wakes on mentions and own claims across 50 events", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const code = await mint(origin, ownerKey);
+  const redeemed = await send(origin, "POST", "/api/agent-invites/redeem", {
+    code, displayName: "Pull Bot",
+    profile: { wake: "pull", events: "mentions-and-own-claims", maxClaims: 1, roles: ["builder"], detail: "brief", capabilities: ["claims"] },
+  });
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
+  store.agentHeartbeats.heartbeat({ agentId: redeemed.json.identityId, hostId: "host-1", mode: "pull-only" });
+  for (let i = 0; i < 20; i += 1) {
+    store.command(ownerKey, "commons", {
+      id: `mention-${i}`, type: "message.posted",
+      data: { messageId: `mention-${i}`, body: `@Pull Bot please look ${i}` },
+    });
+  }
+  for (let i = 0; i < 10; i += 1) {
+    store.command(ownerKey, "commons", {
+      id: `plain-${i}`, type: "message.posted",
+      data: { messageId: `plain-${i}`, body: `status note ${i}` },
+    });
+  }
+  for (let i = 0; i < 10; i += 1) {
+    enqueueClaimWake(store, "commons", redeemed.json.memberId, `work-claim:item-${i}:assigned:${i}`, { reason: "assigned", actorId: "owner" });
+  }
+  for (let i = 0; i < 10; i += 1) {
+    enqueueClaimWake(store, "commons", redeemed.json.memberId, `work-claim:other-${i}:review:${i}`, { reason: "review", actorId: "owner" });
+  }
+  const rows = store.db.prepare("SELECT message_id AS messageId FROM agent_wake_signals WHERE agent_id=?").all(redeemed.json.identityId);
+  const ids = rows.map(row => row.messageId);
+  assert.equal(ids.filter(id => id.startsWith("mention-")).length, 20);
+  assert.equal(ids.filter(id => id.startsWith("plain-")).length, 0);
+  assert.equal(ids.filter(id => id.includes(":assigned:")).length, 10);
+  assert.equal(ids.filter(id => id.includes(":review:")).length, 0);
+  assert.equal(ids.length, 30);
+  const widened = await send(origin, "PATCH", `/api/rooms/commons/members/${redeemed.json.memberId}/profile`, {
+    profile: { events: "all" },
+  }, ownerKey);
+  assert.equal(widened.status, 200, JSON.stringify(widened.json));
+  enqueueClaimWake(store, "commons", redeemed.json.memberId, "work-claim:other-extra:review:extra", { reason: "review", actorId: "owner" });
+  const after = store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get(redeemed.json.identityId).n;
+  assert.equal(after, 31);
 });

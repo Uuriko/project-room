@@ -27,6 +27,8 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { ownMember } from "../src/events.js";
+import { effectiveOpenClaimLimit } from "../src/agent-join-profile.js";
 
 const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -1124,8 +1126,9 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   const takesCard = incoming.type === "claim.acquired" || (incoming.type === "claim.renewed" && !current);
   if (mapped && takesCard && (!current || current.state === "unclaimed")) {
     const held = [...existing.values()].filter(entry => entry.owner === actorId && SYNC_ACTIVE.has(entry.state)).length;
-    if (held >= config.maxMemberOpenClaims) {
-      refuse(409, "too_many_open_claims", `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`);
+    const claimLimit = effectiveOpenClaimLimit(ownMember(state.members, actorId), config.maxMemberOpenClaims);
+    if (held >= claimLimit) {
+      refuse(409, "too_many_open_claims", `You already hold ${claimLimit} open claims. Release or finish one before claiming another.`);
     }
   }
 

@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
 import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
+import { frontDoorHtml } from '../server/github-oauth.mjs';
 
 // Decision #36 (#3254, Option A): the generated agent pages are build output
 // and never committed, so a plain checkout (and every exact-commit package)
@@ -75,7 +76,11 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+    // index.html keeps the GitHub anchor on disk. An unconfigured server
+    // strips it before the bytes leave, so the served body is that transform.
+    let expected = await readFile(new URL('../' + path, import.meta.url));
+    if (path === 'index.html') expected = Buffer.from(frontDoorHtml(expected, { githubConfigured: false }));
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.
