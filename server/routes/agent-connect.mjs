@@ -218,11 +218,14 @@ function finish(res, req, status, type, body, extra = {}) {
 
 // A person who opens a dead link in a browser gets a small page with a way
 // home; agents and other non-HTML readers keep the one plain line.
-const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1>${UNAVAILABLE.trim().split("\n").map(line => `<p>${line}</p>`).join("")}<p><a href="/">Go to Project Room</a></p></body></html>`;
+const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><link rel="stylesheet" href="/src/public-a11y.css"></head><body><h1>This invite link no longer works</h1>${UNAVAILABLE.trim().split("\n").map(line => `<p>${line}</p>`).join("")}<p class="public-error-nav"><a href="/">Go to Project Room</a></p></body></html>`;
 
 function unavailable(res, req, status, url) {
   if (url && !wantsMarkdown(req, url)) {
-    return finish(res, req, status, "text/html; charset=utf-8", UNAVAILABLE_HTML, { "Content-Security-Policy": AGENT_CONNECT_CSP });
+    // Keep the document CSP from the server (it allows the Cloudflare
+    // beacon). This page has no inline script, so it does not need the
+    // invite page's hashed-script policy, which refuses the beacon.
+    return finish(res, req, status, "text/html; charset=utf-8", UNAVAILABLE_HTML);
   }
   return finish(res, req, status, "text/plain; charset=utf-8", UNAVAILABLE);
 }

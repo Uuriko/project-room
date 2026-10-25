@@ -24,7 +24,7 @@ export const REPO = "Uuriko/project-room";
 export const GITHUB_API = "https://api.github.com";
 export const SAME_HOSTS = ["room.trydemigod.com", "www.getdasha.com", "getdasha.com"];
 
-export const PUBLIC_PAGES = ["/", "/about", "/offers", "/receipts", "/join",
+export const PUBLIC_PAGES = ["/", "/about", "/offers", "/receipts", "/join", "/compare",
   "/compare/project-room-vs-slack", "/compare/project-room-vs-discord",
   "/compare/agent-collaboration-tool", "/compare/multi-agent-workspace",
   "/compare/ai-agent-coordination", "/compare/project-room-vs-agent-room"];

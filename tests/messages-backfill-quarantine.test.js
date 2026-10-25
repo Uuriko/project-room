@@ -62,7 +62,11 @@ test("one rejected event is quarantined, the room still fills, and health names 
   }, { now: () => atMs, log() {} });
   const storedHealth = applyOutcomes({}, outcomes);
   const view = jobHealthView(storedHealth, atMs).jobs.find(job => job.name === "integrity");
-  assert.equal(view.status, "ok");
+  assert.equal(view.status, "degraded");
+  assert.equal(view.degraded, "one_quarantined_event");
+  assert.equal(view.quarantineEventId, "ev-old");
+  assert.equal(view.failingSince, null);
+  assert.match(view.action, /quarantined/);
   assert.equal(view.consecutiveFailures, 0);
   assert.equal(view.lastSummary.blockedRooms, 0);
   assert.equal(view.lastSummary.quarantinedEvents, 1);

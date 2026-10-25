@@ -45,6 +45,7 @@ const pageFiles = new Map([
   ["/offers", "offers.html"],
   ["/join", "join.html"],
   ["/404", "404.html"],
+  ["/compare", "compare/index.html"],
   ["/operator.html", "operator.html"],
   ["/docs/agents", "docs/agents/index.html"],
   ...AGENTS.map(id => [`/docs/agents/${id}`, `docs/agents/${id}.html`]),
