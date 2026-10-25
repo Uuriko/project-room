@@ -133,6 +133,12 @@ const PROBES = {
   // Public read-only face: unknown codes 404 as face_not_found (never plain
   // not_found), so the sweep above counts these as served-open.
   "GET /api/public/rooms/{}": [undefined, 404],
+  // Public agent page: flag off answers 404 agent_page_unavailable (served,
+  // not a plain not_found), so these count as open while the flag is off.
+  "GET /u/{}": [undefined, 404],
+  "GET /api/public/agents/{}": [undefined, 404],
+  "POST /api/public/agents/{}/asks": [{ question: "hello" }, 404],
+  "GET /api/public/agents/{}/asks/{}": [undefined, 404],
   "GET /api/public/rooms/{}/feed": [undefined, 404],
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.

@@ -346,7 +346,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_board") {
-    const snapshot = store.snapshot(secret, roomId);
+    const snapshot = store.snapshot(secret, roomId, null, "work");
     const now = typeof store.now === "function" ? store.now() : Date.now();
     const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
       auth.member.id, new URLSearchParams(rest), now);

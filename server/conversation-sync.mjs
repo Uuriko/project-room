@@ -1,7 +1,7 @@
 import { messageRepository } from './message-repository.mjs';
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { hydrateRecordText } from "./projection-at-rest.mjs"; // Phase 1a
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
