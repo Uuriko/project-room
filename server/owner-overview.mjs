@@ -199,6 +199,7 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
   // the access-request queue only — no exceptions section at all.
   if (ownerRoomsIncluded === 0) exceptions.length = 0;
   else collectJobExceptions(jobHealth, nowMs, exceptions);
+  const jobs = ownerRoomsIncluded === 0 ? [] : jobHealthRows(jobHealth);
 
   const sortedDecisions = [...decisions].sort(decisionOrder);
   const sortedExceptions = [...exceptions].sort(exceptionOrder);
@@ -229,6 +230,7 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
       items: Object.freeze(sortedExceptions.slice(0, EXCEPTIONS_CAP)),
     }),
     roomErrors: Object.freeze(roomErrors),
+    jobs: Object.freeze(jobs),
   });
 }
 
@@ -489,6 +491,27 @@ function sessionBudgetsByWorkItem(store, roomId) {
   return budgets;
 }
 
+// The glanceable job list: every scheduled job's last run, its result, its
+// failure streak and its last success, with alert set at the same >=3 line
+// the critical exception uses. Accepts the Node scheduler's records
+// (enabled flag) and the Worker heartbeat view (status field).
+export const JOB_ALERT_FAILURES = 3;
+export function jobHealthRows(jobHealth) {
+  if (typeof jobHealth !== "function") return [];
+  let jobs;
+  try { jobs = jobHealth(); } catch { return []; }
+  if (!Array.isArray(jobs)) return [];
+  return jobs.filter(job => job && typeof job.name === "string").map(job => {
+    const failures = Number.isFinite(job.consecutiveFailures) ? job.consecutiveFailures : 0;
+    const disabled = job.enabled === false || job.status === "disabled";
+    const result = disabled ? "disabled" : failures > 0 ? "failing" : job.lastRunAt ? "ok" : "not_run";
+    return Object.freeze({
+      name: job.name, result, lastRunAt: job.lastRunAt ?? null, lastSuccessAt: job.lastSuccessAt ?? null,
+      consecutiveFailures: failures, alert: !disabled && failures >= JOB_ALERT_FAILURES,
+    });
+  });
+}
+
 // Deployment job health (spec §6): critical at >=3 consecutive failures,
 // or the integrity job failing at all; any other failing job warns.
 // Deployment-scoped — identical for every owner, carries no user data.
@@ -498,11 +521,11 @@ function collectJobExceptions(jobHealth, nowMs, exceptions) {
   try { jobs = jobHealth(); } catch { return; }
   if (!Array.isArray(jobs)) return;
   for (const job of jobs) {
-    if (!job || job.enabled === false) continue;
+    if (!job || job.enabled === false || job.status === "disabled") continue;
     const failures = job.consecutiveFailures ?? 0;
     if (!Number.isFinite(failures) || failures <= 0) continue;
     const isIntegrity = typeof job.name === "string" && job.name.toLowerCase().includes("integrity");
-    const critical = failures >= 3 || isIntegrity;
+    const critical = failures >= JOB_ALERT_FAILURES || isIntegrity;
     exceptions.push(Object.freeze({
       severity: critical ? "critical" : "warn", kind: "job_health", roomId: null, roomName: null,
       subjectId: job.name, firstSeenInWindow: job.lastErrorAt ?? null,

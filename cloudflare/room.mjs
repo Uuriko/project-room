@@ -93,8 +93,26 @@ function roomOrigin(env) {
   return origin;
 }
 
+// TM-2: resolve the split backup credentials for the operator export and
+// restore doors. Each door's handler reads a missing or sub-16-char value
+// as "unconfigured" (404), so the values pass through untouched — except
+// when both secrets hold the same usable value: then one credential would
+// open both doors, the split would be void, and both doors fail closed
+// until the operator sets distinct values.
+function splitBackupTokens(env) {
+  const exportToken = env.ROOM_EXPORT_TOKEN;
+  const restoreToken = env.ROOM_RESTORE_TOKEN;
+  if (typeof exportToken === 'string' && exportToken.length >= 16 && exportToken === restoreToken) {
+    return { exportToken: undefined, restoreToken: undefined };
+  }
+  return { exportToken, restoreToken };
+}
+
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
+// Reads that carry the job list: refresh the heartbeat snapshot first.
+const JOB_LIST_READS = new Set(['/api/owner/overview']);
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -141,9 +159,15 @@ export class ProjectRoom extends DurableObject {
     catch (error) { console.warn(`room github auth disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    // The owner overview's job list reads the heartbeat view, refreshed on
+    // each recorded tick and before each overview read (the Node scheduler
+    // records are absent in the Durable Object, so the list was empty here).
+    this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      jobHealth: () => this.jobHealthSnapshot,
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
@@ -205,21 +229,30 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
+    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
+    // TM-2 split: the backup doors no longer share one credential.
+    // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
+    // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
+    // restore doors and stays unset outside a restore incident, so they
+    // answer 404 in normal operation. The retired ROOM_BACKUP_TOKEN opens
+    // nothing. If both secrets are configured to the same usable value the
+    // split is void, so both doors fail closed until the values differ.
+    const backupTokens = splitBackupTokens(this.env);
     if (url.pathname === '/api/operator/export') {
-      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+      return respond(operatorExportResponse(request, backupTokens.exportToken, this.store.db));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
-    // Object's storage. Same operator token as the export; fail-closed on a
-    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    // Object's storage. Restore token only; fail-closed on a non-empty store
+    // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
     // the current backup is past it (#3409), so the parts are pulled and
     // replayed one at a time instead of uploaded whole.
     if (url.pathname === '/api/operator/restore-from-backup') {
-      return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
+      return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
@@ -278,12 +311,17 @@ export class ProjectRoom extends DurableObject {
           this.channelDrainOutcomeHeld = null;
         }
       }
+      this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
       return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
     };
     const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
     this.cronTickTail = pending;
     try { return await pending; }
     finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
+  }
+  async refreshJobHealthSnapshot() {
+    try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
+    catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);

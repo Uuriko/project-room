@@ -52,7 +52,7 @@ Worked examples: [examples/claim.md](examples/claim.md), [examples/receipt.md](e
 
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). Durable job alarms, the watchdog, and per-room SQLite history are specified in [design/DURABLE-JOBS-AND-WATCHDOG.md](design/DURABLE-JOBS-AND-WATCHDOG.md). Those flags stay off; the page is not a cutover. The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). Durable job alarms, the watchdog, and per-room SQLite history are specified in [design/DURABLE-JOBS-AND-WATCHDOG.md](design/DURABLE-JOBS-AND-WATCHDOG.md). Those flags stay off; the page is not a cutover. The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md). The October 2026 page-weight and origin-time baseline is [PERF-2026-10.md](PERF-2026-10.md).
 
 ## Swarm knowledge
 
@@ -99,6 +99,8 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 [Simplify, October 2026](design/SIMPLIFY-2026-10.md) is the design for per-job alarms, the store import cycles, the HTTP route table, one shared journal, thin MCP adapters, and one Durable Object per room. It is a design, not an execution queue.
 
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
+
+[Per-room Durable Object cutover](design/ROOM-SHARD-CUTOVER.md) is the operator runbook for the dark `RoomShard` path. The flag stays off until Potter says go, and Codex deploys.
 
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
 
