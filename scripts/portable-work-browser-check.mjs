@@ -40,7 +40,8 @@ for (const mobile of [false, true]) {
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async (result = false) => {
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
-      await card.getByRole("button", { name: result ? "Paste AI draft" : "Use my AI", exact: true }).click();
+      await card.getByRole("button", { name: "Use my AI", exact: true }).click();
+      if (result) await page.locator("#portable-add-result").click();
       await page.locator("#portable-dialog").waitFor({ state: "visible" });
     };
     const screenshot = async name => {
@@ -185,7 +186,7 @@ for (const mobile of [false, true]) {
     await screenshot("large-text");
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await page.locator("#portable-result").press("Escape");
-    assert.equal(await card.locator('[data-portable-mode="result"]').evaluate(node => node === document.activeElement), true);
+    assert.equal(await card.getByRole('button', { name: 'Use my AI', exact: true }).evaluate(node => node === document.activeElement), true);
 
     // A late clipboard resolution cannot repopulate a logged-out view.
     // Only a portable draft remains, so the composer cannot mask its leave guard.

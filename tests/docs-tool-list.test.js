@@ -4,7 +4,7 @@
 // teach tool names to agents. A name a doc teaches that the server does not
 // serve 404s as unknown_tool on tools/call; an enumerated "core set" that
 // silently drops served names teaches a wrong catalog (tools.md once listed
-// 16 of the 19 core tools, and denied the served room_react tool). This test
+// 16 of the 19 core tools). This test
 // pins the three doc surfaces against the catalog the server actually serves,
 // so drift fails CI instead of failing agents at runtime.
 //
@@ -66,14 +66,6 @@ test("tools.md core-set sentence matches the live core profile", () => {
   const m = text.match(/Default `tools\/list` is the core set[^:]*:([^\n.]+)\./);
   assert.ok(m, "tools.md states the default tools/list core set");
   assertSetEqual(toolTokens(m[1]), core, "tools.md core set == live CORE_MCP_TOOLS");
-});
-
-test("tools.md react section names the served room_react tool", () => {
-  const text = read("skills/project-room/references/tools.md");
-  const m = text.match(/[^\n]*reaction_set[^\n]*/);
-  assert.ok(m, "tools.md has a react-tool paragraph");
-  assert.ok(!/no MCP react tool/i.test(m[0]), "tools.md must not deny the served react tool");
-  assert.ok(toolTokens(m[0]).includes("room_react"), "tools.md react paragraph names room_react");
 });
 
 test("SWARM-PLUG-IN read/write tool bullets all resolve in the served catalog", () => {

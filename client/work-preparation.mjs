@@ -1,5 +1,6 @@
 import { validId } from "../src/events.js";
 import { workContextMarkdown } from "./room-agent.mjs";
+import { createWorkBrief } from "./work-brief.mjs";
 
 const readScope = value => JSON.stringify(["roomId", "viewerId", "viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"].map(key => value[key] ?? null));
 const changedReview = () => new WorkReviewRefused("review_changed", "Work, result or membership changed during review preparation. Read this task again; no review packet was returned.");
@@ -104,7 +105,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     }
     return (args.brief ?? batch) ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      brief: workContextMarkdown(context), ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
+      brief: workContextMarkdown(context), briefVersion: (await createWorkBrief(context)).version, ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
   };
   const worker = async () => {
     try {

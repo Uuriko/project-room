@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { publicSearchAssets, reviewedPublicSearchPaths } from "../server/public-search.mjs";
+import { publicSearchAssets, publicSearchSitemap, publicBuildLastmod, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../server/public-search.mjs";
 import { publicAssetPaths } from "../server/public-assets.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -32,16 +32,32 @@ function assertPublicPolicy(response, origin) {
   });
 }
 
+// /about ships one first-party script (src/front-door.js) fed by one API
+// path (/api/public/front-door); both are path-pinned into its policy.
+// Everything else matches the shared public policy above.
+function assertAboutPolicy(response, origin) {
+  const policy = Object.fromEntries(response.headers.get("content-security-policy").split(";").map(part => {
+    const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(" ")];
+  }));
+  assert.deepEqual(policy, {
+    "default-src": "'none'", "script-src": `${origin}/src/front-door.js https://static.cloudflareinsights.com`,
+    "style-src": "'unsafe-inline'", "connect-src": `${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    "img-src": "'self'", "manifest-src": "'self'", "base-uri": "'none'",
+    "form-action": "'none'", "frame-ancestors": "'none'"
+  });
+}
+
 test("public doors are indexable while credentials and unknown pages keep private defaults", async t => {
   const origin = await serve(t);
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
-  assertPublicPolicy(about, origin);
-  assert.match(about.headers.get("content-security-policy"), /script-src https:\/\/static\.cloudflareinsights\.com/);
-  assert.match(about.headers.get("content-security-policy"), /connect-src https:\/\/cloudflareinsights\.com/);
+  assertAboutPolicy(about, origin);
+  assert.match(about.headers.get("content-security-policy"), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(about.headers.get("content-security-policy"), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
-  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src 'self'/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src[^;]*'self'/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /connect-src[^;]*'self'/);
   assert.match(await about.text(), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
   const head = await fetch(origin + "/about", { method: "HEAD" });
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");
@@ -108,12 +124,45 @@ test("public doors are indexable while credentials and unknown pages keep privat
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /https:\/\/room.trydemigod.com\/about/); assert.match(xml, /\/receipts/);
-  assert.match(xml, /<lastmod>2026-10-02<\/lastmod>/);
+  // No entry in this empty store carries a date of its own, and the test
+  // checkout is unstamped, so the build-date fallback is null and the sitemap
+  // honestly omits <lastmod> rather than serving a frozen constant.
+  assert.doesNotMatch(xml, /<lastmod>/);
   for (const slug of ["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"]) {
     assert.match(xml, new RegExp(`/compare/${slug}</loc>`));
   }
   assert.doesNotMatch(xml, /\/join|\/api|token/);
   assert.match(await (await fetch(origin + "/robots.txt")).text(), /Sitemap: https:\/\/room.trydemigod.com\/sitemap.xml/);
+});
+
+test("sitemap lastmod derives from real entry dates and the build stamp, never a frozen constant", () => {
+  // A stamped build id is the build's ISO timestamp (scripts/stamp-version.mjs
+  // default), and its date is the fallback for entries with no date of their
+  // own. Anything else — unstamped, a non-date build id, an impossible date —
+  // yields no date at all.
+  assert.equal(publicBuildLastmod("2026-10-16T12:34:56.789Z"), "2026-10-16");
+  assert.equal(publicBuildLastmod("2026-10-16"), "2026-10-16");
+  assert.equal(publicBuildLastmod("unstamped"), null);
+  assert.equal(publicBuildLastmod("build-42"), null);
+  assert.equal(publicBuildLastmod("2026-02-31T00:00:00.000Z"), null);
+  assert.equal(publicBuildLastmod("2026-13-01"), null);
+  assert.equal(publicBuildLastmod(undefined), null);
+  // The test checkout ships unstamped placeholders in server/version.mjs, so
+  // the module-level fallback here is null (a stamped deploy serves its date).
+  assert.equal(PUBLIC_PAGE_LASTMOD, null);
+  const xml = publicSearchSitemap("https://room.trydemigod.com", [
+    { path: "/receipts/rc_1", lastmod: "2026-09-30" },
+    { path: "/about", lastmod: PUBLIC_PAGE_LASTMOD },
+    "/offers",
+    { path: "/r/some-room", lastmod: null },
+  ]);
+  // A real per-entry date is served as-is; entries without one omit the
+  // element entirely instead of inheriting a frozen date.
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/receipts\/rc_1<\/loc><lastmod>2026-09-30<\/lastmod>/);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc><\/url>/);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc><\/url>/);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/r\/some-room<\/loc><\/url>/);
+  assert.doesNotMatch(xml, /2026-10-02/);
 });
 
 test("a browser asking for an unknown page gets the HTML 404 and API clients keep JSON", async t => {
