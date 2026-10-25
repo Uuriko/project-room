@@ -1360,12 +1360,9 @@ function advertiseCapabilities(state, incoming) {
 function setMemberProfile(state, incoming) {
   requireFields(incoming.data, ["memberId", "profile"]);
   requireMember(state, incoming.actorId);
-  const member = knownMember(state, incoming.data.memberId);
-  if (member.active === false) throw new Error("Member access revoked");
-  if (member.kind !== "agent") throw new Error("Join profiles are for agent members");
-  if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
-    throw new Error("Only this member or the room owner may set a join profile");
-  }
+  const member = requireMember(state, incoming.data.memberId);
+  if (member.kind !== "agent") throw new Error("join_profile_kind");
+  if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) throw new Error("join_profile_actor");
   member.joinProfile = assertStoredJoinProfile(incoming.data.profile);
 }
 
