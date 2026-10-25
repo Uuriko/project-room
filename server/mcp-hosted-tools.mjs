@@ -3,7 +3,8 @@
 import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
-import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_BLURBS } from "../src/room-mcp-join.js";
+import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_BLURBS, FAMILY_MCP_TOOL_NAMES } from "../src/room-mcp-join.js";
+import { FOLDED_MCP_TOOLS, familyToolDefs } from "./mcp-folded-catalog.mjs";
 import { hostedStdioToolDefinitions } from "./mcp-full-profile.mjs";
 import { base64LengthForBytes } from "./room-attachment-bytes.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
@@ -298,4 +299,14 @@ export const hostedWakeTools = [
 export const hostedMcpToolDefs = [...hostedRoomTools, ...hostedInboxTools, ...hostedWakeTools, ...hostedStdioToolDefinitions()];
 if (hostedMcpToolDefs.map(entry => entry.name).join() !== HOSTED_ROOM_MCP_TOOLS.join()) {
   throw new Error("hosted room MCP tool list drifted from HOSTED_ROOM_MCP_TOOLS");
+}
+const familyNames = new Set(familyToolDefs.map(entry => entry.name));
+if ([...familyNames].join() !== FAMILY_MCP_TOOL_NAMES.join()) {
+  throw new Error("family MCP tool list drifted from FAMILY_MCP_TOOL_NAMES");
+}
+for (const name of Object.keys(FOLDED_MCP_TOOLS)) {
+  if (!HOSTED_ROOM_MCP_TOOLS.includes(name)) throw new Error(`folded MCP tool ${name} is not hosted`);
+}
+for (const name of familyNames) {
+  if (HOSTED_ROOM_MCP_TOOLS.includes(name)) throw new Error(`family MCP tool ${name} collides with a hosted tool`);
 }

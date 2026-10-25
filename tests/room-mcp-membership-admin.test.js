@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-admin-"));
@@ -148,8 +149,9 @@ test("membership admin tools are in the hosted catalog with schemas", async t =>
   rooms.create(owner.secret, { roomId: "catalog-den", title: "Catalog den", purpose: "Catalog", kind: "personal", displayName: "Cara Lind" });
   const tools = await listTools(origin, owner.secret);
   const names = tools.map(tool => tool.name);
-  for (const name of ADMIN_TOOLS) assert.ok(names.includes(name), `${name} listed`);
-  const decide = tools.find(tool => tool.name === "room_decide_access_request");
+  assert.ok(names.includes("room_access"), "room_access is the listed family");
+  for (const name of ADMIN_TOOLS) assert.ok(!names.includes(name), `${name} is folded out of profile=full`);
+  const decide = hostedMcpToolDefs.find(tool => tool.name === "room_decide_access_request");
   assert.deepEqual(decide.inputSchema.required, ["roomId", "requestId", "decision"]);
   assert.equal(decide.annotations.readOnlyHint, false);
 });

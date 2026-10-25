@@ -22,6 +22,8 @@ import assert from "node:assert/strict";
 import { aiCatalog } from "../server/agent-discovery.mjs";
 import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
+import { actionMetaToolDefs } from "../server/mcp-action-search.mjs";
+import { familyToolDefs } from "../server/mcp-folded-catalog.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
 import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
@@ -39,7 +41,8 @@ function ardMcpTools() {
 function servedProfiles() {
   return {
     public: livePublicMcpTools(),
-    "core (default)": listedMcpTools("core"),
+    "lean (default)": listedMcpTools("lean"),
+    core: listedMcpTools("core"),
     full: listedMcpTools("full"),
     "focus=work": listedMcpTools("core", false, null, "work"),
     "focus=conversation": listedMcpTools("core", false, null, "conversation"),
@@ -55,6 +58,8 @@ function servedProfiles() {
 function codeToolNames() {
   return new Set([
     ...hostedMcpToolDefs.map(t => t.name),
+    ...actionMetaToolDefs.map(t => t.name),
+    ...familyToolDefs.map(t => t.name),
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
     ...identityMintMcpDefinitions.map(t => t.name),
@@ -93,8 +98,9 @@ test("round-1 scoping is pinned: public_work_recommend and room_list_work live o
   const names = list => list.map(t => t.name);
   // The default core profile is intentionally the short catalog; these two
   // are discovered via focus profiles and the enrolled server card.
-  assert.ok(!names(profiles["core (default)"]).includes("public_work_recommend"), "public_work_recommend is not in the default profile");
-  assert.ok(!names(profiles["core (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
+  assert.ok(!names(profiles["lean (default)"]).includes("public_work_recommend"), "public_work_recommend is not in the default profile");
+  assert.ok(!names(profiles["lean (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
+  assert.ok(!names(profiles["lean (default)"]).includes("room_map"), "room_map stays off the lean default");
   assert.ok(names(profiles["focus=public_work"]).includes("public_work_recommend"), "public_work_recommend is in focus=public_work");
   assert.ok(names(profiles["focus=work"]).includes("room_list_work"), "room_list_work is in focus=work");
   // The enrolled server-card list is the member core catalog (#3769): it

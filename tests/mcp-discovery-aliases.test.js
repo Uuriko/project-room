@@ -29,8 +29,9 @@ test("aliases=true: every advertised dotted alias resolves to its listed canonic
   }
 });
 
-test("full catalog advertises every registry alias exactly once, on the right tool", () => {
+test("full catalog advertises every registry alias of a listed tool exactly once", () => {
   const tools = listed("full", true);
+  const listedNames = new Set(tools.map(tool => tool.name));
   const seen = new Map();
   for (const tool of tools) {
     for (const alias of tool.aliases ?? []) {
@@ -38,10 +39,15 @@ test("full catalog advertises every registry alias exactly once, on the right to
       seen.set(alias, tool.name);
     }
   }
-  for (const [alias, canonical] of Object.entries(MCP_TOOL_ALIASES)) {
+  const listedAliases = Object.entries(MCP_TOOL_ALIASES).filter(([, canonical]) => listedNames.has(canonical));
+  for (const [alias, canonical] of listedAliases) {
     assert.equal(seen.get(alias), canonical, `${alias} must be advertised on ${canonical}`);
   }
-  assert.equal(seen.size, Object.keys(MCP_TOOL_ALIASES).length);
+  for (const [alias, canonical] of Object.entries(MCP_TOOL_ALIASES)) {
+    if (listedNames.has(canonical)) continue;
+    assert.equal(seen.has(alias), false, `${alias} stays callable but is not advertised while ${canonical} is folded`);
+  }
+  assert.equal(seen.size, listedAliases.length);
 });
 
 test("no dotted alias collides with any canonical tool name in the listing", () => {

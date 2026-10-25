@@ -202,9 +202,13 @@ test("tools/list hides dotted aliases by default and reveals them with aliases=1
       `${tool.name} must advertise exactly its documented alias`);
     assert.ok(tool.aliases.every(a => a.includes(".")), "advertised aliases must be dotted");
   }
-  const aliasedCanonicals = new Set(Object.values(EXPECTED_ALIASES));
-  assert.deepEqual(new Set(aliasEntries.map(tool => tool.name)), aliasedCanonicals,
-    "exactly the documented alias targets may advertise aliases");
+  const listed = new Set(withAliases.map(tool => tool.name));
+  const stillListed = new Set(Object.values(EXPECTED_ALIASES).filter(name => listed.has(name)));
+  assert.deepEqual(new Set(aliasEntries.map(tool => tool.name)), stillListed,
+    "aliases=1 advertises dotted names only for tools still on the list");
+  for (const hidden of ["bond_accept", "wake_register", "webhook_subscribe"]) {
+    assert.equal(listed.has(hidden), false, `${hidden} is folded out of profile=full`);
+  }
 
   // ?aliases=1 query form behaves the same.
   const viaQuery = await list(origin, { profile: "full" }, secret, "?aliases=1");

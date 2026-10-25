@@ -107,18 +107,27 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(listed.status, 200);
   const coreBody = await listed.json();
   const names = coreBody.result.tools.map(tool => tool.name);
-  assert.equal(coreBody.result.profile, "core");
-  assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
-  assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
-  assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
+  assert.equal(coreBody.result.profile, "lean");
+  assert.equal(names.length, 10);
+  assert.equal(names.includes("room_map"), false);
+  assert.equal(names.includes("room_needs_me"), true);
+  assert.equal(names.includes("room_search_actions"), true);
+  const coreList = await rpc(origin, "tools/list", { profile: "core" }, owner.secret);
+  const coreNames = (await coreList.json()).result.tools.map(tool => tool.name);
+  assert.equal(coreNames.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
+  assert.deepEqual(coreNames.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
   assert.equal(names.includes("room_react"), false);
   assert.equal(names.includes("bond.list"), false);
   for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
   const full = await rpc(origin, "tools/list", { profile: "full" }, owner.secret);
   const fullNames = (await full.json()).result.tools.map(tool => tool.name);
   assert.equal(fullNames.includes("room_react"), false);
-  assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
-  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  const folded = new Set(["squads_list", "bond_accept", "wake_register", "webhook_subscribe", "room_propose_work", "bounty_list", "inbox_put_attachment"]);
+  for (const name of folded) assert.equal(fullNames.includes(name), false, name);
+  for (const name of ["squads", "bond_respond", "webhook", "room_work", "bounty", "inbox_attachment", "room_access", "room_help"]) {
+    assert.equal(fullNames.includes(name), true, name);
+  }
+  assert.deepEqual(fullNames.slice(-JOIN_TOOLS.length - PUBLIC_WORK_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
     assert.equal(fullNames.includes(name), true, name);

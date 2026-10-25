@@ -274,24 +274,6 @@
         "openWorldHint": false
       }
     },
-    "bond_accept": {
-      "inputSchema": "ab715fdf513237f6",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bond_decline": {
-      "inputSchema": "6641b64f351c020a",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "bond_list": {
       "inputSchema": "60e40f0a6fc702eb",
       "annotations": {
@@ -310,119 +292,20 @@
         "openWorldHint": false
       }
     },
-    "bond_revoke": {
-      "inputSchema": "6641b64f351c020a",
+    "bond_respond": {
+      "inputSchema": "d272c5174d720a69",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bounty_accept": {
-      "inputSchema": "c74853234ea70969",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": false
       }
     },
-    "bounty_claim": {
-      "inputSchema": "12aafb4ee86fa975",
+    "bounty": {
+      "inputSchema": "a8f5a069381b876d",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_dispute": {
-      "inputSchema": "706d1614d3833313",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_finalize": {
-      "inputSchema": "12aafb4ee86fa975",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_fund": {
-      "inputSchema": "12aafb4ee86fa975",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_list": {
-      "inputSchema": "d1e2e0d7ff55ca3e",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bounty_post": {
-      "inputSchema": "a8ddaa10a4d90ed5",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_read_balances": {
-      "inputSchema": "9c4dedb9bd1af453",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bounty_read_history": {
-      "inputSchema": "68951ce65dc90e5a",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bounty_submit": {
-      "inputSchema": "c603235bbd313975",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_transfer": {
-      "inputSchema": "04d7ba1655bb9549",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      }
-    },
-    "bounty_watch": {
-      "inputSchema": "12aafb4ee86fa975",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": false
       }
@@ -490,39 +373,12 @@
         "openWorldHint": false
       }
     },
-    "inbox_discard_attachment": {
-      "inputSchema": "2fc159f17602ec30",
+    "inbox_attachment": {
+      "inputSchema": "e0327c7c7d4b2295",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "inbox_get_attachment": {
-      "inputSchema": "a2562d73892e8b17",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true
-      }
-    },
-    "inbox_list_attachments": {
-      "inputSchema": "d746974fa9afd5e9",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "inbox_put_attachment": {
-      "inputSchema": "cf2ac46c84f3c8f4",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -616,21 +472,12 @@
         "openWorldHint": false
       }
     },
-    "room_accept_work": {
-      "inputSchema": "997d52d3df093d0c",
+    "room_access": {
+      "inputSchema": "cfe0a9a64e11d484",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_acquire_claim": {
-      "inputSchema": "60bbe03b9f4d42a8",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -670,15 +517,6 @@
         "openWorldHint": false
       }
     },
-    "room_block_work": {
-      "inputSchema": "cb32d833da554242",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_cancel_request": {
       "inputSchema": "1f4c0acd234a8c3b",
       "annotations": {
@@ -693,15 +531,6 @@
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_clear_halt": {
-      "inputSchema": "10ef080c6a66fafb",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -733,33 +562,6 @@
         "openWorldHint": false
       }
     },
-    "room_create_agent_invite": {
-      "inputSchema": "2884f452719ad86f",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_decide_access_request": {
-      "inputSchema": "a908437a59ff991f",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_decline_help_offer": {
-      "inputSchema": "c93102c738720d65",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_discard_file": {
       "inputSchema": "819af86b52ff2541",
       "annotations": {
@@ -776,6 +578,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_help": {
+      "inputSchema": "59a25b5227eee16c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
       }
     },
     "room_introduce_outside_agent": {
@@ -827,24 +638,6 @@
       "inputSchema": "bdc08d9682895268",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_list_access_requests": {
-      "inputSchema": "67eb8123bcf5978d",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true
-      }
-    },
-    "room_list_agent_invites": {
-      "inputSchema": "9c4dedb9bd1af453",
-      "annotations": {
-        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -931,15 +724,6 @@
         "openWorldHint": true
       }
     },
-    "room_offer_help": {
-      "inputSchema": "bf8202dfae059c28",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_post_draft": {
       "inputSchema": "9d90cc793474a002",
       "annotations": {
@@ -954,15 +738,6 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_propose_work": {
-      "inputSchema": "a2f024c70bf9a3e9",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -1030,69 +805,6 @@
         "openWorldHint": true
       }
     },
-    "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true
-      }
-    },
-    "room_record_completion": {
-      "inputSchema": "b5baa11cf5d752b1",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_record_handoff": {
-      "inputSchema": "2f690e02f2c13878",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_record_verification": {
-      "inputSchema": "0b925ba63ce5e4c4",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_release_claim": {
-      "inputSchema": "997d52d3df093d0c",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_release_help_offer": {
-      "inputSchema": "6df8d335d804e11e",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_renew_claim": {
-      "inputSchema": "d1c971ee068b0902",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_reply": {
       "inputSchema": "e44673ea50fc459c",
       "annotations": {
@@ -1120,35 +832,8 @@
         "openWorldHint": false
       }
     },
-    "room_resolve_blocker": {
-      "inputSchema": "4be72edf2d3d6703",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_respond_to_request": {
       "inputSchema": "4b961a3a4293f0c4",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_revoke_agent_invite": {
-      "inputSchema": "d5fb1615705f5fb1",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_select_help_offer": {
-      "inputSchema": "e01ff20c1de7f96c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1165,39 +850,12 @@
         "openWorldHint": false
       }
     },
-    "room_start_work": {
-      "inputSchema": "a164a6f1e85c925e",
+    "room_work": {
+      "inputSchema": "a94685732b1d8f28",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_submit_text_result": {
-      "inputSchema": "15543437625fbdc2",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_supersede_work": {
-      "inputSchema": "096edd6511ab0071",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_withdraw_help_offer": {
-      "inputSchema": "c93102c738720d65",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -1210,71 +868,17 @@
         "openWorldHint": false
       }
     },
-    "squads_create": {
-      "inputSchema": "46dbbbf2c16c4498",
+    "squads": {
+      "inputSchema": "c7cf274b7f58ec72",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "squads_disband": {
-      "inputSchema": "a42e2e76bd84a7cf",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "squads_get": {
-      "inputSchema": "a42e2e76bd84a7cf",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "squads_list": {
-      "inputSchema": "9c4dedb9bd1af453",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "squads_update_members": {
-      "inputSchema": "f0618385d5d2ea3c",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "wake_clear": {
-      "inputSchema": "d7850eb6972d3488",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
     "wake_pause": {
       "inputSchema": "d528b9d288c11906",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "wake_register": {
-      "inputSchema": "f96a46dc616cca27",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1291,35 +895,26 @@
         "openWorldHint": false
       }
     },
-    "webhook_list": {
-      "inputSchema": "d746974fa9afd5e9",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+    "webhook": {
+      "inputSchema": "f87e324471c86efb",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "webhook_unsubscribe": {
-      "inputSchema": "dddc74161f4be8e6",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     }
   },
   "focus=work": {
+    "bounty": {
+      "inputSchema": "a8f5a069381b876d",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
     "get_room_context": {
       "inputSchema": "512aefa99da239e9",
       "annotations": {
@@ -1329,21 +924,12 @@
         "openWorldHint": true
       }
     },
-    "room_accept_work": {
-      "inputSchema": "997d52d3df093d0c",
+    "room_access": {
+      "inputSchema": "cfe0a9a64e11d484",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_acquire_claim": {
-      "inputSchema": "60bbe03b9f4d42a8",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -1367,15 +953,6 @@
     },
     "room_begin_work": {
       "inputSchema": "dfbf4a6b79964c4e",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_block_work": {
-      "inputSchema": "cb32d833da554242",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1408,6 +985,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_help": {
+      "inputSchema": "59a25b5227eee16c",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
       }
     },
     "room_join_kits": {
@@ -1509,15 +1095,6 @@
         "openWorldHint": false
       }
     },
-    "room_propose_work": {
-      "inputSchema": "a2f024c70bf9a3e9",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_put_file": {
       "inputSchema": "97439b27a90f7807",
       "annotations": {
@@ -1554,51 +1131,6 @@
         "openWorldHint": true
       }
     },
-    "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true
-      }
-    },
-    "room_record_completion": {
-      "inputSchema": "b5baa11cf5d752b1",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_record_handoff": {
-      "inputSchema": "2f690e02f2c13878",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_release_claim": {
-      "inputSchema": "997d52d3df093d0c",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_renew_claim": {
-      "inputSchema": "d1c971ee068b0902",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_reply": {
       "inputSchema": "e44673ea50fc459c",
       "annotations": {
@@ -1617,15 +1149,6 @@
         "openWorldHint": false
       }
     },
-    "room_resolve_blocker": {
-      "inputSchema": "4be72edf2d3d6703",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_respond_to_request": {
       "inputSchema": "4b961a3a4293f0c4",
       "annotations": {
@@ -1635,21 +1158,12 @@
         "openWorldHint": false
       }
     },
-    "room_start_work": {
-      "inputSchema": "a164a6f1e85c925e",
+    "room_work": {
+      "inputSchema": "a94685732b1d8f28",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_submit_text_result": {
-      "inputSchema": "15543437625fbdc2",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -1661,27 +1175,18 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    "squads": {
+      "inputSchema": "c7cf274b7f58ec72",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
     }
   },
   "focus=conversation": {
-    "bond_accept": {
-      "inputSchema": "ab715fdf513237f6",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bond_decline": {
-      "inputSchema": "6641b64f351c020a",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "bond_list": {
       "inputSchema": "60e40f0a6fc702eb",
       "annotations": {
@@ -1691,12 +1196,12 @@
         "openWorldHint": false
       }
     },
-    "bond_revoke": {
-      "inputSchema": "6641b64f351c020a",
+    "bond_respond": {
+      "inputSchema": "d272c5174d720a69",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },
@@ -2035,24 +1540,6 @@
         "openWorldHint": true
       }
     },
-    "room_read_work_discussion": {
-      "inputSchema": "622e3a8dc028f739",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true
-      }
-    },
-    "room_record_verification": {
-      "inputSchema": "0b925ba63ce5e4c4",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_reply": {
       "inputSchema": "e44673ea50fc459c",
       "annotations": {
@@ -2077,6 +1564,15 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_work": {
+      "inputSchema": "a94685732b1d8f28",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     }
@@ -2235,26 +1731,8 @@
         "openWorldHint": false
       }
     },
-    "wake_clear": {
-      "inputSchema": "d7850eb6972d3488",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "wake_pause": {
       "inputSchema": "d528b9d288c11906",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "wake_register": {
-      "inputSchema": "f96a46dc616cca27",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2271,30 +1749,12 @@
         "openWorldHint": false
       }
     },
-    "webhook_list": {
-      "inputSchema": "d746974fa9afd5e9",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+    "webhook": {
+      "inputSchema": "f87e324471c86efb",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "webhook_unsubscribe": {
-      "inputSchema": "dddc74161f4be8e6",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     }
@@ -2401,42 +1861,6 @@
     }
   },
   "enrolled": {
-    "add_land_item": {
-      "inputSchema": "bb1792782a4e4949",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "bond_propose": {
-      "inputSchema": "08f01b3d9e199296",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "dm_posted": {
-      "inputSchema": "7369f86ea9f3d082",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "list_land_queue": {
-      "inputSchema": "9c4dedb9bd1af453",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -2446,73 +1870,10 @@
         "openWorldHint": false
       }
     },
-    "room_commit_file": {
-      "inputSchema": "e474540a197f0411",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_join": {
       "inputSchema": "ef021780b7f53fec",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_join_kits": {
-      "inputSchema": "99334726611ccf58",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_join_packet": {
-      "inputSchema": "99334726611ccf58",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_join_prompt": {
-      "inputSchema": "99334726611ccf58",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_list_requests": {
-      "inputSchema": "321236af9d9af96f",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_mcp_snippet": {
-      "inputSchema": "99334726611ccf58",
-      "annotations": {
-        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -2529,15 +1890,6 @@
     },
     "room_post_message": {
       "inputSchema": "4787408dca930bda",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
-    "room_put_file": {
-      "inputSchema": "97439b27a90f7807",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2563,15 +1915,6 @@
         "openWorldHint": true
       }
     },
-    "room_reply": {
-      "inputSchema": "e44673ea50fc459c",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_respond_to_request": {
       "inputSchema": "4b961a3a4293f0c4",
       "annotations": {
@@ -2581,17 +1924,26 @@
         "openWorldHint": false
       }
     },
-    "wake_pause": {
-      "inputSchema": "d528b9d288c11906",
+    "room_run_action": {
+      "inputSchema": "81ad2ade46cb75b2",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    "room_search_actions": {
+      "inputSchema": "db4687fb9b7e04ca",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
     },
-    "wake_resume": {
-      "inputSchema": "a97dd4e696fbdec2",
+    "wake_pause": {
+      "inputSchema": "d528b9d288c11906",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

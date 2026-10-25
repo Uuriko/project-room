@@ -274,11 +274,10 @@ test("mcp: squads_list and squads_get read squads", async t => {
 
   const listed = await mcp({ jsonrpc: "2.0", id: "l", method: "tools/list", params: { profile: "full" } }, { authorization: `Bearer ${owner.secret}` });
   const names = listed.result.tools.map(tool => tool.name);
-  assert.ok(names.includes("squads_list"), "squads_list is in the hosted catalog");
-  assert.ok(names.includes("squads_get"), "squads_get is in the hosted catalog");
-  assert.ok(names.includes("squads_create"), "squads_create is in the hosted catalog");
-  assert.ok(names.includes("squads_update_members"), "squads_update_members is in the hosted catalog");
-  assert.ok(names.includes("squads_disband"), "squads_disband is in the hosted catalog");
+  assert.ok(names.includes("squads"), "squads is in the hosted catalog");
+  for (const name of ["squads_list", "squads_get", "squads_create", "squads_update_members", "squads_disband"]) {
+    assert.ok(!names.includes(name), `${name} is folded out of profile=full`);
+  }
 
   const empty = valueOf(await rpcCall("squads_list", { roomId }, owner.secret));
   assert.deepEqual(empty.squads, []);
