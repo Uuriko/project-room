@@ -11,6 +11,7 @@ import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../server/room-entry.mjs";
 import { renderReceiptsHtml } from "../server/receipts-page.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
+import { agentPageHtml } from "../server/public-agent-page.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 import { publicUnpublishSchema } from "../server/legal-store.mjs";
@@ -57,6 +58,12 @@ const surfaces = {
   "demigod door": ROOM_ENTRY_HTML,
   "public door": publicRoomDoorHtml(),
   "public face": faceHtml(),
+  "public agent page": agentPageHtml({
+    slug: "relay", name: "Relay", blurb: "Asks", access: "open",
+    page: "https://room.example/u/relay",
+    ask: "https://room.example/api/public/agents/relay/asks",
+    poll: "https://room.example/api/public/agents/relay/asks/{id}",
+  }),
   receipts,
   "room export": renderRoomExportHtml([]),
   // docs/room-health.html is a generated artifact and no longer committed; the

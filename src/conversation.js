@@ -1,14 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
+import { uiText } from "./strings.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-// Legacy names remain the input aliases. Pills render the Unicode key.
-export const REACTIONS = LEGACY_REACTIONS;
-
-export function reactionPills(reactions = {}) {
-  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
-    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
-  ));
-}
 
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
@@ -17,9 +9,8 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
-export function escapeChatAction({ dialogOpen = false, mentionOpen = false, emojiOpen = false, replyOpen = false, inThread = false } = {}) {
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
-  if (emojiOpen) return "hide-emoji";
   if (mentionOpen) return "hide-mentions";
   if (replyOpen) return "clear-reply";
   if (inThread) return "leave-thread";
@@ -162,6 +153,8 @@ export function memberOnLine(member, { workItems, now } = {}) {
 
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
+  // R350-n1: the seat is still a member, but its identity signed out for good.
+  if (member.identityRevoked === true) return uiText("people.status.signed_out_for_good");
   const line = context ? memberOnLine(member, context) : "";
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
@@ -215,7 +208,7 @@ export function messageBodyHtml(body, members, esc, messageId) {
   const lines = text.split("\n");
   const full = mentionHtml(text, members, esc);
   if (text.length <= 1200 && lines.length <= 12) return full;
-  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  const preview = [...lines.slice(0, 6).join("\n")].slice(0, 600).join("");
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
@@ -247,7 +240,7 @@ export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
 }
 
 export function mentionHtml(body, members, esc) {
-  const text = renderEmojiShortcodes(body);
+  const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return markdownHtml(esc(text));
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
@@ -473,6 +466,20 @@ export function draftRecoveryScope(identity) {
     identity.member.id, identity.sessionBinding]);
 }
 
+// Only references and recovery state persist. File bytes never enter browser storage.
+function recoveredFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, 20).flatMap(file => {
+    if (!file || typeof file.id !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(file.id)
+      || typeof file.filename !== 'string' || file.filename.length > 255
+      || typeof file.mediaType !== 'string' || file.mediaType.length > 255
+      || !['staged', 'uploading', 'error'].includes(file.status)) return [];
+    return [{ id: file.id, filename: file.filename, mediaType: file.mediaType,
+      status: file.status === 'uploading' ? 'error' : file.status,
+      ...(typeof file.commitMessageId === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(file.commitMessageId)
+        ? { commitMessageId: file.commitMessageId } : {}) }];
+  });
+}
+
 // Tab-scoped recovery. The composer used to hide this behind a checkbox; drafts
 // now save for this tab until the 12-hour expiry or sign-out. Read only after
 // an authenticated room snapshot.
@@ -483,12 +490,13 @@ export class DraftRecovery {
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
-      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim() || recoveredFiles(d.files).length).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null,
+          files: recoveredFiles(d.files) }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -535,7 +543,7 @@ export class DraftRecovery {
           // A malformed retained operation must never become a new automatic send.
           if (d.pending && !pending) continue;
           drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-            mode: d.mode, threadId: d.threadId, channelId, pending });
+            mode: d.mode, threadId: d.threadId, channelId, pending, files: recoveredFiles(d.files) });
           continue;
         }
         let assistantDraft = null;
@@ -568,11 +576,23 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, files: recoveredFiles(d.files), ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // Keep empty-thread navigation separate from recoverable draft text.
+      // Never turn a rejected private draft into a fresh public reply.
+      if (activeKey === null && typeof saved.threadId === "string"
+        && saved.activeKey === saved.threadId && !saved.entries.some(([id]) => id === saved.threadId)) {
+        const root = index.byId.get(saved.threadId), channelId = root?.channelId ?? "general";
+        if (root && !root.deletedAt && !root.toMemberId && index.threads.has(root.id)
+          && (channelId === "general" || state.channels?.[channelId])
+          && !state.channels?.[channelId]?.archivedAt) {
+          drafts.save(root.id, { body: "", toMemberId: "", replyToId: root.id, channelId, pending: null });
+          activeKey = root.id;
+        }
+      }
       const active = drafts.entries.get(activeKey);
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
@@ -610,6 +630,7 @@ export function createTimelinePin() {
   const flush = list => list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
   return {
     set(view, list) { pin = { view, top: list.scrollTop }; },
+    tracks(view) { return Boolean(pin && pin.view === view); },
     holds(view, list) { return Boolean(pin && pin.view === view && (list.scrollTop === pin.top || flush(list))); },
     clear() { pin = null; },
   };
