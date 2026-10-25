@@ -4,7 +4,7 @@
 import { randomBytes } from "node:crypto";
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
-import { identityIdForWakeMember } from "./wake-identity-resolution.mjs";
+import { guestSeatLive, identityIdForWakeMember } from "./wake-identity-resolution.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -301,6 +301,18 @@ export class PublicAgentPages {
     if (typeof state?.room?.archivedAt === "string" && state.room.archivedAt) fail(404, "agent_not_found", "No such agent.");
     const member = state?.members?.[row.member_id];
     if (!member || member.active === false || member.kind !== "agent") fail(404, "agent_not_found", "No such agent.");
+    // A guest seat is additionally judged by the shared live-seat
+    // predicate, uniformly for card, ask intake, and poll: the
+    // projection active flag flips only on disconnect or on a sweep,
+    // so an expired-but-unswept guest would otherwise keep its page.
+    // Non-guest agents are never passed to the predicate.
+    let guestRow;
+    try {
+      guestRow = this.db.prepare("SELECT 1 AS seated FROM guest_members WHERE room_id=? AND member_id=?")
+        .get(row.room_id, row.member_id);
+    } catch { guestRow = undefined; }
+    if (guestRow && !guestSeatLive(this.db, row.room_id, row.member_id, this.store.now()))
+      fail(404, "agent_not_found", "No such agent.");
     return { row, member };
   }
 
@@ -351,7 +363,7 @@ export class PublicAgentPages {
       let signal = null;
       let identityId = null;
       try {
-        identityId = identityIdForWakeMember(this.db, row.room_id, row.member_id);
+        identityId = identityIdForWakeMember(this.db, row.room_id, row.member_id, this.store.now());
         if (identityId) {
           const woke = this.store.agentHeartbeats.wakeIfOffline({
             agentId: identityId, kind: "ask", roomId: row.room_id, messageId: `public-ask:${id}`,

@@ -5187,10 +5187,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const empty = { identityId: targetIdentityId, rooms: [] };
       if (!caller || typeof caller.identityId !== "string" || typeof targetIdentityId !== "string") return empty;
-      const targetSeats = identityRoomSeats(this.db, targetIdentityId);
+      const now = this.now();
+      const targetSeats = identityRoomSeats(this.db, targetIdentityId, { liveGuestsOnly: true, now });
       if (targetSeats.length === 0) return empty;
       const callerSeatByRoom = new Map(
-        identityRoomSeats(this.db, caller.identityId).map(seat => [seat.roomId, seat]));
+        identityRoomSeats(this.db, caller.identityId, { liveGuestsOnly: true, now }).map(seat => [seat.roomId, seat]));
       const roomRowOf = this.db.prepare("SELECT archived_at AS archivedAt FROM rooms WHERE id=?");
       const rooms = [];
       for (const seat of targetSeats) {
@@ -6613,7 +6614,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId, this.now());
       // #3345: a mention target with no identity link on either table can
       // never be woken — that used to be a silent `continue`; it is now a
       // counted, journaled loss (the member exists; the fabric cannot

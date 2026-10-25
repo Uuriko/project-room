@@ -31,7 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
-import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { guestSeatLiveSql, memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1739,7 +1739,9 @@ export class AgentPluginStore {
     // subscription was removed (s is NULL) are still selected so they
     // dead-letter as before. A guest seat counts as seated here only
     // while it holds a live access credential (the resolver's liveness
-    // gate, mirrored in SQL), so a disconnected guest's rows stay out.
+    // gate, generated from the shared predicate — guestSeatLiveSql in
+    // server/wake-identity-resolution.mjs — so the SQL cannot drift
+    // from the JS judgement), so a disconnected guest's rows stay out.
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
@@ -1748,8 +1750,7 @@ export class AgentPluginStore {
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
          OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id
-           AND EXISTS (SELECT 1 FROM credentials c WHERE c.room_id = g.room_id AND c.member_id = g.member_id
-             AND c.kind = 'access' AND c.revoked = 0 AND c.expires_at > ?)))))
+           AND ${guestSeatLiveSql("g.room_id", "g.member_id")}))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, now, limit] : [now, now, limit]));
     const isolated = [];
