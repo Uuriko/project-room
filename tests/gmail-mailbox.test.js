@@ -107,7 +107,7 @@ test('tampered ciphertext is rejected and explicit enablement requires encryptio
   assert.throws(() => gmailConfig({ ROOM_GMAIL_ENABLED: '1' }, 'https://room.example'));
 });
 test('HTTP enforces CSRF and ownership, persists setup and reports disabled Gmail honestly', async t => {
-  const f = setup(t), server = createRoomServer({ store: f.store });
+  const f = setup(t), server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = 'http://127.0.0.1:' + server.address().port;

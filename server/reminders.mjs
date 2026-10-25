@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const reminderLimits = Object.freeze({ active: 100, receipts: 5000, horizon: 365 * 86400000 });
