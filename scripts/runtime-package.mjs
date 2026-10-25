@@ -420,6 +420,8 @@ optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-r
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage
 optional.push("server/room-shard-copy.mjs"); // operator copy of one room's room-tables and the digest compare; not called from the command path
+optional.push("src/agent-join-profile.js"); // join profile read by the member row and by events.js
+optional.push("server/agent-join-profile.mjs", "server/routes/agent-join-profile.mjs"); // redeem profile, GET/PATCH, member.profile_set
 // Retired UI files remain recognized only when an historical commit contains them.
 // They are not advertised or required by the current runtime.
 const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board"].map(name => `src/${name}.js`);

@@ -9,6 +9,19 @@ import { base64LengthForBytes } from "./room-attachment-bytes.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 
 const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
+const joinProfileField = {
+  type: "object",
+  additionalProperties: false,
+  description: "Optional join profile. wake is push, webhook, or pull. events is mentions-and-own-claims (the default) or all. maxClaims is an integer from 1 to 10 (default 2). roles are any of coordinator, reviewer, builder. detail is brief or full. capabilities are at most 20 tags, each at most 40 characters. Omit the object to keep the defaults. This is not the invite access preset.",
+  properties: {
+    wake: { type: "string", enum: ["push", "webhook", "pull"] },
+    events: { type: "string", enum: ["mentions-and-own-claims", "all"] },
+    maxClaims: { type: "integer", minimum: 1, maximum: 10 },
+    roles: { type: "array", items: { type: "string", enum: ["coordinator", "reviewer", "builder"] } },
+    detail: { type: "string", enum: ["brief", "full"] },
+    capabilities: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+  },
+};
 const tool = (name, description, inputSchema, readOnlyHint = true) => ({
   name, description, inputSchema,
   annotations: { readOnlyHint, destructiveHint: false, idempotentHint: true, openWorldHint: false }
@@ -32,16 +45,22 @@ export const hostedRoomTools = [
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key for creates that omit roomId: retrying with the same requestId and parameters returns the original room (duplicate:true); reusing it with different parameters is 409 request_conflict." },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["title", "purpose"]), false),
-  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. displayName defaults to this identity's name. Does not mint a new identity.", schema({
+  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. displayName defaults to this identity's name. Optional profile declares wake, events, maxClaims, roles, detail, and capabilities; omit it to keep the defaults. Does not mint a new identity.", schema({
     linkToken: { type: "string", minLength: 1, maxLength: 200 },
     inviteCode: { type: "string", minLength: 1, maxLength: 80 },
-    displayName: { type: "string", minLength: 1, maxLength: 80 }
+    displayName: { type: "string", minLength: 1, maxLength: 80 },
+    profile: joinProfileField
   }), false),
   tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
   tool("room_member_card", "Read one room member's agent directory card: capabilities, owns[] (areas from the member's live claims), reach{} (wake mode, last poll, unacked wakes, bond status, host — live data, never fabricated), provenance (seeded or self-published), and the a2a A2A v1.0 shaped projection (skills, auth, endpoints; interop/discoverability only). Same read as GET /api/rooms/:roomId/members/:memberId/card. A member with no visible card reads as unknown_card. This read does not start an AI.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id whose directory card to read." }
   }, ["roomId", "memberId"])),
+  tool("room_member_profile", "Read or replace this agent's join profile. Same read as GET /api/rooms/{roomId}/members/{memberId}/profile and same write as PATCH /api/rooms/{roomId}/members/{memberId}/profile. Omit profile to read. Send profile to change the fields you include. The caller must be that member or the room owner. Does not start an AI.", schema({
+    roomId: roomIdField,
+    memberId: { ...idField, description: "Room member id whose join profile to read or change." },
+    profile: joinProfileField
+  }, ["roomId", "memberId"]), false),
   tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when structural context is unchanged; always consume fresh cursors. Does not mark caught up or grant permission.", schema({
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }

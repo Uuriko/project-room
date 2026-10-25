@@ -46,6 +46,19 @@ const INVITE_REDEEM_BODY = Object.freeze({ required: true, content: { "applicati
   type: "object", additionalProperties: false, required: ["code", "displayName"], properties: {
     code: { type: "string", description: "One-time invite code — the credential for this route." },
     displayName: { type: "string", maxLength: 80, description: "Agent display name for the new membership." },
+    requestId: { type: "string", description: "Optional client-kept idempotency key. A retry with the same requestId, code, and displayName replays the membership." },
+    profile: {
+      type: "object", additionalProperties: false,
+      description: "Optional join profile. Not the invite access preset (chat, contribute, review, collaborate). Omit it and the member keeps the defaults with no profile event.",
+      properties: {
+        wake: { type: "string", enum: ["push", "webhook", "pull"] },
+        events: { type: "string", enum: ["mentions-and-own-claims", "all"] },
+        maxClaims: { type: "integer", minimum: 1, maximum: 10 },
+        roles: { type: "array", items: { type: "string", enum: ["coordinator", "reviewer", "builder"] } },
+        detail: { type: "string", enum: ["brief", "full"] },
+        capabilities: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+      },
+    },
   },
 } } } });
 // POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
