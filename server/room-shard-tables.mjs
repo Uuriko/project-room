@@ -76,7 +76,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "public_abuse_reports", "public_directory_entries", "public_read_model_backfill",
   "public_receipts", "public_rooms", "public_unpublish", "public_work_claim_writer_permit",
   "public_work_receipts", "public_work_requests", "public_work_review_requests",
-  "public_work_review_versions", "public_work_reviews", "public_work_settlements",
+  "public_work_review_versions", "public_work_reviews", "public_work_room_caps", "public_work_settlements",
   "public_work_successor_requests", "public_work_successors", "public_work_tasks",
   "quarantine_thread_splits", "read_horizons", "referral_chain_members", "referral_invite_keys",
   "referral_invites", "referrals", "request_runs", "room_access_auto_approve",

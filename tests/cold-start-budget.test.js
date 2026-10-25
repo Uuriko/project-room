@@ -55,6 +55,9 @@ const EMPTY_UNTIL_CRON = new Set([
   // Settlement links exist only once a paid public task is enabled
   // (First Shift settlement rail).
   "public_work_settlements",
+  // Sponsor room caps exist only once a paid public task is funded
+  // (COMP-DEEP #23 C1).
+  "public_work_room_caps",
   // A public agent page and its questions stay empty until an owner opts in.
   "agent_public_pages",
   "agent_public_asks"
