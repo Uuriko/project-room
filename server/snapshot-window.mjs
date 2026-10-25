@@ -66,24 +66,36 @@ function slimEventBodies(events) {
 export function fitWindowedSnapshot(snapshot, { maxBytes = SNAPSHOT_WINDOW_BYTES, messageBudget = MESSAGE_BUDGET } = {}) {
   const state = { ...snapshot.state };
   const original = Array.isArray(state.messages) ? state.messages : [];
-  let messages = takeNewestFitting(original, messageBudget);
+  const messages = takeNewestFitting(original, messageBudget);
   let messagesWindow = snapshot.messagesWindow ? { ...snapshot.messagesWindow } : null;
   const dropped = original.length - messages.length;
   if (messagesWindow && dropped > 0) {
     messagesWindow = { ...messagesWindow, limit: messages.length, omitted: (messagesWindow.omitted ?? 0) + dropped };
   }
-  state.messages = messages;
-  let next = { ...snapshot, ...(messagesWindow ? { messagesWindow } : {}), state };
-  const encode = () => Buffer.byteLength(JSON.stringify(next));
-  if (encode() <= maxBytes) return next;
-  state.eventLog = slimEventBodies(state.eventLog ?? []);
-  next = { ...next, state: { ...state } };
-  while ((state.eventLog?.length ?? 0) > 0 && encode() > maxBytes) {
-    state.eventLog = state.eventLog.slice(1);
-    next = { ...next, state: { ...state } };
-    if (state.eventLog.length === 0) break;
+  // Size the audit tail once. Re-encoding the whole snapshot per dropped
+  // event made the small window slower than the unbounded read.
+  const events = slimEventBodies(state.eventLog ?? []);
+  const baseState = { ...state, messages, eventLog: [] };
+  const base = { ...snapshot, ...(messagesWindow ? { messagesWindow } : {}), state: baseState };
+  const baseBytes = Buffer.byteLength(JSON.stringify(base));
+  if (baseBytes >= maxBytes || events.length === 0) return base;
+  const sizes = events.map(event => Buffer.byteLength(JSON.stringify(event)) + 1);
+  let total = baseBytes;
+  let start = events.length;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const next = total + sizes[i];
+    if (start !== events.length && next > maxBytes) break;
+    total = next;
+    start = i;
+    if (next > maxBytes) break;
   }
-  return next;
+  let chosen = events.slice(start);
+  let fitted = { ...base, state: { ...baseState, eventLog: chosen } };
+  while (chosen.length > 0 && Buffer.byteLength(JSON.stringify(fitted)) > maxBytes) {
+    chosen = chosen.slice(1);
+    fitted = { ...base, state: { ...baseState, eventLog: chosen } };
+  }
+  return fitted;
 }
 
 function viewerFilter(store, roomId, viewerId) {
@@ -104,14 +116,13 @@ function viewerFilter(store, roomId, viewerId) {
 }
 
 // The member snapshot. windowed uses the shared message window and byte budget.
-export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false } = {}) {
+export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null } = {}) {
   const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null);
   if (view === "work") {
     delete snapshot.state.agentHalts;
     return snapshot;
   }
-  const viewerId = snapshot.viewerId;
-  const { dmMessageVisible, roomEventVisible, peerContext } = viewerFilter(store, roomId, viewerId);
+  const { dmMessageVisible, roomEventVisible, peerContext } = visibility ?? viewerFilter(store, roomId, snapshot.viewerId);
   const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
   const visibleIds = new Set(visibleMessages.map(message => message.id));
   const shown = windowed ? visibleMessages.slice(-SNAPSHOT_WINDOW_MESSAGES) : visibleMessages;

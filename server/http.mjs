@@ -4450,7 +4450,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           helpContext: helpContext === "1",
           offerContext: offerContext === "1",
           auditView: auditHeader ? "activity" : "full",
-          windowed: snapshotView === "full" && !fullRead
+          windowed: snapshotView === "full" && !fullRead,
+          visibility: { dmMessageVisible, roomEventVisible, peerContext }
         }));
       }
       if (route === "outside-agents") {
