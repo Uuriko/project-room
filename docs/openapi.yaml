@@ -1109,6 +1109,7 @@ paths:
         Reply root IDs remain intact; retrieve an older root explicitly by messageId.
         Authentication and scope checks run on every read, including conditional reads.
         This additive API does not change the legacy full room snapshot.
+        A receipt_card message includes `cost`: `{spentCents, capCents, model}` when a spend was measured, or `cost: null` when it was not. The card text names a cost only when `spentCents` was recorded.
         Optional `channelId` selects public messages in that channel (including replies),
         before pagination. DMs are excluded even for their participants. Legacy messages
         without a channel belong to general; archived channel history remains readable.
@@ -13814,6 +13815,7 @@ paths:
         still appear in the projection). The response declares
         `auditView: activity` and `auditVersion: 1`. Omit the header for
         the complete default audit tail. Older servers may ignore it.
+        A receipt_card message in `state.messages` includes `cost`: `{spentCents, capCents, model}` when a spend was measured, or `cost: null` when it was not.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -18345,7 +18347,9 @@ components:
         resolves — the room opted in to public receipts and the claim
         projected (a server-verified merge, or a result-mode finish at its
         recorded verification tier) — and are null when it does not, so
-        the link is never dead. Summaries + blob pointers only —
+        the link is never dead. `cost` is the measured
+        `{spentCents, capCents, model}` when a spend was recorded, or null
+        when it was not — never a prose placeholder. Summaries + blob pointers only —
         full bodies stay on the work-claim read route.
       type: object
       properties:
@@ -18362,6 +18366,13 @@ components:
           items: { type: string }
         publicId: { type: [string, 'null'], description: "Public twin id (wcr_…), or null when no public projection resolves" }
         publicUrl: { type: [string, 'null'], description: "Absolute URL of the public twin, or null when none resolves" }
+        cost:
+          type: [object, 'null']
+          description: "Measured run spend, or null when no spend was recorded"
+          properties:
+            spentCents: { type: integer, minimum: 0 }
+            capCents: { type: [integer, 'null'], minimum: 0 }
+            model: { type: [string, 'null'] }
     SpendAllowanceReport:
       allOf:
         - type: object

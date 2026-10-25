@@ -23,6 +23,7 @@ import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
+import { publishedReceiptCost } from "../src/message-reducers.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
@@ -101,7 +102,8 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
     ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
       && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
-    ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
+    ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {}),
+    ...(event.data?.kind === "receipt_card" ? { cost: publishedReceiptCost(event.data.cost) } : {})
   });
   const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {
     after, limit, latest,

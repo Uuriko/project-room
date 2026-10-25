@@ -46,11 +46,20 @@ jobs:
           set -o pipefail
           node scripts/watch-deploy-drift.mjs --ref origin/main --max-prs "$MAX_PRS" --max-hours "$MAX_HOURS" --settle-ms 120000 | tee "$RUNNER_TEMP/drift.json"
           code=$?
+          revision_status="$(node -e 'const fs=require("fs"); try { process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).revision_status||"")) } catch {}' "$RUNNER_TEMP/drift.json")"
           {
             echo "## Deploy drift"
             echo
+            if [ "$revision_status" = "unknown revision" ]; then
+              echo "unknown revision"
+              echo
+            fi
             echo '```json'
             cat "$RUNNER_TEMP/drift.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$revision_status" = "unknown revision" ] && [ "$code" -eq 0 ]; then
+            echo "unknown revision" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           exit "$code"

@@ -89,6 +89,19 @@ test("signed build writes an A2A v1.0 JWS covering the served envelope", async t
   assert.equal(readFileSync(outputPath, "utf8").includes(key.privateKey), false);
 });
 
+test("no signing key with an explicit opt-in is a notice, not an error", t => {
+  const directory = mkdtempSync(join(tmpdir(), "card-build-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const logs = [];
+  const orig = console.log;
+  console.log = (...args) => logs.push(args.join(" "));
+  t.after(() => { console.log = orig; });
+  signAgentCard({ privateKey: null, card: { name: "Fixture" }, outputPath: join(directory, "signed.mjs"), allowUnsigned: true });
+  const text = logs.join("\n");
+  assert.match(text, /NOTICE: no signing key is configured/);
+  assert.doesNotMatch(text, /\bERROR\b/);
+});
+
 test("unsigned build writes AGENT_CARD_JWS_SIGNATURES = null", t => {
   const directory = mkdtempSync(join(tmpdir(), "card-build-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

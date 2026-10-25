@@ -22,6 +22,9 @@ const PERMISSION_WORDS = Object.freeze({
 const COPY_SCRIPT = 'document.getElementById("copy").addEventListener("click",function(){var input=document.getElementById("link");input.select();navigator.clipboard.writeText(input.value);});';
 const COPY_SCRIPT_HASH = createHash("sha256").update(COPY_SCRIPT).digest("base64");
 export const AGENT_CONNECT_CSP = `default-src 'none'; script-src 'sha256-${COPY_SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+// A dead invite has no script. script-src 'none' keeps the beacon host out;
+// the live invite page still allows only its copy-script hash.
+export const INVITE_NOT_FOUND_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 export function connectFields(origin = HOSTED_ORIGIN) {
   const base = String(origin || HOSTED_ORIGIN).replace(/\/$/, "");
@@ -222,7 +225,7 @@ const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="ut
 
 function unavailable(res, req, status, url) {
   if (url && !wantsMarkdown(req, url)) {
-    return finish(res, req, status, "text/html; charset=utf-8", UNAVAILABLE_HTML, { "Content-Security-Policy": AGENT_CONNECT_CSP });
+    return finish(res, req, status, "text/html; charset=utf-8", UNAVAILABLE_HTML, { "Content-Security-Policy": INVITE_NOT_FOUND_CSP });
   }
   return finish(res, req, status, "text/plain; charset=utf-8", UNAVAILABLE);
 }

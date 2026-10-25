@@ -8,10 +8,15 @@ import { prepareReplyPost, recordReplyPost } from './reply-requests.js';
 // cents or null, and a short model string or null. Anything else is dropped
 // so a malformed card never shows an invented number.
 const centsOrNull = v => (Number.isSafeInteger(v) && v >= 0 ? v : null);
-function receiptCost(cost) {
+// A receipt read carries a cost only when spentCents was measured. A missing
+// or partial record is null — never a prose stand-in, and never stored as
+// null on the event (the envelope rejects cost: null).
+export function publishedReceiptCost(cost) {
   if (!cost || typeof cost !== "object" || Array.isArray(cost)) return null;
+  const spentCents = centsOrNull(cost.spentCents);
+  if (spentCents === null) return null;
   const model = typeof cost.model === "string" && cost.model.trim() && cost.model.length <= 100 ? cost.model : null;
-  return { spentCents: centsOrNull(cost.spentCents), capCents: centsOrNull(cost.capCents), model };
+  return { spentCents, capCents: centsOrNull(cost.capCents), model };
 }
 
 export function isRedactedBody(data) {
@@ -87,7 +92,7 @@ export function createMessageReducers({ requireMember, knownMember, requireField
         deliveryMode: incoming.data.deliveryMode,
         evidence: incoming.data.evidence,
         ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {}),
-        ...(receiptCost(incoming.data.cost) ? { cost: receiptCost(incoming.data.cost) } : {})
+        cost: publishedReceiptCost(incoming.data.cost)
       } : {}),
       ...(poll ? { kind: "poll", poll } : {})
     });
