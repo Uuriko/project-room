@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { prepareHostedAssets } from './build-assets.mjs';
+import { prepareHostedAssets, requireHashedBundler } from './build-assets.mjs';
 import { edgePublicResponse, hashedAssetFile } from './edge-public.mjs';
 
 async function fixture(t) {
@@ -17,8 +17,14 @@ test('hosted build hashes entries, keeps relative chunks, and serves them immuta
   const output = await fixture(t);
   await mkdir(new URL('a/', output), { recursive: true });
   await writeFile(new URL('a/stale-aaaaaaaa.js', output), 'stale');
+  await writeFile(new URL('a/generation.json', output), JSON.stringify(['stale-aaaaaaaa.js', 'missing-bbbbbbbb.js']));
+  await writeFile(new URL('a/older-cccccccc.js', output), 'older');
   const { hashed } = await prepareHostedAssets(output);
-  assert.equal(await readFile(new URL('a/stale-aaaaaaaa.js', output), 'utf8').catch(error => error.code), 'ENOENT');
+  assert.equal(await readFile(new URL('a/stale-aaaaaaaa.js', output), 'utf8'), 'stale', 'the previous generation stays servable for one rollback');
+  assert.equal(await readFile(new URL('a/older-cccccccc.js', output), 'utf8').catch(error => error.code), 'ENOENT', 'a hash already older than the previous generation is not kept');
+  const kept = JSON.parse(await readFile(new URL('a/generation.json', output), 'utf8'));
+  assert.equal(kept.includes('stale-aaaaaaaa.js'), false);
+  assert.equal(kept.includes(hashed.map['src/entry.js'].slice(2)), true);
   const index = await readFile(new URL('index.html', output), 'utf8');
   assert.match(index, /src="\.\/a\/entry-[A-Za-z0-9._-]{8,}\.js"/);
   assert.match(index, /href="\.\/a\/styles-[a-f0-9]{10}\.css"/);
@@ -68,4 +74,12 @@ test('hosted build hashes entries, keeps relative chunks, and serves them immuta
   const absent = await edgePublicResponse(new Request(missing), counting, missing);
   assert.equal(absent.status, 404);
   assert.equal(fetches, 2);
+
+  await prepareHostedAssets(output);
+  assert.equal(await readFile(new URL('a/stale-aaaaaaaa.js', output), 'utf8').catch(error => error.code), 'ENOENT', 'only the immediately previous generation is kept');
+  assert.equal(await readFile(new URL(entry, output), 'utf8').then(text => text.length > 0).catch(() => false), true, 'the generation this build replaced is still on disk');
+});
+
+test('a missing hashed-asset bundler fails the build', () => {
+  assert.throws(() => requireHashedBundler(new URL('./missing-bundler.mjs', import.meta.url)), /Refusing to deploy unbundled assets/);
 });

@@ -46,17 +46,60 @@ export async function buildAssets(output = new URL('./public/', import.meta.url)
   return present.length;
 }
 
+const HASHED_FILE = /^[A-Za-z0-9._-]{8,128}\.(?:js|css)$/;
+
+// The files a rolled-back document still names. `a/generation.json` lists the
+// generation this output just wrote. The build keeps that list from the
+// previous run and drops anything older, so one rollback still resolves and
+// the directory does not accumulate every historical hash.
+async function previousHashedGeneration(output) {
+  const dir = new URL('a/', output);
+  let names;
+  try { names = await readdir(dir); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  let listed = null;
+  try { listed = JSON.parse(await readFile(new URL('generation.json', dir), 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const keep = Array.isArray(listed) && listed.every(name => typeof name === 'string')
+    ? listed
+    : names.filter(name => HASHED_FILE.test(name));
+  const saved = [];
+  for (const name of keep) {
+    if (!HASHED_FILE.test(name)) continue;
+    const bytes = await readFile(new URL(name, dir)).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (bytes) saved.push({ name, bytes });
+  }
+  return saved;
+}
+
+export function requireHashedBundler(bundler = new URL('./bundle-hashed-assets.mjs', import.meta.url)) {
+  if (!existsSync(fileURLToPath(bundler))) {
+    throw new Error('cloudflare/bundle-hashed-assets.mjs is missing. Refusing to deploy unbundled assets.');
+  }
+  return bundler;
+}
+
 // Deploy build only. `buildAssets` stays an exact copy: the runtime package
 // and the asset tests compare those bytes, and a stray `a/` fails checkOutput
 // on the next build. The bundler is loaded by URL, not a literal import,
 // because esbuild is a deploy tool and is not part of the exact-commit package.
+// A missing bundler fails the build. There is no unbundled fallback.
 export async function prepareHostedAssets(output = new URL('./public/', import.meta.url)) {
+  const previous = await previousHashedGeneration(output);
   await rm(new URL('a', output), { recursive: true, force: true });
   const copied = await buildAssets(output);
-  const bundler = new URL('./bundle-hashed-assets.mjs', import.meta.url);
-  if (!existsSync(fileURLToPath(bundler))) return { copied, hashed: null };
+  const bundler = requireHashedBundler();
   const { bundleHashedAssets } = await import(bundler.href);
-  return { copied, hashed: await bundleHashedAssets(output) };
+  const hashed = await bundleHashedAssets(output);
+  const dir = new URL('a/', output);
+  for (const file of previous) {
+    const dest = new URL(file.name, dir);
+    if (existsSync(fileURLToPath(dest))) continue;
+    await writeFile(dest, file.bytes);
+  }
+  const current = Object.values(hashed.map).map(path => path.slice(path.lastIndexOf('/') + 1));
+  await writeFile(new URL('generation.json', dir), JSON.stringify(current));
+  return { copied, hashed };
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

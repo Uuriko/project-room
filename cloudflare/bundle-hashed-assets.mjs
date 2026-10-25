@@ -89,7 +89,14 @@ export function rewriteAssetHtml(html, map) {
 }
 
 export async function bundleHashedAssets(output) {
-  const esbuild = await import('esbuild');
+  let esbuild;
+  try { esbuild = await import('esbuild'); }
+  catch (error) {
+    throw new Error('esbuild is required to hash hosted assets. The build does not fall back to unbundled files.', { cause: error });
+  }
+  if (typeof esbuild.build !== 'function' || typeof esbuild.transform !== 'function') {
+    throw new Error('esbuild is required to hash hosted assets. The build does not fall back to unbundled files.');
+  }
   const outdir = fileURLToPath(new URL('a/', output));
   await mkdir(outdir, { recursive: true });
   const map = new Map();
