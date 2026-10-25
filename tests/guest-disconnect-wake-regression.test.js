@@ -68,8 +68,8 @@ async function mintInvite(origin, ownerKey, label) {
   assert.ok(body.code, `mint returns a code: ${JSON.stringify(body).slice(0, 200)}`);
   return body.code;
 }
-async function redeemWithIdentity(f, origin, identity, name) {
-  const code = await mintInvite(origin, f.store.issueAccessKey("commons", "owner"), `guest ${name}`);
+async function redeemWithIdentity(f, origin, ownerKey, identity, name) {
+  const code = await mintInvite(origin, ownerKey, `guest ${name}`);
   const kp = generateKeyPair();
   const cardBody = { name, description: "live-seat regression guest", capabilities: ["chat"] };
   const card = { ...cardBody, publicKey: kp.publicKey,
@@ -79,9 +79,9 @@ async function redeemWithIdentity(f, origin, identity, name) {
   assert.ok(redeemed.member?.id, `redeem seats a member: ${JSON.stringify(redeemed).slice(0, 200)}`);
   return { identity, memberId: redeemed.member.id, token: redeemed.token, credential: redeemed.credential ?? redeemed.token };
 }
-async function seatGuest(f, origin, name) {
+async function seatGuest(f, origin, ownerKey, name) {
   const identity = f.store.identities.create(name);
-  return redeemWithIdentity(f, origin, identity, name);
+  return redeemWithIdentity(f, origin, ownerKey, identity, name);
 }
 const deliveriesFor = (f, identityId) => f.store.db.prepare(
   "SELECT delivery_id AS id FROM agent_webhook_deliveries WHERE agent_id=? AND event_type='message.posted'")
@@ -319,7 +319,7 @@ async function seatedSubscribedGuest(t, name) {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  const guest = await seatGuest(f, origin, name);
+  const guest = await seatGuest(f, origin, ownerKey, name);
   f.store.agentPlugin.subscribeWebhook({
     identityId: guest.identity.identityId, url: `https://${name}.example.test/hook`, events: ["message.posted"],
   });
@@ -396,7 +396,7 @@ test("regression S1×T2a+T6: a held row delivers after the seat is re-seated by 
     fetchImpl: async () => ok200(), now: Date.now() + 1000, dnsResolvers: publicDns,
   });
   assert.equal(quiet.processed, 0, "nothing drains while the seat is down");
-  const reseated = await redeemWithIdentity(f, origin, guest.identity, "RegT6");
+  const reseated = await redeemWithIdentity(f, origin, ownerKey, guest.identity, "RegT6");
   assert.equal(reseated.memberId, guest.memberId, "the fresh redeem reactivates the same seat");
   const posted = [];
   const summary = await f.store.agentPlugin.drainWebhookDeliveries({
@@ -415,9 +415,8 @@ test("regression S2×T1 + S3×T1: disconnect removes the seat from the room rost
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  const subject = await seatGuest(f, origin, "RegS2Subject");
-  const reader = await seatGuest(f, origin, "RegS2Reader");
-  void ownerKey;
+  const subject = await seatGuest(f, origin, ownerKey, "RegS2Subject");
+  const reader = await seatGuest(f, origin, ownerKey, "RegS2Reader");
   const beat = g => post(origin, "/api/agent-heartbeats", { hostId: `h-${g.memberId}` }, g.identity.secret);
   assert.equal((await beat(subject)).status, 200);
   const roster = async () => (await (await get(origin, "/api/wake-status?roomId=commons", reader.identity.secret)).json());
@@ -426,7 +425,7 @@ test("regression S2×T1 + S3×T1: disconnect removes the seat from the room rost
   const ownRead = await get(origin, "/api/wake-status?roomId=commons", subject.identity.secret);
   assert.equal(ownRead.status, 200, "the gate admits a live guest member");
 
-  f.store.guestInvites.disconnect(f.store.issueAccessKey("commons", "owner"), "commons", subject.memberId);
+  f.store.guestInvites.disconnect(ownerKey, "commons", subject.memberId);
   assert.ok(!JSON.stringify(await roster()).includes(subject.identity.identityId),
     "after disconnect the seat is in neither roster list, heartbeat notwithstanding");
   const closed = await get(origin, "/api/wake-status?roomId=commons", subject.identity.secret);
@@ -442,8 +441,9 @@ test("regression S2×T1 + S3×T1: disconnect removes the seat from the room rost
 test("regression S2×T3: expiry unswept removes the seat from the room roster", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
-  const subject = await seatGuest(f, origin, "RegS2Expiry");
-  const reader = await seatGuest(f, origin, "RegS2ExpiryReader");
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const subject = await seatGuest(f, origin, ownerKey, "RegS2Expiry");
+  const reader = await seatGuest(f, origin, ownerKey, "RegS2ExpiryReader");
   await post(origin, "/api/agent-heartbeats", { hostId: "h-expiry" }, subject.identity.secret);
   const rosterText = async () => JSON.stringify(
     await (await get(origin, "/api/wake-status?roomId=commons", reader.identity.secret)).json());
@@ -457,7 +457,7 @@ test("regression S5×T1 (D-3 accepted-as-signal): the wake ping still journals f
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  const guest = await seatGuest(f, origin, "RegS5");
+  const guest = await seatGuest(f, origin, ownerKey, "RegS5");
   f.store.agentPlugin.subscribeWebhook({
     identityId: guest.identity.identityId, url: "https://regs5.example.test/hook", events: ["agent.wake"],
   });
@@ -481,7 +481,7 @@ test("regression S5×T1 (D-3 accepted-as-signal): the wake ping still journals f
 test("regression S4×T3: an expired-unswept guest's page, ask intake, and poll all 404", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { publicAgentPages: true });
-  const guest = await seatGuest(f, origin, "RegS4");
+  const guest = await seatGuest(f, origin, f.store.issueAccessKey("commons", "owner"), "RegS4");
   f.store.db.prepare(`INSERT INTO agent_public_pages(room_id, member_id, slug, access, blurb, enabled, created_at, updated_at)
     VALUES ('commons', ?, 'reg-s4', 'open', 'regression page', 1, 1, 1)`).run(guest.memberId);
   const card = await get(origin, "/api/public/agents/reg-s4");
@@ -506,7 +506,7 @@ test("§5.6.3 needs-me: a DM summary served while live disappears when the seat'
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  const guest = await seatGuest(f, origin, "RegNeedsMe");
+  const guest = await seatGuest(f, origin, ownerKey, "RegNeedsMe");
   const marker = `dm-marker-${randomUUID()}`;
   postRoom(f, ownerKey, "nm-1", marker, { toMemberId: guest.memberId });
   const live = JSON.stringify(collectNeedsMe(f.store, guest.identity.secret));
@@ -520,10 +520,11 @@ test("§5.6.3 needs-me: a DM summary served while live disappears when the seat'
 test("§5.6.4 agentPresence: target seats and caller standing are both judged by the predicate", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
-  const guestTarget = await seatGuest(f, origin, "RegPresenceTarget");
-  const guestCaller = await seatGuest(f, origin, "RegPresenceCaller");
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const guestTarget = await seatGuest(f, origin, ownerKey, "RegPresenceTarget");
+  const guestCaller = await seatGuest(f, origin, ownerKey, "RegPresenceCaller");
   const linked = f.store.identities.create("RegPresenceLinked");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: linked.identityId, displayName: "RegPresenceLinked", permissions: [] });
+  f.store.identities.link(ownerKey, "commons", { identityId: linked.identityId, displayName: "RegPresenceLinked", permissions: [] });
   await post(origin, "/api/agent-heartbeats", { hostId: "h-presence" }, guestTarget.identity.secret);
   const roomsOf = res => (res?.rooms ?? []).map(r => r.roomId);
   assert.ok(roomsOf(f.store.agentPresence({ identityId: guestCaller.identity.identityId }, guestTarget.identity.identityId)).includes("commons"),
@@ -541,7 +542,7 @@ test("§5.6.4 agentPresence: target seats and caller standing are both judged by
 test("§5.6.6 agent-rooms: a dead guest seat's room leaves the identity's room list", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
-  const guest = await seatGuest(f, origin, "RegRooms");
+  const guest = await seatGuest(f, origin, f.store.issueAccessKey("commons", "owner"), "RegRooms");
   const rooms = new AgentRooms(f.store);
   const listed = await rooms.list(guest.identity.secret);
   assert.ok(JSON.stringify(listed).includes("commons"), "the live guest sees its room");
