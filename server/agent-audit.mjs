@@ -1,8 +1,13 @@
+import { ownMember } from "../src/events.js";
+
 // Read model over the room event log (and the receipt rows that wrap those
 // events). One actor's actions, newest first: time, action, target, result.
-// Message text is never copied. The owner and the agent can read; anyone
-// else gets a 403 with one next step. No store and no route: a denial is a
-// value, not an HTTP error, until the route lands.
+// Message text is never copied. The agent can read their own page. Anyone
+// else can read it only when state.room.ownerId is their member id. A
+// caller-supplied owner flag is not authority. An action in a DM, or in a
+// private channel, drops every target id unless that owner is a party or a
+// channel member. No store and no route: a denial is a value, not an HTTP
+// error, until the route lands.
 
 export const AGENT_AUDIT_DEFAULT_LIMIT = 50;
 export const AGENT_AUDIT_MAX_LIMIT = 1000;
@@ -14,6 +19,10 @@ const MESSAGE_RESULT = Object.freeze({
   "message.redacted": "redacted",
   "dm.posted": "posted",
 });
+const DM_FOLLOW_UP = new Set([
+  "message.edited", "message.deleted", "message.redacted",
+  "poll.voted", "message.pinned", "message.unpinned",
+]);
 const TARGET_KEYS = Object.freeze([
   "workItemId", "claimId", "messageId", "memberId", "identityId", "inviteId", "targetId", "channelId",
 ]);
@@ -41,18 +50,33 @@ function denial(status, code, message, hint, command) {
   });
 }
 
-function isPrivateRoom(room) {
-  if (!room || typeof room !== "object") return false;
-  if (room.private === true) return true;
-  return room.visibility === "private";
+function stringId(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function viewerMayRead(viewer, memberId) {
-  if (!viewer || typeof viewer !== "object" || typeof viewer.memberId !== "string" || viewer.memberId.length === 0) return false;
+function partyList(...values) {
+  const ids = [];
+  for (const value of values) {
+    const id = stringId(value);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+// Owner is whoever the room projection names. viewer.isOwner and
+// viewer.ownerId are ignored, including when they match the caller.
+function viewerMayRead(viewer, memberId, state) {
+  if (!stringId(viewer?.memberId)) return false;
   if (viewer.memberId === memberId) return true;
-  if (viewer.isOwner === true) return true;
-  if (typeof viewer.ownerId === "string" && viewer.ownerId.length > 0 && viewer.ownerId === viewer.memberId) return true;
-  return false;
+  const ownerId = stringId(state?.room?.ownerId);
+  return ownerId !== null && ownerId === viewer.memberId;
+}
+
+function ownerMatches(ownerId, ids, state) {
+  if (!ownerId || ids.length === 0) return false;
+  if (ids.includes(ownerId)) return true;
+  const identityId = stringId(ownMember(state?.members, ownerId)?.identityId);
+  return identityId !== null && ids.includes(identityId);
 }
 
 function pick(data, keys, pattern) {
@@ -64,23 +88,102 @@ function pick(data, keys, pattern) {
   return null;
 }
 
-function projectAction(event, privateRoom) {
+// DMs the projection (or this same event list) already knows. Follow-up
+// events do not repeat toMemberId, so the parties have to be looked up.
+function dmPartyIndex(events, messages) {
+  const parties = new Map();
+  if (Array.isArray(messages)) {
+    for (const message of messages) {
+      const id = stringId(message?.id);
+      const to = stringId(message?.toMemberId);
+      if (id && to) parties.set(id, partyList(message.authorId, to));
+    }
+  }
+  if (!Array.isArray(events)) return parties;
+  for (let index = 0; index < events.length; index += 1) {
+    const row = unwrap(events[index], index);
+    const event = row?.event;
+    if (!event || event.type !== "message.posted") continue;
+    const to = stringId(event.data?.toMemberId);
+    if (!to) continue;
+    const id = stringId(event.data?.messageId) || stringId(event.id);
+    if (id && !parties.has(id)) parties.set(id, partyList(event.actorId, to));
+  }
+  return parties;
+}
+
+function messageIndex(messages) {
+  const byId = new Map();
+  if (!Array.isArray(messages)) return byId;
+  for (const message of messages) {
+    if (stringId(message?.id)) byId.set(message.id, message);
+  }
+  return byId;
+}
+
+function dmOwnerIsOut(event, ownerId, state, parties) {
+  const data = event.data && typeof event.data === "object" && !Array.isArray(event.data) ? event.data : {};
+  if (event.type === "dm.posted") {
+    return !ownerMatches(ownerId, partyList(data.fromIdentityId, data.toIdentityId, data.to, data.toMemberId, event.actorId), state);
+  }
+  if (event.type === "dm.consent_changed") {
+    return !ownerMatches(ownerId, partyList(data.requesterId, data.targetId), state);
+  }
+  if (event.type === "message.posted" && stringId(data.toMemberId)) {
+    return !ownerMatches(ownerId, partyList(event.actorId, data.toMemberId), state);
+  }
+  if (DM_FOLLOW_UP.has(event.type)) {
+    const known = parties.get(stringId(data.messageId));
+    if (known) return !ownerMatches(ownerId, known, state);
+  }
+  return false;
+}
+
+function channelMemberIds(channel) {
+  if (Array.isArray(channel.memberIds)) return channel.memberIds.filter(id => stringId(id));
+  if (channel.members && typeof channel.members === "object") return Object.keys(channel.members).filter(id => stringId(id));
+  return [];
+}
+
+function channelIsPrivate(channel) {
+  return channel.private === true || channel.visibility === "private";
+}
+
+function channelFor(event, state, messages) {
+  const channels = state?.channels;
+  if (!channels || typeof channels !== "object") return null;
+  const direct = stringId(event.data?.channelId);
+  if (direct && channels[direct] && typeof channels[direct] === "object") return channels[direct];
+  const message = messages.get(stringId(event.data?.messageId));
+  const fromMessage = stringId(message?.channelId);
+  if (fromMessage && channels[fromMessage] && typeof channels[fromMessage] === "object") return channels[fromMessage];
+  return null;
+}
+
+function privateChannelOwnerIsOut(event, ownerId, state, messages) {
+  const channel = channelFor(event, state, messages);
+  if (!channel || !channelIsPrivate(channel)) return false;
+  return !ownerMatches(ownerId, channelMemberIds(channel), state);
+}
+
+function projectAction(event, omitTarget) {
   const data = event.data;
   const messageResult = MESSAGE_RESULT[event.type];
+  const target = omitTarget ? null : pick(data, TARGET_KEYS, ID_TOKEN);
   if (messageResult) {
     return Object.freeze({
       time: typeof event.at === "string" ? event.at : null,
       action: event.type,
-      // A private room row does not carry the message id. The text stays out
-      // either way: body, text, and note are not target or result fields.
-      target: privateRoom ? null : pick(data, TARGET_KEYS, ID_TOKEN),
+      // Body, text, and note are not target or result fields, so the text
+      // stays out. omitTarget also drops message, channel, and member ids.
+      target,
       result: messageResult,
     });
   }
   return Object.freeze({
     time: typeof event.at === "string" ? event.at : null,
     action: event.type,
-    target: pick(data, TARGET_KEYS, ID_TOKEN),
+    target,
     result: pick(data, RESULT_KEYS, RESULT_TOKEN),
   });
 }
@@ -133,8 +236,8 @@ function olderThan(row, cursor) {
   return row.id < cursor.id;
 }
 
-export function readAgentAudit({ viewer, memberId, events, cursor = null, limit = AGENT_AUDIT_DEFAULT_LIMIT, room = null } = {}) {
-  if (!viewerMayRead(viewer, memberId)) {
+export function readAgentAudit({ viewer, memberId, events, cursor = null, limit = AGENT_AUDIT_DEFAULT_LIMIT, state = null } = {}) {
+  if (!viewerMayRead(viewer, memberId, state)) {
     return denial(403, "agent_audit_forbidden", "Only the room owner or this agent can read this audit.",
       "Ask the room owner to open this audit.",
       "Ask the room owner to open this agent's audit.");
@@ -156,7 +259,9 @@ export function readAgentAudit({ viewer, memberId, events, cursor = null, limit 
   }
   const position = decodeCursor(cursor);
   if (position && position.ok === false) return position;
-  const privateRoom = isPrivateRoom(room);
+  const ownerId = stringId(state?.room?.ownerId);
+  const parties = dmPartyIndex(events, state?.messages);
+  const messages = messageIndex(state?.messages);
   const rows = [];
   for (let index = 0; index < events.length; index += 1) {
     const row = unwrap(events[index], index);
@@ -170,7 +275,8 @@ export function readAgentAudit({ viewer, memberId, events, cursor = null, limit 
   return Object.freeze({
     ok: true,
     memberId,
-    actions: Object.freeze(page.map(row => projectAction(row.event, privateRoom))),
+    actions: Object.freeze(page.map(row => projectAction(row.event,
+      dmOwnerIsOut(row.event, ownerId, state, parties) || privateChannelOwnerIsOut(row.event, ownerId, state, messages)))),
     nextCursor,
   });
 }
