@@ -858,8 +858,17 @@ export function publicReceiptById(store, id) {
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
     try {
-      const j = store.db.prepare("SELECT lot_id, amount, lot_state FROM bounty_journal WHERE receipt_id=? LIMIT 1").get(id);
-      if (j && j.lot_id) {
+      const j = store.db.prepare("SELECT lot_id, amount, lot_state, room_id FROM bounty_journal WHERE receipt_id=? ORDER BY seq LIMIT 1").get(id);
+      // F-2: the cross-reference discloses the lot id, the settled
+      // amount, and the lot state, so it may only be attached when the
+      // lot itself is public under the one lot gate (lotReceiptVisible:
+      // operator unpublish, the room's recorded opt-in, and the owner's
+      // directory toggle). The gate is consumed as-is here; its
+      // internals are owned by the LOT-AUTH chain and are not read or
+      // reimplemented at this call site. The gate's room is the first
+      // journal entry's room — the lot's own room, not the work
+      // receipt's — and a missing room fails the gate closed.
+      if (j && j.lot_id && lotReceiptVisible(store.db, { id: j.lot_id, roomId: j.room_id })) {
         pub.lotId = j.lot_id;
         pub.settlement = {
           lotId: j.lot_id,
