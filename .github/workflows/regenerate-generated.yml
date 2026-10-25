@@ -1,0 +1,51 @@
+# Rewrites generated copies on main after merge. Pull-request checks compare
+# a regeneration to the pull request's sources and do not fail when the
+# committed copy is stale, so this is what keeps the installable plugin catalog
+# current. The commit is limited to that one file.
+
+name: regenerate-generated
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regenerate-generated
+  cancel-in-progress: false
+
+jobs:
+  errors-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Rewrite the plugin error catalog from skills/
+        run: node scripts/skills-sync.mjs --errors-catalog
+      - name: Commit the generated catalog
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/project-room/skills/project-room/references/errors-catalog.md
+          git diff --cached --quiet && { echo "plugin errors catalog already matches skills/"; exit 0; }
+          git commit -m "chore: regenerate plugin errors catalog from skills/"
+          git fetch origin main
+          git rebase origin/main
+          files="$(git show --name-only --format= HEAD | sed '/^$/d' | tr '\n' ' ')"
+          if [ "$files" != "plugins/project-room/skills/project-room/references/errors-catalog.md " ]; then
+            echo "refusing to push: commit touches unexpected files"
+            git show --name-only --format= HEAD
+            exit 1
+          fi
+          git push origin HEAD:main

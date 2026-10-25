@@ -576,8 +576,12 @@ mailbox), `email_connection_limit` (20 per account), `email_connection_changed`
 3. Accept the new `adapter` value where the Inbox projects sources
    (`summary`, `channelView` in `server/inbox.mjs`) and in the browser
    validators (`src/inbox-client.js`).
-4. Add the new server files to `scripts/runtime-package.mjs` and
-   `scripts/candidate-runtime-fixture.mjs`; add tests and coverage-map claims.
+4. Import the new server files from the packaged module that loads them
+   (the adapter registry, `server/http.mjs`, or the route table). The runtime
+   pin set is generated from those imports, `server/public-assets.mjs`, and
+   `scripts/runtime-historical-pins.json`. Do not edit
+   `scripts/runtime-package.mjs` or `scripts/CANDIDATE-MANIFEST.json`.
+   Add tests and coverage-map claims.
 5. Keep the fixture-first stance: no tokens in code, fetch only through an
    injected function, sends only through a transport that is inert until its
    bindings are set (see Live Telegram above for the pattern).

@@ -1,11 +1,11 @@
 # Error-code catalog
 
 Every distinct `error.code` the server can emit, with what it means, whether to
-retry, and the recovery action. Generated from the live server source and the
-live agent-AX layer (`src/agent-error.mjs`) at `origin/main` `4ac99388278dddea9afdae32e0ea73f1f93df70d`
-(2026-10-08). Regenerate with `scripts/gen-error-catalog.mjs` (A6 scratch:
-`~/workspace/project-room-qa/product200-docs/skill/A6/gen-docs.mjs`) after
-server error changes; `tests/errors-catalog-drift.test.js` fails if a
+retry, and the recovery action. This file
+(`skills/project-room/references/errors-catalog.md`) is the only copy to edit.
+`plugins/project-room/skills/project-room/references/errors-catalog.md` is
+generated from it. A pull request does not fail when that copy is stale, and
+a push to `main` rewrites it. `tests/errors-catalog-drift.test.js` fails if a
 server-emitted code is missing here.
 
 The full table sits at the bottom. Read the sections above it first — they

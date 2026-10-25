@@ -4,11 +4,13 @@
 // match skills/ exactly, the manifest names line up, and the plugin MCP points
 // at the hosted Room MCP with an optional bearer.
 // If this fails after a skill edit, run: node scripts/skills-sync.mjs
+// errors-catalog.md is generated from skills/; a stale plugin copy is not a failure.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { GENERATED_SKILL_COPIES, errorsCatalogDrift } from "../scripts/skills-sync.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const plugin = join(root, "plugins", "project-room");
@@ -22,8 +24,12 @@ test("plugin skill copies match skills/", () => {
     const source = join(root, "skills", skill), copy = join(plugin, "skills", skill);
     const list = dir => files(dir).map(f => relative(dir, f)).sort();
     assert.deepEqual(list(copy), list(source), `${skill} file list`);
-    for (const file of list(source)) assert.equal(readFileSync(join(copy, file), "utf8"), readFileSync(join(source, file), "utf8"), `${skill}/${file} is stale`);
+    for (const file of list(source)) {
+      if (GENERATED_SKILL_COPIES.has(`${skill}/${file}`)) continue;
+      assert.equal(readFileSync(join(copy, file), "utf8"), readFileSync(join(source, file), "utf8"), `${skill}/${file} is stale`);
+    }
   }
+  assert.deepEqual(errorsCatalogDrift(root), []);
 });
 
 test("marketplace, plugin and MCP manifests line up", () => {

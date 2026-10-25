@@ -241,10 +241,17 @@ jobs:
       - name: Record exact live versions and code schemas before upload
         id: pre
         run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
+      - name: Record the candidate manifest for this deploy
+        run: node scripts/candidate-manifest.mjs --record "$RUNNER_TEMP/candidate-manifest-record.json" --commit "$SHA"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
           path: ${{ runner.temp }}/pre-deploy.json
+          retention-days: 90
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-manifest-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/candidate-manifest-record.json
           retention-days: 90
       - name: Deploy canonical Worker (project-room)
         id: prod
@@ -365,6 +372,9 @@ jobs:
               let pre = null, report = null;
               try { pre = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/pre-deploy.json`, "utf8")); } catch {}
               try { report = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/deploy-recovery.json`, "utf8")); } catch {}
+              let record = null;
+              try { record = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/candidate-manifest-record.json`, "utf8")); } catch {}
+              console.log(`Candidate manifest: ${record?.manifestSha256 ?? "not recorded"} for ${record?.sourceCommit ?? "unknown"}`);
               console.log(`Code schemas: candidate ${pre?.candidateCodeSchemaVersion ?? "unknown"}; prod previous ${pre?.prod?.codeSchemaVersion ?? "unknown"}; entry previous ${pre?.entry?.codeSchemaVersion ?? "unknown"}`);
               console.log(recoveryDescription(report));
               console.log("Schema floor is necessary, not proof of same-schema row/runtime compatibility. Schema migrations are not reversed.");
@@ -403,6 +413,7 @@ jobs:
           OUT="$RUNNER_TEMP/project-room-runtime"
           node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
           node scripts/runtime-package.mjs verify "$OUT" "$SHA"
+          node scripts/candidate-manifest.mjs --record "$RUNNER_TEMP/candidate-manifest-record.json" --commit "$SHA"
           tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
       - name: Publish the runtime release
         env:
@@ -418,10 +429,12 @@ jobs:
             echo "Release ${TAG} already exists; marked latest."
             exit 0
           fi
+          MANIFEST_SHA="$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const record = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/candidate-manifest-record.json", "utf8")); if (record.sourceCommit !== process.env.SHA) { console.error("candidate manifest commit does not match the deploy sha"); process.exit(1); } process.stdout.write(record.manifestSha256);')"
           gh release create "$TAG" \
             "$RUNNER_TEMP/project-room-runtime.tar.gz#project-room-runtime.tar.gz" \
+            "$RUNNER_TEMP/candidate-manifest-record.json#candidate-manifest-record.json" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG" \
             --latest \
-            --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."
+            --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+. Candidate manifest ${MANIFEST_SHA}."
