@@ -159,6 +159,20 @@ export function assetCachePolicy(type) {
   return null;
 }
 const assetEtags = new WeakMap();
+// The packaged front door keeps the GitHub anchor. The served copy without it
+// is built once for the cached source bytes, and its etag is hashed then.
+// A fresh buffer on every request would miss this cache.
+const strippedFrontDoor = new WeakMap();
+async function frontDoorBody(bytes, githubConfigured) {
+  if (githubConfigured) return bytes;
+  let stripped = strippedFrontDoor.get(bytes);
+  if (!stripped) {
+    stripped = new TextEncoder().encode(frontDoorHtml(bytes, { githubConfigured: false }));
+    strippedFrontDoor.set(bytes, stripped);
+    await assetEtag(stripped);
+  }
+  return stripped;
+}
 async function assetEtag(bytes) {
   let etag = assetEtags.get(bytes);
   if (!etag) {
@@ -276,9 +290,7 @@ async function assetResponse(request, env, url) {
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
   const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
-  const bodyBytes = file === 'index.html' && !githubConfigured
-    ? new TextEncoder().encode(frontDoorHtml(bytes, { githubConfigured: false }))
-    : bytes;
+  const bodyBytes = file === 'index.html' ? await frontDoorBody(bytes, githubConfigured) : bytes;
   headers.set('Content-Type', contentType);
   // Static assets were no-store, so every visit re-downloaded the ~1.9 MB app
   // shell (app.js, styles, emoji catalog). Binary images and fonts get the
