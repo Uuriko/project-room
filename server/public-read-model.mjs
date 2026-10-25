@@ -7,6 +7,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { RECEIPT_TYPE_BY_SHORT } from "./bounty-receipts.mjs";
 import {
   OPERATOR_HIDDEN_RECEIPT_SQL,
   ownerHiddenReceiptSql,
@@ -1116,6 +1117,7 @@ export function publicLotReceiptById(store, id) {
       })),
       entries: entries.map(entry => entry.entry_id),
       signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
+      signedReceiptLinks: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))].map(id => ({ receiptId: id, type: RECEIPT_TYPE_BY_SHORT[id.split(":")[1]] ?? null, href: `/receipts/signed/${id}` })),
       workReceiptId: entries.map(entry => entry.receipt_id).find(id => typeof id === "string" && id.startsWith("pwr_")) ?? null,
       journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
       prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,

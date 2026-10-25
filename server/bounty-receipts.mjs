@@ -44,6 +44,12 @@ export const RECEIPT_TYPES = Object.freeze({
   "refund-issued": "rf",   // timeout / dispute-cancel / split: award -> poster payable
 });
 
+// The inverse map: receiptId short -> type. A receiptId embeds its type
+// short, so projections can name the type of a signed receipt from the
+// ID alone, without resolving (or serving) the body.
+export const RECEIPT_TYPE_BY_SHORT = Object.freeze(Object.fromEntries(
+  Object.entries(RECEIPT_TYPES).map(([type, short]) => [short, type])));
+
 class ReceiptError extends Error {
   constructor(code, message) { super(message); this.name = "ReceiptError"; this.code = code; }
 }
