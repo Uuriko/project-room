@@ -36,10 +36,10 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
-// A recorded failure retries after this cap instead of the job's full
-// cadence. It matches the alarm retry so a one-second node loop cannot
-// spin, and it is shorter than the safety-net cron, so the next cron
-// tick always finds the job due.
+// First retry of a failed cadence job. Later failures double this wait,
+// and the wait never grows past the job's own cadence. See
+// failedJobRetryDelayMs. The floor matches the alarm retry so a
+// one-second node loop cannot spin on the first failure.
 export const JOB_RETRY_LEASE_MS = ALARM_RETRY_MS;
 // Slow jobs ride the */30 safety-net cron, whose phase can land a few
 // seconds before the job's own anchor. Without slack the job waits a
@@ -718,21 +718,36 @@ export function jobNextDue(job, store, now, lastRanAt) {
   return last + job.cadenceMs;
 }
 
-export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs, failed = false) {
+// How long a cadence job waits after `consecutiveFailures` recorded
+// failures. Null means it is not in the failure retry. The delay is
+// min(cadence, lease * 2^(consecutiveFailures-1)): one failure retries
+// after a single lease, each further failure doubles that, and a job
+// that keeps failing returns to its normal cadence instead of waking
+// every lease. Queue-timed jobs do not use this; they keep nextDueAt.
+export function failedJobRetryDelayMs(cadenceMs, consecutiveFailures) {
+  const failures = Math.floor(Number(consecutiveFailures));
+  if (!Number.isFinite(failures) || failures < 1) return null;
+  const span = Number.isFinite(cadenceMs) ? Math.max(0, cadenceMs) : 0;
+  if (span === 0) return 0;
+  const exponent = failures - 1;
+  // 2^31 minutes is far past any cadence. A long streak (integrity has
+  // failed for weeks) must compare as the cadence, not as Infinity.
+  if (exponent >= 31) return span;
+  const grown = JOB_RETRY_LEASE_MS * (2 ** exponent);
+  return grown >= span ? span : grown;
+}
+
+export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs, consecutiveFailures = 0) {
   if (typeof job.nextDueAt === "function") {
     const next = jobNextDue(job, store, now, lastRanAt);
     return next != null && next <= now;
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
-  // A recorded failure retries after the capped lease. Queue-timed jobs
-  // keep their own nextDueAt schedule above, and a success still waits
-  // the full cadence (with slack for slow jobs).
-  if (failed === true) {
-    const span = Number.isFinite(cadenceMs) ? Math.max(0, cadenceMs) : 0;
-    return last + Math.min(span, JOB_RETRY_LEASE_MS) <= now;
-  }
+  const retryDelay = failedJobRetryDelayMs(cadenceMs, consecutiveFailures);
+  if (retryDelay != null) return last + retryDelay <= now;
   // Only slow jobs get slack: they run from the safety-net cron, so a tick
   // landing a few seconds before the anchor would otherwise skip a period.
+  // Failure retries do not use slack; their delay is the formula above.
   const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
   return last + cadenceMs - slack <= now;
 }
@@ -906,8 +921,8 @@ export function startNodeScheduler({
         if (job.name === "channel-drain" && !channelEnabled) continue;
         if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
-        const failedBefore = (records.get(job.name)?.consecutiveFailures ?? 0) > 0;
-        if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs, failedBefore)) continue;
+        const consecutiveFailures = records.get(job.name)?.consecutiveFailures ?? 0;
+        if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs, consecutiveFailures)) continue;
         // #3767: the budget window opens at this job's own start, not at
         // the pass start — the Worker builds each runner's deadline when
         // the job runs. A pass-relative deadline let early jobs burn the

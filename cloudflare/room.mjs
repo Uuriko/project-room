@@ -531,8 +531,8 @@ export class ProjectRoom extends DurableObject {
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
       if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
-      const failedBefore = (stored?.[job.name]?.consecutiveFailures ?? 0) > 0;
-      return jobIsDue(job, this.store, now, lastRan[job.name], job.cadenceMs, failedBefore);
+      const consecutiveFailures = stored?.[job.name]?.consecutiveFailures ?? 0;
+      return jobIsDue(job, this.store, now, lastRan[job.name], job.cadenceMs, consecutiveFailures);
     });
     const outcomes = [];
     for (const job of selected) {
