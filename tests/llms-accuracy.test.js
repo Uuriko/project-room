@@ -23,7 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  llmsTxt, llmsFullTxt, kitsTxt, agentCard,
+  llmsTxt, llmsFullTxt, kitsTxt, agentCard, skillMd,
   ROOM_ORIGIN, ROOM_PUBLIC_WWW,
 } from "../server/agent-discovery.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -173,26 +173,56 @@ test("Routes compact core set names the same tools as the 18-tool paragraph", ()
   }
 });
 test("wake-poll sentence states the three-case hostId contract (#3640)", () => {
-  // Ported from superseded PR #4082 (its llms-accuracy.test.js pin) into
-  // carrier PR #3730; the asserted substrings are adapted to #3730's
-  // WAKE_POLL_INSTRUCTION wording, which states the same three cases.
-  // The packet's one WAKE_POLL_INSTRUCTION sentence taught the
-  // pre-derivation contract ("Polling without `hostId` returns 422")
-  // after hostId derivation landed, misstating the common single-host
-  // cold start. The server (pollWakes, server/agent-plugin-routes.mjs)
-  // derives an omitted hostId from exactly one registered host: 404
-  // agent_not_registered with none, a successful poll with one, 422
-  // invalid_wake_poll with several; docs/openapi.yaml states the same
-  // contract. tests/agent-wake-poll.test.js pins the behaviour; this
-  // pins the packet sentence so the prose cannot drift back.
+  // The packet sentence taught the pre-derivation contract ("Polling without
+  // hostId returns 422") after host derivation landed. pollWakes derives an
+  // omitted hostId from exactly one registered host: 404 with none, a
+  // successful poll with one, 422 with several. Every packet that mentions
+  // the poll must state those three cases. The short index may omit the poll.
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     assert.ok(!packet.includes("Polling without `hostId` returns 422"),
       `${label} must not teach the pre-derivation wake-poll contract`);
+    if (!packet.includes("agent-wakes/poll")) continue;
     assert.ok(packet.includes("polling before any heartbeat returns 404 `agent_not_registered`"),
       `${label} wake-poll sentence must state the no-host 404 case`);
     assert.ok(packet.includes("Omitting `hostId` is fine with exactly one registered host"),
       `${label} wake-poll sentence must state the one-host derivation case`);
     assert.ok(packet.includes("with several registered hosts, omitting `hostId` returns 422 `invalid_wake_poll`"),
       `${label} wake-poll sentence must state the several-hosts 422 case`);
+  }
+});
+
+test("llms-full.txt is a superset of llms.txt (#3706)", () => {
+  const shortPacket = llmsTxt();
+  const fullPacket = llmsFullTxt();
+  const headingsOf = (text) => [...text.matchAll(/^## .+$/gm)].map((m) => m[0]);
+  const fullHeadings = new Set(headingsOf(fullPacket));
+  const missing = headingsOf(shortPacket).filter((h) => !fullHeadings.has(h));
+  assert.deepEqual(missing, [],
+    "llms-full.txt must contain every ## heading of llms.txt, missing: " + missing.join(", "));
+  assert.ok(Buffer.byteLength(fullPacket) >= Buffer.byteLength(shortPacket),
+    "llms-full.txt (" + Buffer.byteLength(fullPacket) + " B) must not be smaller than llms.txt ("
+      + Buffer.byteLength(shortPacket) + " B)");
+});
+
+test("packet payment and board claims stay accurate (#3701, #3720, #3722, #3460)", () => {
+  const skill = skillMd();
+  for (const banned of ["get paid", "start earning"]) {
+    assert.ok(!skill.includes(banned), "SKILL.md must not promise \"" + banned + "\"");
+  }
+  assert.ok(skill.includes("no real-value payout path exists yet"),
+    "SKILL.md must state the payment-honesty wording");
+  // The board encyclopedia lives in the full packet. The short index must
+  // not teach the old claim shape if it mentions the route.
+  const full = llmsFullTxt();
+  assert.ok(full.includes("a JSON object body is required"),
+    "llms-full.txt must state that board claim/renew require a JSON object body");
+  assert.ok(full.includes("`done` is reachable only from `in_progress`"),
+    "llms-full.txt must state the claimed -> in_progress -> done ordering");
+  assert.ok(full.includes("2-hour lease is already ticking"),
+    "llms-full.txt must name the starter claim and its ticking 2h lease");
+  const short = llmsTxt();
+  if (short.includes("/work-claims/{claimId}/claim")) {
+    assert.ok(short.includes("a JSON object body is required"));
+    assert.ok(short.includes("`done` is reachable only from `in_progress`"));
   }
 });
