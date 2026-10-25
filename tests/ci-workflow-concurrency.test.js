@@ -264,7 +264,7 @@ test("heavy pull-request jobs wait for ready-to-land", () => {
   expectsLabel("pr-gates.yml", "gates", String(gates.jobs.gates.if));
   assert.equal(String(gates.jobs["quarantined-tests"].if).includes("ready-to-land"), false);
 
-  for (const file of ["pin-gate.yml", "review-mechanical.yml"]) {
+  for (const file of ["pin-gate.yml", "review-mechanical.yml", "safety-net.yml"]) {
     const text = readFileSync(join(WORKFLOWS, file), "utf8");
     const wf = parse(text);
     assert.equal(text.includes("ready-to-land"), false, `${file} stays on every pull-request push`);

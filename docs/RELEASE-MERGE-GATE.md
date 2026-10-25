@@ -22,6 +22,8 @@ github.event_name != 'pull_request' || (github.event.pull_request.draft == false
 
 On a non-draft pull request that has `ready-to-land`, these check names still report from `.github/workflows/test.yml`: `test`, `contract`, `lint`, `browser`, `cloudflare`. The job id is the check name. A docs-only diff still runs those jobs and short-circuits them to success, so the names report. An unlabeled pull request does not start them.
 
+`safety-net` reports from `.github/workflows/safety-net.yml` on every pull request, including drafts and pull requests without `ready-to-land`. The merge queue waits on it with the five checks above.
+
 `room/release-lease` is a commit status from the landing coordinator. It is not a job in these workflows.
 
 ## What runs on every pull-request push
@@ -30,6 +32,7 @@ These stay ungated. They do not look at `ready-to-land` and they run on drafts:
 
 - `pin-gate.yml` (still limited to workflow, action, and lockfile paths)
 - `review-mechanical.yml`
+- `safety-net.yml` (join and work stories, access invariants, room-page byte budget, seeded snapshot time)
 
 ## What stays on its previous trigger
 
